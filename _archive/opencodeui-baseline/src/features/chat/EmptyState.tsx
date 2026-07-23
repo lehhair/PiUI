@@ -1,0 +1,221 @@
+import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { MessageSquareIcon, FolderIcon, ChevronDownIcon, NewChatIcon } from '../../components/Icons'
+import { getPath, type ApiProject, type ApiPath } from '../../api'
+import { serverStore } from '../../store/serverStore'
+import { handleError } from '../../utils'
+
+interface EmptyStateProps {
+  currentProject: ApiProject | null
+  projects: ApiProject[]
+  onStartChat: (directory: string) => void
+}
+
+export function EmptyState({ currentProject, projects, onStartChat }: EmptyStateProps) {
+  const { t } = useTranslation(['chat', 'common'])
+  const [pathInfo, setPathInfo] = useState<ApiPath | null>(null)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [customPath, setCustomPath] = useState('')
+  const [isCustomMode, setIsCustomMode] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const pathRequestIdRef = useRef(0)
+
+  // 获取当前路径信息
+  useEffect(() => {
+    let mounted = true
+
+    const loadPathInfo = () => {
+      const requestId = ++pathRequestIdRef.current
+      const reportError = handleError('get path', 'api')
+      getPath()
+        .then(info => {
+          if (mounted && requestId === pathRequestIdRef.current) setPathInfo(info)
+        })
+        .catch(error => {
+          if (mounted && requestId === pathRequestIdRef.current) reportError(error)
+        })
+    }
+
+    loadPathInfo()
+    const unsubscribe = serverStore.onServerChange(loadPathInfo)
+
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [])
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // 切换到自定义模式时聚焦输入框
+  useEffect(() => {
+    if (isCustomMode) {
+      inputRef.current?.focus()
+    }
+  }, [isCustomMode])
+
+  // 当前选中的目录
+  const currentDirectory = currentProject?.id === 'global' ? pathInfo?.directory || '' : currentProject?.worktree || ''
+
+  // 处理开始聊天
+  const handleStart = () => {
+    const directory = isCustomMode ? customPath.trim() : currentDirectory
+    if (directory) {
+      onStartChat(directory)
+    }
+  }
+
+  // 处理选择目录
+  const handleSelectDirectory = (directory: string) => {
+    setCustomPath(directory)
+    setIsDropdownOpen(false)
+    setIsCustomMode(false)
+    // 找到对应的 project 并选中（如果有的话）
+    // 这里直接用选中的目录开始
+  }
+
+  // 处理自定义路径
+  const handleCustomPath = () => {
+    setIsCustomMode(true)
+    setIsDropdownOpen(false)
+    setCustomPath(currentDirectory)
+  }
+
+  // 其他可选目录（排除当前的）
+  const otherDirectories = projects
+    .filter(p => p.id !== 'global' && p.worktree !== currentDirectory)
+    .map(p => p.worktree)
+
+  return (
+    <div className="flex-1 flex items-center justify-center p-8">
+      <div className="max-w-md w-full">
+        {/* Logo / Icon */}
+        <div className="flex justify-center mb-6">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent-main-100 to-accent-main-200 flex items-center justify-center">
+            <MessageSquareIcon className="w-8 h-8 text-oncolor-100" />
+          </div>
+        </div>
+
+        {/* Title */}
+        <h2 className="text-[length:var(--fs-heading-1)] font-semibold text-text-100 text-center mb-2">
+          {t('emptyState.title')}
+        </h2>
+        <p className="text-[length:var(--fs-base)] text-text-400 text-center mb-6">{t('emptyState.description')}</p>
+
+        {/* Directory Selector */}
+        <div className="space-y-3">
+          <label className="block text-[length:var(--fs-sm)] font-medium text-text-400 uppercase tracking-wider">
+            {t('emptyState.workingDirectory')}
+          </label>
+
+          {isCustomMode ? (
+            // 自定义路径输入
+            <div className="space-y-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={customPath}
+                onChange={e => setCustomPath(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && customPath.trim()) {
+                    handleStart()
+                  } else if (e.key === 'Escape') {
+                    setIsCustomMode(false)
+                  }
+                }}
+                placeholder={t('emptyState.enterAbsolutePath')}
+                className="w-full px-3 py-2.5 bg-bg-200 border border-border-300/30 rounded-lg text-[length:var(--fs-base)] text-text-100 placeholder:text-text-500 focus:outline-none focus:border-accent-main-100/50 transition-colors"
+              />
+              <button
+                onClick={() => setIsCustomMode(false)}
+                className="text-[length:var(--fs-sm)] text-text-400 hover:text-text-200 transition-colors"
+              >
+                ← {t('emptyState.backToDirectoryList')}
+              </button>
+            </div>
+          ) : (
+            // 目录选择下拉
+            <div ref={dropdownRef} className="relative">
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="w-full flex items-center justify-between px-3 py-2.5 bg-bg-200 border border-border-300/30 rounded-lg text-[length:var(--fs-base)] text-text-100 hover:border-border-300/50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <FolderIcon className="w-4 h-4 text-text-400 flex-shrink-0" />
+                  <span className="truncate">{currentDirectory || t('emptyState.selectDirectory')}</span>
+                </div>
+                <ChevronDownIcon
+                  className={`w-4 h-4 text-text-400 transition-transform flex-shrink-0 ${isDropdownOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {/* Dropdown */}
+              {isDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 glass-alt border border-border-200/60 rounded-xl shadow-lg overflow-hidden z-50">
+                  <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                    {/* Current directory */}
+                    <button
+                      onClick={() => handleSelectDirectory(currentDirectory)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-200/50 transition-colors text-[length:var(--fs-base)] text-text-200"
+                    >
+                      <FolderIcon className="w-4 h-4 text-accent-main-100 flex-shrink-0" />
+                      <span className="truncate">{currentDirectory}</span>
+                      <span className="text-[length:var(--fs-sm)] text-text-500 flex-shrink-0">
+                        {t('emptyState.current')}
+                      </span>
+                    </button>
+
+                    {/* Other project directories */}
+                    {otherDirectories.map(dir => (
+                      <button
+                        key={dir}
+                        onClick={() => handleSelectDirectory(dir)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-200/50 transition-colors text-[length:var(--fs-base)] text-text-300"
+                      >
+                        <FolderIcon className="w-4 h-4 text-text-500 flex-shrink-0" />
+                        <span className="truncate">{dir}</span>
+                      </button>
+                    ))}
+
+                    {/* Custom path option */}
+                    <div className="border-t border-border-300/20">
+                      <button
+                        onClick={handleCustomPath}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-200/50 transition-colors text-[length:var(--fs-base)] text-text-400"
+                      >
+                        <NewChatIcon className="w-4 h-4 flex-shrink-0" />
+                        <span>{t('emptyState.enterCustomPath')}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Start Button */}
+        <button
+          onClick={handleStart}
+          disabled={isCustomMode ? !customPath.trim() : !currentDirectory}
+          className="w-full mt-6 px-4 py-2.5 bg-accent-main-100 hover:bg-accent-main-200 disabled:opacity-50 disabled:cursor-not-allowed text-oncolor-100 rounded-lg text-[length:var(--fs-base)] font-medium transition-colors"
+        >
+          {t('emptyState.startConversation')}
+        </button>
+
+        {/* Hint */}
+        <p className="mt-4 text-[length:var(--fs-sm)] text-text-500 text-center">{t('emptyState.orJustType')}</p>
+      </div>
+    </div>
+  )
+}

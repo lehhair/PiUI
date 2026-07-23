@@ -1,0 +1,19 @@
+# OpenCode WebUI - Caddy 配置
+# 纯静态文件服务
+
+:3000 {
+    @api path /api /api/*
+    handle @api {
+        respond "API is not served by the frontend-only image" 404
+    }
+
+    handle {
+        root * /srv
+        file_server
+
+        # SPA 路由 - 所有非文件请求返回 index.html
+        try_files {path} /index.html
+    }
+
+    encode gzip
+}

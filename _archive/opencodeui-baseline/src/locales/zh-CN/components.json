@@ -1,0 +1,181 @@
+{
+  "commandPalette": {
+    "placeholder": "输入命令...",
+    "noCommandsFound": "未找到命令"
+  },
+  "fileExplorer": {
+    "selectProject": "选择项目以浏览文件",
+    "explorer": "文件浏览器",
+    "searchFiles": "搜索文件内容",
+    "clearSearch": "清除搜索",
+    "noFilesFound": "未找到文件",
+    "noTextMatches": "未找到匹配内容",
+    "fileMatches": "文件",
+    "contentMatches": "内容",
+    "failedToLoadFiles": "加载文件失败",
+    "failedToLoadFile": "加载文件内容失败",
+    "textSearchFailed": "搜索失败",
+    "binaryFile": "二进制文件，无法预览",
+    "fit": "适应",
+    "oneToOne": "1:1",
+    "revealInExplorer": "在资源管理器中显示",
+    "revealInFinder": "在 Finder 中显示",
+    "revealInFileManager": "在文件管理器中显示"
+  },
+  "terminal": {
+    "terminal": "终端",
+    "newTerminal": "新建终端",
+    "hidePanel": "隐藏面板",
+    "restoringSessions": "恢复会话中...",
+    "noTerminals": "没有终端",
+    "createTerminal": "创建终端",
+    "closeTerminal": "关闭终端"
+  },
+  "diffViewer": {
+    "noChanges": "无变更",
+    "linesUnchanged": "{{count}} 行未修改"
+  },
+  "rightPanel": {
+    "loadingPanel": "加载面板中...",
+    "noActiveSession": "没有活跃会话"
+  },
+  "bottomPanel": {
+    "loadingPanel": "加载面板中..."
+  },
+  "panelContainer": {
+    "files": "文件",
+    "changes": "变更",
+    "mcp": "MCP",
+    "skills": "Skills",
+    "worktrees": "Worktrees",
+    "tab": "标签",
+    "addTab": "添加标签",
+    "renameTerminal": "重命名终端",
+    "moveToRight": "移动到右侧面板",
+    "moveToBottom": "移动到底部面板",
+    "mcpServers": "MCP 服务器"
+  },
+  "sessionChanges": {
+    "loadingChanges": "加载变更中...",
+    "failedToLoad": "加载变更失败",
+    "failedToInitGit": "初始化 Git 仓库失败",
+    "mode": "变更模式",
+    "modeHint": "查看范围",
+    "noChanges": "此会话无变更",
+    "noGitChanges": "暂无未提交变更",
+    "noBranchChanges": "暂无分支变更",
+    "noTurnChanges": "本轮无变更",
+    "noGit": "未检测到 Git 仓库",
+    "noGitHint": "初始化后就可以跟踪会话变更和本轮变更",
+    "initGit": "初始化 Git 仓库",
+    "initializingGit": "初始化中...",
+    "fileCount_other": "{{count}} 个文件",
+    "fileCountCompact": "{{count}}f",
+    "gitScope": "Git 变更",
+    "gitScopeHint": "工作区里还没有提交的变更",
+    "branchScope": "分支变更",
+    "branchScopeHint": "当前分支相对 {{branch}} 的全部变更",
+    "sessionScope": "会话变更",
+    "sessionScopeHint": "这个会话里改过的全部文件",
+    "turnScope": "上一轮变更",
+    "turnScopeHint": "只看上一轮助手改过的文件",
+    "list": "列表",
+    "flatList": "平铺列表",
+    "tree": "树形",
+    "treeView": "树形视图",
+    "unified": "统一",
+    "split": "分栏",
+    "openInFiles": "在文件中打开"
+  },
+  "mcpPanel": {
+    "title": "MCP 服务器",
+    "addServer": "添加服务器",
+    "loadingServers": "加载服务器中...",
+    "failedToLoad": "加载 MCP 服务器失败",
+    "failedToLoadResources": "加载 MCP 资源失败",
+    "noServers": "尚未配置 MCP 服务器",
+    "addMcpServer": "添加 MCP 服务器",
+    "local": "本地",
+    "remote": "远程",
+    "serverName": "服务器名称",
+    "commandPlaceholder": "命令（例如 npx -y @modelcontextprotocol/server-github）",
+    "urlPlaceholder": "服务器 URL（例如 https://mcp.example.com）",
+    "nameRequired": "服务器名称必填",
+    "commandRequired": "命令必填",
+    "urlRequired": "URL 必填",
+    "failedToAdd": "添加服务器失败",
+    "connected": "已连接",
+    "disabled": "已禁用",
+    "needsAuth": "需要认证",
+    "needsRegistration": "需要注册",
+    "resources": "资源",
+    "resourceCount_other": "{{count}} 个资源",
+    "disconnect": "断开连接",
+    "connect": "连接",
+    "authenticate": "认证"
+  },
+  "skillPanel": {
+    "title": "Skills",
+    "filterPlaceholder": "筛选 Skills...",
+    "loadingSkills": "加载 Skills...",
+    "failedToLoad": "加载 Skills 失败",
+    "noSkills": "暂无 Skills"
+  },
+  "worktreePanel": {
+    "selectProject": "选择项目以管理 Worktrees",
+    "git": "Git",
+    "worktrees": "Worktrees",
+    "createWorktree": "新建 Worktree",
+    "loadingWorktrees": "加载 Worktrees...",
+    "failedToLoad": "加载 Worktrees 失败",
+    "failedWithMessage": "Worktree 操作失败：{{message}}",
+    "failedToCreate": "新建 Worktree 失败",
+    "failedToRemove": "移除 Worktree 失败",
+    "failedToReset": "重置 Worktree 失败",
+    "noWorktrees": "暂无 Worktree",
+    "removeWorktree": "移除 Worktree",
+    "removeWorktreeConfirm": "确定要移除 Worktree“{{name}}”吗？这会删除对应目录。",
+    "resetWorktree": "重置 Worktree",
+    "resetWorktreeConfirm": "确定要重置 Worktree“{{name}}”吗？这会丢弃所有未提交的更改。",
+    "newWorktree": "新建 Worktree",
+    "worktreeNamePlaceholder": "Worktree 名称（例如 feature-xyz）",
+    "openSessionAfter": "创建后打开会话",
+    "openSession": "在此 Worktree 中打开会话",
+    "resetWorktreeAction": "重置 Worktree",
+    "removeWorktreeAction": "移除 Worktree"
+  },
+  "toast": {
+    "clearAll": "清除全部"
+  },
+  "fullscreenViewer": {
+    "lines": "行"
+  },
+  "desktopTitlebar": {
+    "goBack": "后退",
+    "goForward": "前进",
+    "openProject": "打开项目",
+    "openSettings": "打开设置",
+    "settingsUpdate": "有新版本可用，打开设置",
+    "newWindow": "新建窗口"
+  },
+  "multiFileDiff": {
+    "sessionChanges": "会话变更",
+    "fileCount_other": "{{count}} 个文件",
+    "failedToLoad": "加载变更失败",
+    "noChangesFound": "未找到变更",
+    "selectFile": "选择文件以查看变更"
+  },
+  "closeService": {
+    "title": "关闭 OpenCode",
+    "description": "opencode 服务由此应用启动。是否同时停止服务？",
+    "closeAndStop": "关闭并停止服务",
+    "closeKeepRunning": "关闭，保持服务运行"
+  },
+  "contentBlock": {
+    "fullscreen": "全屏",
+    "exitCode": "exit {{code}}"
+  },
+  "diffView": {
+    "fullscreenView": "全屏查看"
+  }
+}

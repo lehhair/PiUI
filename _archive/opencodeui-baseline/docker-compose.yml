@@ -1,0 +1,100 @@
+# ============================================
+# OpenCode WebUI - Docker Compose
+# ============================================
+#
+# 架构:
+#   gateway  (Caddy)  :6658 -> 统一入口（反代 + 端口路由）
+#                      :6659 -> 独立预览端口（前端开发服务专用）
+#   frontend (Caddy)  :3000 -> 静态文件 (GitHub Actions 预构建镜像)
+#   backend  (opencode):4096 -> opencode serve (GitHub Actions 预构建镜像)
+#
+# 使用方法:
+#   cp .env.example .env    # 填写 API Key
+#   docker compose up -d    # 启动
+#
+# 本地构建全部服务 (可选):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+services:
+  # ---- 统一入口：网关 ----
+  gateway:
+    image: ghcr.io/lehhair/opencodeui-gateway:latest
+    container_name: opencode-gateway
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${GATEWAY_PORT:-6658}:6658'
+      - '127.0.0.1:${PREVIEW_PORT:-6659}:6659'
+    volumes:
+      - opencode-router-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - frontend
+      - backend
+    environment:
+      - TARGET_CONTAINER=opencode-backend
+      - ROUTER_STATE_FILE=/data/routes.json
+      - ROUTER_SCAN_INTERVAL=${ROUTER_SCAN_INTERVAL:-5}
+      - ROUTER_TOKEN_LENGTH=${ROUTER_TOKEN_LENGTH:-12}
+      - ROUTER_PORT_RANGE=${ROUTER_PORT_RANGE:-3000-9999}
+      - ROUTER_EXCLUDE_PORTS=${ROUTER_EXCLUDE_PORTS:-4096}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - PREVIEW_DOMAIN=${PREVIEW_DOMAIN:-}
+      - ROUTER_USERNAME=${OPENCODE_SERVER_USERNAME:-opencode}
+      - ROUTER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
+    networks:
+      - opencode-net
+
+  # ---- 前端：预构建镜像 ----
+  frontend:
+    image: ghcr.io/lehhair/opencodeui-frontend:latest
+    container_name: opencode-frontend
+    restart: unless-stopped
+    networks:
+      - opencode-net
+
+  # ---- 后端：预构建镜像 ----
+  backend:
+    image: ghcr.io/lehhair/opencodeui-backend:latest
+    container_name: opencode-backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    volumes:
+      - ${WORKSPACE:-./workspace}:/workspace
+      - opencode-home:/root
+    working_dir: /workspace
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
+      - OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-opencode}
+      - DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.40}
+      - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      - NODEJS_ORG_MIRROR=${NODEJS_ORG_MIRROR:-https://npmmirror.com/mirrors/node}
+      - PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+      - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+      - MISE_DATA_DIR=/root/.local/share/mise
+      - MISE_CONFIG_DIR=/root/.config/mise
+      - MISE_STATE_DIR=/root/.local/state/mise
+      - PATH=/root/.local/bin:/root/.cargo/bin:/root/.local/share/mise/shims:/root/.local/share/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    networks:
+      - opencode-net
+
+volumes:
+  opencode-home:
+  opencode-router-data:
+
+networks:
+  opencode-net:
+    name: opencode-net

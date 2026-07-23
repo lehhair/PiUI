@@ -1,0 +1,19 @@
+{
+  "name": "piui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi desktop client — thin UI + Host engine",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:host": "npm run dev -w @piui/host",
+    "dev:app": "npm run dev -w @piui/app",
+    "build": "npm run build -w @piui/protocol && npm run build -w @piui/host && npm run build -w @piui/app",
+    "typecheck": "npm run typecheck -w @piui/protocol && npm run typecheck -w @piui/host && npm run typecheck -w @piui/app"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

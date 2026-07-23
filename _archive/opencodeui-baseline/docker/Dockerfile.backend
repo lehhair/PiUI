@@ -1,0 +1,127 @@
+# ============================================
+# OpenCode WebUI - Backend
+# ============================================
+# Debian slim + opencode serve + agent tooling
+
+FROM docker:29-cli AS docker-cli
+
+FROM debian:bookworm-slim
+
+ARG TARGETARCH
+ARG USE_CHINA_MIRROR=0
+ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+ARG NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node
+ARG MISE_INSTALL_URL=https://mise.run
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TERM=xterm-256color \
+    COLORTERM=truecolor \
+    EDITOR=vim \
+    NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY} \
+    NODEJS_ORG_MIRROR=${NODEJS_ORG_MIRROR}
+
+RUN if [ "${USE_CHINA_MIRROR}" = "1" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+        -e "s|http://security.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+# Agent 常用基础环境。语言运行时交给 mise，安装到持久化的 /root。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    dnsutils \
+    fd-find \
+    file \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    g++ \
+    git \
+    git-lfs \
+    gnupg \
+    jq \
+    less \
+    make \
+    nano \
+    openssh-client \
+    patch \
+    procps \
+    python3 \
+    python3-venv \
+    ripgrep \
+    rsync \
+    tini \
+    tzdata \
+    unzip \
+    vim-tiny \
+    wget \
+    xz-utils \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI + Compose/Buildx plugin，只复制客户端，不安装 dockerd/containerd/runc。
+RUN mkdir -p /usr/local/libexec/docker/cli-plugins
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+
+# Debian 的 fd 二进制叫 fdfind，补一个常见命令名。
+RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd
+
+# 安装 mise。走 mise.run 安装脚本但强制从 GitHub Releases 下载（MISE_INSTALL_FROM_GITHUB=1），
+# 避开 mise.jdx.dev CDN 与每日版本号不同步导致的下载 404 / 校验失败。
+# arm64 的 gnu 二进制需要 GLIBC_2.38+，但 bookworm-slim 只有 2.36，故 arm64 改用静态链接的
+# musl 变体（MISE_INSTALL_ARCH 覆盖脚本的 ldd 探测）。用 MISE_INSTALL_PATH 直接落位，免去 find/cp。
+RUN case "${TARGETARCH}" in \
+      amd64) MISE_ARCH=x64 ;; \
+      arm64) MISE_ARCH=arm64-musl ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "${MISE_INSTALL_URL}" \
+      | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_INSTALL_FROM_GITHUB=1 MISE_INSTALL_ARCH="${MISE_ARCH}" sh \
+    && mise --version
+
+# 安装 opencode。直接从 GitHub Releases 拉 tarball 解压，绕开 opencode.ai/install 脚本：
+# 该脚本为拼一个版本号字符串去调 api.github.com（未鉴权，60 次/小时/IP），
+# GitHub Actions 共享 runner IP 极易触发限流而 exit 1；而 releases/latest/download
+# 本身是 302 跳转，不需要版本号。tarball 内仅含单个 opencode 二进制。
+RUN case "${TARGETARCH}" in \
+      amd64) OC_ARCH=x64 ;; \
+      arm64) OC_ARCH=arm64 ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/opencode.tar.gz \
+      "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OC_ARCH}.tar.gz" \
+    && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
+    && rm -f /tmp/opencode.tar.gz \
+    && chmod +x /usr/local/bin/opencode \
+    && opencode --version
+
+# 工作目录
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+ENV MISE_DATA_DIR=/root/.local/share/mise \
+    MISE_CONFIG_DIR=/root/.config/mise \
+    MISE_STATE_DIR=/root/.local/state/mise \
+    OPENCODE_DISABLE_AUTOUPDATE=true \
+    OPENCODE_DISABLE_TERMINAL_TITLE=true \
+    WORKSPACE=/workspace
+
+ENV PATH="/root/.local/bin:/root/.cargo/bin:/root/.local/share/mise/shims:/root/.local/share/mise/bin:${PATH}"
+
+COPY ./docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
+RUN chmod +x /usr/local/bin/backend-entrypoint.sh
+
+EXPOSE 4096
+
+ENTRYPOINT ["tini", "--", "/usr/local/bin/backend-entrypoint.sh"]
+CMD ["opencode", "serve", "--port", "4096", "--hostname", "0.0.0.0"]

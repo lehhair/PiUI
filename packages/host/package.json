@@ -1,0 +1,29 @@
+{
+  "name": "@piui/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli.ts",
+    "start": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@piui/protocol": "0.1.0",
+    "@earendil-works/pi-coding-agent": "0.81.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3"
+  }
+}
