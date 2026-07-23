@@ -36,14 +36,18 @@ export class PiuiHost {
     for (const l of this.listeners) l(event);
   }
 
-  async start(): Promise<void> {
-    this.piVersion = "linked";
-    this.emit({
-      type: "engine.ready",
+  async start(piVersion = "unknown"): Promise<void> {
+    this.piVersion = piVersion;
+    this.emit(this.readyEvent());
+  }
+
+  readyEvent() {
+    return {
+      type: "engine.ready" as const,
       pi: this.piVersion,
       host: HOST_VERSION,
       protocolVersion: PROTOCOL_VERSION,
-    });
+    };
   }
 
   async handle(cmd: HostCommand): Promise<HostResponse> {

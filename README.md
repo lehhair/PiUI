@@ -27,19 +27,15 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 cd E:/dev/re_agent_UI/PiUI
 npm install
 
-# UI（Mock Host）
-npm run dev:app
-
-# 真实 Host（stdio JSONL）
+# 终端 1：真 Host（默认 ws://127.0.0.1:8787）
 npm run dev:host
+
+# 终端 2：浏览器 UI
+npm run dev:app
 ```
 
-Host 试跑示例（另一终端）：
-
-```bash
-# 先启动 host，再往 stdin 打 JSON 行
-echo '{"type":"ping"}' | npm run start -w @piui/host
-```
+浏览器顶部选「真 Host (WS)」，填本机项目路径后打开即可。  
+Mock 模式可不启 Host。stdio：`npm run start -w @piui/host -- --stdio`
 
 ## 阶段
 

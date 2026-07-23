@@ -568,8 +568,13 @@ type PiUiState = {
 8. 点击文件右侧预览
 9. 复用 `~/.pi/agent` 凭据（若已有）
 
-当前进度：protocol + host 核心 + app Mock 壳已就位。  
-下一步：App 通过 stdio/IPC 接真 Host；从归档搬主题与组件。
+当前进度：
+- Host WS + 真引擎闭环可用
+- App 已接入归档 **主题/CSS/Icons**（eucalyptus 变量）
+- 主界面 `ShellApp`：Pi 原生 state（`usePiSession` / `UiMessage`），**无 OpenCode 桥**
+- 验收台保留在 `packages/app/src/dev/AcceptanceApp.tsx`
+
+下一步：继续 cp 归档聊天布局/Markdown/文件树外观，仍只换 Pi 数据口。
 
 不做：会话树、MCP、PTY、远程、引擎热更新 UI。
 

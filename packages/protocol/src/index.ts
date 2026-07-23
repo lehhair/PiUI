@@ -1,11 +1,23 @@
 /** UI <-> Host protocol. Bump when breaking. */
 export const PROTOCOL_VERSION = 1 as const
 
+export {
+  DEFAULT_HOST_HOST,
+  DEFAULT_HOST_PORT,
+  DEFAULT_HOST_WS_URL,
+  type WireEvent,
+  type WireMessage,
+  type WireRequest,
+  type WireResponse,
+} from "./wire.js"
+
 // --- Transport ---
 
 export interface HostTransport {
   request(cmd: HostCommand): Promise<HostResponse>
-  events(): AsyncIterable<HostEvent>
+  /** Optional push subscription (preferred in UI). */
+  onEvent?(listener: (event: HostEvent) => void): () => void
+  events?(): AsyncIterable<HostEvent>
   close?(): Promise<void> | void
 }
 

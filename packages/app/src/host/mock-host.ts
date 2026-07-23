@@ -30,6 +30,15 @@ export class MockHostTransport {
     return () => this.listeners.delete(listener);
   }
 
+  onStatus(listener: (s: string) => void): () => void {
+    listener("mock");
+    return () => {};
+  }
+
+  async connect(): Promise<void> {}
+
+  close(): void {}
+
   private emit(event: HostEvent): void {
     for (const l of this.listeners) l(event);
   }
