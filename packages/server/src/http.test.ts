@@ -54,6 +54,23 @@ describe("http phase1", () => {
     }
   })
 
+  it("default workspace + CORS preflight", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces/default`)
+      assert.equal(res.status, 200)
+      assert.ok(res.headers.get("access-control-allow-origin"))
+      const body = await res.json()
+      assert.ok(body.workspace.id)
+
+      const opt = await fetch(`http://127.0.0.1:${port}/api/v1/health`, { method: "OPTIONS" })
+      assert.equal(opt.status, 204)
+    } finally {
+      await close()
+    }
+  })
+
   it("register workspace, list and read files safely", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

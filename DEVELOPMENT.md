@@ -63,10 +63,11 @@ npm run dev:app      # vite
 - [x] **最小可用**：文件树 list/read 接 server + 会话绑 workspace + abort 占位
 - [ ] 真 Pi worker / 流式 / git / 终端（默认不调模型）
 
-### 最小完成体怎么跑
+### 最小可用怎么跑
 
 ```bash
-npm run dev:server
-npm run dev:app
-# 打开浏览器 → 自动 mock 会话 → 输入框发一句 → 出现 mock reply
+npm run dev:server   # 127.0.0.1:8787
+npm run dev:app      # 5173，/api 代理到 server
+# 打开浏览器 → mock 会话 → 侧栏列表 → 发消息 mock 回复 → 右侧文件树可浏览
+# VITE_PIUI_MOCK=0 关闭自动 seed
 ```

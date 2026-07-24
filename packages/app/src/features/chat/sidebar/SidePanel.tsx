@@ -792,7 +792,12 @@ export function SidePanel({
   const handleSelect = useCallback(
     (session: ApiSession) => {
       // Global 模式下，点击 session 自动切换到该 session 的工作目录并添加到项目列表
-      if (!currentDirectory && session.directory) {
+      // piws: 是 Pi workspace 标记，不是本机路径，不要塞进项目列表
+      if (
+        !currentDirectory &&
+        session.directory &&
+        !String(session.directory).startsWith('piws:')
+      ) {
         addDirectory(session.directory)
       }
       onSelectSession(session)
@@ -806,7 +811,7 @@ export function SidePanel({
   // Active tab 专用：跨目录的 session 需要确保目录在项目列表中
   const handleSelectActive = useCallback(
     (session: ApiSession) => {
-      if (session.directory) {
+      if (session.directory && !String(session.directory).startsWith('piws:')) {
         addDirectory(session.directory)
       }
       onSelectSession(session)
