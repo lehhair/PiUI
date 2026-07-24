@@ -10,7 +10,8 @@
     "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@piui/protocol": "0.1.0"
+    "@piui/protocol": "0.1.0",
+    "@piui/pi-worker": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
