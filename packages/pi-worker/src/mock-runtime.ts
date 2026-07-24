@@ -10,8 +10,19 @@ export interface MockTurn {
   tool?: { name: string; args: unknown; result: string; isError?: boolean }
 }
 
-export function* mockTurnEvents(turn: MockTurn, ids = { user: "u1", asst: "a1", tool: "t1" }): Generator<WorkerEvent> {
-  const now = 1_700_000_000_000
+let mockSeq = 0
+
+export function nextMockIds() {
+  mockSeq += 1
+  const n = mockSeq
+  return { user: `u${n}`, asst: `a${n}`, tool: `t${n}` }
+}
+
+export function* mockTurnEvents(
+  turn: MockTurn,
+  ids = nextMockIds(),
+): Generator<WorkerEvent> {
+  const now = Date.now() + mockSeq
   yield { type: "message_start", entryId: ids.user, role: "user", timestamp: now }
   yield {
     type: "message_end",

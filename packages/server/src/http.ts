@@ -123,6 +123,32 @@ export function createAppServer() {
         return sendJson(res, 200, sessions.snapshot(s))
       }
 
+      const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/prompt$/)
+      if (method === "POST" && sessionPrompt) {
+        const id = decodeURIComponent(sessionPrompt[1])
+        const raw = await readBody(req)
+        let body: { text?: string }
+        try {
+          body = JSON.parse(raw || "{}") as { text?: string }
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        try {
+          const s = sessions.prompt(id, body.text ?? "")
+          return sendJson(res, 200, {
+            commandId: `cmd-${Date.now()}`,
+            accepted: true,
+            snapshot: sessions.snapshot(s),
+          })
+        } catch (e) {
+          const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
+          if (code === "SESSION_NOT_FOUND") {
+            return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+          }
+          return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
+        }
+      }
+
       if (method === "GET" && p === "/api/v1/workspaces") {
         return sendJson(res, 200, { workspaces: store.list() })
       }

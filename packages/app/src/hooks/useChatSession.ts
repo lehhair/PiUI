@@ -48,6 +48,9 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
+import { isPiSession } from '../pi/isPiSession'
+import { promptSession } from '../pi/sessionApi'
+import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
 import { themeStore } from '../store/themeStore'
 
@@ -655,6 +658,20 @@ export function useChatSession({
           navigateToSession(sessionId, newSession.directory)
         }
 
+        // Pi path: mock prompt on piui-server (no OpenCode, no real LLM)
+        if (isPiSession(sessionId)) {
+          messageStore.setStreaming(sessionId, true)
+          try {
+            const snap = await promptSession(sessionId, input.content)
+            applySnapshotToUi(snap)
+            messageStore.setStreaming(sessionId, false)
+            return true
+          } catch (error) {
+            messageStore.setStreaming(sessionId, false)
+            throw error
+          }
+        }
+
         if (rollbackSnapshot) {
           messageStore.truncateAfterRevert(sessionId)
         }
@@ -728,7 +745,8 @@ export function useChatSession({
   // Send message handler
   const handleSend = useCallback(
     async (content: string, attachments: Attachment[], options?: { agent?: string; variant?: string }) => {
-      if (!currentModel) {
+      const piMode = isPiSession(routeSessionId)
+      if (!currentModel && !piMode) {
         handleError('send message', new Error('No model selected'))
         return false
       }
@@ -736,6 +754,22 @@ export function useChatSession({
       // 如果队列头有失败项，用户重新发送时先清掉失败项（内容已恢复到输入框）
       if (routeSessionId && queuedFollowupFailedId) {
         followupQueueStore.remove(routeSessionId, queuedFollowupFailedId)
+      }
+
+      // Pi mock sessions: always send now (no OpenCode follow-up queue)
+      if (piMode) {
+        return sendMessageNow({
+          sessionId: routeSessionId,
+          content,
+          attachments,
+          model: {
+            providerID: currentModel?.providerId ?? 'mock',
+            modelID: currentModel?.id ?? 'mock',
+          },
+          options,
+          directory: effectiveDirectory || '',
+          allowCreateSession: false,
+        })
       }
 
       const shouldQueueFollowup =
@@ -748,8 +782,8 @@ export function useChatSession({
           text: content,
           attachments,
           model: {
-            providerID: currentModel.providerId,
-            modelID: currentModel.id,
+            providerID: currentModel!.providerId,
+            modelID: currentModel!.id,
             variant: options?.variant,
           },
           variant: options?.variant,
@@ -774,8 +808,8 @@ export function useChatSession({
         content,
         attachments,
         model: {
-          providerID: currentModel.providerId,
-          modelID: currentModel.id,
+          providerID: currentModel!.providerId,
+          modelID: currentModel!.id,
         },
         options,
         directory: effectiveDirectory || '',

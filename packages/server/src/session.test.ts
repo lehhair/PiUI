@@ -47,6 +47,30 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
+  it("prompt appends mock turn without LLM", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const seeded = await json(port, "POST", "/api/v1/dev/mock-chat")
+      const sessionId = seeded.data.snapshot.session.id as string
+      const before = seeded.data.snapshot.timeline.length as number
+
+      const prompted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
+        text: "second turn",
+      })
+      assert.equal(prompted.status, 200)
+      assert.equal(prompted.data.accepted, true)
+      const after = prompted.data.snapshot.timeline as { type: string; text?: string }[]
+      assert.ok(after.length > before)
+      const lastUser = [...after].reverse().find(t => t.type === "user")
+      assert.equal(lastUser?.text, "second turn")
+      const lastAsst = [...after].reverse().find(t => t.type === "assistant")
+      assert.ok(lastAsst)
+    } finally {
+      await close()
+    }
+  })
+
   it("creates session with projected timeline", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)
