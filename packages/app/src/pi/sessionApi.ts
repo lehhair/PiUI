@@ -6,6 +6,8 @@
 import type { SessionSnapshotV1 } from "@piui/protocol"
 import type { PiSessionSummary } from "./toApiSession"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
+import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
+import { parsePiWorkspaceId } from "./workspaceRef"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 
@@ -33,11 +35,16 @@ export async function listPiSessions(): Promise<PiSessionSummary[]> {
 export async function createPiSession(opts?: {
   title?: string
   seedMock?: boolean
+  workspaceId?: string
 }): Promise<{ summary: PiSessionSummary; snapshot: SessionSnapshotV1 }> {
   const res = await fetch(`${getApiBase()}/api/v1/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: opts?.title, seedMock: opts?.seedMock === true }),
+    body: JSON.stringify({
+      title: opts?.title,
+      seedMock: opts?.seedMock === true,
+      workspaceId: opts?.workspaceId,
+    }),
   })
   if (!res.ok) throw new Error(`createPiSession ${res.status}`)
   const data = (await res.json()) as { session: PiSessionSummary; snapshot: SessionSnapshotV1 }
@@ -54,13 +61,76 @@ export async function deletePiSession(sessionId: string): Promise<void> {
 }
 
 export async function createWorkspace(rootPath: string, displayName?: string) {
+  const cached = getWorkspaceIdByPath(rootPath)
+  if (cached) return { workspace: { id: cached, displayName: displayName ?? rootPath } }
+
   const res = await fetch(`${getApiBase()}/api/v1/workspaces`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ rootPath, displayName }),
   })
   if (!res.ok) throw new Error(`createWorkspace ${res.status}`)
-  return (await res.json()) as { workspace: { id: string; displayName: string } }
+  const data = (await res.json()) as { workspace: { id: string; displayName: string } }
+  cacheWorkspace(rootPath, data.workspace.id)
+  return data
+}
+
+/** Resolve workspace id from absolute path or piws:id directory marker. */
+export async function resolveWorkspaceId(directory?: string): Promise<string | null> {
+  if (!directory) return null
+  const fromMarker = parsePiWorkspaceId(directory)
+  if (fromMarker) return fromMarker
+  // absolute path
+  if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
+    const { workspace } = await createWorkspace(directory)
+    return workspace.id
+  }
+  return null
+}
+
+export async function listWorkspaceFiles(workspaceId: string, path = "") {
+  const q = new URLSearchParams()
+  if (path && path !== "." && path !== "./") q.set("path", path)
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/files?${q}`,
+  )
+  if (!res.ok) throw new Error(`listWorkspaceFiles ${res.status}`)
+  return (await res.json()) as {
+    path: string
+    entries: Array<{
+      name: string
+      path: string
+      type: string
+      size?: number
+      mtimeMs?: number
+      restricted?: boolean
+    }>
+  }
+}
+
+export async function readWorkspaceFile(workspaceId: string, path: string) {
+  const q = new URLSearchParams({ path })
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/file?${q}`,
+  )
+  if (!res.ok) throw new Error(`readWorkspaceFile ${res.status}`)
+  return (await res.json()) as {
+    path: string
+    content: string
+    encoding: "utf-8"
+    size: number
+    etag: string
+  }
+}
+
+export async function abortSessionCommand(sessionId: string): Promise<SessionSnapshotV1 | null> {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/abort`,
+    { method: "POST" },
+  )
+  if (!res.ok) return null
+  const data = (await res.json()) as { snapshot?: SessionSnapshotV1 }
+  return data.snapshot ?? null
 }
 
 export async function createMockSession(workspaceId: string, title?: string) {

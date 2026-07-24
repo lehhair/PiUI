@@ -9,6 +9,7 @@ import {
 } from '../api'
 import {
   createPiSession,
+  createWorkspace,
   deletePiSession,
   isPiServerUp,
   listPiSessions,
@@ -286,9 +287,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const createSession = useCallback(
     async (title?: string) => {
       if (await isPiServerUp()) {
-        const { summary, snapshot } = await createPiSession({ title, seedMock: false })
+        let workspaceId: string | undefined
+        const dir = currentDirectory?.trim()
+        if (dir && (/^[a-zA-Z]:[\\/]/.test(dir) || dir.startsWith('/'))) {
+          const { workspace } = await createWorkspace(dir)
+          workspaceId = workspace.id
+        }
+        const { summary, snapshot } = await createPiSession({
+          title,
+          seedMock: false,
+          workspaceId,
+        })
         applySnapshotToUi(snapshot)
-        const apiSession = snapshotToApiSession(snapshot, 'piui')
+        const apiSession = snapshotToApiSession(snapshot, dir || undefined)
         setSessions(prev => [apiSession, ...prev.filter(s => s.id !== summary.id)])
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
         return apiSession

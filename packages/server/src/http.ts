@@ -175,6 +175,18 @@ export function createAppServer() {
         }
       }
 
+      const sessionAbort = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort$/)
+      if (method === "POST" && sessionAbort) {
+        const id = decodeURIComponent(sessionAbort[1])
+        const s = sessions.get(id)
+        if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        // Mock runtime is synchronous; abort is idempotent no-op returning snapshot
+        return sendJson(res, 200, {
+          accepted: true,
+          snapshot: sessions.snapshot(s),
+        })
+      }
+
       if (method === "GET" && p === "/api/v1/workspaces") {
         return sendJson(res, 200, { workspaces: store.list() })
       }

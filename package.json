@@ -13,10 +13,11 @@
     "dev:host": "npm run dev -w @piui/server",
     "dev:app": "npm run dev -w @piui/app",
     "build": "npm run build -w @piui/protocol && npm run build -w @piui/app",
-    "test": "npm run test:phase0 && npm run test:phase3 && npm run test:mvp && npm run test -w @piui/protocol && npm run test -w @piui/server && npm run test -w @piui/pi-worker",
+    "test": "npm run test:phase0 && npm run test:phase3 && npm run test:mvp && npm run test:usable && npm run test -w @piui/protocol && npm run test -w @piui/server && npm run test -w @piui/pi-worker",
     "test:phase0": "node --test tests/phase0-structure.test.mjs",
     "test:phase3": "node --test tests/phase3-no-opencode-sdk.test.mjs",
     "test:mvp": "node --import tsx --test tests/mvp-loop.test.mjs",
+    "test:usable": "node --import tsx --test tests/usable-files.test.mjs",
     "typecheck": "npm run typecheck -w @piui/protocol && npm run typecheck -w @piui/server && npm run typecheck -w @piui/pi-worker"
   },
   "engines": {
