@@ -103,10 +103,10 @@ describe("applyWorkerEvent stream", () => {
     assert.equal(tool.output?.[0]?.type, "text")
   })
 
-  it("never imports pi-coding-agent in this package surface", async () => {
-    // structural: mock path only
+  it("mock surface does not load real session module eagerly", async () => {
     const pkg = await import("./index.js")
     assert.ok(pkg.runMockTurn)
     assert.ok(pkg.projectEntries)
+    assert.equal(pkg.getDriverMode({}), "mock")
   })
 })

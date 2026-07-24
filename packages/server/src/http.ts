@@ -12,6 +12,7 @@ import { SessionRegistry } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { eventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
+import { getDriverMode } from "@piui/pi-worker"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
@@ -88,11 +89,12 @@ export function createAppServer() {
       }
 
       if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
-        const body: HealthResponseV1 = {
-          ok: true,
+        const body = {
+          ok: true as const,
           protocolVersion: PROTOCOL_VERSION,
-          service: "piui-server",
+          service: "piui-server" as const,
           phase: 1,
+          driver: sessions.getDriver(),
         }
         return sendJson(res, 200, body)
       }
@@ -100,7 +102,11 @@ export function createAppServer() {
       // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.
       if (method === "POST" && p === "/api/v1/dev/mock-chat") {
         const workspaceId = await ensureDefaultWorkspace()
-        const s = sessions.create(workspaceId, { title: "Mock chat", seedMock: true })
+        // seedMock only applies in mock driver; real pi starts empty
+        const s = await sessions.create(workspaceId, {
+          title: getDriverMode() === "mock" ? "Mock chat" : "New chat",
+          seedMock: getDriverMode() === "mock",
+        })
         const rec = store.get(workspaceId)!
         return sendJson(res, 201, {
           workspace: {
@@ -110,6 +116,7 @@ export function createAppServer() {
             lastOpenedAt: rec.lastOpenedAt,
           },
           snapshot: sessions.snapshot(s),
+          driver: sessions.getDriver(),
         })
       }
 
@@ -133,13 +140,14 @@ export function createAppServer() {
         }
         try {
           const workspaceId = body.workspaceId || (await ensureDefaultWorkspace())
-          const s = sessions.create(workspaceId, {
+          const s = await sessions.create(workspaceId, {
             title: body.title,
             seedMock: body.seedMock === true,
           })
           return sendJson(res, 201, {
             session: sessionSummary(s),
             snapshot: sessions.snapshot(s),
+            driver: sessions.getDriver(),
           })
         } catch (e) {
           const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
@@ -161,7 +169,7 @@ export function createAppServer() {
       if (method === "DELETE" && sessionOnly) {
         const id = decodeURIComponent(sessionOnly[1])
         if (!sessions.get(id)) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        sessions.delete(id)
+        await sessions.delete(id)
         return sendJson(res, 200, { ok: true, id })
       }
 
@@ -212,9 +220,8 @@ export function createAppServer() {
       const sessionAbort = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort$/)
       if (method === "POST" && sessionAbort) {
         const id = decodeURIComponent(sessionAbort[1])
-        const s = sessions.get(id)
+        const s = await sessions.abort(id)
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        // Mock runtime is synchronous; abort is idempotent no-op returning snapshot
         return sendJson(res, 200, {
           accepted: true,
           snapshot: sessions.snapshot(s),

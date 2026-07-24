@@ -64,7 +64,18 @@ npm run dev:app      # vite
 - [x] mock 流式：WS `/api/v1/events` + prompt stream 增量 snapshot
 - [x] workspace git status / info / diff（文件树改动标记）
 - [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
-- [ ] 真 Pi worker / 终端（默认不调模型）
+- [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
+- [ ] 终端 PTY
+
+### 真 Pi 怎么开
+
+```bash
+# 需本机已配置 ~/.pi/agent 凭据
+set PIUI_DRIVER=pi
+npm run dev:server
+npm run dev:app
+# 发消息会走真实模型，消耗 token
+```
 
 ### 最小可用怎么跑
 
