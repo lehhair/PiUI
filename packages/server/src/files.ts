@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import type { FileListResponseV1, FileNodeDtoV1, FileReadResponseV1 } from "@piui/protocol"
 import { PathSafetyError, resolveWorkspacePath } from "./path-safety.ts"
@@ -88,5 +88,48 @@ export function readFileText(ws: WorkspaceRecord, relativePath: string): FileRea
   }
 }
 
-// silence unused path import when only used in types on some platforms
-void path
+export function writeFileText(
+  ws: WorkspaceRecord,
+  relativePath: string,
+  content: string,
+  opts?: { ifMatch?: string },
+): FileReadResponseV1 {
+  const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
+  if (resolved.restricted) {
+    throw new PathSafetyError("SYMLINK_ESCAPE", "restricted path")
+  }
+  if (resolved.exists) {
+    const st = statSync(resolved.absolute)
+    if (!st.isFile()) {
+      throw new PathSafetyError("INVALID_REQUEST", "not a file")
+    }
+    if (opts?.ifMatch) {
+      const current = readFileSync(resolved.absolute)
+      const etag = createHash("sha256").update(current).digest("hex").slice(0, 16)
+      if (etag !== opts.ifMatch) {
+        throw Object.assign(new Error("etag mismatch"), { code: "STALE_REVISION" as const })
+      }
+    }
+  }
+
+  // absolute for new files is still under root (resolveWorkspacePath validates parent)
+  const abs = resolved.absolute
+  const parent = path.dirname(abs)
+  mkdirSync(parent, { recursive: true })
+
+  const buf = Buffer.from(content, "utf8")
+  if (buf.length > MAX_TEXT_PREVIEW) {
+    throw Object.assign(new Error("file too large"), { code: "FILE_TOO_LARGE" as const })
+  }
+  const tmp = `${abs}.piui-tmp-${process.pid}`
+  writeFileSync(tmp, buf)
+  renameSync(tmp, abs)
+  const etag = createHash("sha256").update(buf).digest("hex").slice(0, 16)
+  return {
+    path: resolved.relative || relativePath.replace(/\\/g, "/"),
+    content,
+    encoding: "utf-8",
+    size: buf.length,
+    etag,
+  }
+}

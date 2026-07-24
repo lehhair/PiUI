@@ -2,6 +2,7 @@ import type { EventEnvelopeV1, SessionSnapshotV1 } from "@piui/protocol"
 import { getApiBase } from "./sessionApi"
 import { applySnapshotToUi } from "./applySnapshot"
 import { isTrackedPiSession, trackPiSession } from "./piSessionIndex"
+import { reportPiConnectionState } from "../api/events"
 
 type Status = "idle" | "connecting" | "open" | "closed"
 
@@ -41,17 +42,26 @@ class PiEventSocket {
     if (this.ws && (this.status === "open" || this.status === "connecting")) return
     this.intentionalClose = false
     this.setStatus("connecting")
+    reportPiConnectionState("connecting")
     try {
       const ws = new WebSocket(wsUrl())
       this.ws = ws
-      ws.onopen = () => this.setStatus("open")
+      ws.onopen = () => {
+        this.setStatus("open")
+        reportPiConnectionState("connected")
+      }
       ws.onclose = () => {
         this.ws = null
         this.setStatus("closed")
-        if (!this.intentionalClose) this.scheduleReconnect()
+        if (!this.intentionalClose) {
+          reportPiConnectionState("disconnected")
+          this.scheduleReconnect()
+        } else {
+          reportPiConnectionState("disconnected")
+        }
       }
       ws.onerror = () => {
-        /* onclose follows */
+        reportPiConnectionState("error", { error: "websocket error" })
       }
       ws.onmessage = ev => {
         try {

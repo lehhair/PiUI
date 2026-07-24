@@ -5,7 +5,8 @@ import {
   type HealthResponseV1,
   type WorkspaceCreateRequestV1,
 } from "@piui/protocol"
-import { listFiles, readFileText } from "./files.ts"
+import { listFiles, readFileText, writeFileText } from "./files.ts"
+import { searchFilesByName } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
 import { SessionRegistry } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
@@ -296,6 +297,45 @@ export function createAppServer() {
           if (!rel) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
           try {
             return sendJson(res, 200, readFileText(ws, rel))
+          } catch (e) {
+            return handlePathError(res, e)
+          }
+        }
+
+        if (method === "PUT" && rest === "file") {
+          const rel = url.searchParams.get("path") ?? ""
+          if (!rel) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
+          const raw = await readBody(req)
+          let body: { content?: string; ifMatch?: string }
+          try {
+            body = JSON.parse(raw || "{}") as { content?: string; ifMatch?: string }
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (typeof body.content !== "string") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "content required")
+          }
+          try {
+            const ifMatch = body.ifMatch ?? (req.headers["if-match"] as string | undefined)
+            return sendJson(res, 200, writeFileText(ws, rel, body.content, { ifMatch }))
+          } catch (e) {
+            if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "STALE_REVISION") {
+              return sendProblem(res, 409, "STALE_REVISION", (e as Error).message)
+            }
+            return handlePathError(res, e)
+          }
+        }
+
+        if (method === "GET" && rest === "search/files") {
+          const q = url.searchParams.get("q") ?? ""
+          const type = url.searchParams.get("type")
+          const limit = Number(url.searchParams.get("limit") ?? 50)
+          try {
+            const paths = searchFilesByName(ws, q, {
+              type: type === "directory" || type === "file" ? type : undefined,
+              limit: Number.isFinite(limit) ? limit : 50,
+            })
+            return sendJson(res, 200, { query: q, paths })
           } catch (e) {
             return handlePathError(res, e)
           }
