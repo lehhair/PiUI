@@ -20,6 +20,8 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
   }
 
   try {
+    const { ensurePiEventSocket } = await import("./eventSocket")
+    ensurePiEventSocket()
     const res = await fetch(`${base}/api/v1/dev/mock-chat`, { method: "POST" })
     if (!res.ok) {
       console.warn("[PiUI] mock-chat failed", res.status)

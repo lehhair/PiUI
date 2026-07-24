@@ -662,7 +662,9 @@ export function useChatSession({
         if (isPiSession(sessionId)) {
           messageStore.setStreaming(sessionId, true)
           try {
-            const snap = await promptSession(sessionId, input.content)
+            const { ensurePiEventSocket } = await import('../pi/eventSocket')
+            ensurePiEventSocket()
+            const snap = await promptSession(sessionId, input.content, { stream: true })
             applySnapshotToUi(snap)
             messageStore.setStreaming(sessionId, false)
             return true
