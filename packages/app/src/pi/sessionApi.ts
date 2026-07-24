@@ -154,6 +154,50 @@ export async function readWorkspaceFile(workspaceId: string, path: string) {
   }
 }
 
+export async function searchWorkspaceFiles(
+  workspaceId: string,
+  query: string,
+  opts?: { type?: "file" | "directory"; limit?: number },
+): Promise<string[]> {
+  const q = new URLSearchParams({ q: query })
+  if (opts?.type) q.set("type", opts.type)
+  if (opts?.limit) q.set("limit", String(opts.limit))
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/search/files?${q}`,
+  )
+  if (!res.ok) throw new Error(`searchWorkspaceFiles ${res.status}`)
+  const data = (await res.json()) as { paths: string[] }
+  return data.paths
+}
+
+export async function writeWorkspaceFile(
+  workspaceId: string,
+  path: string,
+  content: string,
+  ifMatch?: string,
+) {
+  const q = new URLSearchParams({ path })
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/file?${q}`,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...(ifMatch ? { "if-match": ifMatch } : {}),
+      },
+      body: JSON.stringify({ content, ifMatch }),
+    },
+  )
+  if (!res.ok) throw new Error(`writeWorkspaceFile ${res.status}`)
+  return (await res.json()) as {
+    path: string
+    content: string
+    encoding: "utf-8"
+    size: number
+    etag: string
+  }
+}
+
 export async function getWorkspaceGitStatus(workspaceId: string) {
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/status`,

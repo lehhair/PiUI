@@ -75,6 +75,19 @@ export async function searchFiles(
     limit?: number
   } = {},
 ): Promise<string[]> {
+  if (await isPiServerUp()) {
+    const workspaceId = await resolveWorkspaceId(options.directory)
+    if (!workspaceId) return []
+    try {
+      const { searchWorkspaceFiles } = await import('../pi/sessionApi')
+      return await searchWorkspaceFiles(workspaceId, query, {
+        type: options.type,
+        limit: options.limit,
+      })
+    } catch {
+      return []
+    }
+  }
   const sdk = getSDKClient()
   return unwrap(
     await sdk.find.files({

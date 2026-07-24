@@ -56,6 +56,20 @@ export function subscribeToConnectionState(fn: (info: ConnectionInfo) => void): 
   return () => connectionListeners.delete(fn)
 }
 
+/** Pi Host / WS 上报连接态，驱动侧栏状态点 */
+export function reportPiConnectionState(
+  state: ConnectionState,
+  extra?: { error?: string; reconnectAttempt?: number },
+) {
+  updateConnectionState({
+    state,
+    error: extra?.error,
+    lastEventTime: Date.now(),
+    reconnectAttempt:
+      extra?.reconnectAttempt ?? (state === "connected" ? 0 : connectionInfo.reconnectAttempt),
+  })
+}
+
 // ============================================
 // Singleton SSE Connection
 // ============================================

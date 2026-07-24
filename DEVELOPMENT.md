@@ -63,6 +63,7 @@ npm run dev:app      # vite
 - [x] **最小可用**：文件树 list/read 接 server + 会话绑 workspace + abort 占位
 - [x] mock 流式：WS `/api/v1/events` + prompt stream 增量 snapshot
 - [x] workspace git status / info / diff（文件树改动标记）
+- [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [ ] 真 Pi worker / 终端（默认不调模型）
 
 ### 最小可用怎么跑
