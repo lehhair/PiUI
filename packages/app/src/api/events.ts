@@ -253,7 +253,25 @@ function scheduleReconnect() {
   }, delay)
 }
 
+function isPiBackendMode(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isPiServerReachable } = require('../pi/serverMode') as typeof import('../pi/serverMode')
+    return isPiServerReachable()
+  } catch {
+    return false
+  }
+}
+
 function connectSingleton() {
+  // PiUI: 事件走 WS，禁止 OpenCode SSE
+  if (isPiBackendMode()) {
+    if (import.meta.env.DEV) {
+      console.log('[SSE] skipped — Pi backend uses WebSocket')
+    }
+    return
+  }
+
   if (isConnecting || allSubscribers.size === 0) return
 
   // 如果状态声称 connected，验证连接是否真的活着
@@ -634,6 +652,12 @@ function disconnectSingleton() {
 // ============================================
 
 function handleVisibilityChange() {
+  if (isPiBackendMode()) {
+    // Pi 模式：不维护 OpenCode SSE 前后台逻辑
+    isInBackground = document.visibilityState !== 'visible'
+    return
+  }
+
   if (document.visibilityState === 'visible') {
     // 页面恢复前台
     isInBackground = false

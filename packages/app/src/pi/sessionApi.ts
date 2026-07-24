@@ -313,6 +313,11 @@ export async function compactSession(sessionId: string, instructions?: string) {
         "会话在服务端不存在（可能重启过 server）。请点「新建会话」后再 /compact",
       )
     }
+    // Pi: empty/small session is not a hard failure
+    if (/nothing to compact/i.test(detail)) {
+      console.info("[PiUI] compact skipped:", detail)
+      return fetchSnapshot(sessionId)
+    }
     throw new Error(`compactSession failed: ${detail}`)
   }
   const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
