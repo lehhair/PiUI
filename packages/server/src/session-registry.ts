@@ -3,8 +3,12 @@ import type { SessionSnapshotV1, TimelineItemV1 } from "@piui/protocol"
 import {
   applyWorkerEvent,
   createProjectionState,
+  getDriverMode,
+  loadRealPiSession,
   runMockTurn,
+  type DriverMode,
   type ProjectionState,
+  type RealPiSession,
 } from "@piui/pi-worker"
 import type { WorkspaceStore } from "./workspace-store.ts"
 
@@ -18,12 +22,24 @@ export interface AppSession {
   epoch: string
   sequence: number
   projection: ProjectionState
+  driver: DriverMode
+  real?: RealPiSession
 }
 
 export class SessionRegistry {
   private readonly byId = new Map<string, AppSession>()
+  private readonly driver: DriverMode
 
-  constructor(private readonly workspaces: WorkspaceStore) {}
+  constructor(
+    private readonly workspaces: WorkspaceStore,
+    driver: DriverMode = getDriverMode(),
+  ) {
+    this.driver = driver
+  }
+
+  getDriver(): DriverMode {
+    return this.driver
+  }
 
   list(workspaceId?: string): AppSession[] {
     const all = [...this.byId.values()]
@@ -34,20 +50,44 @@ export class SessionRegistry {
     return this.byId.get(id)
   }
 
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
+    const s = this.byId.get(id)
+    if (!s) return false
+    if (s.real) {
+      try {
+        await s.real.dispose()
+      } catch {
+        /* ignore */
+      }
+    }
     return this.byId.delete(id)
   }
 
-  /** Create session and optionally seed with deterministic mock turn (no LLM). */
-  create(workspaceId: string, opts?: { title?: string; seedMock?: boolean }): AppSession {
-    if (!this.workspaces.get(workspaceId)) {
+  /**
+   * Create session.
+   * - mock: optional seed turn, no LLM
+   * - pi: opens real AgentSessionRuntime (models when prompted)
+   */
+  async create(
+    workspaceId: string,
+    opts?: { title?: string; seedMock?: boolean },
+  ): Promise<AppSession> {
+    const ws = this.workspaces.get(workspaceId)
+    if (!ws) {
       throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
     }
     const now = new Date().toISOString()
     let projection = createProjectionState()
     let sequence = 0
-    const seedMock = opts?.seedMock === true
-    if (seedMock) {
+    let real: RealPiSession | undefined
+    let driverSessionId = `mock-${randomUUID().slice(0, 8)}`
+
+    if (this.driver === "pi") {
+      const RealPiSession = await loadRealPiSession()
+      real = await RealPiSession.open(ws.canonicalRoot)
+      driverSessionId = real.getSessionId()
+      projection = real.getProjection()
+    } else if (opts?.seedMock === true) {
       for (const ev of runMockTurn({
         userText: "hello from mock",
         assistantText: "this is a mock assistant reply",
@@ -58,25 +98,25 @@ export class SessionRegistry {
         sequence++
       }
     }
+
+    const seedMock = opts?.seedMock === true && this.driver === "mock"
     const session: AppSession = {
       id: randomUUID(),
       workspaceId,
-      driverSessionId: `mock-${randomUUID().slice(0, 8)}`,
+      driverSessionId,
       title: opts?.title ?? (seedMock ? "Mock session" : "New chat"),
       createdAt: now,
       updatedAt: now,
       epoch: randomUUID(),
       sequence,
       projection,
+      driver: this.driver,
+      real,
     }
     this.byId.set(session.id, session)
     return session
   }
 
-  /**
-   * Append a user prompt and mock assistant turn. Never calls a real model.
-   * Optional onTick for streaming UI (each worker event after apply).
-   */
   async prompt(
     sessionId: string,
     text: string,
@@ -95,6 +135,22 @@ export class SessionRegistry {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
     }
 
+    if (session.real) {
+      await session.real.prompt(trimmed, projection => {
+        session.projection = projection
+        session.sequence += 1
+        session.updatedAt = new Date().toISOString()
+        opts?.onTick?.(session)
+      })
+      session.projection = session.real.getProjection()
+      if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
+        session.title = trimmed.slice(0, 48)
+      }
+      session.updatedAt = new Date().toISOString()
+      return session
+    }
+
+    // mock path — no LLM
     let projection = session.projection
     const events = runMockTurn({
       userText: trimmed,
@@ -117,7 +173,19 @@ export class SessionRegistry {
     return session
   }
 
+  async abort(sessionId: string): Promise<AppSession | undefined> {
+    const session = this.byId.get(sessionId)
+    if (!session) return undefined
+    if (session.real) {
+      await session.real.abort()
+      session.projection = session.real.getProjection()
+    }
+    session.updatedAt = new Date().toISOString()
+    return session
+  }
+
   snapshot(session: AppSession): SessionSnapshotV1 {
+    const model = session.real?.getModel()
     return {
       protocolVersion: 1,
       epoch: session.epoch,
@@ -128,19 +196,23 @@ export class SessionRegistry {
         driverId: "pi",
         driverSessionId: session.driverSessionId,
         title: session.title,
-        state: session.projection.isStreaming ? "running" : "idle",
+        state: session.projection.isStreaming || session.real?.isStreaming() ? "running" : "idle",
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
       },
       runtime: {
         attached: true,
-        model: { provider: "mock", id: "mock", displayName: "Mock" },
-        thinkingLevel: "off",
-        availableThinkingLevels: ["off", "low", "medium", "high"],
-        isStreaming: session.projection.isStreaming,
+        model: model
+          ? { provider: model.provider, id: model.id, displayName: model.displayName }
+          : session.driver === "mock"
+            ? { provider: "mock", id: "mock", displayName: "Mock" }
+            : undefined,
+        thinkingLevel: session.real?.getThinkingLevel() ?? "off",
+        availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        isStreaming: session.projection.isStreaming || Boolean(session.real?.isStreaming()),
         isCompacting: false,
         queue: { steering: [], followUp: [] },
-        activeTools: ["read", "bash", "edit"],
+        activeTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
       },
       timeline: session.projection.timeline as TimelineItemV1[],
       native: {
