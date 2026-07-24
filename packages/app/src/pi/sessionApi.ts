@@ -154,6 +154,44 @@ export async function readWorkspaceFile(workspaceId: string, path: string) {
   }
 }
 
+export async function getWorkspaceGitStatus(workspaceId: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/status`,
+  )
+  if (!res.ok) throw new Error(`getWorkspaceGitStatus ${res.status}`)
+  return (await res.json()) as {
+    branch: string | null
+    ahead: number
+    behind: number
+    items: Array<{ path: string; status: string; added?: number; removed?: number }>
+  }
+}
+
+export async function getWorkspaceGitInfo(workspaceId: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/info`,
+  )
+  if (!res.ok) throw new Error(`getWorkspaceGitInfo ${res.status}`)
+  return (await res.json()) as {
+    branch: string | null
+    root: boolean
+    ahead: number
+    behind: number
+  }
+}
+
+export async function getWorkspaceGitDiff(workspaceId: string, mode: "git" | "branch") {
+  const q = new URLSearchParams({ mode })
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/diff?${q}`,
+  )
+  if (!res.ok) throw new Error(`getWorkspaceGitDiff ${res.status}`)
+  return (await res.json()) as {
+    mode: string
+    files: Array<{ file: string; status: string; additions: number; deletions: number }>
+  }
+}
+
 export async function abortSessionCommand(sessionId: string): Promise<SessionSnapshotV1 | null> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/abort`,

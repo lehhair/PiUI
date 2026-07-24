@@ -17,7 +17,7 @@
     "test:phase0": "node --test tests/phase0-structure.test.mjs",
     "test:phase3": "node --test tests/phase3-no-opencode-sdk.test.mjs",
     "test:mvp": "node --import tsx --test tests/mvp-loop.test.mjs",
-    "test:usable": "node --import tsx --test tests/usable-files.test.mjs",
+    "test:usable": "node --import tsx --test tests/usable-files.test.mjs tests/usable-git.test.mjs",
     "typecheck": "npm run typecheck -w @piui/protocol && npm run typecheck -w @piui/server && npm run typecheck -w @piui/pi-worker"
   },
   "engines": {
