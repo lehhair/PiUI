@@ -180,14 +180,18 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   return (await res.json()) as SessionSnapshotV1
 }
 
-/** Mock prompt — server does not call a real LLM. */
-export async function promptSession(sessionId: string, text: string): Promise<SessionSnapshotV1> {
+/** Mock prompt — server does not call a real LLM. stream=true emits WS snapshots. */
+export async function promptSession(
+  sessionId: string,
+  text: string,
+  opts?: { stream?: boolean },
+): Promise<SessionSnapshotV1> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/prompt`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, stream: opts?.stream === true }),
     },
   )
   if (!res.ok) throw new Error(`promptSession ${res.status}`)

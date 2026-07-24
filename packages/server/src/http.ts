@@ -9,6 +9,7 @@ import { listFiles, readFileText } from "./files.ts"
 import { PathSafetyError } from "./path-safety.ts"
 import { SessionRegistry } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
+import { eventHub } from "./event-hub.ts"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
@@ -166,14 +167,32 @@ export function createAppServer() {
       if (method === "POST" && sessionPrompt) {
         const id = decodeURIComponent(sessionPrompt[1])
         const raw = await readBody(req)
-        let body: { text?: string }
+        let body: { text?: string; stream?: boolean }
         try {
-          body = JSON.parse(raw || "{}") as { text?: string }
+          body = JSON.parse(raw || "{}") as { text?: string; stream?: boolean }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
         try {
-          const s = sessions.prompt(id, body.text ?? "")
+          // stream defaults off for tests/speed; client passes stream:true for UI
+          const stream = body.stream === true
+          const s = await sessions.prompt(id, body.text ?? "", {
+            stream,
+            onTick: sess => {
+              eventHub.publish({
+                type: "session.snapshot",
+                sessionId: sess.id,
+                workspaceId: sess.workspaceId,
+                payload: sessions.snapshot(sess),
+              })
+            },
+          })
+          eventHub.publish({
+            type: "session.updated",
+            sessionId: s.id,
+            workspaceId: s.workspaceId,
+            payload: sessionSummary(s),
+          })
           return sendJson(res, 200, {
             commandId: `cmd-${Date.now()}`,
             accepted: true,

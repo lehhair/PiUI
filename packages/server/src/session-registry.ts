@@ -75,8 +75,17 @@ export class SessionRegistry {
 
   /**
    * Append a user prompt and mock assistant turn. Never calls a real model.
+   * Optional onTick for streaming UI (each worker event after apply).
    */
-  prompt(sessionId: string, text: string): AppSession {
+  async prompt(
+    sessionId: string,
+    text: string,
+    opts?: {
+      stream?: boolean
+      onTick?: (session: AppSession) => void
+      delayMs?: number
+    },
+  ): Promise<AppSession> {
     const session = this.byId.get(sessionId)
     if (!session) {
       throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
@@ -87,19 +96,24 @@ export class SessionRegistry {
     }
 
     let projection = session.projection
-    for (const ev of runMockTurn({
+    const events = runMockTurn({
       userText: trimmed,
       assistantText: `mock reply: ${trimmed.slice(0, 200)}`,
       thinking: "mock thinking",
-    })) {
+    })
+    const delay = opts?.stream ? (opts.delayMs ?? 25) : 0
+    for (const ev of events) {
       projection = applyWorkerEvent(projection, ev)
       session.sequence += 1
+      session.projection = projection
+      session.updatedAt = new Date().toISOString()
+      opts?.onTick?.(session)
+      if (delay > 0) await new Promise(r => setTimeout(r, delay))
     }
-    session.projection = projection
-    session.updatedAt = new Date().toISOString()
-    if (session.title === "Mock session" || session.title === "Mock chat") {
+    if (session.title === "Mock session" || session.title === "Mock chat" || session.title === "New chat") {
       session.title = trimmed.slice(0, 48)
     }
+    session.updatedAt = new Date().toISOString()
     return session
   }
 
