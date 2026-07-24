@@ -52,4 +52,5 @@ npm run dev:app      # vite
 ## 当前
 
 - [x] Phase 0 结构
-- [ ] Phase 1
+- [x] Phase 1 health + workspace + 安全文件 list/read
+- [ ] Phase 2 pi-worker（无真实 prompt）
