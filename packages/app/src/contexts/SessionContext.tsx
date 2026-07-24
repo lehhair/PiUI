@@ -7,6 +7,15 @@ import {
   type ApiSession,
   type SessionListParams,
 } from '../api'
+import {
+  createPiSession,
+  deletePiSession,
+  isPiServerUp,
+  listPiSessions,
+} from '../pi/sessionApi'
+import { toApiSession, snapshotToApiSession } from '../pi/toApiSession'
+import { applySnapshotToUi } from '../pi/applySnapshot'
+import { isTrackedPiSession } from '../pi/piSessionIndex'
 import { todoStore } from '../store/todoStore'
 import { serverStore } from '../store/serverStore'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -62,6 +71,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       try {
+        // Pi server first (MVP). OpenCode list only if Pi is down.
+        if (await isPiServerUp()) {
+          let list = await listPiSessions()
+          if (search) {
+            const q = search.toLowerCase()
+            list = list.filter(s => (s.title || '').toLowerCase().includes(q))
+          }
+          const data = list.map(s => toApiSession(s, 'piui'))
+          if (requestId !== requestIdRef.current) return
+          if (append) {
+            setSessions(prev => {
+              const existingIds = new Set(prev.map(s => s.id))
+              return [...prev, ...data.filter(s => !existingIds.has(s.id))]
+            })
+          } else {
+            setSessions(data)
+          }
+          setHasMore(false)
+          return
+        }
+
         // 使用正斜杠格式传给 API（http 层会处理兼容）
         const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
 
@@ -225,6 +255,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  // Pi bootstrap / create/delete notify
+  useEffect(() => {
+    const onPi = () => {
+      void fetchSessionsRef.current()
+    }
+    window.addEventListener("piui:sessions-changed", onPi)
+    return () => window.removeEventListener("piui:sessions-changed", onPi)
+  }, [])
+
   // Actions
   const refresh = useCallback(() => fetchSessions(), [fetchSessions])
 
@@ -246,6 +285,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const createSession = useCallback(
     async (title?: string) => {
+      if (await isPiServerUp()) {
+        const { summary, snapshot } = await createPiSession({ title, seedMock: false })
+        applySnapshotToUi(snapshot)
+        const apiSession = snapshotToApiSession(snapshot, 'piui')
+        setSessions(prev => [apiSession, ...prev.filter(s => s.id !== summary.id)])
+        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+        return apiSession
+      }
+
       // 使用正斜杠格式传给后端
       const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
 
@@ -260,6 +308,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const deleteSession = useCallback(
     async (id: string) => {
+      if (isTrackedPiSession(id) || (await isPiServerUp())) {
+        try {
+          await deletePiSession(id)
+        } catch {
+          // fall through if not on pi server
+        }
+        pinnedSessionsStore.unpin(id)
+        clearSessionRuntimeState(id)
+        setSessions(prev => prev.filter(s => s.id !== id))
+        return
+      }
       const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
       await apiDeleteSession(id, targetDir)
       pinnedSessionsStore.unpin(id)

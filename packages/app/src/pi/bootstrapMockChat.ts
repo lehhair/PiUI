@@ -27,6 +27,8 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
     }
     const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
     const sessionId = applySnapshotToUi(data.snapshot)
+    // notify session list consumers
+    window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
     const hash = `#/session/${sessionId}`
     if (!window.location.hash.includes(sessionId)) {
       window.location.hash = hash

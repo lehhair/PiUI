@@ -47,6 +47,28 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
+  it("create empty session, list, delete", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "blank" })
+      assert.equal(created.status, 201)
+      assert.equal(created.data.snapshot.timeline.length, 0)
+      const id = created.data.session.id as string
+
+      const listed = await json(port, "GET", "/api/v1/sessions")
+      assert.equal(listed.status, 200)
+      assert.ok((listed.data.sessions as { id: string }[]).some(s => s.id === id))
+
+      const del = await json(port, "DELETE", `/api/v1/sessions/${id}`)
+      assert.equal(del.status, 200)
+      const listed2 = await json(port, "GET", "/api/v1/sessions")
+      assert.ok(!(listed2.data.sessions as { id: string }[]).some(s => s.id === id))
+    } finally {
+      await close()
+    }
+  })
+
   it("prompt appends mock turn without LLM", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

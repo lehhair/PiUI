@@ -34,6 +34,10 @@ export class SessionRegistry {
     return this.byId.get(id)
   }
 
+  delete(id: string): boolean {
+    return this.byId.delete(id)
+  }
+
   /** Create session and optionally seed with deterministic mock turn (no LLM). */
   create(workspaceId: string, opts?: { title?: string; seedMock?: boolean }): AppSession {
     if (!this.workspaces.get(workspaceId)) {
@@ -42,7 +46,8 @@ export class SessionRegistry {
     const now = new Date().toISOString()
     let projection = createProjectionState()
     let sequence = 0
-    if (opts?.seedMock !== false) {
+    const seedMock = opts?.seedMock === true
+    if (seedMock) {
       for (const ev of runMockTurn({
         userText: "hello from mock",
         assistantText: "this is a mock assistant reply",
@@ -57,7 +62,7 @@ export class SessionRegistry {
       id: randomUUID(),
       workspaceId,
       driverSessionId: `mock-${randomUUID().slice(0, 8)}`,
-      title: opts?.title ?? "Mock session",
+      title: opts?.title ?? (seedMock ? "Mock session" : "New chat"),
       createdAt: now,
       updatedAt: now,
       epoch: randomUUID(),

@@ -12,6 +12,28 @@ import { WorkspaceStore } from "./workspace-store.ts"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
+let defaultWorkspaceId: string | null = null
+
+async function ensureDefaultWorkspace(): Promise<string> {
+  if (defaultWorkspaceId && store.get(defaultWorkspaceId)) return defaultWorkspaceId
+  const { mkdtempSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const path = await import("node:path")
+  const root = mkdtempSync(path.join(tmpdir(), "piui-default-"))
+  const rec = store.register(root, "piui-default")
+  defaultWorkspaceId = rec.id
+  return rec.id
+}
+
+function sessionSummary(s: ReturnType<SessionRegistry["list"]>[number]) {
+  return {
+    id: s.id,
+    workspaceId: s.workspaceId,
+    title: s.title,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body)
@@ -61,12 +83,9 @@ export function createAppServer() {
 
       // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.
       if (method === "POST" && p === "/api/v1/dev/mock-chat") {
-        const { mkdtempSync } = await import("node:fs")
-        const { tmpdir } = await import("node:os")
-        const path = await import("node:path")
-        const root = mkdtempSync(path.join(tmpdir(), "piui-mock-"))
-        const rec = store.register(root, "mock-workspace")
-        const s = sessions.create(rec.id, { title: "Mock chat", seedMock: true })
+        const workspaceId = await ensureDefaultWorkspace()
+        const s = sessions.create(workspaceId, { title: "Mock chat", seedMock: true })
+        const rec = store.get(workspaceId)!
         return sendJson(res, 201, {
           workspace: {
             id: rec.id,
@@ -80,13 +99,11 @@ export function createAppServer() {
 
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
-        const list = sessions.list(workspaceId).map(s => ({
-          id: s.id,
-          workspaceId: s.workspaceId,
-          title: s.title,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        }))
+        const list = sessions
+          .list(workspaceId)
+          .slice()
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .map(sessionSummary)
         return sendJson(res, 200, { sessions: list })
       }
 
@@ -98,15 +115,16 @@ export function createAppServer() {
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
-        if (!body.workspaceId) {
-          return sendProblem(res, 400, "INVALID_REQUEST", "workspaceId required")
-        }
         try {
-          const s = sessions.create(body.workspaceId, {
+          const workspaceId = body.workspaceId || (await ensureDefaultWorkspace())
+          const s = sessions.create(workspaceId, {
             title: body.title,
-            seedMock: body.seedMock,
+            seedMock: body.seedMock === true,
           })
-          return sendJson(res, 201, { session: sessions.snapshot(s).session, snapshot: sessions.snapshot(s) })
+          return sendJson(res, 201, {
+            session: sessionSummary(s),
+            snapshot: sessions.snapshot(s),
+          })
         } catch (e) {
           const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
           if (code === "WORKSPACE_NOT_FOUND") {
@@ -121,6 +139,14 @@ export function createAppServer() {
         const s = sessions.get(decodeURIComponent(sessionSnap[1]))
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         return sendJson(res, 200, sessions.snapshot(s))
+      }
+
+      const sessionOnly = p.match(/^\/api\/v1\/sessions\/([^/]+)$/)
+      if (method === "DELETE" && sessionOnly) {
+        const id = decodeURIComponent(sessionOnly[1])
+        if (!sessions.get(id)) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        sessions.delete(id)
+        return sendJson(res, 200, { ok: true, id })
       }
 
       const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/prompt$/)

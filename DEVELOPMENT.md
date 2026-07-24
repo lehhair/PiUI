@@ -59,7 +59,8 @@ npm run dev:app      # vite
 - [x] Phase 4 mock session snapshot API + `sessionProjectionStore`（无真实 prompt）
 - [x] Phase 5 timeline→Message 桥接 + mock-chat 灌进 ChatArea（无真实 prompt）
 - [x] **最小完成体**：seed 会话 → 输入发送 → mock 回复进 ChatArea（`npm run test:mvp`）
-- [ ] 真 Pi worker / 流式 / 会话列表 / 文件树接 server（默认不调模型）
+- [x] 侧栏会话列表 / 新建 / 删除 / 切换（Pi server）
+- [ ] 真 Pi worker / 流式 / 文件树接 server（默认不调模型）
 
 ### 最小完成体怎么跑
 
