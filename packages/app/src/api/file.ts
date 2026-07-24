@@ -33,11 +33,40 @@ function mapPiType(t: string): FileNode['type'] {
   return 'file'
 }
 
+/** Normalize explorer path to workspace-relative for Pi file API. */
+function toPiRelativePath(path: string, directory?: string): string {
+  if (!path || isRootDirectoryPath(path)) return ''
+  let p = path.replace(/\\/g, '/')
+  // virtual labels
+  if (p === 'piui' || p.startsWith('piui/') || p.startsWith('piws:')) return ''
+
+  const root = directory?.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (root && (/^[a-zA-Z]:/.test(root) || root.startsWith('/'))) {
+    const lp = p.toLowerCase()
+    const lr = root.toLowerCase()
+    if (lp === lr || lp === `${lr}/`) return ''
+    if (lp.startsWith(`${lr}/`)) return p.slice(root.length + 1)
+    // absolute path that is not under workspace root → list root instead of 403
+    if (/^[a-zA-Z]:/.test(p) || p.startsWith('/')) return ''
+  }
+
+  // bare absolute without directory
+  if (/^[a-zA-Z]:/.test(p) || (p.startsWith('/') && p.length > 1 && !directory)) return ''
+  return p.replace(/^\//, '')
+}
+
 async function fetchDirectoryPi(path: string, directory?: string): Promise<FileNode[] | null> {
   if (!(await isPiServerUp())) return null
-  const workspaceId = await resolveWorkspaceId(directory)
+  // Prefer absolute directory as workspace; fall back to current path if it is absolute
+  const workspaceDir =
+    directory && (/^[a-zA-Z]:/.test(directory) || directory.startsWith('/'))
+      ? directory
+      : path && (/^[a-zA-Z]:/.test(path) || path.startsWith('/'))
+        ? path
+        : directory
+  const workspaceId = await resolveWorkspaceId(workspaceDir)
   if (!workspaceId) return null
-  const rel = isRootDirectoryPath(path) ? '' : path.replace(/\\/g, '/')
+  const rel = toPiRelativePath(path, workspaceDir)
   const listed = await listWorkspaceFiles(workspaceId, rel)
   return listed.entries
     .filter(e => !e.restricted)
@@ -143,7 +172,8 @@ export async function getFileContent(path: string, directory?: string): Promise<
   if (await isPiServerUp()) {
     const workspaceId = await resolveWorkspaceId(directory)
     if (workspaceId) {
-      const file = await readWorkspaceFile(workspaceId, path.replace(/\\/g, '/'))
+      const rel = toPiRelativePath(path, directory)
+      const file = await readWorkspaceFile(workspaceId, rel)
       return {
         type: 'text',
         content: file.content,
