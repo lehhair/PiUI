@@ -71,10 +71,14 @@ npm run dev:app      # vite
 
 ```bash
 # 需本机已配置 ~/.pi/agent 凭据
-set PIUI_DRIVER=pi
-npm run dev:server
+npm run dev:server:pi   # Windows / bash 通用
 npm run dev:app
 # 发消息会走真实模型，消耗 token
+#
+# 手动设环境变量（可选）:
+#   Git Bash:  export PIUI_DRIVER=pi && npm run dev:server
+#   cmd:       set PIUI_DRIVER=pi&& npm run dev:server
+#   PowerShell: $env:PIUI_DRIVER='pi'; npm run dev:server
 ```
 
 ### 最小可用怎么跑

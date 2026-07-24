@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev:server": "npm run dev -w @piui/server",
-    "dev:server:pi": "PIUI_DRIVER=pi npm run dev -w @piui/server",
+    "dev:server:pi": "node scripts/dev-server-pi.mjs",
     "dev:host": "npm run dev -w @piui/server",
     "dev:app": "npm run dev -w @piui/app",
     "build": "npm run build -w @piui/protocol && npm run build -w @piui/app",
