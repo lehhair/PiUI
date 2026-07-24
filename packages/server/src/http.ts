@@ -59,6 +59,25 @@ export function createAppServer() {
         return sendJson(res, 200, body)
       }
 
+      // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.
+      if (method === "POST" && p === "/api/v1/dev/mock-chat") {
+        const { mkdtempSync } = await import("node:fs")
+        const { tmpdir } = await import("node:os")
+        const path = await import("node:path")
+        const root = mkdtempSync(path.join(tmpdir(), "piui-mock-"))
+        const rec = store.register(root, "mock-workspace")
+        const s = sessions.create(rec.id, { title: "Mock chat", seedMock: true })
+        return sendJson(res, 201, {
+          workspace: {
+            id: rec.id,
+            displayName: rec.displayName,
+            createdAt: rec.createdAt,
+            lastOpenedAt: rec.lastOpenedAt,
+          },
+          snapshot: sessions.snapshot(s),
+        })
+      }
+
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
         const list = sessions.list(workspaceId).map(s => ({

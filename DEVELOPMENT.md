@@ -57,4 +57,5 @@ npm run dev:app      # vite
 - [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
 - [x] Phase 3 去掉 npm `@opencode-ai/sdk`，本地 shim + `vite build` 通过
 - [x] Phase 4 mock session snapshot API + `sessionProjectionStore`（无真实 prompt）
-- [ ] 下一步：ChatArea 吃 timeline；接真 Pi worker（仍默认不在 CI 调模型）
+- [x] Phase 5 timeline→Message 桥接 + mock-chat 灌进 ChatArea（无真实 prompt）
+- [ ] 下一步：ChatArea 原生 Timeline；发消息走 server；真 Pi worker（默认不调模型）

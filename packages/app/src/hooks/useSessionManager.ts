@@ -23,6 +23,7 @@ import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_MESSAGE_LIMIT, HISTORY_LOAD_BATCH_SIZE } from '../constants'
 import type { MessageError } from '../types/message'
+import { sessionProjectionStore } from '../pi/sessionProjectionStore'
 
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
@@ -137,6 +138,17 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const existingState = messageStore.getSessionState(sid)
       const hasExistingMessages = existingState && existingState.messages.length > 0
       const hasLoadedBaseline = existingState?.loadState === 'loaded' && !existingState?.isStale
+
+      // Pi mock / projection：已由 applySnapshotToUi 写入，禁止 OpenCode API 空结果覆盖
+      const piSnap = sessionProjectionStore.getSnapshot()
+      if (piSnap?.session.id === sid && hasExistingMessages) {
+        messageStore.updateSessionMetadata(sid, {
+          loadState: 'loaded',
+          title: piSnap.session.title ?? existingState?.title,
+        })
+        if (!isStale()) onLoadComplete?.()
+        return
+      }
 
       // 如果已经有消息且正在 streaming，不能覆盖消息，但仍需加载元数据
       // 仅在「已经完整加载过」时才跳过覆盖；
