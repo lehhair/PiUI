@@ -14,8 +14,11 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
   try {
     const health = await fetch(`${base}/api/v1/health`, { signal: AbortSignal.timeout(2000) })
     if (!health.ok) return null
-    const { setPiServerReachable } = await import("./isPiSession")
+    const { setPiServerReachable } = await import("./serverMode")
     setPiServerReachable(true)
+    // 关掉 OpenCode SSE，避免 visibility 重连刷 404
+    const { disconnectSSE } = await import("../api/events")
+    disconnectSSE()
     const body = (await health.json()) as { driver?: string }
     console.info("[PiUI] server up, driver=", body.driver ?? "unknown")
   } catch {

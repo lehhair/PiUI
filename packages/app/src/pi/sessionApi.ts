@@ -300,7 +300,21 @@ export async function compactSession(sessionId: string, instructions?: string) {
       body: JSON.stringify({ instructions }),
     },
   )
-  if (!res.ok) throw new Error(`compactSession ${res.status}`)
+  if (!res.ok) {
+    let detail = String(res.status)
+    try {
+      const err = (await res.json()) as { message?: string; code?: string }
+      detail = err.message || err.code || detail
+    } catch {
+      /* */
+    }
+    if (res.status === 404) {
+      throw new Error(
+        "会话在服务端不存在（可能重启过 server）。请点「新建会话」后再 /compact",
+      )
+    }
+    throw new Error(`compactSession failed: ${detail}`)
+  }
   const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
   return data.snapshot
 }

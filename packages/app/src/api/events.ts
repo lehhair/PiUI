@@ -937,6 +937,17 @@ export function disconnectSSE(error?: string) {
  * 订阅 SSE 事件（单例模式，多个订阅者共享一个连接）
  */
 export function subscribeToEvents(callbacks: EventCallbacks): () => void {
+  // PiUI: 有 piui-server 时用 WS，不再拉 OpenCode SSE
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isPiServerReachable } = require('../pi/serverMode') as typeof import('../pi/serverMode')
+    if (isPiServerReachable()) {
+      return () => {}
+    }
+  } catch {
+    /* continue with SSE */
+  }
+
   allSubscribers.add(callbacks)
 
   // 如果是第一个订阅者，启动连接

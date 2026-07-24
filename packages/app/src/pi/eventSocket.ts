@@ -85,7 +85,10 @@ class PiEventSocket {
     if (this.reconnectTimer) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect()
+      // only reconnect if server still expected
+      void import("./serverMode").then(({ isPiServerReachable }) => {
+        if (isPiServerReachable()) this.connect()
+      })
     }, 1500)
   }
 

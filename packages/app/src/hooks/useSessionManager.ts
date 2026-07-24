@@ -161,6 +161,13 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           if (!isStale()) onLoadComplete?.()
         } catch (error) {
           if (isStale()) return
+          // server 重启后内存会话丢失：保留本地消息，不打成 error 红屏
+          if (hasExistingMessages) {
+            messageStore.updateSessionMetadata(sid, { loadState: 'loaded' })
+            if (!isStale()) onLoadComplete?.()
+            console.warn('[PiUI] snapshot 404 — server may have restarted; local messages kept')
+            return
+          }
           messageStore.setLoadError(sid, toLoadMessageError(error))
         }
         return
