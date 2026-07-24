@@ -24,6 +24,9 @@ import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_MESSAGE_LIMIT, HISTORY_LOAD_BATCH_SIZE } from '../constants'
 import type { MessageError } from '../types/message'
 import { sessionProjectionStore } from '../pi/sessionProjectionStore'
+import { isTrackedPiSession } from '../pi/piSessionIndex'
+import { fetchSnapshot } from '../pi/sessionApi'
+import { applySnapshotToUi } from '../pi/applySnapshot'
 
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
@@ -139,14 +142,27 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const hasExistingMessages = existingState && existingState.messages.length > 0
       const hasLoadedBaseline = existingState?.loadState === 'loaded' && !existingState?.isStale
 
-      // Pi mock / projection：已由 applySnapshotToUi 写入，禁止 OpenCode API 空结果覆盖
-      const piSnap = sessionProjectionStore.getSnapshot()
-      if (piSnap?.session.id === sid && hasExistingMessages) {
-        messageStore.updateSessionMetadata(sid, {
-          loadState: 'loaded',
-          title: piSnap.session.title ?? existingState?.title,
-        })
-        if (!isStale()) onLoadComplete?.()
+      // Pi sessions: load snapshot from piui-server (never OpenCode)
+      if (isTrackedPiSession(sid) || sessionProjectionStore.getSnapshot()?.session.id === sid) {
+        const piSnap = sessionProjectionStore.getSnapshot()
+        if (piSnap?.session.id === sid && hasExistingMessages && !force) {
+          messageStore.updateSessionMetadata(sid, {
+            loadState: 'loaded',
+            title: piSnap.session.title ?? existingState?.title,
+          })
+          if (!isStale()) onLoadComplete?.()
+          return
+        }
+        messageStore.setLoadState(sid, 'loading')
+        try {
+          const snap = await fetchSnapshot(sid)
+          if (isStale()) return
+          applySnapshotToUi(snap)
+          if (!isStale()) onLoadComplete?.()
+        } catch (error) {
+          if (isStale()) return
+          messageStore.setLoadError(sid, toLoadMessageError(error))
+        }
         return
       }
 
