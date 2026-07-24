@@ -58,4 +58,13 @@ npm run dev:app      # vite
 - [x] Phase 3 去掉 npm `@opencode-ai/sdk`，本地 shim + `vite build` 通过
 - [x] Phase 4 mock session snapshot API + `sessionProjectionStore`（无真实 prompt）
 - [x] Phase 5 timeline→Message 桥接 + mock-chat 灌进 ChatArea（无真实 prompt）
-- [ ] 下一步：ChatArea 原生 Timeline；发消息走 server；真 Pi worker（默认不调模型）
+- [x] **最小完成体**：seed 会话 → 输入发送 → mock 回复进 ChatArea（`npm run test:mvp`）
+- [ ] 真 Pi worker / 流式 / 会话列表 / 文件树接 server（默认不调模型）
+
+### 最小完成体怎么跑
+
+```bash
+npm run dev:server
+npm run dev:app
+# 打开浏览器 → 自动 mock 会话 → 输入框发一句 → 出现 mock reply
+```

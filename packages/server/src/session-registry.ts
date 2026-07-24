@@ -68,6 +68,36 @@ export class SessionRegistry {
     return session
   }
 
+  /**
+   * Append a user prompt and mock assistant turn. Never calls a real model.
+   */
+  prompt(sessionId: string, text: string): AppSession {
+    const session = this.byId.get(sessionId)
+    if (!session) {
+      throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
+    }
+    const trimmed = text.trim()
+    if (!trimmed) {
+      throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    }
+
+    let projection = session.projection
+    for (const ev of runMockTurn({
+      userText: trimmed,
+      assistantText: `mock reply: ${trimmed.slice(0, 200)}`,
+      thinking: "mock thinking",
+    })) {
+      projection = applyWorkerEvent(projection, ev)
+      session.sequence += 1
+    }
+    session.projection = projection
+    session.updatedAt = new Date().toISOString()
+    if (session.title === "Mock session" || session.title === "Mock chat") {
+      session.title = trimmed.slice(0, 48)
+    }
+    return session
+  }
+
   snapshot(session: AppSession): SessionSnapshotV1 {
     return {
       protocolVersion: 1,
