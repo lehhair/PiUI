@@ -10,6 +10,7 @@ import { PathSafetyError } from "./path-safety.ts"
 import { SessionRegistry } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { eventHub } from "./event-hub.ts"
+import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
@@ -297,6 +298,34 @@ export function createAppServer() {
             return sendJson(res, 200, readFileText(ws, rel))
           } catch (e) {
             return handlePathError(res, e)
+          }
+        }
+
+        if (method === "GET" && rest === "git/status") {
+          try {
+            return sendJson(res, 200, await getGitStatus(ws.canonicalRoot))
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            return sendProblem(res, 500, "INTERNAL", msg)
+          }
+        }
+
+        if (method === "GET" && rest === "git/info") {
+          try {
+            return sendJson(res, 200, await getGitInfo(ws.canonicalRoot))
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            return sendProblem(res, 500, "INTERNAL", msg)
+          }
+        }
+
+        if (method === "GET" && rest === "git/diff") {
+          const mode = url.searchParams.get("mode") === "branch" ? "branch" : "git"
+          try {
+            return sendJson(res, 200, await getGitDiff(ws.canonicalRoot, mode))
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            return sendProblem(res, 500, "INTERNAL", msg)
           }
         }
       }

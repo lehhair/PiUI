@@ -147,9 +147,20 @@ export async function getFileContent(path: string, directory?: string): Promise<
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
   if (await isPiServerUp()) {
-    // Phase: no git service yet
-    void directory
-    return []
+    const workspaceId = await resolveWorkspaceId(directory)
+    if (!workspaceId) return []
+    try {
+      const { getWorkspaceGitStatus } = await import('../pi/sessionApi')
+      const st = await getWorkspaceGitStatus(workspaceId)
+      return st.items.map(item => ({
+        path: item.path,
+        status: item.status,
+        added: item.added ?? 0,
+        removed: item.removed ?? 0,
+      })) as FileStatusItem[]
+    } catch {
+      return []
+    }
   }
   const sdk = getSDKClient()
   return unwrap(await sdk.file.status({ directory: formatPathForApi(directory) }))
