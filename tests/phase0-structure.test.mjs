@@ -50,11 +50,12 @@ describe("phase0 structure", () => {
     for (const k of keys) mustExist(k)
   })
 
-  it("server binds health stub only (phase0, no model)", () => {
-    const src = readFileSync(mustExist("packages/server/src/index.ts"), "utf8")
-    assert.match(src, /127\.0\.0\.1/)
-    assert.match(src, /\/api\/v1\/health/)
-    assert.doesNotMatch(src, /createAgentSession|prompt\(|pi-coding-agent/)
+  it("server listens on loopback and does not call Pi models", () => {
+    const index = readFileSync(mustExist("packages/server/src/index.ts"), "utf8")
+    const http = readFileSync(mustExist("packages/server/src/http.ts"), "utf8")
+    assert.match(index, /127\.0\.0\.1/)
+    assert.match(http, /\/api\/v1\/health/)
+    assert.doesNotMatch(index + http, /createAgentSession|pi-coding-agent/)
   })
 
   it("protocol exports version constant", () => {

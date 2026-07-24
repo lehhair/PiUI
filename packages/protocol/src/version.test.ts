@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { PROTOCOL_VERSION, DEFAULT_HOST_WS_URL } from "./index.ts"
+import { PROTOCOL_VERSION, DEFAULT_HOST_WS_URL } from "./index.js"
 
 describe("protocol v1 skeleton", () => {
   it("PROTOCOL_VERSION is 1", () => {
