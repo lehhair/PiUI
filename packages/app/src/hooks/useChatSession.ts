@@ -48,7 +48,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
-import { isPiSession } from '../pi/isPiSession'
+import { isPiSession, shouldUsePiChat } from '../pi/isPiSession'
 import { promptSession } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
@@ -658,13 +658,23 @@ export function useChatSession({
           navigateToSession(sessionId, newSession.directory)
         }
 
-        // Pi path: mock prompt on piui-server (no OpenCode, no real LLM)
-        if (isPiSession(sessionId)) {
+        // Pi path whenever piui-server is up (mock or real driver)
+        if (shouldUsePiChat(sessionId) || isPiSession(sessionId)) {
+          if (!sessionId) {
+            if (!input.allowCreateSession) return false
+            const newSession = await createSession()
+            sessionId = newSession.id
+            navigateToSession(sessionId, newSession.directory)
+          }
           messageStore.setStreaming(sessionId, true)
           try {
             const { ensurePiEventSocket } = await import('../pi/eventSocket')
             ensurePiEventSocket()
-            const snap = await promptSession(sessionId, input.content, { stream: true })
+            // pass selected model for real pi (server may ignore in mock)
+            const snap = await promptSession(sessionId, input.content, {
+              stream: true,
+              model: input.model,
+            })
             applySnapshotToUi(snap)
             messageStore.setStreaming(sessionId, false)
             return true
@@ -747,7 +757,7 @@ export function useChatSession({
   // Send message handler
   const handleSend = useCallback(
     async (content: string, attachments: Attachment[], options?: { agent?: string; variant?: string }) => {
-      const piMode = isPiSession(routeSessionId)
+      const piMode = shouldUsePiChat(routeSessionId) || isPiSession(routeSessionId)
       if (!currentModel && !piMode) {
         handleError('send message', new Error('No model selected'))
         return false
@@ -758,7 +768,7 @@ export function useChatSession({
         followupQueueStore.remove(routeSessionId, queuedFollowupFailedId)
       }
 
-      // Pi mock sessions: always send now (no OpenCode follow-up queue)
+      // Pi server up: always send via Pi (create session if needed)
       if (piMode) {
         return sendMessageNow({
           sessionId: routeSessionId,
@@ -770,7 +780,7 @@ export function useChatSession({
           },
           options,
           directory: effectiveDirectory || '',
-          allowCreateSession: false,
+          allowCreateSession: true,
         })
       }
 

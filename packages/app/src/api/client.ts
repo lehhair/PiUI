@@ -51,6 +51,34 @@ export * from './lsp'
 // ============================================
 
 export async function getActiveModels(directory?: string): Promise<ModelInfo[]> {
+  // PiUI server first — OpenCode shim returns empty models
+  try {
+    const { isPiServerUp, listPiModels } = await import('../pi/sessionApi')
+    if (await isPiServerUp()) {
+      const { models } = await listPiModels()
+      if (models.length > 0) {
+        return models.map(m => ({
+          id: m.id,
+          name: m.name,
+          providerId: m.providerId,
+          providerName: m.providerName,
+          family: m.family,
+          contextLimit: m.contextLimit,
+          outputLimit: m.outputLimit,
+          supportsReasoning: m.supportsReasoning,
+          supportsImages: m.supportsImages,
+          supportsPdf: m.supportsPdf,
+          supportsAudio: m.supportsAudio,
+          supportsVideo: m.supportsVideo,
+          supportsToolcall: m.supportsToolcall,
+          variants: m.variants ?? [],
+        }))
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
   const sdk = getSDKClient()
   const data = requireRecord(
     unwrap(await sdk.config.providers({ directory: formatPathForApi(directory) })),

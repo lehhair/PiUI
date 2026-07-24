@@ -13,6 +13,7 @@ import { WorkspaceStore } from "./workspace-store.ts"
 import { eventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode } from "@piui/pi-worker"
+import { listModelsForUi } from "./models.ts"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
@@ -120,6 +121,10 @@ export function createAppServer() {
         })
       }
 
+      if (method === "GET" && p === "/api/v1/drivers/pi/models") {
+        return sendJson(res, 200, await listModelsForUi())
+      }
+
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
         const list = sessions
@@ -177,9 +182,17 @@ export function createAppServer() {
       if (method === "POST" && sessionPrompt) {
         const id = decodeURIComponent(sessionPrompt[1])
         const raw = await readBody(req)
-        let body: { text?: string; stream?: boolean }
+        let body: {
+          text?: string
+          stream?: boolean
+          model?: { provider?: string; id?: string }
+        }
         try {
-          body = JSON.parse(raw || "{}") as { text?: string; stream?: boolean }
+          body = JSON.parse(raw || "{}") as {
+            text?: string
+            stream?: boolean
+            model?: { provider?: string; id?: string }
+          }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
@@ -188,6 +201,7 @@ export function createAppServer() {
           const stream = body.stream === true
           const s = await sessions.prompt(id, body.text ?? "", {
             stream,
+            model: body.model,
             onTick: sess => {
               eventHub.publish({
                 type: "session.snapshot",

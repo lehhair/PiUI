@@ -70,16 +70,19 @@ npm run dev:app      # vite
 ### 真 Pi 怎么开
 
 ```bash
-# 需本机已配置 ~/.pi/agent 凭据
+# 需本机已配置 ~/.pi/agent 凭据（auth.json）
 npm run dev:server:pi   # Windows / bash 通用
 npm run dev:app
+# 控制台应有 driver=pi；模型选择器从 /api/v1/drivers/pi/models 拉列表
 # 发消息会走真实模型，消耗 token
-#
-# 手动设环境变量（可选）:
-#   Git Bash:  export PIUI_DRIVER=pi && npm run dev:server
-#   cmd:       set PIUI_DRIVER=pi&& npm run dev:server
-#   PowerShell: $env:PIUI_DRIVER='pi'; npm run dev:server
 ```
+
+### 发不了消息时先查
+
+1. server 是否在跑，health 是否 200  
+2. 模型选择器是否有项（mock 至少有 Mock；pi 看凭据）  
+3. 浏览器控制台是否有 promptSession failed  
+4. 是否开了会话 hash `#/session/...`  
 
 ### 最小可用怎么跑
 
