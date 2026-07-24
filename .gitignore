@@ -40,3 +40,4 @@ src-tauri/target/
 *.njsproj
 *.sln
 *.sw?
+packages/app/package-lock.json

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- 圆形背景，适配圆形裁切 -->
+  <circle cx="256" cy="256" r="256" fill="#1e1d1c"/>
+  <!-- > 箭头 -->
+  <path d="M148 168 L272 256 L148 344" stroke="#d97706" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- _ 下划线 -->
+  <line x1="296" y1="344" x2="372" y2="344" stroke="#d97706" stroke-width="36" stroke-linecap="round"/>
+</svg>
