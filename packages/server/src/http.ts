@@ -7,9 +7,11 @@ import {
 } from "@piui/protocol"
 import { listFiles, readFileText } from "./files.ts"
 import { PathSafetyError } from "./path-safety.ts"
+import { SessionRegistry } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 
 const store = new WorkspaceStore()
+const sessions = new SessionRegistry(store)
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body)
@@ -55,6 +57,51 @@ export function createAppServer() {
           phase: 1,
         }
         return sendJson(res, 200, body)
+      }
+
+      if (method === "GET" && p === "/api/v1/sessions") {
+        const workspaceId = url.searchParams.get("workspaceId") ?? undefined
+        const list = sessions.list(workspaceId).map(s => ({
+          id: s.id,
+          workspaceId: s.workspaceId,
+          title: s.title,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        }))
+        return sendJson(res, 200, { sessions: list })
+      }
+
+      if (method === "POST" && p === "/api/v1/sessions") {
+        const raw = await readBody(req)
+        let body: { workspaceId?: string; title?: string; seedMock?: boolean }
+        try {
+          body = JSON.parse(raw || "{}") as { workspaceId?: string; title?: string; seedMock?: boolean }
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.workspaceId) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "workspaceId required")
+        }
+        try {
+          const s = sessions.create(body.workspaceId, {
+            title: body.title,
+            seedMock: body.seedMock,
+          })
+          return sendJson(res, 201, { session: sessions.snapshot(s).session, snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
+          if (code === "WORKSPACE_NOT_FOUND") {
+            return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
+          }
+          return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
+        }
+      }
+
+      const sessionSnap = p.match(/^\/api\/v1\/sessions\/([^/]+)\/snapshot$/)
+      if (method === "GET" && sessionSnap) {
+        const s = sessions.get(decodeURIComponent(sessionSnap[1]))
+        if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        return sendJson(res, 200, sessions.snapshot(s))
       }
 
       if (method === "GET" && p === "/api/v1/workspaces") {

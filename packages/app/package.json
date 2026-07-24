@@ -55,7 +55,8 @@
     "react-dom": "^19.2.0",
     "react-i18next": "^17.0.1",
     "shiki": "^4.0.2",
-    "shiki-stream": "^0.1.4"
+    "shiki-stream": "^0.1.4",
+    "@piui/protocol": "0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
