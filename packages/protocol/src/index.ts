@@ -9,6 +9,7 @@ export const DEFAULT_HTTP_BASE = "http://127.0.0.1:8787"
 export * from "./errors.js"
 export * from "./workspace.js"
 export * from "./events.js"
+export * from "./session.js"
 
 export interface HealthResponseV1 {
   ok: true
