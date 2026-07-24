@@ -186,12 +186,14 @@ export function createAppServer() {
           text?: string
           stream?: boolean
           model?: { provider?: string; id?: string }
+          deliverAs?: "steer" | "followUp"
         }
         try {
           body = JSON.parse(raw || "{}") as {
             text?: string
             stream?: boolean
             model?: { provider?: string; id?: string }
+            deliverAs?: "steer" | "followUp"
           }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
@@ -202,6 +204,7 @@ export function createAppServer() {
           const s = await sessions.prompt(id, body.text ?? "", {
             stream,
             model: body.model,
+            deliverAs: body.deliverAs,
             onTick: sess => {
               eventHub.publish({
                 type: "session.snapshot",
@@ -240,6 +243,90 @@ export function createAppServer() {
           accepted: true,
           snapshot: sessions.snapshot(s),
         })
+      }
+
+      const sessionSetModel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-model$/)
+      if (method === "POST" && sessionSetModel) {
+        const id = decodeURIComponent(sessionSetModel[1])
+        const raw = await readBody(req)
+        let body: { provider?: string; id?: string }
+        try {
+          body = JSON.parse(raw || "{}") as { provider?: string; id?: string }
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.provider || !body.id) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "provider and id required")
+        }
+        try {
+          const s = await sessions.setModel(id, body.provider, body.id)
+          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionThinking = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-thinking-level$/)
+      if (method === "POST" && sessionThinking) {
+        const id = decodeURIComponent(sessionThinking[1])
+        const raw = await readBody(req)
+        let body: { level?: string }
+        try {
+          body = JSON.parse(raw || "{}") as { level?: string }
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.level) return sendProblem(res, 400, "INVALID_REQUEST", "level required")
+        try {
+          const s = await sessions.setThinkingLevel(id, body.level)
+          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionCompact = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/compact$/)
+      if (method === "POST" && sessionCompact) {
+        const id = decodeURIComponent(sessionCompact[1])
+        const raw = await readBody(req)
+        let body: { instructions?: string } = {}
+        try {
+          body = JSON.parse(raw || "{}") as { instructions?: string }
+        } catch {
+          /* empty ok */
+        }
+        try {
+          const s = await sessions.compact(id, body.instructions)
+          eventHub.publish({
+            type: "session.snapshot",
+            sessionId: s.id,
+            workspaceId: s.workspaceId,
+            payload: sessions.snapshot(s),
+          })
+          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionSkills = p.match(/^\/api\/v1\/sessions\/([^/]+)\/pi\/skills$/)
+      if (method === "GET" && sessionSkills) {
+        const id = decodeURIComponent(sessionSkills[1])
+        try {
+          return sendJson(res, 200, { skills: sessions.listSkills(id) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionCommands = p.match(/^\/api\/v1\/sessions\/([^/]+)\/pi\/commands$/)
+      if (method === "GET" && sessionCommands) {
+        const id = decodeURIComponent(sessionCommands[1])
+        try {
+          return sendJson(res, 200, { commands: sessions.listCommands(id) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
       }
 
       if (method === "GET" && p === "/api/v1/workspaces") {
@@ -397,6 +484,14 @@ export function createAppServer() {
       return sendProblem(res, 500, "INTERNAL", msg)
     }
   })
+}
+
+function handleSessionCmdError(res: ServerResponse, e: unknown) {
+  const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
+  if (code === "SESSION_NOT_FOUND") {
+    return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+  }
+  return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
 }
 
 function handlePathError(res: ServerResponse, e: unknown) {

@@ -35,6 +35,28 @@ function getCommandCacheKey(directory?: string): string {
 }
 
 async function fetchCommands(directory?: string): Promise<Command[]> {
+  // Pi session commands first
+  try {
+    const { isPiServerUp, listSessionCommands } = await import('../pi/sessionApi')
+    const { sessionProjectionStore } = await import('../pi/sessionProjectionStore')
+    if (await isPiServerUp()) {
+      const sid = sessionProjectionStore.getSnapshot()?.session.id
+      if (sid) {
+        const { commands } = await listSessionCommands(sid)
+        const fromPi: Command[] = commands.map(c => ({
+          name: c.name.replace(/^\/+/, ''),
+          description: c.description,
+          source: 'api' as const,
+        }))
+        const frontendCommands = getFrontendCommands()
+        const names = new Set(fromPi.map(c => c.name))
+        return [...fromPi, ...frontendCommands.filter(c => !names.has(c.name))]
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
   let apiCommands: ApiCommand[] = []
   try {
     const sdk = getSDKClient()

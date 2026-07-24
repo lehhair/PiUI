@@ -18,15 +18,56 @@ import {
 } from "./projection.js"
 import type { PiContentBlock, WorkerEvent } from "./types.js"
 
+export interface PiRuntimeUiState {
+  thinkingLevel: string
+  availableThinkingLevels: string[]
+  isStreaming: boolean
+  isCompacting: boolean
+  isIdle: boolean
+  queue: { steering: string[]; followUp: string[] }
+  retryAttempt: number
+  activeTools: string[]
+  model?: { provider: string; id: string; displayName: string }
+  supportsThinking: boolean
+}
+
+export interface PiSkillInfo {
+  name: string
+  description?: string
+  source?: string
+}
+
+export interface PiCommandInfo {
+  name: string
+  description?: string
+  source: "skill" | "prompt" | "extension" | "builtin"
+}
+
 export class RealPiSession {
   private runtime: AgentSessionRuntime
   private projection: ProjectionState = createProjectionState()
   private unsub: (() => void) | null = null
   private lastUserId: string | null = null
   private currentAsstId: string | null = null
+  private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
+  /** last known runtime flags from events */
+  private isCompactingFlag = false
+  private retryAttempt = 0
 
   private constructor(runtime: AgentSessionRuntime) {
     this.runtime = runtime
+    // permanent light subscription for queue/compaction/retry flags
+    this.runtime.session.subscribe(event => {
+      if (event.type === "compaction_start") this.isCompactingFlag = true
+      if (event.type === "compaction_end") this.isCompactingFlag = false
+      if (event.type === "auto_retry_start") {
+        this.retryAttempt = Number((event as { attempt?: number }).attempt ?? 1)
+      }
+      if (event.type === "auto_retry_end") this.retryAttempt = 0
+      if (event.type === "queue_update" || event.type === "thinking_level_changed") {
+        this.emitState()
+      }
+    })
   }
 
   static async open(cwd: string): Promise<RealPiSession> {
@@ -57,6 +98,17 @@ export class RealPiSession {
     return new RealPiSession(runtime)
   }
 
+  onState(listener: (s: PiRuntimeUiState) => void): () => void {
+    this.stateListeners.add(listener)
+    listener(this.getRuntimeUiState())
+    return () => this.stateListeners.delete(listener)
+  }
+
+  private emitState() {
+    const s = this.getRuntimeUiState()
+    for (const l of this.stateListeners) l(s)
+  }
+
   getProjection(): ProjectionState {
     return this.projection
   }
@@ -79,41 +131,73 @@ export class RealPiSession {
     return String(this.runtime.session.thinkingLevel ?? "off")
   }
 
+  getAvailableThinkingLevels(): string[] {
+    try {
+      const levels = this.runtime.session.getAvailableThinkingLevels?.() ?? []
+      return levels.map(String)
+    } catch {
+      return ["off", "minimal", "low", "medium", "high"]
+    }
+  }
+
   isStreaming(): boolean {
     return this.runtime.session.isStreaming
   }
 
-  async setModel(provider: string, modelId: string): Promise<void> {
+  getRuntimeUiState(): PiRuntimeUiState {
     const session = this.runtime.session
-    // ModelRuntime lives on services; try session.setModel with resolved model
-    const models = session as unknown as {
-      setModel?: (m: unknown) => Promise<void>
-      modelRuntime?: { getModel: (p: string, id: string) => unknown }
-    }
-    const runtime = (this.runtime as unknown as { services?: { modelRuntime?: { getModel: (p: string, id: string) => unknown } } })
-      .services?.modelRuntime
-    const model =
-      runtime?.getModel?.(provider, modelId) ??
-      models.modelRuntime?.getModel?.(provider, modelId)
-    if (model && typeof models.setModel === "function") {
-      await models.setModel(model)
-      return
-    }
-    // best-effort: some builds expose setModel(provider, id)
-    const setAny = session as unknown as { setModel?: (...a: unknown[]) => Promise<void> }
-    if (typeof setAny.setModel === "function") {
-      try {
-        await setAny.setModel(model ?? { provider, id: modelId })
-      } catch {
-        console.warn("[RealPiSession] setModel failed", provider, modelId)
-      }
+    const steering = [...(session.getSteeringMessages?.() ?? [])].map(String)
+    const followUp = [...(session.getFollowUpMessages?.() ?? [])].map(String)
+    return {
+      thinkingLevel: this.getThinkingLevel(),
+      availableThinkingLevels: this.getAvailableThinkingLevels(),
+      isStreaming: session.isStreaming,
+      isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
+      isIdle: Boolean(session.isIdle ?? !session.isStreaming),
+      queue: { steering, followUp },
+      retryAttempt: this.retryAttempt || session.retryAttempt || 0,
+      activeTools: session.getActiveToolNames?.() ?? [],
+      model: this.getModel(),
+      supportsThinking: Boolean(session.supportsThinking?.() ?? true),
     }
   }
 
-  async prompt(text: string, onTick?: (p: ProjectionState) => void): Promise<void> {
+  async setModel(provider: string, modelId: string): Promise<void> {
+    const session = this.runtime.session
+    const modelRuntime = session.modelRuntime
+    const model = modelRuntime?.getModel?.(provider, modelId)
+    if (!model) {
+      throw new Error(`model not found: ${provider}/${modelId}`)
+    }
+    await session.setModel(model)
+    this.emitState()
+  }
+
+  setThinkingLevel(level: string): void {
+    this.runtime.session.setThinkingLevel(level as never)
+    this.emitState()
+  }
+
+  async compact(customInstructions?: string): Promise<void> {
+    await this.runtime.session.compact(customInstructions)
+    this.emitState()
+  }
+
+  abortCompaction(): void {
+    this.runtime.session.abortCompaction?.()
+    this.isCompactingFlag = false
+    this.emitState()
+  }
+
+  async prompt(
+    text: string,
+    onTick?: (p: ProjectionState) => void,
+    opts?: { deliverAs?: "steer" | "followUp" },
+  ): Promise<void> {
     const apply = (ev: WorkerEvent) => {
       this.projection = applyWorkerEvent(this.projection, ev)
       onTick?.(this.projection)
+      this.emitState()
     }
 
     this.unsub?.()
@@ -121,28 +205,108 @@ export class RealPiSession {
       for (const wev of mapPiEventToWorker(event, this)) {
         apply(wev)
       }
+      // state-only events
+      if (
+        event.type === "queue_update" ||
+        event.type === "compaction_start" ||
+        event.type === "compaction_end" ||
+        event.type === "auto_retry_start" ||
+        event.type === "auto_retry_end" ||
+        event.type === "thinking_level_changed"
+      ) {
+        if (event.type === "compaction_start") this.isCompactingFlag = true
+        if (event.type === "compaction_end") this.isCompactingFlag = false
+        if (event.type === "auto_retry_start") {
+          this.retryAttempt = Number((event as { attempt?: number }).attempt ?? 1)
+        }
+        if (event.type === "auto_retry_end") this.retryAttempt = 0
+        this.emitState()
+      }
     })
 
     try {
-      await this.runtime.session.prompt(text)
+      if (opts?.deliverAs && this.runtime.session.isStreaming) {
+        if (opts.deliverAs === "steer") {
+          await this.runtime.session.steer(text)
+        } else {
+          await this.runtime.session.followUp(text)
+        }
+        // wait until idle if possible
+        await this.runtime.session.waitForIdle?.()
+      } else {
+        await this.runtime.session.prompt(text)
+      }
     } finally {
       apply({ type: "agent_end" })
       this.unsub?.()
       this.unsub = null
+      this.emitState()
     }
   }
 
   async abort(): Promise<void> {
     await this.runtime.session.abort()
+    this.emitState()
+  }
+
+  listSkills(): PiSkillInfo[] {
+    try {
+      const loader = this.runtime.session.resourceLoader as unknown as {
+        skills?: Array<{ name: string; description?: string; source?: string }>
+        getSkills?: () =>
+          | Array<{ name: string; description?: string }>
+          | { skills: Array<{ name: string; description?: string; source?: string }> }
+      }
+      const raw = loader.getSkills?.() ?? loader.skills ?? []
+      const skills = Array.isArray(raw) ? raw : (raw.skills ?? [])
+      return skills.map(s => ({
+        name: s.name,
+        description: s.description,
+        source: (s as { source?: string }).source,
+      }))
+    } catch {
+      return []
+    }
+  }
+
+  listCommands(): PiCommandInfo[] {
+    const out: PiCommandInfo[] = [
+      { name: "compact", description: "Compact session context", source: "builtin" },
+      { name: "new", description: "New session", source: "builtin" },
+    ]
+    for (const s of this.listSkills()) {
+      out.push({
+        name: `skill:${s.name}`,
+        description: s.description ?? `Skill ${s.name}`,
+        source: "skill",
+      })
+    }
+    try {
+      const loader = this.runtime.session.resourceLoader as unknown as {
+        promptTemplates?: Array<{ name: string; description?: string }>
+        getPromptTemplates?: () => Array<{ name: string; description?: string }>
+      }
+      const templates = loader.getPromptTemplates?.() ?? loader.promptTemplates ?? []
+      for (const t of templates) {
+        out.push({
+          name: t.name,
+          description: t.description ?? `Prompt ${t.name}`,
+          source: "prompt",
+        })
+      }
+    } catch {
+      /* */
+    }
+    return out
   }
 
   async dispose(): Promise<void> {
     this.unsub?.()
     this.unsub = null
+    this.stateListeners.clear()
     await this.runtime.dispose()
   }
 
-  /** internal helpers for mapper */
   _setLastUser(id: string) {
     this.lastUserId = id
   }
@@ -189,6 +353,7 @@ function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: 
     const asstId = ctx._getAsst()
     if (!asstId) return out
     const message = event.message as { content?: unknown } | undefined
+    // prefer delta path: full content rebuild from message
     const blocks = toContentBlocks(message?.content)
     out.push({ type: "message_update", entryId: asstId, content: blocks })
     return out

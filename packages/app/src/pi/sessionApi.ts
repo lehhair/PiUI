@@ -263,6 +263,68 @@ export async function getWorkspaceGitDiff(workspaceId: string, mode: "git" | "br
   }
 }
 
+export async function setSessionModel(sessionId: string, provider: string, modelId: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/set-model`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider, id: modelId }),
+    },
+  )
+  if (!res.ok) throw new Error(`setSessionModel ${res.status}`)
+  const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
+  return data.snapshot
+}
+
+export async function setSessionThinkingLevel(sessionId: string, level: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/set-thinking-level`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ level }),
+    },
+  )
+  if (!res.ok) throw new Error(`setSessionThinkingLevel ${res.status}`)
+  const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
+  return data.snapshot
+}
+
+export async function compactSession(sessionId: string, instructions?: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/compact`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ instructions }),
+    },
+  )
+  if (!res.ok) throw new Error(`compactSession ${res.status}`)
+  const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
+  return data.snapshot
+}
+
+export async function listSessionCommands(sessionId: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/pi/commands`,
+  )
+  if (!res.ok) throw new Error(`listSessionCommands ${res.status}`)
+  return (await res.json()) as {
+    commands: Array<{ name: string; description?: string; source: string }>
+  }
+}
+
+export async function listSessionSkills(sessionId: string) {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/pi/skills`,
+  )
+  if (!res.ok) throw new Error(`listSessionSkills ${res.status}`)
+  return (await res.json()) as {
+    skills: Array<{ name: string; description?: string; source?: string }>
+  }
+}
+
 export async function abortSessionCommand(sessionId: string): Promise<SessionSnapshotV1 | null> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/abort`,
@@ -296,6 +358,7 @@ export async function promptSession(
   opts?: {
     stream?: boolean
     model?: { providerID: string; modelID: string }
+    deliverAs?: "steer" | "followUp"
   },
 ): Promise<SessionSnapshotV1> {
   const res = await fetch(
@@ -306,6 +369,7 @@ export async function promptSession(
       body: JSON.stringify({
         text,
         stream: opts?.stream === true,
+        deliverAs: opts?.deliverAs,
         model: opts?.model
           ? { provider: opts.model.providerID, id: opts.model.modelID }
           : undefined,

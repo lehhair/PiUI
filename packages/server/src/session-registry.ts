@@ -125,6 +125,7 @@ export class SessionRegistry {
       onTick?: (session: AppSession) => void
       delayMs?: number
       model?: { provider?: string; id?: string }
+      deliverAs?: "steer" | "followUp"
     },
   ): Promise<AppSession> {
     const session = this.byId.get(sessionId)
@@ -141,12 +142,16 @@ export class SessionRegistry {
         if (opts?.model?.provider && opts.model.id) {
           await session.real.setModel(opts.model.provider, opts.model.id)
         }
-        await session.real.prompt(trimmed, projection => {
-          session.projection = projection
-          session.sequence += 1
-          session.updatedAt = new Date().toISOString()
-          opts?.onTick?.(session)
-        })
+        await session.real.prompt(
+          trimmed,
+          projection => {
+            session.projection = projection
+            session.sequence += 1
+            session.updatedAt = new Date().toISOString()
+            opts?.onTick?.(session)
+          },
+          { deliverAs: opts?.deliverAs },
+        )
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         throw Object.assign(new Error(msg), { code: "INTERNAL" as const })
@@ -193,8 +198,67 @@ export class SessionRegistry {
     return session
   }
 
+  async setModel(sessionId: string, provider: string, modelId: string): Promise<AppSession> {
+    const session = this.require(sessionId)
+    if (session.real) {
+      await session.real.setModel(provider, modelId)
+    }
+    session.updatedAt = new Date().toISOString()
+    return session
+  }
+
+  async setThinkingLevel(sessionId: string, level: string): Promise<AppSession> {
+    const session = this.require(sessionId)
+    if (session.real) {
+      session.real.setThinkingLevel(level)
+    }
+    session.updatedAt = new Date().toISOString()
+    return session
+  }
+
+  async compact(sessionId: string, instructions?: string): Promise<AppSession> {
+    const session = this.require(sessionId)
+    if (session.real) {
+      await session.real.compact(instructions)
+      session.projection = session.real.getProjection()
+    }
+    session.updatedAt = new Date().toISOString()
+    return session
+  }
+
+  listSkills(sessionId: string) {
+    const session = this.require(sessionId)
+    return session.real?.listSkills() ?? []
+  }
+
+  listCommands(sessionId: string) {
+    const session = this.require(sessionId)
+    if (session.real) return session.real.listCommands()
+    return [
+      { name: "new", description: "New session", source: "builtin" as const },
+      { name: "compact", description: "Compact (mock no-op)", source: "builtin" as const },
+    ]
+  }
+
+  private require(sessionId: string): AppSession {
+    const session = this.byId.get(sessionId)
+    if (!session) {
+      throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
+    }
+    return session
+  }
+
   snapshot(session: AppSession): SessionSnapshotV1 {
-    const model = session.real?.getModel()
+    const ui = session.real?.getRuntimeUiState()
+    const model = ui?.model ?? session.real?.getModel()
+    const isStreaming =
+      ui?.isStreaming || session.projection.isStreaming || Boolean(session.real?.isStreaming())
+    const isCompacting = ui?.isCompacting ?? false
+    let state: SessionSnapshotV1["session"]["state"] = "idle"
+    if (isCompacting) state = "compacting"
+    else if (ui?.retryAttempt) state = "retrying"
+    else if (isStreaming) state = "running"
+
     return {
       protocolVersion: 1,
       epoch: session.epoch,
@@ -205,7 +269,7 @@ export class SessionRegistry {
         driverId: "pi",
         driverSessionId: session.driverSessionId,
         title: session.title,
-        state: session.projection.isStreaming || session.real?.isStreaming() ? "running" : "idle",
+        state,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
       },
@@ -216,12 +280,18 @@ export class SessionRegistry {
           : session.driver === "mock"
             ? { provider: "mock", id: "mock", displayName: "Mock" }
             : undefined,
-        thinkingLevel: session.real?.getThinkingLevel() ?? "off",
-        availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        isStreaming: session.projection.isStreaming || Boolean(session.real?.isStreaming()),
-        isCompacting: false,
-        queue: { steering: [], followUp: [] },
-        activeTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        thinkingLevel: ui?.thinkingLevel ?? session.real?.getThinkingLevel() ?? "off",
+        availableThinkingLevels:
+          ui?.availableThinkingLevels ??
+          (session.real
+            ? session.real.getAvailableThinkingLevels()
+            : ["off", "minimal", "low", "medium", "high"]),
+        isStreaming,
+        isCompacting,
+        queue: ui?.queue ?? { steering: [], followUp: [] },
+        activeTools: ui?.activeTools?.length
+          ? ui.activeTools
+          : ["read", "bash", "edit", "write", "grep", "find", "ls"],
       },
       timeline: session.projection.timeline as TimelineItemV1[],
       native: {
