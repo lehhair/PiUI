@@ -6,7 +6,7 @@
  * compact viewport wrapper.
  */
 
-import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue } from 'react'
+import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 
 import { ChatArea, Header, InputBox, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
@@ -28,6 +28,7 @@ import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { autoApproveStore } from '../../store/autoApproveStore'
 import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
+import { sessionProjectionStore } from '../../pi/sessionProjectionStore'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
 import { useTheme } from '../../hooks/useTheme'
 import type { Attachment } from '../../api'
@@ -162,10 +163,17 @@ export const ChatPane = memo(function ChatPane({
   const { activeServer, getHealth } = useServerStore()
   const activeServerHealth = activeServer ? getHealth(activeServer.id) : null
   const hiddenModelKeys = useHiddenModelKeys()
-  const visibleModels = useMemo(
-    () => models.filter(model => !hiddenModelKeys.includes(getModelKey(model))),
-    [models, hiddenModelKeys],
+  // Pi thinking levels surface as "variants" when model has none
+  const piRuntime = useSyncExternalStore(
+    cb => sessionProjectionStore.subscribe(cb),
+    () => sessionProjectionStore.getSnapshot()?.runtime ?? null,
   )
+  const visibleModels = useMemo(() => {
+    const base = models.filter(model => !hiddenModelKeys.includes(getModelKey(model)))
+    const levels = piRuntime?.availableThinkingLevels ?? []
+    if (!levels.length) return base
+    return base.map(m => (m.variants?.length ? m : { ...m, variants: levels }))
+  }, [models, hiddenModelKeys, piRuntime?.availableThinkingLevels])
   const {
     selectedModelKey,
     selectedVariant,

@@ -670,10 +670,12 @@ export function useChatSession({
           try {
             const { ensurePiEventSocket } = await import('../pi/eventSocket')
             ensurePiEventSocket()
+            const busy = messageStore.getSessionState(sessionId)?.isStreaming
             // pass selected model for real pi (server may ignore in mock)
             const snap = await promptSession(sessionId, input.content, {
               stream: true,
               model: input.model,
+              deliverAs: busy ? 'followUp' : undefined,
             })
             applySnapshotToUi(snap)
             messageStore.setStreaming(sessionId, false)
@@ -1038,6 +1040,14 @@ export function useChatSession({
         }
 
         if (command === 'compact') {
+          if (shouldUsePiChat(sessionId) || isPiSession(sessionId)) {
+            void import('../pi/sessionApi')
+              .then(({ compactSession }) => compactSession(sessionId!))
+              .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
+              .catch(err => handleError('execute command', err))
+            return true
+          }
+
           if (!currentModel) {
             handleError('execute command', new Error('No model selected'))
             return false
@@ -1053,6 +1063,22 @@ export function useChatSession({
             handleError('execute command', err)
           })
 
+          return true
+        }
+
+        // Pi skill:name or other pi slash → prompt as text so Pi expands templates
+        if ((shouldUsePiChat(sessionId) || isPiSession(sessionId)) && command.startsWith('skill:')) {
+          void sendMessageNow({
+            sessionId,
+            content: `/${command}${args ? ` ${args}` : ''}`,
+            attachments: [],
+            model: {
+              providerID: currentModel?.providerId ?? 'mock',
+              modelID: currentModel?.id ?? 'mock',
+            },
+            directory: effectiveDirectory || '',
+            allowCreateSession: false,
+          })
           return true
         }
 

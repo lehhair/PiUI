@@ -120,7 +120,7 @@ export function useModelSelection({ models, sessionId = null }: UseModelSelectio
 
   // 切换模型
   const handleModelChange = useCallback(
-    (modelKey: string, _model: ModelInfo) => {
+    (modelKey: string, model: ModelInfo) => {
       // 先保存当前模型的 variant 偏好
       if (resolvedModelKey && resolvedSelectedVariant) {
         saveModelVariantPref(resolvedModelKey, resolvedSelectedVariant)
@@ -131,19 +131,41 @@ export function useModelSelection({ models, sessionId = null }: UseModelSelectio
         selectedModelKey: modelKey,
         selectedVariant: getModelVariantPref(modelKey),
       })
+
+      // Pi session: push setModel to host
+      if (sessionId) {
+        void import('../pi/isPiSession').then(({ isPiSession }) => {
+          if (!isPiSession(sessionId)) return
+          void import('../pi/sessionApi').then(({ setSessionModel }) => {
+            void setSessionModel(sessionId, model.providerId, model.id)
+              .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
+              .catch(err => console.warn('[PiUI] setModel failed', err))
+          })
+        })
+      }
     },
-    [resolvedModelKey, resolvedSelectedVariant],
+    [resolvedModelKey, resolvedSelectedVariant, sessionId],
   )
 
-  // Variant 变化时保存偏好
+  // Variant 变化时保存偏好；Pi 下 variant = thinking level
   const handleVariantChange = useCallback(
     (variant: string | undefined) => {
       setSelection(prev => ({ ...prev, selectedVariant: variant }))
       if (resolvedModelKey) {
         saveModelVariantPref(resolvedModelKey, variant)
       }
+      if (sessionId && variant) {
+        void import('../pi/isPiSession').then(({ isPiSession }) => {
+          if (!isPiSession(sessionId)) return
+          void import('../pi/sessionApi').then(({ setSessionThinkingLevel }) => {
+            void setSessionThinkingLevel(sessionId, variant)
+              .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
+              .catch(err => console.warn('[PiUI] setThinkingLevel failed', err))
+          })
+        })
+      }
     },
-    [resolvedModelKey],
+    [resolvedModelKey, sessionId],
   )
 
   // 从消息中恢复模型选择（仅更新内存状态，不写 storage）

@@ -65,7 +65,9 @@ npm run dev:app      # vite
 - [x] workspace git status / info / diff（文件树改动标记）
 - [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
-- [ ] 终端 PTY
+- [x] Pi 能力对齐 UI（有壳才接）：模型/thinking level/compact/skills·commands/steer·followUp/runtime 状态
+- [ ] fork/undo 映射 Pi tree；终端 PTY
+- 矩阵：`docs/PI_UI_INTEGRATION.md`
 
 ### 真 Pi 怎么开
 
