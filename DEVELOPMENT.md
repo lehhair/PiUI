@@ -25,6 +25,7 @@ docs/                         设计文档
 packages/app/                 OCUI 视觉壳（GPL）
 packages/protocol/            版本化协议
 packages/server/              Orchestrator（127.0.0.1）
+packages/pi-worker/           投影 + mock runtime（无真实模型）
 _archive/opencodeui-baseline  只读参考
 _archive/wip-phase0-*         清理前半成品
 ```
@@ -53,4 +54,5 @@ npm run dev:app      # vite
 
 - [x] Phase 0 结构
 - [x] Phase 1 health + workspace + 安全文件 list/read
-- [ ] Phase 2 pi-worker（无真实 prompt）
+- [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
+- [ ] Phase 3 app 去 SDK，壳可 dev
