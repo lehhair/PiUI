@@ -41,3 +41,4 @@ src-tauri/target/
 *.sln
 *.sw?
 packages/app/package-lock.json
+packages/app/dist

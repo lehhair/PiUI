@@ -55,4 +55,5 @@ npm run dev:app      # vite
 - [x] Phase 0 结构
 - [x] Phase 1 health + workspace + 安全文件 list/read
 - [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
-- [ ] Phase 3 app 去 SDK，壳可 dev
+- [x] Phase 3 去掉 npm `@opencode-ai/sdk`，本地 shim + `vite build` 通过
+- [ ] Phase 4 Chat 接 mock/host timeline

@@ -22,7 +22,11 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@opencode-ai/sdk/v2/client": ["./src/shims/opencode-sdk/v2/client.ts"],
+      "@opencode-ai/sdk": ["./src/shims/opencode-sdk/v2/client.ts"]
+    }
   },
   "include": ["src"]
 }
