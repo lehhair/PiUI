@@ -11,8 +11,15 @@ import { parsePiWorkspaceId } from "./workspaceRef"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 
+/**
+ * Browser dev uses same-origin + Vite proxy (`/api` → :8787) to avoid CORS.
+ * Override with VITE_PIUI_API when needed.
+ */
 export function getApiBase(): string {
-  return (import.meta as ImportMeta & { env?: { VITE_PIUI_API?: string } }).env?.VITE_PIUI_API ?? DEFAULT_BASE
+  const envBase = (import.meta as ImportMeta & { env?: { VITE_PIUI_API?: string } }).env?.VITE_PIUI_API
+  if (envBase) return envBase.replace(/\/$/, "")
+  if (typeof window !== "undefined") return ""
+  return DEFAULT_BASE
 }
 
 export async function isPiServerUp(): Promise<boolean> {
@@ -75,17 +82,41 @@ export async function createWorkspace(rootPath: string, displayName?: string) {
   return data
 }
 
-/** Resolve workspace id from absolute path or piws:id directory marker. */
-export async function resolveWorkspaceId(directory?: string): Promise<string | null> {
-  if (!directory) return null
-  const fromMarker = parsePiWorkspaceId(directory)
-  if (fromMarker) return fromMarker
-  // absolute path
-  if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
-    const { workspace } = await createWorkspace(directory)
-    return workspace.id
+let defaultWorkspacePromise: Promise<string | null> | null = null
+
+async function ensureDefaultWorkspaceId(): Promise<string | null> {
+  if (!defaultWorkspacePromise) {
+    defaultWorkspacePromise = (async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/api/v1/workspaces/default`)
+        if (!res.ok) return null
+        const data = (await res.json()) as { workspace: { id: string } }
+        return data.workspace.id
+      } catch {
+        return null
+      } finally {
+        // allow retry later if failed
+      }
+    })()
   }
-  return null
+  const id = await defaultWorkspacePromise
+  if (!id) defaultWorkspacePromise = null
+  return id
+}
+
+/** Resolve workspace id from absolute path, piws:id, or default workspace. */
+export async function resolveWorkspaceId(directory?: string): Promise<string | null> {
+  if (directory) {
+    const fromMarker = parsePiWorkspaceId(directory)
+    if (fromMarker) return fromMarker
+    // absolute path
+    if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
+      const { workspace } = await createWorkspace(directory)
+      return workspace.id
+    }
+  }
+  // empty / global mode: still allow file tree against default workspace
+  return ensureDefaultWorkspaceId()
 }
 
 export async function listWorkspaceFiles(workspaceId: string, path = "") {

@@ -35,11 +35,18 @@ function sessionSummary(s: ReturnType<SessionRegistry["list"]>[number]) {
   }
 }
 
+const CORS_HEADERS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+  "access-control-allow-headers": "content-type,authorization",
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body)
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(data),
+    ...CORS_HEADERS,
   })
   res.end(data)
 }
@@ -70,6 +77,12 @@ export function createAppServer() {
       const url = parseUrl(req)
       const method = req.method ?? "GET"
       const p = url.pathname
+
+      if (method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS)
+        res.end()
+        return
+      }
 
       if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
         const body: HealthResponseV1 = {
@@ -189,6 +202,19 @@ export function createAppServer() {
 
       if (method === "GET" && p === "/api/v1/workspaces") {
         return sendJson(res, 200, { workspaces: store.list() })
+      }
+
+      if (method === "GET" && p === "/api/v1/workspaces/default") {
+        const id = await ensureDefaultWorkspace()
+        const rec = store.get(id)!
+        return sendJson(res, 200, {
+          workspace: {
+            id: rec.id,
+            displayName: rec.displayName,
+            createdAt: rec.createdAt,
+            lastOpenedAt: rec.lastOpenedAt,
+          },
+        })
       }
 
       if (method === "POST" && p === "/api/v1/workspaces") {
