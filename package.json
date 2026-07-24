@@ -3,17 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pi desktop client — thin UI + Host engine",
+  "description": "Pi coding agent client — OCUI visual shell + Pi-native runtime",
+  "license": "GPL-3.0-only",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "dev:host": "npm run dev -w @piui/host",
+    "dev:server": "npm run dev -w @piui/server",
+    "dev:host": "npm run dev -w @piui/server",
     "dev:app": "npm run dev -w @piui/app",
-    "build": "npm run build -w @piui/protocol && npm run build -w @piui/host && npm run build -w @piui/app",
-    "typecheck": "npm run typecheck -w @piui/protocol && npm run typecheck -w @piui/host && npm run typecheck -w @piui/app"
+    "build": "npm run build -w @piui/protocol && npm run build -w @piui/app",
+    "test": "npm run test:phase0 && npm run test -w @piui/protocol --if-present && npm run test -w @piui/server --if-present",
+    "test:phase0": "node --test tests/phase0-structure.test.mjs",
+    "typecheck": "npm run typecheck -w @piui/protocol && npm run typecheck -w @piui/server"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   }
 }

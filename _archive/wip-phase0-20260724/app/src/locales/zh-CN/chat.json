@@ -1,0 +1,201 @@
+{
+  "header": {
+    "openCode": "OpenCode",
+    "newChat": "新对话",
+    "openSidebar": "打开侧边栏",
+    "clickToRename": "点击重命名",
+    "shareSession": "分享会话",
+    "closeBottomPanel": "关闭底部面板",
+    "openBottomPanel": "打开底部面板",
+    "closePanel": "关闭面板",
+    "openPanel": "打开面板"
+  },
+  "chatArea": {
+    "loadingSession": "加载会话中...",
+    "loadingHistory": "加载历史记录...",
+    "dropFolderToAddProject": "添加为项目",
+    "dropFolderToAddProjectHint": "将文件夹放到此处"
+  },
+  "emptyState": {
+    "title": "开始新对话",
+    "description": "为此会话选择工作目录",
+    "workingDirectory": "工作目录",
+    "enterAbsolutePath": "输入绝对路径...",
+    "backToDirectoryList": "返回目录列表",
+    "selectDirectory": "选择目录...",
+    "current": "（当前）",
+    "enterCustomPath": "输入自定义路径...",
+    "startConversation": "开始对话",
+    "orJustType": "或在下方直接输入消息，使用当前目录开始"
+  },
+  "inputBox": {
+    "dropFilesHere": "拖放文件到此处",
+    "replyToAgentMobile": "回复 Agent...",
+    "replyToAgent": "回复 Agent（输入 @ 提及，/ 执行命令）"
+  },
+  "modelSelector": {
+    "selectModel": "选择模型",
+    "searchModels": "搜索模型...",
+    "noModelsFound": "未找到模型",
+    "tryDifferentKeyword": "试试其他关键词",
+    "pinned": "已置顶",
+    "recent": "最近使用",
+    "thinking": "Thinking",
+    "vision": "Vision",
+    "unpin": "取消置顶",
+    "pinToTop": "置顶",
+    "model": "模型"
+  },
+  "retryStatus": {
+    "retrying": "重试中（第 {{attempt}} 次）",
+    "nextIn": "{{label}} 后重试"
+  },
+  "shareDialog": {
+    "title": "分享对话",
+    "publicLink": "公开链接",
+    "publicLinkDesc": "任何拥有此链接的人都可以查看此对话。",
+    "failedCreate": "创建分享链接失败",
+    "failedRemove": "移除分享链接失败",
+    "copyLink": "复制链接",
+    "stopSharing": "停止分享",
+    "createPublicLink": "创建公开链接",
+    "creatingLink": "创建链接中..."
+  },
+  "questionDialog": {
+    "title": "问题",
+    "moreCount": "还有 {{count}} 个",
+    "minimize": "最小化",
+    "typeYourAnswer": "输入你的回答..."
+  },
+  "permissionDialog": {
+    "permission": "权限：{{permission}}",
+    "moreCount": "还有 {{count}} 个",
+    "minimize": "最小化",
+    "fromSubtask": "来自 Subtask：{{title}}",
+    "changesPreview": "变更预览",
+    "request": "请求",
+    "rule": "规则",
+    "allowOnce": "允许一次",
+    "alwaysAllow": "始终允许",
+    "subtaskFallback": "Subtask",
+    "browserSession": "前端临时",
+    "thisSession": "后端始终",
+    "autoApproveEnabled": "前端会临时记住始终允许规则，刷新后清空。",
+    "changePermissionSettings": "始终允许将交给后端处理，可在设置中更改。"
+  },
+  "projectDialog": {
+    "typePath": "输入路径...",
+    "parent": "..（上级目录）",
+    "noMatchingFolders": "没有匹配的文件夹",
+    "addCurrent": "添加当前目录"
+  },
+  "inputToolbar": {
+    "default": "Default",
+    "attachFile": "附加文件",
+    "stopGeneration": "停止生成",
+    "sendingMessage": "发送消息中",
+    "sendMessage": "发送消息"
+  },
+  "inputFooter": {
+    "autoApproveOff": "自动放行：关闭",
+    "autoApproveSession": "自动放行：本次会话 · 点击切换为全部会话",
+    "autoApproveGlobal": "自动放行：全部会话 · 点击关闭",
+    "pleaseVerify": "请验证 AI 回复的准确性。",
+    "allTasksDone": "所有任务已完成",
+    "remaining": "剩余 {{count}} 个",
+    "allDone": "全部完成",
+    "tasksCount": "{{done}}/{{total}} 个任务",
+    "greatWork": "干得漂亮!",
+    "inProgress": "{{count}} 个进行中"
+  },
+  "inputActions": {
+    "scrollToBottom": "滚动到底部",
+    "reply": "回复..."
+  },
+  "undoStatus": {
+    "editing": "Editing",
+    "redo": "Redo",
+    "redoAll": "Redo All"
+  },
+  "sidebar": {
+    "allProjects": "全部项目",
+    "global": "全局",
+    "globalProjectHint": "非 Git 项目，通常是 opencode 启动目录",
+    "collapseSidebar": "收起侧边栏",
+    "expandSidebar": "展开侧边栏",
+    "newChat": "新对话",
+    "addProject": "添加项目...",
+    "searchChats": "搜索对话...",
+    "clearSearch": "清除搜索",
+    "recents": "最近",
+    "active": "活跃",
+    "noActiveSessions": "没有活跃会话",
+    "notifications": "通知",
+    "readAll": "全部已读",
+    "removeProject": "移除项目",
+    "removeProjectConfirm": "确定从列表中移除此项目文件夹？文件不会被删除。",
+    "contextUsage": "上下文用量",
+    "viewDetails": "查看详情",
+    "appearance": "外观",
+    "standardWidth": "标准宽度",
+    "wideMode": "宽屏模式",
+    "shareChat": "分享对话",
+    "settings": "设置",
+    "noProjectFoldersYet": "还没有项目文件夹",
+    "addProjectDesc": "添加一个项目以按文件夹浏览最近的对话。",
+    "deleteChat": "删除对话",
+    "deleteChatConfirm": "确定要删除此对话？此操作无法撤销。",
+    "moveFolderUp": "上移文件夹",
+    "moveFolderDown": "下移文件夹",
+    "noChatsInFolder": "此文件夹中没有对话",
+    "showMoreChats": "展开更多会话",
+    "selectedSessions": "已选 {{count}}",
+    "selectedProjects": "已选 {{count}} 个项目",
+    "selectedMixed": "{{sessions}} 会话 · {{projects}} 项目",
+    "selectItems": "点选要管理的项",
+    "manageSessions": "管理",
+    "doneManaging": "完成",
+    "deleteSessionsWithCount": "删除 {{count}} 个会话",
+    "removeProjectsWithCount": "移除 {{count}} 个项目",
+    "batchDeleteSessions": "删除 {{count}} 个会话",
+    "batchDeleteSessionsConfirm": "确定要删除 {{count}} 个会话？此操作无法撤销。",
+    "batchDeleteIncludesCurrent": "包含当前打开的会话，删除后将切换到新会话。",
+    "batchRemoveProjects": "移除 {{count}} 个项目",
+    "batchRemoveProjectsConfirm": "确定从列表中移除 {{count}} 个项目？这只会从侧边栏中移除，不会删除任何会话，也不会删除磁盘上的文件。"
+  },
+  "activeSession": {
+    "awaitingPermission": "等待权限",
+    "awaitingAnswer": "等待回答",
+    "retrying": "重试中",
+    "working": "工作中",
+    "attempt": "第 {{count}} 次"
+  },
+  "notification": {
+    "completed": "已完成",
+    "error": "错误",
+    "permission": "权限",
+    "question": "问题"
+  },
+  "contextDetails": {
+    "context": "上下文",
+    "session": "会话",
+    "messages": "消息",
+    "provider": "Provider",
+    "model": "模型",
+    "contextLimit": "上下文限制",
+    "totalTokens": "Token 总量",
+    "usage": "用量",
+    "totalCost": "总费用",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "reasoning": "Reasoning",
+    "cacheRW": "缓存 (读/写)",
+    "rawMessages": "原始消息"
+  },
+  "hints": {
+    "pressEscAgain": "再按一次 <1>Esc</1> 停止",
+    "autoApproveAll": "自动放行：全部会话",
+    "autoApproveSession": "自动放行：本次会话",
+    "autoApproveOffHint": "自动放行：关闭"
+  }
+}

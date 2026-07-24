@@ -1,0 +1,1101 @@
+# Changelog
+
+## [v0.6.34] - 2026-07-19
+
+- fix(message): markdown 思考折叠时渲染单行预览 (5505c2d3)
+- fix(settings): 对齐已保存 CSS 覆盖方案工具栏 (85559cd4)
+- fix(settings): 优化代码块主题选择与预览 (a4ef92a5)
+- feat(ui): 优化侧栏与面板控件交互 (f15c5350)
+- feat(settings): 调整聊天相关默认设置 (dd401a85)
+- chore: remove TODO.md (task complete) (40bb61ab)
+- feat(code-block): user-configurable Shiki theme (light/dark independent) (93a71e61)
+- fix(settings): 优化搜索候选宽度和键盘滚动 (fd1de693)
+- feat(config): 添加配置字段和原始 JSON 搜索 (dba66d9a)
+- feat(settings): 添加设置搜索和分类导航 (913d949e)
+- refactor(config): 重构可视化配置编辑器 (6caacc71)
+
+## [v0.6.33] - 2026-07-18
+
+- fix(sidebar): 修复文件夹模式全局文件夹拖拽排序 (7dbe35c)
+- Revert "perf(input): animate streaming border pulse with opacity" (3f84e2c)
+- feat(sidebar): add global folder to folder-mode session list (fc26be5)
+
+## [v0.6.32] - 2026-07-18
+
+- fix(chat): inline loading-history indicator into message stream (127ade3)
+- perf(codeblock): remove useDeferredValue for real-time highlighting (e83dac6)
+- perf(markdown): remove redundant useDeferredValue and cache fullText (1f9b228)
+- feat(terminal): long-press repeat and haptic feedback for mobile extra keys (1f5cce2)
+- fix(chat): clamp mention/slash menu below header shadow (2e77064)
+
+## [v0.6.31] - 2026-07-17
+
+- fix(chat): keep retry status above input and re-pin on footer height change (77305b0)
+- fix(sidebar): align folder session loading spinner with list text (84b3660)
+- fix(chat): inherit input dock collapse setting in split panes (d1eef49)
+- perf(chat): pin streaming hot rows in virtual range (bb0781c)
+- perf(chat): reuse stable process timeline items during streaming (1dc8b54)
+- perf(input): animate streaming border pulse with opacity (6283508)
+- perf(chat): narrow message store subscriptions for sidebar chrome (c37c81e)
+- fix(lint): remove useless escape in live markdown suffix regex (47213df)
+- fix(sidebar): harden session fetch after PR #140 (96efa5c)
+- feat(files): reveal local files in system explorer (90588e7)
+- feat(changes): open files from changes context menu (62c7698)
+- fix(sidebar): stabilize session fetch effect to prevent /session request storm (497279f)
+- perf(markdown): append plain live text without full reparse (dc40efe)
+- perf: cut layout thrash on panels, diff measure, and input budget (2ba9641)
+- perf: localize overlay scrollbar scan and scroll updates (dd6578f)
+- perf: narrow Tauri compositing hints to glass layers (0a8adfd)
+
+## [v0.6.30] - 2026-07-16
+
+- fix(test): hoist serverStore mock for pinned sessions init (16165d5)
+- fix(project): polish folder-drop zone to center dashed overlay (1cf504c)
+- feat(project): add projects by dropping folders on the chat stream (3bd7396)
+- fix(project): open add-project dialog at current directory (20ff2ef)
+- fix(session): isolate pinned sessions per server (8dbff0a)
+- fix(message): correct collapsed-height threshold and isolate user bubble layout (9027257)
+- perf(stream): preserve settled part references across deltas (e4086d5)
+- fix(sync): force completed snapshots over preserved live text (421f160)
+- fix(sync): preserve longer live part text across reloads (e30a807)
+- perf(syntax): coalesce streaming highlight requests to one rAF (8260c4e)
+- perf(markdown): freeze settled blocks and skip live re-lex on pure append (973b5c6)
+- perf(chat): cut streaming layout tax on stick-to-bottom path (654f355)
+- fix(chat): equalize collapsed/expanded bottom padding to stop dock flicker on desktop (7316710)
+- fix(chat): fake Android expand height without layout animation (5f3ad81)
+- fix(markdown): restrict subscript ~text~ to chemical-forma only (06961ad)
+- fix(chat): stop sticky-bottom from hijacking scroll-up during streaming (628325e)
+- fix(chat): format process duration as whole ms/s/m/h/d/y (0ea645c)
+- fix(chat): show whole seconds on process collapse timer (94b4e5d)
+- fix(chat): keep tool steps collapsed under process collapse (14f82a7)
+- fix(chat): single earliest Working shell for async multi-send (ef0c537)
+- refactor(chat): clean up process-collapse shell gate (7b19aaf)
+- feat: process collapse for agent turns (a686569)
+- feat: enable desktop collapsed input dock by default (9382b79)
+- perf(chat): reduce virtualizer render overscan to 15 (d654e02)
+- fix: drive busy UI from session status like official webui (fad60a9)
+- fix: add @tanstack/react-virtual dependency for CI build (40aae8f)
+- fix: stabilize virtualizer session switch and auto-scroll (1fe16fa)
+- fix: prepend anchor stability during history loading (a48f184)
+- fix: scroll-to-bottom button + header spacing (f201bb5)
+- fix: remove contentRef ResizeObserver — causes render loop (5666a53)
+- fix: remove key={sessionId}, handle session switch via effect (054ba6e)
+- refactor: clean virtualizer implementation (v5 lessons applied) (69d1403)
+- fix: pin chat scroll only when expanded pages change (afb7d4f)
+- fix: keep chat pages stable when prepending history (c1e9edc)
+- fix: render expanded tool header and body together (eb07b8a)
+- fix: mount tool headers before body during expand (fa9aa6e)
+- fix: keep disclosure headers fixed while content expands (5011fb5)
+- fix: only follow bash scroll during live stream (8129bfe)
+- fix: keep bash terminal scrolled to exit status (a269e8b)
+- fix: reveal message actions on hover for pointer devices (655a8d9)
+- feat: show fork/copy actions only on latest assistant (02dc726)
+- feat: show step finish info only on latest turn step (f111242)
+- refactor: redesign sidebar session manage mode UI (c7ad8ed)
+- feat: add sandbox storage fallback (3bb121a)
+- fix: preserve interactive SVG previews (6923cd5)
+- fix: preserve nested HTML artifacts (62fdf76)
+
+## [v0.6.29] - 2026-07-12
+
+- fix: stop HTML preview width feedback (75c7b38)
+- feat: preview fenced markup languages (d008faa)
+- fix: preserve bare HTML artifact assets (eae9b46)
+
+## [v0.6.28] - 2026-07-12
+
+- fix: use accent color for HTML source control icon (7eb3c26)
+- fix: persist model visibility with current hidden keys (4650043)
+
+## [v0.6.27] - 2026-07-11
+
+- fix: scroll HTML previews like code results (483fa01)
+
+## [v0.6.26] - 2026-07-11
+
+- fix: persist HTML preview controls on touch (ccd25c2)
+
+## [v0.6.25] - 2026-07-11
+
+- fix: reveal HTML preview controls on touch (5e102a2)
+- feat: preview HTML files in file explorer (8705599)
+- feat: add sandboxed interactive HTML previews (d3a3abb)
+- fix: render aligned math and markdown alerts (cb12cb0)
+- fix: separate task header navigation and disclosure (c65f8fc)
+- fix: redraw collapsed tool content on mobile (55daadd)
+- fix: harden chat rendering edge cases (75e769e)
+- perf: restore smooth chat page transitions (4c84e0a)
+- perf: make chat virtualization content-aware (83dc3a7)
+- fix: stabilize chat scrolling with async media (1c576ae)
+- refactor: consolidate syntax highlighting into worker-only architecture (7224c65)
+- fix: restore inline style filtering for rich HTML markdown (47e4546)
+- fix(docker): fix backend image build (mise CDN lag, opencode api rate limit, TARGETARCH) (c73c2a6)
+- fix: harden markdown rendering and cleanup render residues (ef40a33)
+- chore: remove unused message role visibility rule (c30f9e6)
+- fix: restore stable chat virtualization baseline (7ca2382)
+- feat: replace streamdown markdown renderer (f7e3a3f)
+- perf: stabilize markdown and shiki highlighting (1d615d7)
+- fix: restore markdown DOM styles (addfb1a)
+- perf: patch streaming markdown updates (fa995ae)
+- perf: optimize streaming markdown rendering (3410212)
+- fix: preserve file preview target navigation (3aac8c5)
+- fix: remove chat page paint containment (0213d64)
+- fix: stabilize chat scroll anchors (b3784b4)
+- fix: isolate hidden chat premeasurement (759db6e)
+- fix: restore readonly CodeMirror remount on render (829429b)
+- fix: change PageBlock from contain-content to contain-layout-style to prevent paint clipping of expanded tool content on mobile (e48e6ca)
+- fix: preserve scroll position after loading history (fc6ce8e)
+- fix: premeasure chat pages after user scroll intent (4118ca6)
+- fix: commit initial chat page heights synchronously (9c60328)
+
+## [v0.6.24] - 2026-07-03
+
+- perf: reduce layout thrash in streaming render (95994a8)
+- fix: improve streaming render performance under heavy usage (9bb161a)
+- feat: search file names alongside content, drag results to input as @mention (3f38eb1)
+- feat: auto-refresh file tree and changes panel (a3f0d3b)
+- fix: prevent invisible window after closing in fullscreen (987f966)
+- fix: account for container padding in scrollItemIntoView (8c54441)
+- fix: stop mention menu selection reset during streaming (a6838f8)
+- fix: ensure keyboard-selected menu items are fully visible (90105ae)
+- fix: wrap arrow key navigation in popup menus (a45815a)
+- fix: shrink divider hit area in horizontal split for outline index (8ccca70)
+- fix: stabilize scroll anchor when page heights change (4096b71)
+- Revert "fix: premeasure chat pages during scroll" (440be3d)
+- fix: premeasure chat pages during scroll (59e2260)
+- fix: link subtask titles to sessions (0a0a5f7)
+- fix: tighten outline index hit area (7cd3271)
+- fix: mute permission sounds during full auto (7b0e78f)
+- feat: show MCP resources (807e2f5)
+- feat: add file content search (df843d3)
+
+## [v0.6.23] - 2026-06-27
+
+- fix: constrain mobile dialog content height (52d6a5e)
+- fix: constrain composer height (94ed590)
+- fix: preserve message disclosure state (0fcc13f)
+
+## [v0.6.22] - 2026-06-27
+
+- fix: stabilize streaming markdown highlights (a973d79)
+
+## [v0.6.21] - 2026-06-27
+
+- fix: remeasure CodeMirror layout after collapse-to-expand animation (d6e5d5c)
+- fix: stabilize recent sessions on startup (a4e88f7)
+- fix: avoid expanding stale chat pages on resize (69ee821)
+- fix: smooth streaming markdown updates (664abc4)
+- fix: optimize streaming markdown rendering (f88b68e)
+- fix: reduce chat virtualization reflow work (4e520cf)
+- fix: ensure auto-approved permission state is always cleared (f657827)
+- fix: clear replied permission requests locally (45aced2)
+- fix: optimize streaming markdown rendering (665ebf4)
+- fix: stabilize chat stream render props (c5a6dc6)
+- fix: reduce streaming chat re-renders (ec71fb1)
+- fix: prefer verified terminal mono fonts (78ecf8d)
+- fix: stabilize mobile keyboard focus (570f74a)
+- fix: avoid blank CodeMirror content when expanding collapsed inputs (da64f85)
+- fix: respect user scroll position in sub-session auto-scroll (a795405)
+- fix: expand accordion content immediately, not one frame late (a08014f)
+- fix: break infinite re-render cycle when moving terminal between panels (73d998d)
+
+## [v0.6.20] - 2026-06-22
+
+- fix: bottom panel tabs should not have top safe-area padding (34a6d98)
+- fix: stabilize fullscreen overlays (7e1ca42)
+- perf: switch terminal to WebGL2 GPU-accelerated renderer (84b0a21)
+- docs: add macOS quarantine removal note to READMEs (9341044)
+
+## [v0.6.19] - 2026-06-21
+
+- perf: move outline fisheye animation to CSS variables (cebf4b8)
+- perf: stabilize outline index during streaming (38648e0)
+- fix: hide dialog close button on mobile (60016c0)
+- fix: refactor Android status bar to top-chrome self-extend (e4735da)
+- feat(chat): render user messages as markdown (5f9f2d3)
+- fix: make Android status bar fully transparent (7d03f6c)
+- fix: stabilize mobile pager depth transform (8117762)
+- feat: add mobile pager depth transform (d7c9b98)
+- fix: improve mobile pager accessibility (0493f6c)
+- fix: polish mobile pager depth (9a1a890)
+- fix: round mobile pager separators (2a3bb8c)
+- fix: harden mobile pager state sync (cb7a161)
+- feat: add mobile snap panel pager (39cb451)
+
+## [v0.6.18] - 2026-06-19
+
+- chore: upgrade ajv to v8 for build compatibility (2c5830f)
+- fix: macOS 拖拽文件上传两次的问题 (977844f)
+- fix: 高亮当前对话位置的 tick 在日间模式下不可见 (c919d1c)
+- fix(macos): 兼容拖放坐标判断 (f4ae1e9)
+- fix(macos): clear fullscreen state on window destroy (37972e9)
+- fix(macos): 退出全屏后重新对齐红绿灯位置 (1a6c403)
+- fix: undo 后输入框字体模糊的问题 (726387e)
+- fix(macos): 红黄绿按钮与自定义标题栏按钮垂直对齐 (a942272)
+- fix: macOS 从 Finder 拖放文件到窗口不生效 (71ed010)
+- fix(chat): integrate pinned session UI and lifecycle (9b1b7a9)
+- feat: add conversation pinning to sidebar (d6b7500)
+- fix(chat): preserve first message on new sessions (38e51c3)
+- fix(chat): keep outline highlight toggle scoped (a1e9ddb)
+- fix(chat): stabilize outline current highlight (68b7748)
+- fix(terminal): omit undefined restore size options (c0a6038)
+- fix(chat): show hidden project directories (9da3bee)
+- feat: add territory-based highlight to outline index (ec10ea4)
+- fix: consolidate drawer bottom safe-area padding (8c01459)
+
+## [v0.6.17] - 2026-06-07
+
+- fix: default changes panel to last turn scope (0c341e9)
+- fix: read metadata.output for real-time bash streaming during execution (5da7b1f)
+- fix(settings): apply mobile viewport height to config editor (d442e66)
+- fix(titlebar): preserve decorum window controls (1892621)
+- fix: remove touchAction:none from FileTreeItem button that broke mobile scrolling (a619d72)
+- fix: replace 92vh with calc(var(--app-height) * 0.92) in mobile SettingsDialog to fix address bar hiding issue (f3558fc)
+
+## [v0.6.16] - 2026-06-07
+
+- fix(startup): cancel stale local endpoint requests (9c789e5)
+
+## [v0.6.15] - 2026-06-06
+
+- fix(settings): validate opencode server health (0c19e18)
+- fix(startup): refresh after local service URL changes (991a856)
+
+## [v0.6.14] - 2026-06-06
+
+- fix(pwa): clear stale iOS keyboard inset (f5eba98)
+- fix(chat): lock mobile sidebar swipe direction (7e1df88)
+- fix: apply detected local service URL before boot (e0c00bb)
+- fix(settings): improve config editor schema handling (b5a8978)
+- fix(session): reset missing routed sessions (46a35d0)
+- fix(chat): preserve streaming page height measurements (1c97439)
+- fix: detect local opencode service URL (e628ac7)
+- feat(settings): add visual opencode config editor (7965d06)
+- feat: auto-detect opencode service binary (b3b32bd)
+- refactor: align api types with sdk (ad5fb7b)
+
+## [v0.6.13] - 2026-06-05
+
+- chore: update opencode sdk (4a4fe17)
+- fix: render Windows path markdown links (d895fa6)
+- fix: improve Linux terminal font fallback (7158d87)
+- fix: make markdown code blocks selectable (cd453ad)
+
+## [v0.6.12] - 2026-06-02
+
+- refactor: harden internal drag interactions (ccb0280)
+- feat: support desktop file path drops (aa177a3)
+- fix: keep mermaid touch controls off desktop (346423a)
+- fix: refine markdown touch controls (6dfa4b9)
+
+## [v0.6.11] - 2026-05-31
+
+- fix: clarify auto approval behavior (e16e7aa)
+- fix: preserve whitespace in split word diff (d0b10dd)
+- fix: highlight streaming code blocks (9198a4d)
+- fix: improve markdown rendering (2a75c1b)
+- perf(chat): stabilize virtualized scroll premeasurement (046019d)
+- fix: refine chat page virtualization (5854671)
+- chore: bump version to 0.6.11-canary.1 (bd0ecd8)
+- fix: stabilize chat scrolling with paged virtualization (a7bb14a)
+- fix: terminal reverse video shows black box in light mode (b902645)
+- fix: terminal ANSI white colors invisible in light mode (5a8a386)
+
+## [v0.6.11-canary.1] - 2026-05-25 (Pre-release)
+
+- fix: stabilize chat scrolling with paged virtualization (a7bb14a)
+
+## [v0.6.10] - 2026-05-17
+
+- fix: refresh sidebar child session links (a49908a)
+- ci: deploy pages from dev (bc50843)
+- fix: route permission replies through session (75bd8ac)
+- fix: avoid iOS toolbar bottom gap (d880fac)
+- fix: keep provider enabled for visible models (2462adf)
+- fix: show detailed completion time on hover (9ca1ab6)
+
+## [v0.6.9] - 2026-05-16
+
+- fix(terminal): correct clipboard paste behavior (bf6f902)
+- ci(docker): add image workflow guardrails (da80d45)
+- fix(docker): avoid qemu frontend builds (2d4d00b)
+
+## [v0.6.8] - 2026-05-16
+
+- fix(diff): keep split word diff text themed (53e1d9a)
+- feat(docker): add optional host backend access (279ac15)
+- fix(message): preserve aborted messages with content (86fd11f)
+
+## [v0.6.7] - 2026-05-15
+
+- fix(input): prevent IME confirmation from sending messages (5f4e0bb)
+- feat(terminal): add scoped clipboard keybindings (2f8a933)
+
+## [v0.6.6] - 2026-05-13
+
+- fix(session): 修复 PR #90 的子目录加载竞态并理顺范围刷新语义 (5360b59)
+- fix(session): 目录切换时合并活动会话刷新状态 (4aca25d)
+- feat(file-explorer): 按目录恢复文件树展开状态 (e29498d)
+
+## [v0.6.5] - 2026-05-10
+
+- ui: show bash working directory (48d5b28)
+- fix: skip shiki fallback for unsupported languages (d4ea3be)
+
+## [v0.6.4] - 2026-05-04
+
+- fix: keep delete change bars continuous (843d861)
+
+## [v0.6.3] - 2026-05-04
+
+- ui: simplify tool diff result headers (a5889a5)
+- build: reduce bundled asset size (3e4aaa2)
+- fix: align wrapped diff empty textures (d4b187b)
+- fix: smooth split session loading (c4f3bb7)
+
+## [v0.6.2] - 2026-05-04
+
+- fix: smooth wrapped diff scrolling (e46d0e5)
+- fix: center collapsed diff buttons on mobile (9c1c6ef)
+- fix: keep empty diff buffer textures aligned (3b70696)
+
+## [v0.6.1] - 2026-05-03
+
+- fix: align readonly code gutters with diffs (b9a15d3)
+- fix: polish diff gutter and separators (2568070)
+- fix: keep chat bottom spacing comfortable (bc42873)
+- fix: tighten chat surface bottom spacing (f47dedb)
+- fix: PWA safe-area double padding on iOS (0b4fa33)
+
+## [v0.6.0] - 2026-05-03
+
+- test: update diff viewer mock for shared data (13d7c04)
+- fix: stabilize preview tab hover width (f2d0564)
+- feat: improve file and change previews (7ae977d)
+- fix: restore scrolling for inline code previews (09d3e96)
+- perf: share diff data with fullscreen viewer (e3ceef8)
+- perf: hoist diff viewer data across view modes (4467730)
+- fix: improve readonly code selection contrast (4955f56)
+- fix: strengthen empty diff buffer texture (849445f)
+- fix: add Pierre-style empty diff buffers (16eec59)
+- fix: adapt line number gutter width (d37f112)
+- fix: center diff separator icons (db857dc)
+- fix: port Pierre diff separator styling (789dcf2)
+- fix: add Pierre-style diff separator expansion (1ce0d3a)
+- fix: refine handwritten diff collapsed separators (ab9c8a6)
+- fix: mask readonly code gutters (0a41e2a)
+- refactor: extract readonly codemirror view (0b81235)
+- fix: refine code search responsive layout (fc12a33)
+- fix: anchor code preview search panel (00244e3)
+- fix: polish code preview search panel (cd4e8d1)
+- fix: smooth syntax theme switching (1f079e1)
+- fix: use complete github shiki themes (2fc89fb)
+- fix: align shiki theme with github syntax colors (e4c171a)
+- feat: add adaptive shiki theme (6cb720e)
+- feat: use codemirror for code previews (487cea3)
+- fix: optimize sidebar transition rendering (06fe9a2)
+- fix: limit message offscreen unmounting to resize (3986e5f)
+
+## [v0.5.20] - 2026-05-01
+
+- fix: preserve git subdirectory projects (e9646b9)
+
+## [v0.5.19] - 2026-04-29
+
+- fix: tighten sidebar search spacing (8b76cb2)
+- fix: align desktop titlebar and dialog layout (f5800ba)
+- fix: align dialog overlay styling (fe3a3cf)
+- fix: unify right panel tab styling (ca6d697)
+- fix: align command palette styling (dc67f38)
+- fix: polish sidebar popover styling (da633ea)
+- fix: preserve route session during refresh (9d3f0a0)
+- fix: prevent terminal reconnect loops on global switch (5d0aca2)
+
+## [v0.5.18] - 2026-04-29
+
+- fix: tighten pane focus and interaction regressions (c800e44)
+- fix: prevent route sync from overwriting focused panes (fa44f13)
+
+## [v0.5.17] - 2026-04-28
+
+- fix: keep session actions tied to visible focus (0e16597)
+- ci: update GitHub artifact actions (d9e49c6)
+
+## [v0.5.16] - 2026-04-28
+
+- fix: hide session actions after mouse selection (1d6b4be)
+- ci: upgrade GitHub Actions Node runtimes (ff10d7b)
+
+## [v0.5.15] - 2026-04-28
+
+- fix: restore model selector typography scaling (121b762)
+
+## [v0.5.14] - 2026-04-28
+
+- fix: close the remaining review regressions (58a03dc)
+- fix: clear lint regressions and selector focus artifacts (1b85707)
+- fix: preserve injected desktop titlebar controls (7e60acf)
+- fix: reveal session row actions on keyboard focus (a568535)
+- fix: ignore hidden controls during menu dismissal (2db0cd0)
+- fix: normalize menu focus target detection (c981584)
+- fix: harden menu close paths against hidden targets (c1ac600)
+- fix: make portal menus inert only after close (f82b285)
+- fix: route tab exits through real control order (ce3ad2d)
+- fix: keep selector focus stable during keyboard actions (6fbefae)
+- fix: finish keyboard flows for selection popups (110cb06)
+- fix: complete keyboard navigation for selection menus (ce247ee)
+- fix: stabilize stacked dialog and toolbar menu focus (3d3c542)
+- fix: align keyboard paths across dialogs and selectors (8f7b01f)
+- fix: tighten follow-up focus and visibility behavior (7618593)
+- fix: close the remaining interaction accessibility gaps (f634223)
+- fix: polish remaining high-traffic control semantics (5c88ad0)
+- fix: resolve remaining session and dialog correctness issues (7bde507)
+- fix: tighten menu and diff accessibility (399471d)
+- fix: finish button semantics in project controls (c05d5c9)
+- fix: improve semantic buttons in settings and sidebar (3a1b5bf)
+- fix: harden session updates and menu interactions (1d673df)
+- fix: update context usage immediately after compaction (df01835)
+
+## [v0.5.13] - 2026-04-27
+
+- fix: restore drag and drop in secondary desktop windows (36d489e)
+
+## [v0.5.12] - 2026-04-27
+
+- fix: create the Android main window explicitly (1c20510)
+
+## [v0.5.11] - 2026-04-26
+
+- fix: defer desktop windows until the first frame is ready (1b1e186)
+- fix: remove titlebar separator that misaligns with sidebar border (ed14752)
+- fix: prevent overlay sidebars from being obscured by desktop titlebar (8b20d80)
+- feat: add titlebar actions — back/forward, open project, settings, new window (65abc23)
+- fix: keep fullscreen viewers below desktop chrome (40e1ef4)
+
+## [v0.5.10] - 2026-04-26
+
+- feat: add manual terminal labels and restore state (b42a90d)
+- fix: align terminal PTY handling with upstream (093f2f2)
+- fix: avoid macOS traffic light overlap in fullscreen headers (a5a3554)
+
+## [v0.5.9] - 2026-04-23
+
+- fix: harden live tool timing updates (d6c963a)
+- feat: resolve issue #74 running tool durations (54490f3)
+- feat: store calibrated server time locally (f35c4ab)
+- feat: handle server.connected event timestamps (0e77075)
+- refactor: extract shared ticking clock hook (1b0c626)
+
+## [v0.5.8] - 2026-04-21
+
+- fix: polish sidebar session and notification layout (51b22f2)
+- refactor: modularize settings backup snapshots (a9d59c6)
+- fix: reset project dialog state on reopen (b344278)
+- feat: add settings backup import and export (93ad2ab)
+- fix: rebalance obsidian surface contrast (0837734)
+- fix: separate system notification settings from sound config (ccc80e4)
+- feat: add separate system notification controls (3236d14)
+- feat: add Dracula theme preset (7623377)
+- fix: persist model selection across session restore (d8eb318)
+- fix: shrink launcher icon mark further for masked shells (4f3e99f)
+- fix: reduce app icon mark scale and drop custom Android splash (2552342)
+- fix: remove unsupported Android splash attr from canary build (21ea11a)
+- fix: shrink Android app icon foreground and add native splash theme (8325bfc)
+- feat: redesign app icons for desktop and Android (527d423)
+
+## [v0.5.7] - 2026-04-19
+
+- fix: anchor toasts to the content area beneath desktop titlebar (fe15280)
+
+## [v0.5.6] - 2026-04-19
+
+- chore: sync Tauri app icons from web opencode.svg (f792218)
+- polish: slim desktop titlebar down to minimal app chrome (375e8d1)
+- feat: add platform-aware desktop titlebar foundation (43fa2da)
+- fix: prevent model selector from jumping to wrong provider on split (5b33360)
+
+## [v0.5.5] - 2026-04-18
+
+- fix: remove redundant *Single i18n keys — let i18next handle count=1 natively (9385ef8)
+- style: match pane drop highlight radius to pane shell (rounded-lg) (f8acac2)
+- feat: enable drag-to-split on active session list items (ac20b7b)
+
+## [v0.5.4] - 2026-04-18
+
+- polish: pane drop overlay — drop text labels, harden edge cases (2be4c13)
+- perf: keep pane drop overlay state out of ChatPane re-render path (17025ad)
+- feat: drag sessions onto chat pane to split or replace (e413864)
+- fix: add keyboard shortcuts to question dialogs (send keybinding to submit, Escape to skip) (dc83e0e)
+- fix: narrow shell tool detection to exact 'sh' match across all matchers (f534454)
+- Update zh-CN usage stats labels to English (074878e)
+- fix: distinguish file writes in tool summary (2f25e93)
+- fix: refine message tool summary wording (1d41542)
+- fix: guard session error without sessionID (2166183)
+
+## [v0.5.3] - 2026-04-17
+
+- style: use distinct icons for settings tabs (9b2adb1)
+- fix: sanitize exported CSS snippet filenames safely (139725c)
+- fix: adapt token usage ring track to all themes (75f2ad4)
+- refactor: derive theme previews from preset tokens (720c426)
+- feat: add reusable CSS overrides for themes (eba9d1d)
+- refactor: split settings into agent and workspace tabs (b38ac6b)
+- feat: add configurable message completion timestamps (2f01c56)
+- feat: add model visibility settings (731efdd)
+- style: improve glass effect - thicker base, blur(22px), saturate(200%) (bd27ce1)
+- feat(themes): 新增Sakura、Ocean、Obsidian三款预设主题 (bfa449c)
+- feat(settings): 添加自定义CSS模板管理功能 (79db9f4)
+
+## [v0.5.2] - 2026-04-15
+
+- test: fix streamed event mock typing (92627ee)
+- fix: preserve UTF-8 text in streamed markdown updates (8d89ce4)
+- feat: add release update checks with about entry (closes #33) (e29a842)
+- fix: preserve files and changes panel state across tab switches (closes #63) (3d57dc9)
+- fix: allow pin toggle on selected model in desktop model selector (96e0ab2)
+- fix: remove mobile 16px font-size override so input matches message stream (9e1eb6e)
+
+## [v0.5.1] - 2026-04-13
+
+- feat: show agent and model name in step finish info (closes #61) (7299319)
+- fix: restore line-height lost during font system migration (3d83f3b)
+- fix: split diff view losing syntax highlighting when word diff is active (9f281ec)
+- feat: tune default font sizes to match opencode official UI proportions (29c6f76)
+- feat: unified typography system with CSS variables and per-axis font scale sliders (4533b15)
+
+## [v0.5.0] - 2026-04-13
+
+- feat: add keep-screen-awake toggle in appearance settings (Wake Lock API) (3a6a13c)
+- fix: update inline code test to match simplified style (no border/bg) (edc4beb)
+- fix: simplify inline code style and add persistent underline to links (7f2cd73)
+- fix: allow share URL to scroll horizontally on mobile (d049ce0)
+- fix: ensure bottom padding in PWA standalone for devices without Home Indicator (eb8682c)
+- fix: use replaceState on mobile to prevent session history stacking (ceed83d)
+
+## [v0.4.9] - 2026-04-11
+
+- fix: prevent model restoration from overriding user selection during streaming (0c799e3)
+- fix: return 404 for /api on frontend-only image (b07a30e)
+- fix: align UI hook dependencies with live state (63a2b87)
+- refactor: remove dead UI cleanup leftovers (5b82694)
+- fix: remove unused resolveAlias function in shiki module (81d5fdb)
+- perf: lazy-load shiki languages and optimize Tauri release profile (1be34e0)
+- fix: PTY WebSocket auth fails behind reverse proxy (4bbb3c5)
+- fix: prevent session fetch storm on SSE reconnect in SessionContext (ae26e6c)
+- refactor: unify SSE and PTY into a single transparent bridge (73e638f)
+- fix: use tungstenite message variants for PTY bridge (6210294)
+- fix: bridge Tauri mobile PTY through native client (e33bde5)
+
+## [v0.4.8] - 2026-04-10
+
+- feat: queue follow-up messages behind active turns (90756e3)
+- fix: GPT apply_patch diff not rendering and error messages invisible in chat (6d6f81d)
+- fix: align prompt history cursor navigation (4dd2bf4)
+- fix: tighten session alerts and mobile code copy (8e02c0a)
+
+## [v0.4.7] - 2026-04-09
+
+- fix: update command test to mock sdk instead of removed http module (f7521bc)
+- fix: patch sdk migration review findings (e45b2b5)
+- refactor: collapse remaining sdk helper types (c9d2a74)
+- refactor: align remaining api models with sdk (f9c9272)
+- refactor: align user message model fields with sdk (e427ccd)
+- refactor: align event types with sdk (826cd49)
+- refactor: tighten message part guards (b83098f)
+- refactor: align tool part types with sdk (cecab44)
+- refactor: align event payload adapters with sdk (d9ffe50)
+- refactor: tighten sdk adapters and message conversions (a5aa326)
+- refactor: align config and skill types with sdk (4eed10c)
+- refactor: trim remaining sdk type wrappers (bfa0bde)
+- refactor: collapse API types onto sdk definitions (e5e7305)
+- refactor: replace API type wrappers with sdk aliases (89d42ac)
+- fix: finish sdk migration cleanup (a90d0aa)
+- fix: align API layer with official opencode sdk (ae4308c)
+- fix: eliminate UI flicker, merge duplicate effects, avoid object mutation (a6e4cc1)
+- fix: stabilize git workspace recents and worktree actions (abd0ee5)
+
+## [v0.4.6] - 2026-04-07
+
+- fix: keep active child sessions visible across projects (9d8a725)
+- fix: polish folder recents load more control (cbb1d59)
+- fix: fade changes stats as one line (f05f8af)
+- fix: compact changes panel header (231904f)
+
+## [v0.4.5] - 2026-04-06
+
+- fix: refine changes menu spacing (ad48921)
+- feat: sync file explorer status with change modes (b655d50)
+- fix: align undo state with visible messages (752cae6)
+- fix: clear command drafts after dispatch (4851435)
+- fix: show history compacted messages (cc7d980)
+- fix: simplify changes panel mode switch (ceb721b)
+- feat: add git and branch review modes (71a8c0d)
+- feat: add git setup and current-turn session changes (769f3ab)
+
+## [v0.4.4] - 2026-04-06
+
+- fix: keep edit mode checkboxes compact on mobile (3d7c342)
+- feat: support shift-select in recents edit mode (6181f5f)
+- style: refine edit mode selection visuals (c7ca524)
+- feat: add batch edit mode for sidebar recents and rewrite folder drag-sort (a1326d5)
+- fix: persist panel layout and terminal positions (e1aeea8)
+
+## [v0.4.3] - 2026-04-05
+
+- fix: improve pane navigation and sidebar drag affordances (a3dd889)
+- fix: keep input focus after sending (161e7b8)
+- fix: render bash tool commands inline (b6a6db2)
+- fix: remove sidebar footer divider (d6e59b9)
+- fix: prefer pointer outline interaction on hybrid devices (a20ebc0)
+
+## [v0.4.2] - 2026-04-03
+
+- fix: switch folder recents to the clicked directory (d579407)
+- fix: support sticky ctrl+alt combos in mobile terminal keyboard (4d9c5b3)
+- fix: use tauri plugin-opener for external links in terminal and MCP auth (9b80bf3)
+- fix: add background tint and equal spacing to plain code block copy button (102b5d4)
+- fix: prevent global mode from being overridden by pane directory sync (b7a665c)
+
+## [v0.4.1] - 2026-04-03
+
+- fix: disable split-pane entry points on small touch screens (3c1a607)
+
+## [v0.4.0] - 2026-04-03
+
+- fix: align request dialogs with the input dock width (59b5962)
+- perf: fix memo-defeating patterns in message rendering pipeline (f678d36)
+- fix: stabilize ChatPane tree structure across fullscreen toggle (79b28f1)
+- fix: preserve DOM across pane fullscreen toggle and hide split button in fullscreen (13c7f5e)
+- fix: keep split resizing off the render path (750dd50)
+- fix: normalize panel PTY restoration and dedupe terminal tabs (d1b4565)
+- feat: add pane fullscreen mode and refine split header actions (cf959e0)
+- fix: remove split container transition side effects (5332f61)
+- fix: stabilize split-pane header interactions (6631e01)
+- refactor: streamline split-pane chrome and transitions (cdb4a8b)
+- fix: avoid first-frame tool expansion flicker on session switch (a71dea2)
+- refactor: finish pane-first cleanup and auto-approve wiring (8af9e57)
+- fix: unify router state and focused-pane directory sync (2cbb177)
+- refactor: remove legacy focused-session compatibility layer (e4d0616)
+- refactor: unify chat shell around focused pane state (e45dd17)
+- fix: sidebar selectedSessionId follows focused pane in split mode (a82abaf)
+- fix: isolate per-pane state — fullAutoMode, agent selection, session eviction, clearSession (18bc9af)
+- fix: prevent duplicate SSE subscriptions in split-pane mode (e15ad08)
+- feat: add split-pane UI with full-parity ChatPane, SplitContainer, PaneHeader, SplitToolbar (3af6b14)
+- refactor: parameterize useChatSession for multi-instance support (1b37d8d)
+- refactor: make session infrastructure multi-instance ready (e0ce47d)
+- fix: hide assistant fork action when no text can be copied (f734462)
+- fix: keep composer action blur out of transform layers (6eb3bf0)
+
+## [v0.3.8] - 2026-03-31
+
+- feat: add fullscreen button to file preview and changes diff preview (9e4ca2d)
+- feat: enable fork from assistant messages to preserve AI replies (f2a0079)
+- refactor: unify floating component shadows to a consistent two-tier system (shadow-sm / shadow-lg) (1cf526e)
+- chore: upgrade dependencies (vite 8, i18next 26, lucide-react 1.x, etc.) (41498bf)
+- fix: adjust ModelSelector padding so scrollbar doesn't overlap list content (e7d6e4f)
+- refactor: unify ModelSelector into a single component for both PC and mobile (5b81638)
+- fix: sync session title to messageStore on SSE update for real-time header refresh (b74bb6a)
+- fix: align mobile header toggle spacing (1052826)
+
+## [v0.3.7] - 2026-03-28
+
+- fix: remove double border on attachment meta when no content preview (d29a2f4)
+- fix: hide floating actions (undo/redo/permission) during todo panel swap (a3a7231)
+- fix: apply glass effect to mobile collapsed capsule (2075818)
+- fix: fallback fetch after send to prevent missing user message on SSE drop (e2138df)
+- fix: skip overlay scrollbar on elements with no-scrollbar class (506cf24)
+- feat: child sessions displayed under parent in sidebar with toggle for always-show (97ce7d8)
+- feat: add diff toggle for folder recents (a1ed95e)
+- fix: wire compact model selector to global shortcut (d14fb42)
+
+## [v0.3.6] - 2026-03-28
+
+- test: add chatViewport mock to InputBox and InputToolbar tests (7eb80ac)
+- fix: remove unused let binding in overlayScrollbar (ab9eaba)
+- feat: add horizontal overlay scrollbar support (ad8d21d)
+- refactor: rewrite outline index with visual config, focus-based interaction and entry windowing (18bccf9)
+- fix: align compact model selector trigger (480dd04)
+- refactor: centralize chat viewport state (8512fcb)
+- fix: improve coarse pointer support in desktop UI (4cfc8e5)
+
+## [v0.3.5] - 2026-03-27
+
+- fix: use previous stable tag for release changelog (b00cff7)
+- fix: load chat header title from session detail (0b8443c)
+- fix: stabilize chat history loading scroll behavior (87190c6)
+- fix: animate todo panel swap without layout jank (ca8a672)
+- feat: add frosted glass toggle in appearance settings (662070c)
+- fix: apply overlay scrollbar to textarea, hide all native scrollbars (5dce51f)
+- fix: frosted glass not rendering in Tauri production build & overlay scrollbar positioning (96e72c1)
+- feat: replace native scrollbars with global overlay scrollbar system (da09781)
+- refactor: simplify @ and / menus with cleaner layout and unified style (f5bddec)
+- refactor: redesign ModelSelector for glass aesthetic (33a9dd2)
+- refactor: unify frosted glass system with CSS utility classes (0e459f9)
+- style: introduce frosted glass effect to all floating surfaces (ae10178)
+- fix: remove extra padding from message toggles (4eb916a)
+
+## [v0.3.4] - 2026-03-24
+
+- fix: align markdown copy buttons with header text (80e59ce)
+- fix: render markdown images without streamdown wrapper controls (650851f)
+- fix: remove code size-based rendering limits (42171e7)
+- fix: remove contain-intrinsic-size that caused scroll jank (7942144)
+
+## [v0.3.3] - 2026-03-24
+
+- fix: resolve TypeScript errors in MarkdownRenderer for release (1abcdf1)
+- fix: exclude task tool from compact inline permission mode (5f39aff)
+- style: remove left accent line from TaskRenderer, restore badge status colors (1cb6044)
+- style: refine TaskRenderer visual hierarchy (263b74b)
+- fix: show tool description from input while running, not just after completion (b65d16e)
+- fix: reduce excessive right padding in expanded reasoning content (885668d)
+- fix: panel dropdown menu hover overflow — use inset padding with rounded items (02653bf)
+- fix: table copy button pinned outside scroll, mobile always-visible copy buttons (2cdef17)
+- style: unify tool output header height to h-8 (32px) (c566b1a)
+- style: unify message flow border-radius to a tighter 3-tier system (4a8a89f)
+- refactor: redesign markdown code blocks, tables, and inline code styles (11f6222)
+
+## [v0.3.2] - 2026-03-24
+
+- fix: align fullscreen diff test mocks with typed children (fdf1a74)
+- fix: restore release validation after fullscreen refactor (ef2d755)
+- fix: adjust outline index spacing for visual balance (fb98097)
+- refactor: unify fullscreen components into generic FullscreenViewer (9e6d8ed)
+- refactor: redesign settings UI with section-based layout and cleaner primitives (478351a)
+
+## [v0.3.1] - 2026-03-23
+
+- fix: unify chevron arrow direction - collapsed points right, expanded points down (3557e5a)
+- feat: compact inline permission - hide duplicate content when tool body already renders (63d571b)
+- refactor: redesign descriptive steps summary - merge categories, per-category errors, truncation (870f490)
+- fix: move diff stats next to title and remove exit code from descriptive steps (74e69c0)
+- fix: deferred permission unmount and multi-select question answer parsing (a8dc9bd)
+- fix: auto-expand readable tools that finish instantly in immersive mode (06dd4d4)
+
+## [v0.3.0] - 2026-03-22
+
+- fix: lint warnings, error tool diff stats, descriptive steps partial error coloring (ea53836)
+- feat: add diff stats summary to descriptive steps, fix write tool diff display (ce29807)
+- fix: immersive mode keeps non-readable tool groups collapsed even during execution (be61de2)
+- fix: resolve lint errors and remove unused eslint-disable directives (6037d19)
+- feat: add immersive mode with smart tool expand/collapse (0d4252d)
+- fix: skip QuestionRenderer when user dismissed or error (2029584)
+- feat: add QuestionRenderer with InlineQuestion-style read-only answered view (207f0c6)
+- fix: allow long bash commands to wrap in terminal view (8a7ddfd)
+- simplify: BashRenderer remove buttons, click command to copy, inline exit code (72186b5)
+- refactor: BashRenderer with fixed bottom bar, exit code, fullscreen, mobile-friendly buttons (cb7bb70)
+- fix: restore height limit and fullscreen button in compact mode (8f8689d)
+- feat: add BashRenderer with terminal style, Shiki highlighting, ANSI color support (856d74d)
+- feat: descriptive steps default collapsed, show output status on tool row (b25a0f2)
+- refactor: unify InlinePermission with tool output style, remove unused inline variant (ac510d7)
+- feat: add compact tool output mode (hide input, no collapse, no height limit) (1036133)
+- feat: add descriptive tool steps mode (d7e153f)
+- refactor: remove ambient tool mode and make inline requests opt-in (06034a2)
+
+## [v0.2.10] - 2026-03-21
+
+- feat: restore forked prompts in the composer (0792cf6)
+- fix: keep folder recents aligned with live updates (a0c8899)
+- fix: improve long duration formatting (62e6d94)
+
+## [v0.2.9] - 2026-03-19
+
+- fix: preserve custom audio when switching to builtin sounds (57119da)
+- fix: resolve all eslint warnings across codebase (4b31da3)
+- feat: add notification sound system with per-event configuration (b6019e2)
+- perf: defer offscreen chat message rendering (52d8ba8)
+- refactor: unify file and changes preview panels (9f315d8)
+
+## [v0.2.8] - 2026-03-18
+
+- fix: wrap panel tab label case blocks (d353b80)
+- feat: expand right panel resize range (3e67623)
+- feat: add tabbed session changes workspaces (ace0259)
+- feat: add tabbed file preview workspaces (ffad629)
+- fix: stabilize mobile terminal toolbar layout (1eb23b7)
+- feat: refine mobile terminal extra keys behavior (6e04254)
+- feat: add mobile extra keys toolbar for terminal (Termux-style) (2b185ac)
+- feat: show collapsed folder activity status (0bd1378)
+- feat: mark completed sessions as unread in recents (90cf8c3)
+
+## [v0.2.7] - 2026-03-18
+
+- feat: add markdown reasoning display mode (20fa476)
+- fix: avoid action overlap in folder recents on mobile (83b40b9)
+- feat: animate folder recents expansion (1b8ea13)
+- fix: preserve folder recents expansion across tab switches (058c289)
+- fix: limit streaming layout animation to bottom-follow mode (95c6aca)
+- fix: restore reasoning thinking shimmer transition (5c631c8)
+- feat: refine reasoning markdown presentation (71a012a)
+- fix(chat): extract formatDuration to shared formatUtils (c405092)
+- fix(chat): preserve aborted turn durations (13633fb)
+- feat: add diff gutter style setting (markers vs change bars) (4c5e7b8)
+- fix(i18n): improve permission dialog labels for request/rule clarity (e3730d5)
+- refactor: replace react-markdown with Streamdown for streaming-optimized markdown rendering (fcf3307)
+- refactor: extract useResponsiveMaxHeight hook for shared viewport-aware sizing (1993eb8)
+- fix: make ContentBlock maxHeight responsive to viewport size (b584071)
+- fix: resolve drag-to-reorder race condition causing stale closures (b08a763)
+
+## [v0.2.6] - 2026-03-17
+
+- refactor: redesign folder recents with drag-to-reorder and compact session items (88b4139)
+- fix: resolve bugs introduced by Python-to-Rust router migration (335b82e)
+- refactor: migrate gateway router from Python to Rust (290087f)
+- Feature: Add ability for router to read config from environment variables (bddc46b)
+- refactor: create new Rust project opencodeui-router (dd96377)
+- Update image previews in README.md (be84586)
+- fix: 服务器编辑/删除按钮始终可见 (0037a17)
+
+## [v0.2.5] - 2026-03-16
+
+- fix: 修复胶囊按钮和弹窗 header 图标与文字对齐 (a65e34e)
+- fix: 工具 icon 光晕不再被父容器裁切 (c946f19)
+- fix: 移动端设置 tab 选中态被 overflow 裁切 (027fcf9)
+- refactor: 设置界面优化 — 修复双滚动条、服务器编辑/删除确认 (ec75fad)
+- fix(i18n): 保留开发者工具常见英文术语不翻译 (f4a6022)
+- fix(i18n): 修正中文翻译质量 (f2bd269)
+- feat: add full i18n support with react-i18next (en + zh-CN) (bcd9850)
+
+## [v0.2.4] - 2026-03-16
+
+- fix: 会话级 Full Auto 恢复原有行为 — 只在当前所在页面的 session 生效，切走后不再自动放行 (e98bd4e)
+- fix: Full Auto 全局模式在 SSE 事件层拦截，确保非当前会话的权限请求也能自动放行 (1046837)
+- feat: Full Auto 三态模式 — 单击循环 off/会话级(黄)/全局(红)，会话级只放行当前会话，全局放行所有，纯内存刷新即清 (db95fc7)
+- fix: 去掉 steps header 入场动画，保持与其他元素一致不做特殊处理 (1e725a5)
+- fix: 虚拟滚动横向滚动条修复 — 去掉 probe 元素改用 scrollWidth 历史最大值追踪，SplitDiffView proxy scrollbar 加 gutter 占位对齐 (beee631)
+
+## [v0.2.3] - 2026-03-15
+
+- fix: probe 最长行选取改用 monoDisplayWidth 估算渲染宽度，CJK/全角字符按双倍计，修复含中文注释时横向滚动不到位 (d1fb35a)
+- Revert "fix: probe 元素去掉 overflow:hidden 修复横向滚动不到位 — hidden 在两个方向截断内容导致 scrollWidth 偏小" (0e5353f)
+- fix: probe 元素去掉 overflow:hidden 修复横向滚动不到位 — hidden 在两个方向截断内容导致 scrollWidth 偏小 (c9788fc)
+- fix: lint warnings — ref 写入移入 useEffect，CodePreview 提取 tokens 避免 render 期间读 ref，修复 CodePreview 测试，清理多余依赖和 eslint-disable (96955f7)
+- fix: 消除胶囊⇄输入框切换闪烁 — FloatingActions 改为同一 DOM 切换定位避免 remount，胶囊去掉入场动画和防抖回归纯 UI (bc3cc0c)
+- fix: 移动端胶囊⇄输入框过渡优化 — 胶囊退场不延迟避免与输入框重叠闪烁，收起方向加 120ms 防抖消除滚动边界抖动 (4060e83)
+- refactor: 统一动画体系 — UndoStatus 去自带动画改由 PresenceItem 控制，CollapsedCapsule 从 CSS animate-in 换成 usePresence，PresenceItem 加 shrink-0 防挤压，清理 CSS 死代码 (5106ac0)
+- fix: probe 元素精确撑开 scrollWidth 修复横向滚动不到位，去掉 backdrop-blur (0f3b764)
+- Revert "fix: 代码预览/diff 横向滚动重构 — CodePreview/UnifiedDiffView 改原生滚动+sticky gutter，SplitDiffView 用 probe 元素精确撑宽，去掉 backdrop-blur" (9d12d72)
+- fix: 代码预览/diff 横向滚动重构 — CodePreview/UnifiedDiffView 改原生滚动+sticky gutter，SplitDiffView 用 probe 元素精确撑宽，去掉 backdrop-blur (9e37646)
+- feat: usePresence hook + 浮动按钮/权限框/提问框入场退场动画 — 命令式 animate() 零额外 bundle (fb8c59f)
+- fix: 消息流底部间距增大，为浮动按钮预留空间 (7f32fa2)
+- fix: 删除 Output 的 Running... 文字，Input/Output spinner 统一无文字对齐 (e8c409e)
+- fix: 单工具调用始终 compact 布局，消除流结束时的缩进跳变 — SmoothHeight 平滑过渡 + steps header 入场动画 (031502f)
+- fix: 代码预览和 diff 行号背景色统一 — gutter 去掉硬编码背景，继承父容器颜色 (9ef8223)
+
+## [v0.2.2] - 2026-03-15
+
+- ci: 恢复 codegen-units=1 减小产物体积，Rust cache 按平台隔离，精简工作流 (5018e3b)
+- chore: 清理 suppressAutoScroll 死代码 (d47085e)
+- fix: loadMore 不跳变 — 去掉 inner wrapper，消息反序直接作为 flex 子元素，prepend 时临时禁用 content-visibility (657e7a4)
+- refactor: 用 column-reverse 替代 ResizeObserver 实现原生 stick-to-bottom (591a8eb)
+- refactor: DiffView 复用 DiffViewer 组件，删除 150 行重复 diff 渲染代码 (e78d987)
+
+## [v0.2.1] - 2026-03-14
+
+- refactor: 用 ResizeObserver 替代 RAF 轮询实现流式自动滚动 (10d9e6a)
+- fix: 空消息不参与可见列表，消除 abort 时的滚动跳变 (9dbaa4d)
+
+## [v0.2.0] - 2026-03-14
+
+- feat: RECENTS 列表标记活跃 session 状态 (closes #25) (98ecce9)
+- fix: motion animate() 类型歧义 — 改用 motion/mini 单签名 API 解决 tsc -b TS2769 (7927bcf)
+- fix: 移除 ContentBlock loading skeleton 骨架条，避免输出短于占位时的负增长跳变 (f6db986)
+- feat: 消息入场生长动画 — 用户和助手消息统一从 height 0 平滑展开 (ce055fb)
+- fix: SmoothHeight 激活时锁定 outer 高度，修复动画不触发的问题 (e5f6cf5)
+- feat: 命令式 animate() 动画方案 — 高性能 + 零 React 组件开销 (4481aba)
+- fix: 修复流结束后闪烁回弹问题 (192944e)
+- fix: 修复流式文本不实时渲染的问题，移除 useSmoothStream (005b6bf)
+- refactor: 连续助手消息分组渲染，共享容器浑然一体 (cfadad0)
+- Revert "fix: 复制按钮始终占位，避免 text 到达时布局跳变" (1af197a)
+- fix: 移除未使用的 hasMoreHistory 解构变量，修复 TS6133 编译错误 (cf9419b)
+- fix: 复制按钮始终占位，避免 text 到达时布局跳变 (d51e7a8)
+- fix: 移除 'Beginning of conversation' 常驻提示，仅保留加载中 spinner (11484c6)
+
+## [v0.1.18] - 2026-03-13
+
+- ci: 加速 release 编译 — Rust 多线程 codegen + Android 双架构并行 (2398c54)
+- fix: FloatingActions 高度抖动、滚动按钮误显示 (466f4ea)
+- refactor: gutter/content 分离架构 + 水平滚动独立化 + FullscreenViewer 确定高度 (e327e59)
+- perf: streaming 渲染地基优化 — rAF 滚动、delta 批量化、布局稳定性 (f689910)
+
+## [v0.1.17] - 2026-03-11
+
+- fix: update CodePreview test mock to use useSyntaxHighlightRef (a10075f)
+- fix: move history loading indicator below top spacing so it's visible (4cfc71c)
+- fix: remove MAX_HISTORY_MESSAGES cap and restore loading UI (43d2273)
+- perf: reduce sidebar resize lag with CSS containment and DOM-only sidebar drag (63bc0c5)
+- fix: enable virtual scrolling in CodePreview by adding height constraint (43c9e3a)
+- fix: mobile input collapses when tapping FloatingActions buttons (a777334)
+- refactor: simplify loadMore pagination and remove prependedCount (8614df4)
+- refactor: rewrite messageStore and ChatArea, remove IndexedDB cache layer (eecdeaf)
+- refactor: remove loading spinners/skeletons and reduce scroll-related re-renders (eb7ebff)
+
+## [v0.1.16] - 2026-03-11
+
+- fix: scroll jitter after streaming ends caused by content-visibility height mismatch (765052a)
+- fix: stop auto-scroll jitter when user scrolls slightly during streaming (171a62e)
+
+## [v0.1.15] - 2026-03-10
+
+- fix: default revertSteps to 0 in FloatingActions (400fbb4)
+- chore: bump version to 0.1.15 (3f57df2)
+- fix: slow scroll during streaming causes jitter by pulling user back to bottom (860683e)
+- fix: isFocused stuck after toolbar button click prevents capsule collapse (aaaa727)
+- refactor: extract FloatingActions and CollapsedCapsule components from InputBox (273bd98)
+- refactor: extract useInputHistory hook from InputBox (d920da9)
+- refactor: extract useAttachmentRail hook from InputBox (2150d82)
+- refactor: extract useMobileCollapse hook from InputBox (c5fd39b)
+- fix: mobile input capsule state not resetting on session switch + blur collapsing on toolbar interaction (474938e)
+
+## [v0.1.14] - 2026-03-10
+
+- fix: session switch scroll + eliminate all content flicker during load (d823799)
+- fix: infinite history loading loop + stabilize observer + cleaner scroll-to-bottom (fe28777)
+- fix: smooth shimmer gradient + disable browser scroll restoration + multi-frame scroll-to-bottom (2144260)
+- fix: shimmer highlight sweep + remove unused visibleMessageIds state (ae767ca)
+- fix: outline click retract, prepend scroll preservation, cross-message merge continuation (e3ca11a)
+- fix: desktop label click navigation + mobile passive touch events in OutlineIndex (f35f758)
+- refactor: rewrite OutlineIndex with clean fisheye engine (1057c1c)
+- refactor: replace react-virtuoso with native scroll + content-visibility (2dc550a)
+- fix: correct shimmer animation direction (left-to-right) and use linear timing (16bc419)
+- fix: endsWithTool skips empty reasoning/text so cross-message tool merging works correctly (fdedbcd)
+- style: replace thinking breath-bar with shimmer text animation in italic mode (1bed06b)
+
+## [v0.1.13] - 2026-03-10
+
+- fix: SSE reconnect race conditions and stale timeout constant (7614d53)
+- test: add unit tests for HTTP module and Tauri environment detection (79b77af)
+- chore: eliminate all 8 lint warnings (0 errors, 0 warnings) (b312bb6)
+- fix: URL-encode query string values in buildQueryString (f6a434e)
+- fix: add AbortController-based timeout to HTTP request() (7962278)
+- fix: pending permission/question cache supports multiple requests per session (b421172)
+- fix: SSE parser now handles CRLF line endings and multi-line data correctly (d4553d5)
+- chore: remove dead storage key exports (WIDE_MODE, THEME_MODE, SIDEBAR_WIDTH, MODEL_VARIANT_PREFIX) (2901c99)
+- refactor: replace bare console.error with unified error handlers across 14 files (7a0c86c)
+- refactor: move theme/wideMode into themeStore, eliminate prop drilling through Sidebar and SettingsDialog (9c8b2d7)
+- refactor: split messageStore into store, types, and React hooks layers (caef036)
+- refactor: extract App.tsx hooks (useViewportHeight, useCancelHint, useCloseServiceDialog) (2dd70e3)
+- refactor: split SidePanel into focused sidebar components (673db54)
+- refactor: extract InputBox utility functions to input/inputUtils.ts (a1c0eee)
+- refactor: split SettingsDialog into focused component files (72f5ed4)
+- refactor: consolidate duplicated formatting functions into utils/formatUtils.ts (a981c89)
+- refactor: deduplicate diff content extraction (fad37d4)
+- refactor: extract ModalShell to unify modal overlay infrastructure (ae9f96e)
+- chore: remove unnecessary eslint-disable in logger.ts (118740c)
+- chore: clean up dependencies (0c50ac0)
+- refactor: add dev-only logger, replace bare console.log with logger.log (91fc303)
+- refactor: remove dead code files (test-shiki.ts, editorUtils.ts, toolUtils.ts) (3a3f37a)
+
+## [v0.1.12] - 2026-03-09
+
+- fix: preserve changelog ordering during release prep (039b906)
+- chore: ignore generated tauri assets in lint (071e2db)
+- fix: keep slash command composer responsive (42cdcf6)
+- fix: restore cross-platform Tauri app handling (6b84717)
+- perf: replace std default hasher with rapidhash (c6d5bdb)
+- refactor: reorganize the file structure of Tauri backend (fa5edf6)
+- perf: refactor OpenDirectoryState with papaya HashMap to reduce lock contention (6efd2a0)
+- perf: optimize ServiceState.child_pid with AtomicU32 to reduce Mutex contention (a42df0b)
+- perf: optimize SseState implementation - replace Mutex+Hashmap with papaya library to reduce contention and improve performance (f586a84)
+
+## [v0.1.11] - 2026-03-08
+
+- feat: add an optional folder-style Recent view while preserving the original session row details and per-folder ordering controls
+- feat: aggregate Active sessions across all saved projects instead of limiting the list to the currently selected directory
+
+## [v0.1.10] - 2026-03-08
+
+- fix: harden session message sync and failed sends (b788dce)
+- chore: add validated release preparation flow (010ffbe)
+- docs: consolidate v0.1.9 release notes (79113da)
+
+## [v0.1.9] - 2026-03-08
+
+- fix: restore message attachment expand animation (2975fe3)
+- fix: streamline composer attachment rail interactions (99db58a)
+- fix: constrain expanded attachments and preserve composer blank lines (dd2d7ba)
+- fix: harden composer attachment rail scrolling (b2bac29)
+
+## [v0.1.7] - 2026-03-08
+
+- fix: truncate tool description overflow in tool call row (3782c67)
+- fix: tighten mobile model menu and attachment width (60b34a2)
+- fix: preserve utf-8 across tauri stream chunks (1dcb15a)
+
+## [v0.1.6] - 2026-03-07
+
+- fix: restore tauri mobile file attachments (ffe3398)
+
+## [v0.1.5] - 2026-03-07
+
+- chore: keep tauri config formatted on release (48f6045)
+- fix: sync settings version with app release (b815d18)
+- chore: format release workflow (aef533b)
+- ci: add build validation workflow (491a544)
+- other: add "zed/\*" as ignored file (8f32b7d)
+
+## [v0.1.4] - 2026-03-07
+
+- fix: split frontend and api slash commands (bdb2e33)
+- fix: support clipboard fallback in insecure contexts (edf4dd0)
+- fix: align slash command descriptions (9d84a78)
+
+## [v0.1.3] - 2026-03-07
+
+- chore: restore release workflow formatting (73a41a4)
+- perf: split code preview from file explorer (b94bfc5)
+- perf: lazy load optional panels and split vendor chunks (9e0f7d6)
+- chore: add test baseline and clean lint debt (0d5f175)
+- chore: establish lint and formatting baseline (762786d)
+- fix: shorten input footer disclaimer copy (d691b7b)
+- chore: automate lockfile updates in release script (e678349)
+
+## [v0.1.2] - 2026-03-07
+
+- fix: scope active session state to the current directory (2503c6b)
+
+## [v0.1.1] - 2026-03-07
+
+Patch release focused on chat input polish, session list consistency, and smoother permission handling.
+
+### Fixes
+
+- Restored collapsed input dock bottom spacing
+- Kept the session list in sync across directory filters and live updates
+- Returned gracefully to a new chat after deleting the currently open session
+- Aligned the todo popover with the input dock for desktop and mobile
+- Removed extra polling from permission/question flows and synced reply state immediately
+
+### Improvements
+
+- Preloaded `@` root listing and `/` command data when entering a session to reduce first-open lag
+
+## [v0.1.0] - 2026-03-05
+
+First stable release of OpenCodeUI.
+
+### Features
+
+- Drag-and-drop file attachment support (desktop & mobile)
+- Material file icons for file/folder display
+- File @mention from explorer sidebar
+- Context breakdown visualization in sidebar
+- Live retry status display with expand/collapse
+- Attachment detail viewer with copy/save functionality
+- Capability-based file attachment upload
+
+### Fixes
+
+- Aligned capsule thinking chevron with italic/tool toggle arrows
+- Stabilized Tauri desktop file drag-and-drop handling
+- Fixed multiple task windows rendering the latest child session
+- Eliminated scroll jank from high-frequency re-renders
+- Fixed mobile overflow in project and diff headers
+- Fixed sidebar notification/session meta row overflow
+- Fixed attachment pill truncation and compact tool layout
+
+### Improvements
+
+- Migrated all icons to lucide-react
+- Unified message part spacing and alignment
+- Added Docker support with material icons build step

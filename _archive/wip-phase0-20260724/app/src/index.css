@@ -1,0 +1,1247 @@
+@import 'tailwindcss';
+
+/* ============================================
+ * Tauri WebView backdrop-filter 修复
+ * ============================================
+ * WebView2 (Windows) 和 WebKitGTK (Linux) 的部分版本
+ * 不渲染 backdrop-filter blur，需要合成层提示。
+ * 只给实际带 blur 的节点开 hint，避免 .tauri-app * 把整棵
+ * DOM 推成 GPU 层导致空闲功耗偏高。
+ * 不用 transform：避免打断 InputBox todo-swap 等 transform 动画，
+ * 也避免父层 transform 让子级 backdrop-blur 采样错位。
+ * .tauri-app class 由 main.tsx 在 Tauri 环境下添加到 <html>。
+ */
+.tauri-app[data-glass] :is(.glass, .glass-alt),
+.tauri-app [class*='backdrop-blur'] {
+  will-change: backdrop-filter;
+}
+
+.mobile-chat-pager {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.mobile-chat-pager::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+
+.mobile-chat-pager::-webkit-scrollbar-thumb,
+.mobile-chat-pager::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 导航到消息时保留顶部空间，避免被对话标题栏遮挡。 */
+[data-chat-scroll-root='true'] [data-message-id] {
+  scroll-margin-top: calc(72px + var(--app-safe-top, 0px));
+}
+
+/* ============================================
+ * Mobile Viewport & Safe Area
+ * ============================================ */
+
+/* 动态视口高度变量 - 适配移动端虚拟键盘和地址栏 */
+:root {
+  --app-height: 100vh;
+  color-scheme: light;
+  /* Safe area insets：
+   * - Android: 由 MainActivity.kt 通过 evaluateJavascript 注入真实值
+   *   (Android WebView 的 env(safe-area-inset-*) 返回 0px)
+   * - iOS/浏览器: 使用 env() fallback */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --app-safe-top: 0px;
+  --keyboard-inset-bottom: 0px;
+}
+
+/* 支持 dvh 的浏览器使用动态视口高度 */
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
+}
+
+/* 根元素填充整个视口 */
+html,
+body,
+#root {
+  height: var(--app-height);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: hsl(var(--bg-100));
+}
+
+/* Safe-area padding 应用在 #root 上：浏览器、PWA、Tauri 共用同一份 env()。
+ * 非 PWA 浏览器场景下 env() 自然返回 0，不会产生副作用；Tauri 走原生 setPadding，
+ * 由下方 .tauri-app #root 显式重置为 0，避免与原生层叠加产生双倍 padding。
+ * 不在这里加 padding-bottom——贴底组件 (InputBox / BottomPanel / SidebarFooter)
+ * 自己读取 var(--safe-area-inset-bottom) 处理底边距，避免和键盘 inset 冲突。 */
+#root {
+  padding-top: var(--safe-area-inset-top);
+  padding-left: var(--safe-area-inset-left);
+  padding-right: var(--safe-area-inset-right);
+}
+
+/* PWA standalone 底部兜底：
+ * 部分 iOS 设备（如有物理 Home 键的 iPhone 8）env(safe-area-inset-bottom) 为 0，
+ * 但 Safari standalone 仍会在底部叠加系统 UI 横条，遮住贴底内容。
+ * 用 max() 取 safe-area 和最小保底值的较大者，确保 InputFooter 不被遮挡。 */
+@media (display-mode: standalone) {
+  :root:not(.tauri-app) {
+    --safe-area-inset-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  }
+}
+
+/* Tauri 原生 app：MainActivity.kt 只处理底部键盘/导航栏，顶部由 Web surface 自己绘制。
+ * 用更高优先级 (.tauri-app + #root) 显式 padding:0 覆盖上面的 #root 规则，
+ * 防止 CSS env() 与原生 setPadding 双重叠加。 */
+.tauri-app #root {
+  padding: 0;
+}
+
+.tauri-app {
+  --app-safe-top: var(--safe-area-inset-top);
+}
+
+.mobile-safe-topbar-14 {
+  box-sizing: border-box;
+  height: calc(3.5rem + var(--app-safe-top, 0px));
+  padding-top: var(--app-safe-top, 0px);
+}
+
+.mobile-safe-topbar-10 {
+  box-sizing: border-box;
+  height: calc(2.5rem + var(--app-safe-top, 0px));
+  padding-top: var(--app-safe-top, 0px);
+}
+
+.mobile-chat-top-spacer {
+  height: calc(5rem + var(--app-safe-top, 0px));
+}
+
+.modal-shell-safe-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100% - var(--app-safe-top, 0px));
+  margin-top: var(--app-safe-top, 0px);
+}
+
+.dialog-safe-region {
+  top: calc(var(--desktop-titlebar-height, 0px) + var(--app-safe-top, 0px));
+  padding-right: max(1rem, var(--safe-area-inset-right));
+  padding-bottom: max(1rem, var(--safe-area-inset-bottom));
+  padding-left: max(1rem, var(--safe-area-inset-left));
+}
+
+.settings-search-highlight {
+  border-radius: 0.5rem;
+  animation: settings-search-highlight 1.8s ease-out;
+}
+
+@keyframes settings-search-highlight {
+  0%, 24% {
+    background-color: hsl(var(--accent-main-100) / 0.14);
+    box-shadow: 0 0 0 1px hsl(var(--accent-main-100) / 0.38);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 1px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-search-highlight {
+    animation: none;
+    background-color: hsl(var(--accent-main-100) / 0.14);
+    box-shadow: 0 0 0 1px hsl(var(--accent-main-100) / 0.38);
+  }
+}
+
+.toast-safe-top {
+  top: calc(var(--app-safe-top, 0px) + 0.75rem);
+}
+
+.command-palette-safe-top {
+  padding-top: calc(var(--app-safe-top, 0px) + 15vh);
+}
+
+/* ============================================
+ * Desktop Titlebar (Tauri desktop)
+ * ============================================ */
+
+.desktop-titlebar {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar [data-tauri-drag-region] {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.desktop-titlebar [data-tauri-decorum-tb] {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.desktop-titlebar button.decorum-tb-btn,
+.desktop-titlebar button#decorum-tb-minimize,
+.desktop-titlebar button#decorum-tb-maximize,
+.desktop-titlebar button#decorum-tb-close {
+  position: relative;
+  z-index: 240;
+  width: 46px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: hsl(var(--text-300));
+  pointer-events: auto;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.desktop-titlebar button.decorum-tb-btn:hover,
+.desktop-titlebar button#decorum-tb-minimize:hover,
+.desktop-titlebar button#decorum-tb-maximize:hover {
+  background: hsl(var(--bg-200) / 0.92);
+  color: hsl(var(--text-100));
+}
+
+.desktop-titlebar button#decorum-tb-close:hover {
+  background: hsl(var(--danger-100));
+  color: hsl(var(--always-white, 0 0% 100%));
+}
+
+/* Browser/PWA: keyboard inset via visualViewport (Tauri uses native insets) */
+@media (display-mode: browser), (display-mode: standalone) {
+  :root:not(.tauri-app) #root {
+    padding-bottom: var(--keyboard-inset-bottom, 0px);
+  }
+}
+
+/* ============================================
+ * Design System - Theme Tokens
+ * ============================================
+ * 
+ * 设计规范：
+ * - 所有颜色使用语义化命名
+ * - 圆角统一使用 radius-* 令牌
+ * - 间距使用 Tailwind 默认 spacing
+ */
+
+/* Custom Tailwind Theme */
+@theme {
+  /* ============================================
+   * Background colors
+   * ============================================ */
+  --color-bg-000: hsl(var(--bg-000));
+  --color-bg-100: hsl(var(--bg-100));
+  --color-bg-200: hsl(var(--bg-200));
+  --color-bg-300: hsl(var(--bg-300));
+  --color-bg-400: hsl(var(--bg-400));
+
+  /* ============================================
+   * Text colors
+   * ============================================ */
+  --color-text-000: hsl(var(--text-000));
+  --color-text-100: hsl(var(--text-100));
+  --color-text-200: hsl(var(--text-200));
+  --color-text-300: hsl(var(--text-300));
+  --color-text-400: hsl(var(--text-400));
+  --color-text-500: hsl(var(--text-500));
+  --color-text-600: hsl(var(--text-600));
+
+  /* ============================================
+   * Accent colors (brand)
+   * ============================================ */
+  --color-accent-brand: hsl(var(--accent-brand));
+  --color-accent-main-000: hsl(var(--accent-main-000));
+  --color-accent-main-100: hsl(var(--accent-main-100));
+  --color-accent-main-200: hsl(var(--accent-main-200));
+  --color-accent-secondary-100: hsl(var(--accent-secondary-100));
+
+  /* ============================================
+   * Semantic colors
+   * ============================================ */
+  /* Success (green) */
+  --color-success-100: hsl(var(--success-100));
+  --color-success-200: hsl(var(--success-200));
+  --color-success-bg: hsl(var(--success-bg));
+
+  /* Warning (orange/yellow) */
+  --color-warning-100: hsl(var(--warning-100));
+  --color-warning-200: hsl(var(--warning-200));
+  --color-warning-bg: hsl(var(--warning-bg));
+
+  /* Danger (red) */
+  --color-danger-000: hsl(var(--danger-000));
+  --color-danger-100: hsl(var(--danger-100));
+  --color-danger-200: hsl(var(--danger-200));
+  --color-danger-bg: hsl(var(--danger-bg));
+  --color-danger-900: hsl(var(--danger-900));
+
+  /* Info (blue) */
+  --color-info-100: hsl(var(--info-100));
+  --color-info-200: hsl(var(--info-200));
+  --color-info-bg: hsl(var(--info-bg));
+
+  /* ============================================
+   * Border colors
+   * ============================================ */
+  --color-border-100: hsl(var(--border-100));
+  --color-border-200: hsl(var(--border-200));
+  --color-border-300: hsl(var(--border-300));
+
+  /* ============================================
+   * Special colors
+   * ============================================ */
+  --color-oncolor-100: hsl(var(--oncolor-100));
+
+  /* ============================================
+   * Border Radius - 统一圆角规范
+   * ============================================
+   * 使用场景：
+   * - xs: 小元素如 tag, badge
+   * - sm: 按钮, 输入框内部元素
+   * - md: 卡片, 下拉菜单
+   * - lg: 大卡片, 对话框
+   * - xl: 输入框容器, 消息气泡
+   * - full: 圆形按钮, 头像
+   */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+
+  /* ============================================
+   * Shadows
+   * ============================================ */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 2px 6px -1px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 4px 12px -2px rgb(0 0 0 / 0.08);
+  --shadow-xl: 0 6px 16px -3px rgb(0 0 0 / 0.1);
+  --shadow-float: 0 4px 12px -2px rgb(0 0 0 / 0.1);
+
+  /* ============================================
+   * Sizing - Collapsible Components
+   * ============================================ */
+  --collapsed-min-w: 160px;
+  --collapsed-max-w: 200px;
+
+  /* ============================================
+   * Sizing - Message Layout
+   * ============================================ */
+  --message-user-max-w: 85%;
+  --attachment-thumb-w: 140px;
+  --attachment-expanded-max-w: 500px;
+  --menu-width: 360px;
+
+  /* ============================================
+   * Fonts — 默认使用系统字体栈，用户可通过 Settings 自定义覆盖
+   * 
+   * --font-ui-sans: 用户可覆盖的 UI 字体变量
+   * --font-sans:    Tailwind font-sans class 使用的变量，指向 --font-ui-sans
+   * --font-mono:    代码/等宽字体，Tailwind font-mono class 使用
+   * ============================================ */
+  --font-ui-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Liberation Sans', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji';
+  --font-sans: var(--font-ui-sans);
+  --font-ui-serif: 'Georgia', 'Noto Serif', serif;
+  --font-mono: 'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular',
+    'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono',
+    'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace;
+}
+
+:root[data-mode='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-mode='light'] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mode]) {
+    color-scheme: dark;
+  }
+}
+
+/* ============================================
+ * CSS Variables - Default Fallback (Eucalyptus Light)
+ * ============================================
+ * 
+ * 这些是 CSS 变量的默认值，作为 JS 主题引擎加载前的 fallback。
+ * 实际颜色由 themeStore.ts 通过注入 <style> 标签动态控制。
+ */
+:root {
+  --font-ui-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Liberation Sans', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji';
+  --font-sans: var(--font-ui-sans);
+  --font-ui-serif: 'Georgia', 'Noto Serif', serif;
+  --font-mono: 'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular',
+    'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono',
+    'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace;
+
+  /* Background - 灰调晨雾 */
+  --bg-000: 150 10% 99%;
+  --bg-100: 150 12% 96%;
+  --bg-200: 150 12% 93%;
+  --bg-300: 150 10% 89%;
+  --bg-400: 150 10% 85%;
+
+  /* Text - 墨绿灰 */
+  --text-000: 0 0% 100%;
+  --text-100: 170 15% 15%;
+  --text-200: 170 10% 40%;
+  --text-300: 170 8% 55%;
+  --text-400: 170 8% 70%;
+  --text-500: 170 6% 78%;
+  --text-600: 170 10% 85%;
+
+  /* Accent - 桉树绿 */
+  --accent-brand: 165 45% 42%;
+  --accent-main-000: 165 40% 35%;
+  --accent-main-100: 165 45% 42%;
+  --accent-main-200: 165 50% 48%;
+  --accent-secondary-100: 200 45% 50%;
+
+  /* Semantic */
+  --success-100: 140 40% 40%;
+  --success-200: 140 35% 32%;
+  --success-bg: 140 30% 94%;
+  --warning-100: 35 80% 45%;
+  --warning-200: 35 70% 38%;
+  --warning-bg: 35 60% 94%;
+  --danger-000: 5 55% 40%;
+  --danger-100: 5 60% 55%;
+  --danger-200: 5 65% 62%;
+  --danger-bg: 5 60% 96%;
+  --danger-900: 5 50% 93%;
+  --info-100: 200 50% 50%;
+  --info-200: 200 45% 60%;
+  --info-bg: 200 40% 95%;
+
+  /* Border */
+  --border-100: 160 10% 86%;
+  --border-200: 160 10% 82%;
+  --border-300: 160 10% 75%;
+
+  /* Special */
+  --always-black: 0 0% 0%;
+  --always-white: 0 0% 100%;
+  --oncolor-100: 0 0% 100%;
+
+  /* ============================================
+   * Typography Scale — 字号系统
+   * ============================================
+   * 所有 UI 字号都通过这些变量控制。
+   * themeStore 的 fontScale 设置会覆盖这些值。
+   *
+   * 使用方式：在 Tailwind class 中写 text-[length:var(--fs-xxs)] 等。
+   * 代码区行高必须用绝对值 (px)，保证虚拟滚动和行号对齐。
+   *
+   * 参考：opencode 官方 UI 只用 4 档（13/14/16/20），
+   *       代码区 13px + 24px 行高。
+   */
+  --fs-xxs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+
+  /* 代码 / Diff / 终端专用 */
+  --fs-code: 13px;
+  --fs-code-line-height: 24px;
+  --fs-terminal: 13px;
+  --fs-terminal-line-height: 1.4;
+
+  /* 固定字号 — 不受 fontScale 滑块影响，但统一管理 */
+  --fs-btn-sm: 12px;
+  --fs-btn-md: 14px;
+  --fs-btn-lg: 16px;
+  --fs-heading-3: 16px;
+  --fs-heading-2: 18px;
+  --fs-heading-1: 20px;
+}
+
+/* Base styles */
+body {
+  margin: 0;
+  font-family: var(--font-ui-sans);
+  line-height: 1.5;
+}
+
+/* ============================================
+ * Markdown Math Theme Integration
+ * ============================================
+ * MarkdownRenderer 生成 KaTeX DOM，并显式引入 katex.css。
+ * 这里再把公式根节点绑定到当前文本色，
+ * 让默认消息 / reasoning / 主题切换都能稳定继承 color。
+ */
+.markdown-content .katex,
+.markdown-content .katex-display,
+.markdown-content .katex-display > .katex,
+.markdown-content .katex .base {
+  color: inherit;
+}
+
+.markdown-content .katex svg {
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+/* Streaming Markdown is rendered in stable/live chunks. Without this, Tailwind
+ * first:/last: margin utilities run per chunk root and make adjacent blocks too tight.
+ * Use DOM position (:first-child/:last-child) so settled blocks need no isFirst/isLast props. */
+.markdown-content .markdown-stream-block:not(:first-child) > :first-child > :first-child {
+  margin-top: 1rem;
+}
+
+.markdown-content .markdown-stream-block:not(:last-child) > :last-child > :last-child {
+  margin-bottom: 1rem;
+}
+
+.markdown-content.text-\[length\:var\(--fs-sm\)\] .markdown-stream-block:not(:first-child) > :first-child > :first-child {
+  margin-top: 0.5rem;
+}
+
+.markdown-content.text-\[length\:var\(--fs-sm\)\] .markdown-stream-block:not(:last-child) > :last-child > :last-child {
+  margin-bottom: 0.5rem;
+}
+
+/* Sanitized rich HTML keeps native semantics while matching the Markdown surface. */
+.markdown-content .markdown-html-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border-200) / 0.65);
+  border-radius: 6px;
+  background: hsl(var(--bg-100) / 0.45);
+}
+
+.markdown-content .markdown-html-table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  color: hsl(var(--text-200));
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.markdown-content .markdown-html-table th,
+.markdown-content .markdown-html-table td {
+  min-width: 7rem;
+  padding: 0.625rem 0.75rem;
+  border-right: 1px solid hsl(var(--border-200) / 0.45);
+  border-bottom: 1px solid hsl(var(--border-200) / 0.45);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.markdown-content .markdown-html-table th:last-child,
+.markdown-content .markdown-html-table td:last-child {
+  border-right: 0;
+}
+
+.markdown-content .markdown-html-table tr:last-child > td {
+  border-bottom: 0;
+}
+
+.markdown-content .markdown-html-table th {
+  background: hsl(var(--bg-200) / 0.75);
+  color: hsl(var(--text-100));
+  font-weight: 600;
+}
+
+.markdown-content .markdown-html-table :is(th, td)[align='center'] {
+  text-align: center;
+}
+
+.markdown-content .markdown-html-table :is(th, td)[align='right'] {
+  text-align: right;
+}
+
+.markdown-content .markdown-html-table tbody tr:hover > td {
+  background: hsl(var(--bg-200) / 0.32);
+}
+
+.markdown-content .markdown-html-details {
+  max-width: 100%;
+  overflow: clip;
+  border: 1px solid hsl(var(--border-200) / 0.6);
+  border-radius: 6px;
+  background: hsl(var(--bg-100) / 0.35);
+}
+
+.markdown-content .markdown-html-summary {
+  cursor: pointer;
+  padding: 0.625rem 0.75rem;
+  color: hsl(var(--text-100));
+  font-weight: 600;
+  user-select: none;
+}
+
+.markdown-content .markdown-html-details[open] > .markdown-html-summary {
+  border-bottom: 1px solid hsl(var(--border-200) / 0.45);
+}
+
+.markdown-content .markdown-html-details > :not(.markdown-html-summary) {
+  margin-inline: 0.75rem;
+}
+
+.markdown-content .markdown-html-details > :last-child {
+  margin-bottom: 0.75rem;
+}
+
+.markdown-content .markdown-html-definition-list {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+  gap: 0.25rem 1rem;
+}
+
+.markdown-content .markdown-html-definition-list dt {
+  color: hsl(var(--text-100));
+  font-weight: 600;
+}
+
+.markdown-content .markdown-html-definition-list dd {
+  margin: 0;
+  color: hsl(var(--text-300));
+}
+
+.markdown-content .markdown-html-control:is(input:not([type='checkbox']):not([type='radio']), textarea, select, button) {
+  max-width: 100%;
+  border: 1px solid hsl(var(--border-200) / 0.75);
+  border-radius: 5px;
+  background: hsl(var(--bg-200) / 0.65);
+  color: hsl(var(--text-100));
+  font: inherit;
+}
+
+.markdown-content .markdown-html-control:is(input:not([type='checkbox']):not([type='radio']), textarea, select) {
+  padding: 0.4rem 0.55rem;
+}
+
+.markdown-content button.markdown-html-control {
+  cursor: pointer;
+  padding: 0.4rem 0.7rem;
+}
+
+.markdown-content button.markdown-html-control:hover {
+  background: hsl(var(--bg-300) / 0.8);
+}
+
+.markdown-content .markdown-html-control:focus-visible,
+.markdown-content .markdown-html-summary:focus-visible {
+  outline: 2px solid hsl(var(--accent-main-100) / 0.7);
+  outline-offset: 2px;
+}
+
+.markdown-content :is(.markdown-html-control[type='checkbox'], .markdown-html-control[type='radio'], .markdown-html-progress) {
+  accent-color: hsl(var(--accent-main-100));
+}
+
+.markdown-content .markdown-html-progress {
+  width: 100%;
+  max-width: 28rem;
+}
+
+.markdown-content .markdown-html-media {
+  display: block;
+  max-width: 100%;
+}
+
+.message-renderer-shell:has([data-user-html-artifact]) {
+  width: 100%;
+}
+
+/* Theme View Transition (Circular Reveal) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  /* 硬件加速优化 */
+  will-change: clip-path;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Utility classes */
+
+/*
+ * Fix: Tailwind .truncate 使用 overflow:hidden 会裁切 descender 字母 (g/j/p/q/y)
+ * overflow:clip 支持独立轴控制（不像 hidden 会强制另一轴为 auto），
+ * 且完全兼容 text-overflow:ellipsis，所以：
+ *   - overflow-x: clip  → 保持水平截断 + 省略号
+ *   - overflow-y: visible → 不裁切垂直方向的 descender
+ */
+.truncate {
+  overflow-x: clip;
+  overflow-y: visible;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================
+ * 全局 Overlay Scrollbar
+ * ============================================
+ * 原生滚动条全局隐藏，自绘 thumb 由 overlayScrollbar.ts 注入。
+ * textarea 无法注入子元素所以没有 overlay thumb，
+ * 但原生滚动条一样隐藏——textarea 内容靠滑动/键盘滚动。
+ *
+ * 下方旧 class 保留为兼容空壳，仅声明 overflow 方向，
+ * 不再包含任何原生滚动条样式。
+ */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* 隐藏滚动条（包括 overlay thumb 也不要）—— 旧 class 兼容 */
+.no-scrollbar,
+.scrollbar-none {
+  scrollbar-width: none !important;
+}
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* overflow 方向空壳 */
+.custom-scrollbar {
+  overflow-y: auto;
+}
+.panel-scrollbar {
+  overflow: auto;
+}
+.panel-scrollbar-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.code-scrollbar {
+  overflow: auto;
+}
+
+/* ── Overlay thumb (vertical, default) ── */
+.os-thumb {
+  position: absolute;
+  top: 0;
+  width: 12px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  cursor: default;
+  user-select: none;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.os-thumb::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 9999px;
+  background-color: hsl(var(--border-300) / 0.35);
+  transition:
+    background-color 150ms ease,
+    width 120ms ease;
+}
+
+.os-thumb.os-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.os-thumb:hover::after,
+.os-thumb.os-dragging::after {
+  background-color: hsl(var(--border-300) / 0.6);
+  width: 6px;
+}
+
+/* ── Overlay thumb (horizontal) ── */
+.os-thumb.os-thumb-x {
+  top: auto;
+  left: 0;
+  bottom: 0;
+  width: auto;
+  height: 12px;
+}
+
+.os-thumb.os-thumb-x::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  width: auto;
+  height: 4px;
+  transition:
+    background-color 150ms ease,
+    height 120ms ease;
+}
+
+.os-thumb.os-thumb-x:hover::after,
+.os-thumb.os-thumb-x.os-dragging::after {
+  width: auto;
+  height: 6px;
+}
+
+.internal-drag-active,
+.internal-drag-active * {
+  cursor: default !important;
+}
+
+/* ============================================
+ * Input Textarea + Overlay - 共享样式确保完全对齐
+ * ============================================ */
+
+/* ============================================
+ * Panel Unified Styles - 面板统一样式
+ * ============================================
+ * 用于 RightPanel 和 BottomPanel 的统一视觉规范
+ */
+
+@media (max-width: 768px) {
+  /* 移动端触摸目标最小尺寸 - 只对独立按钮生效，不影响紧凑组件内部 */
+  button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([data-compact]) {
+    min-height: 32px;
+  }
+
+  /*
+   * iOS 缩放已由 viewport meta (maximum-scale=1, user-scalable=no) 阻止，
+   * 不再需要强制 16px，让 textarea 继承 --fs-base 与信息流字号一致。
+   */
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Animation utility classes */
+.animate-in {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+/* Session 加载 spinner — 延迟 150ms 才显示，快速加载时不闪烁 */
+.session-loading-indicator {
+  opacity: 0;
+  animation: fade-in 200ms ease-out 150ms forwards;
+}
+
+.slide-in-from-bottom-2 {
+  animation-name: slide-in-from-bottom;
+}
+
+@keyframes reasoning-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.reasoning-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--text-400)) 0%,
+    hsl(var(--text-300)) 35%,
+    hsl(var(--text-100)) 50%,
+    hsl(var(--text-300)) 65%,
+    hsl(var(--text-400)) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: reasoning-shimmer 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-shimmer-text {
+    animation: none !important;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* ============================================
+ * Mention tag styles
+ * ============================================ */
+.mention-tag {
+  font-weight: 500;
+}
+
+/* Agent mention - uses accent (orange) */
+.mention-tag[data-mention-type='agent'] {
+  color: hsl(var(--accent-main-100));
+}
+
+/* File mention - uses info (blue) */
+.mention-tag[data-mention-type='file'] {
+  color: hsl(var(--info-100));
+}
+
+/* Folder mention - uses success (green) */
+.mention-tag[data-mention-type='folder'] {
+  color: hsl(var(--success-100));
+}
+
+/* ============================================
+ * Browser-style active tab with shoulder curves
+ * ============================================
+ * Temani Afif 方案：mask + radial-gradient，
+ * 单元素实现反向圆弧，无伪元素、无 SVG。
+ * --tab-r 控制肩部弧度大小。
+ */
+.tab-active {
+  --tab-r: 5px;
+  border-inline: var(--tab-r) solid transparent;
+  border-radius: calc(2 * var(--tab-r)) calc(2 * var(--tab-r)) 0 0 / var(--tab-r);
+  mask:
+    radial-gradient(var(--tab-r) at var(--tab-r) 0, #0000 98%, #000 101%) calc(-1 * var(--tab-r)) 100% / 100%
+      var(--tab-r) repeat-x,
+    conic-gradient(#000 0 0) padding-box;
+  -webkit-mask:
+    radial-gradient(var(--tab-r) at var(--tab-r) 0, #0000 98%, #000 101%) calc(-1 * var(--tab-r)) 100% / 100%
+      var(--tab-r) repeat-x,
+    conic-gradient(#000 0 0) padding-box;
+}
+
+/* ============================================
+ * Border Pulse Animation (InputBox waiting)
+ * ============================================ */
+@keyframes border-pulse {
+  0%,
+  100% {
+    border-color: hsl(var(--accent-main-100) / 0.5);
+  }
+  50% {
+    border-color: hsl(var(--accent-main-100) / 0.2);
+  }
+}
+
+@keyframes terminal-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.animate-border-pulse {
+  animation: border-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-border-pulse {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+ * CSS Containment - 优化布局性能，减少 CLS
+ * ============================================ */
+
+/* 完全隔离（用于独立的滚动区域） */
+.contain-strict {
+  contain: strict;
+}
+
+/* 内容隔离（用于动态内容区域） */
+.contain-content {
+  contain: content;
+}
+
+/* ============================================
+ * Frosted Glass 毛玻璃浮层系统
+ * ============================================
+ * .glass       — 通用浮层（下拉菜单、输入框、Dialog、Toast 等）
+ * .glass-alt   — bg-100 底色变体（sidebar footer、popover 等）
+ *
+ * 调参改这里，全局生效。组件里只写 class 名，不写具体数值。
+ *
+ * 注意：
+ *  - backdrop-filter 里不能用 var()，webkit2gtk (Linux Tauri) 不支持
+ *  - -webkit- 前缀必须写在非前缀前面，否则构建工具会删掉非前缀版本
+ *  - 毛玻璃开关由 <html data-glass> 属性驱动
+ *    有 data-glass → 半透明 + blur
+ *    无 data-glass → 实色背景回退
+ */
+
+/* -- 共用底色 / 边框色 -- */
+.glass {
+  background-color: hsl(var(--bg-000));
+  border-color: hsl(var(--border-200) / 0.6);
+}
+
+.glass-alt {
+  background-color: hsl(var(--bg-100));
+  border-color: hsl(var(--border-200) / 0.6);
+}
+
+/* -- data-glass 开启时：半透明 + blur -- */
+:root[data-glass] .glass {
+  background-color: hsl(var(--bg-000) / 0.82);
+  -webkit-backdrop-filter: blur(22px) saturate(200%);
+  backdrop-filter: blur(22px) saturate(200%);
+}
+
+:root[data-glass] .glass-alt {
+  background-color: hsl(var(--bg-100) / 0.78);
+  -webkit-backdrop-filter: blur(22px) saturate(200%);
+  backdrop-filter: blur(22px) saturate(200%);
+}
+
+/* ============================================
+ * Todo Swap Transition
+ * ============================================ */
+
+[data-input-box] {
+  transform-origin: center bottom;
+  transition:
+    opacity 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Floating actions contain backdrop-blur chips; avoid transform layers here so blur survives in WebView/Tauri. */
+[data-floating-actions] {
+  transition: opacity 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-input-box][data-todo-swap='hidden'] {
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+  pointer-events: none;
+}
+
+/* todo panel 展开时同步隐藏 FloatingActions（undo/redo/permission 等） */
+:has([data-input-box][data-todo-swap='hidden']) > [data-floating-actions] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.todo-swap-panel {
+  transform-origin: center bottom;
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+  transition:
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+.todo-swap-panel[data-state='open'] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* ============================================
+ * Diff separator (ported from @pierre/diffs separator structure)
+ * ============================================ */
+
+.diff-separator-surface {
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-block: 1px solid hsl(var(--border-100) / 0.25);
+  background-color: hsl(var(--bg-200) / 0.45);
+  color: hsl(var(--text-500));
+}
+
+.diff-separator-button-group {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  flex: 0 0 auto;
+  user-select: none;
+  fill: currentColor;
+}
+
+.diff-separator-button,
+.diff-separator-content,
+.diff-separator-text-button {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background-color: transparent;
+  color: hsl(var(--text-500));
+  font: inherit;
+}
+
+.diff-separator-button {
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  line-height: 0;
+  cursor: pointer;
+  border-right: 2px solid hsl(var(--bg-100));
+}
+
+.diff-separator-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  transform-origin: center;
+}
+
+.diff-separator-button:hover {
+  color: hsl(var(--text-100));
+}
+
+.diff-separator-button[data-expand-both],
+.diff-separator-button[data-expand-up],
+.diff-separator-button[data-expand-down] {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+.diff-separator-button-group .diff-separator-button + .diff-separator-button {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.diff-separator-button[data-expand-down] .diff-separator-icon {
+  transform: scaleY(-1);
+}
+
+.diff-separator-content-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.diff-separator-label-overlay {
+  position: absolute;
+  top: 0;
+  right: -100vw;
+  z-index: 2;
+}
+
+.diff-separator-label-overlay .diff-separator-content-row {
+  width: auto;
+  max-width: min(60vw, 40rem);
+}
+
+.diff-separator-content {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 1ch;
+}
+
+.diff-separator-text-button {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  cursor: pointer;
+}
+
+.diff-separator-text-button:hover {
+  text-decoration: underline;
+}
+
+.diff-separator-text-button[data-unmodified-lines] {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+.diff-separator-continuation {
+  box-sizing: border-box;
+  height: 100%;
+  background-color: transparent;
+}
+
+.diff-empty-content-buffer {
+  background-color: hsl(var(--bg-200) / 0.18);
+  background-size: 8px 8px;
+  background-position: 5px 0;
+  background-origin: border-box;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent calc(3px * 1.414),
+    hsl(var(--border-200) / 0.48) calc(3px * 1.414),
+    hsl(var(--border-200) / 0.48) calc(4px * 1.414)
+  );
+}
+
+.diff-change-bar-delete {
+  background-image: linear-gradient(0deg, hsl(var(--danger-bg) / 0.45) 50%, hsl(var(--danger-100)) 50%);
+  background-repeat: repeat;
+  background-size: 2px 2px;
+  background-size: calc(1lh / round(1lh / 2px)) calc(1lh / round(1lh / 2px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-input-box],
+  [data-floating-actions],
+  .todo-swap-panel {
+    transition: none;
+  }
+}

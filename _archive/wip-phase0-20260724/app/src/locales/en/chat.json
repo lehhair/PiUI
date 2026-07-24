@@ -1,0 +1,201 @@
+{
+  "header": {
+    "openCode": "OpenCode",
+    "newChat": "New Chat",
+    "openSidebar": "Open sidebar",
+    "clickToRename": "Click to rename",
+    "shareSession": "Share session",
+    "closeBottomPanel": "Close bottom panel",
+    "openBottomPanel": "Open bottom panel",
+    "closePanel": "Close panel",
+    "openPanel": "Open panel"
+  },
+  "chatArea": {
+    "loadingSession": "Loading session...",
+    "loadingHistory": "Loading history...",
+    "dropFolderToAddProject": "Add as project",
+    "dropFolderToAddProjectHint": "Drop a folder here"
+  },
+  "emptyState": {
+    "title": "Start a new conversation",
+    "description": "Choose a working directory for this session",
+    "workingDirectory": "Working Directory",
+    "enterAbsolutePath": "Enter absolute path...",
+    "backToDirectoryList": "Back to directory list",
+    "selectDirectory": "Select directory...",
+    "current": "(current)",
+    "enterCustomPath": "Enter custom path...",
+    "startConversation": "Start Conversation",
+    "orJustType": "Or just type a message below to start with the current directory"
+  },
+  "inputBox": {
+    "dropFilesHere": "Drop files here",
+    "replyToAgentMobile": "Reply to Agent...",
+    "replyToAgent": "Reply to Agent (type @ to mention, / for commands)"
+  },
+  "modelSelector": {
+    "selectModel": "Select model",
+    "searchModels": "Search models...",
+    "noModelsFound": "No models found",
+    "tryDifferentKeyword": "Try a different keyword",
+    "pinned": "Pinned",
+    "recent": "Recent",
+    "thinking": "Thinking",
+    "vision": "Vision",
+    "unpin": "Unpin",
+    "pinToTop": "Pin to top",
+    "model": "Model"
+  },
+  "retryStatus": {
+    "retrying": "Retrying (attempt {{attempt}})",
+    "nextIn": "next in {{label}}"
+  },
+  "shareDialog": {
+    "title": "Share Chat",
+    "publicLink": "Public Link",
+    "publicLinkDesc": "Anyone with this link can view this chat session.",
+    "failedCreate": "Failed to create share link",
+    "failedRemove": "Failed to remove share link",
+    "copyLink": "Copy link",
+    "stopSharing": "Stop sharing",
+    "createPublicLink": "Create public link",
+    "creatingLink": "Creating link..."
+  },
+  "questionDialog": {
+    "title": "Question",
+    "moreCount": "+{{count}} more",
+    "minimize": "Minimize",
+    "typeYourAnswer": "Type your own answer..."
+  },
+  "permissionDialog": {
+    "permission": "Permission: {{permission}}",
+    "moreCount": "+{{count}} more",
+    "minimize": "Minimize",
+    "fromSubtask": "From subtask: {{title}}",
+    "changesPreview": "Changes preview",
+    "request": "Request",
+    "rule": "Rule",
+    "allowOnce": "Allow once",
+    "alwaysAllow": "Always allow",
+    "subtaskFallback": "Subtask",
+    "browserSession": "Frontend temporary",
+    "thisSession": "Backend always",
+    "autoApproveEnabled": "The frontend temporarily remembers Always allow rules. Refresh to clear them.",
+    "changePermissionSettings": "Always allow is handled by the backend. You can change this in settings."
+  },
+  "projectDialog": {
+    "typePath": "Type path...",
+    "parent": ".. (Parent)",
+    "noMatchingFolders": "No matching folders",
+    "addCurrent": "Add current"
+  },
+  "inputToolbar": {
+    "default": "Default",
+    "attachFile": "Attach file",
+    "stopGeneration": "Stop generation",
+    "sendingMessage": "Sending message",
+    "sendMessage": "Send message"
+  },
+  "inputFooter": {
+    "autoApproveOff": "Auto-approve: off",
+    "autoApproveSession": "Auto-approve: this session · click for all sessions",
+    "autoApproveGlobal": "Auto-approve: all sessions · click to disable",
+    "pleaseVerify": "Please verify AI responses.",
+    "allTasksDone": "All tasks done",
+    "remaining": "{{count}} remaining",
+    "allDone": "All Done",
+    "tasksCount": "{{done}} of {{total}} tasks",
+    "greatWork": "Great work!",
+    "inProgress": "{{count}} in progress"
+  },
+  "inputActions": {
+    "scrollToBottom": "Scroll to bottom",
+    "reply": "Reply..."
+  },
+  "undoStatus": {
+    "editing": "Editing",
+    "redo": "Redo",
+    "redoAll": "Redo All"
+  },
+  "sidebar": {
+    "allProjects": "All projects",
+    "global": "Global",
+    "globalProjectHint": "Non-Git workspace, usually where opencode started",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar",
+    "newChat": "New chat",
+    "addProject": "Add project...",
+    "searchChats": "Search chats...",
+    "clearSearch": "Clear search",
+    "recents": "Recents",
+    "active": "Active",
+    "noActiveSessions": "No active sessions",
+    "notifications": "Notifications",
+    "readAll": "Read all",
+    "removeProject": "Remove Project",
+    "removeProjectConfirm": "Remove this project folder from the list? Files won't be deleted.",
+    "contextUsage": "Context Usage",
+    "viewDetails": "View details",
+    "appearance": "Appearance",
+    "standardWidth": "Standard Width",
+    "wideMode": "Wide Mode",
+    "shareChat": "Share Chat",
+    "settings": "Settings",
+    "noProjectFoldersYet": "No project folders yet",
+    "addProjectDesc": "Add a project to browse recent chats by folder.",
+    "deleteChat": "Delete Chat",
+    "deleteChatConfirm": "Are you sure you want to delete this chat? This action cannot be undone.",
+    "moveFolderUp": "Move folder up",
+    "moveFolderDown": "Move folder down",
+    "noChatsInFolder": "No chats in this folder",
+    "showMoreChats": "Show more chats",
+    "selectedSessions": "{{count}} selected",
+    "selectedProjects": "{{count}} projects",
+    "selectedMixed": "{{sessions}} + {{projects}} selected",
+    "selectItems": "Select items",
+    "manageSessions": "Manage",
+    "doneManaging": "Done",
+    "deleteSessionsWithCount": "Delete {{count}} session(s)",
+    "removeProjectsWithCount": "Remove {{count}} project(s)",
+    "batchDeleteSessions": "Delete {{count}} Session(s)",
+    "batchDeleteSessionsConfirm": "Are you sure you want to delete {{count}} session(s)? This action cannot be undone.",
+    "batchDeleteIncludesCurrent": "The currently open session is included. It will switch to a new session after deletion.",
+    "batchRemoveProjects": "Remove {{count}} Project(s)",
+    "batchRemoveProjectsConfirm": "Remove {{count}} project(s) from the list? This only removes them from the sidebar — no sessions will be deleted and no files on disk will be affected."
+  },
+  "activeSession": {
+    "awaitingPermission": "Awaiting Permission",
+    "awaitingAnswer": "Awaiting Answer",
+    "retrying": "Retrying",
+    "working": "Working",
+    "attempt": "attempt {{count}}"
+  },
+  "notification": {
+    "completed": "Completed",
+    "error": "Error",
+    "permission": "Permission",
+    "question": "Question"
+  },
+  "contextDetails": {
+    "context": "Context",
+    "session": "Session",
+    "messages": "Messages",
+    "provider": "Provider",
+    "model": "Model",
+    "contextLimit": "Context Limit",
+    "totalTokens": "Total Tokens",
+    "usage": "Usage",
+    "totalCost": "Total Cost",
+    "inputTokens": "Input",
+    "outputTokens": "Output",
+    "reasoning": "Reasoning",
+    "cacheRW": "Cache (r/w)",
+    "rawMessages": "Raw Messages"
+  },
+  "hints": {
+    "pressEscAgain": "Press <1>Esc</1> again to stop",
+    "autoApproveAll": "Auto-approve: all sessions",
+    "autoApproveSession": "Auto-approve: this session",
+    "autoApproveOffHint": "Auto-approve: off"
+  }
+}
