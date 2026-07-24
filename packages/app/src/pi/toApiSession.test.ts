@@ -12,7 +12,7 @@ describe("toApiSession", () => {
     })
     expect(s.id).toBe("abc")
     expect(s.title).toBe("Hello")
-    expect(s.directory).toBe("piui")
+    expect(s.directory).toBe("piws:w")
     expect(s.time.updated).toBeGreaterThan(0)
   })
 })

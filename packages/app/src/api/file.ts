@@ -1,12 +1,18 @@
 // ============================================
 // File Search API Functions
-// 基于 @opencode-ai/sdk: /file, /find/file, /find/symbol 相关接口
+// Pi server first; OpenCode SDK only as fallback
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
 import { formatPathForApi } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch } from './types'
 import { serverStore } from '../store/serverStore'
+import {
+  isPiServerUp,
+  listWorkspaceFiles,
+  readWorkspaceFile,
+  resolveWorkspaceId,
+} from '../pi/sessionApi'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
 
@@ -21,7 +27,33 @@ function getRootDirectoryCacheKey(directory?: string): string {
   return `${serverStore.getActiveServerId()}::${formatPathForApi(directory) ?? ''}`
 }
 
+function mapPiType(t: string): FileNode['type'] {
+  if (t === 'directory') return 'directory'
+  if (t === 'file' || t === 'symlink' || t === 'other') return 'file'
+  return 'file'
+}
+
+async function fetchDirectoryPi(path: string, directory?: string): Promise<FileNode[] | null> {
+  if (!(await isPiServerUp())) return null
+  const workspaceId = await resolveWorkspaceId(directory)
+  if (!workspaceId) return null
+  const rel = isRootDirectoryPath(path) ? '' : path.replace(/\\/g, '/')
+  const listed = await listWorkspaceFiles(workspaceId, rel)
+  return listed.entries
+    .filter(e => !e.restricted)
+    .map(e => ({
+      name: e.name,
+      path: e.path,
+      absolute: e.path,
+      type: mapPiType(e.type),
+      ignored: false,
+    })) as FileNode[]
+}
+
 async function fetchDirectory(path: string, directory?: string): Promise<FileNode[]> {
+  const pi = await fetchDirectoryPi(path, directory)
+  if (pi) return pi
+
   const sdk = getSDKClient()
   const isAbsolute = /^[a-zA-Z]:/.test(path) || path.startsWith('/')
 
@@ -95,6 +127,17 @@ export async function prefetchRootDirectory(directory?: string): Promise<void> {
  * 读取文件内容
  */
 export async function getFileContent(path: string, directory?: string): Promise<FileContent> {
+  if (await isPiServerUp()) {
+    const workspaceId = await resolveWorkspaceId(directory)
+    if (workspaceId) {
+      const file = await readWorkspaceFile(workspaceId, path.replace(/\\/g, '/'))
+      return {
+        type: 'text',
+        content: file.content,
+        encoding: file.encoding,
+      } as FileContent
+    }
+  }
   const sdk = getSDKClient()
   return unwrap(await sdk.file.read({ path, directory: formatPathForApi(directory) }))
 }
@@ -103,6 +146,11 @@ export async function getFileContent(path: string, directory?: string): Promise<
  * 获取文件 git 状态
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
+  if (await isPiServerUp()) {
+    // Phase: no git service yet
+    void directory
+    return []
+  }
   const sdk = getSDKClient()
   return unwrap(await sdk.file.status({ directory: formatPathForApi(directory) }))
 }

@@ -973,6 +973,14 @@ export function useChatSession({
   const handleAbort = useCallback(async () => {
     if (!routeSessionId) return
     try {
+      if (isPiSession(routeSessionId)) {
+        const { abortSessionCommand } = await import('../pi/sessionApi')
+        const snap = await abortSessionCommand(routeSessionId)
+        if (snap) applySnapshotToUi(snap)
+        messageStore.setStreaming(routeSessionId, false)
+        messageStore.handleSessionIdle(routeSessionId)
+        return
+      }
       const directory = sessionDirectory || currentDirectory
       await abortSession(routeSessionId, directory)
       messageStore.handleSessionIdle(routeSessionId)
