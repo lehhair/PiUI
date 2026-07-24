@@ -31,6 +31,33 @@ export async function isPiServerUp(): Promise<boolean> {
   }
 }
 
+export interface PiModelDto {
+  id: string
+  name: string
+  providerId: string
+  providerName: string
+  family: string
+  contextLimit: number
+  outputLimit: number
+  supportsReasoning: boolean
+  supportsImages: boolean
+  supportsPdf: boolean
+  supportsAudio: boolean
+  supportsVideo: boolean
+  supportsToolcall: boolean
+  variants: string[]
+}
+
+export async function listPiModels(): Promise<{
+  driver: string
+  models: PiModelDto[]
+  error?: string
+}> {
+  const res = await fetch(`${getApiBase()}/api/v1/drivers/pi/models`)
+  if (!res.ok) throw new Error(`listPiModels ${res.status}`)
+  return (await res.json()) as { driver: string; models: PiModelDto[]; error?: string }
+}
+
 export async function listPiSessions(): Promise<PiSessionSummary[]> {
   const res = await fetch(`${getApiBase()}/api/v1/sessions`)
   if (!res.ok) throw new Error(`listPiSessions ${res.status}`)
@@ -262,21 +289,39 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   return (await res.json()) as SessionSnapshotV1
 }
 
-/** Mock prompt — server does not call a real LLM. stream=true emits WS snapshots. */
+/** Prompt session. stream=true emits WS snapshots. Real driver may call LLM. */
 export async function promptSession(
   sessionId: string,
   text: string,
-  opts?: { stream?: boolean },
+  opts?: {
+    stream?: boolean
+    model?: { providerID: string; modelID: string }
+  },
 ): Promise<SessionSnapshotV1> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/prompt`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, stream: opts?.stream === true }),
+      body: JSON.stringify({
+        text,
+        stream: opts?.stream === true,
+        model: opts?.model
+          ? { provider: opts.model.providerID, id: opts.model.modelID }
+          : undefined,
+      }),
     },
   )
-  if (!res.ok) throw new Error(`promptSession ${res.status}`)
+  if (!res.ok) {
+    let detail = String(res.status)
+    try {
+      const err = (await res.json()) as { message?: string; code?: string }
+      detail = err.message || err.code || detail
+    } catch {
+      /* */
+    }
+    throw new Error(`promptSession failed: ${detail}`)
+  }
   const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
   return data.snapshot
 }

@@ -124,6 +124,7 @@ export class SessionRegistry {
       stream?: boolean
       onTick?: (session: AppSession) => void
       delayMs?: number
+      model?: { provider?: string; id?: string }
     },
   ): Promise<AppSession> {
     const session = this.byId.get(sessionId)
@@ -136,12 +137,20 @@ export class SessionRegistry {
     }
 
     if (session.real) {
-      await session.real.prompt(trimmed, projection => {
-        session.projection = projection
-        session.sequence += 1
-        session.updatedAt = new Date().toISOString()
-        opts?.onTick?.(session)
-      })
+      try {
+        if (opts?.model?.provider && opts.model.id) {
+          await session.real.setModel(opts.model.provider, opts.model.id)
+        }
+        await session.real.prompt(trimmed, projection => {
+          session.projection = projection
+          session.sequence += 1
+          session.updatedAt = new Date().toISOString()
+          opts?.onTick?.(session)
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw Object.assign(new Error(msg), { code: "INTERNAL" as const })
+      }
       session.projection = session.real.getProjection()
       if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
         session.title = trimmed.slice(0, 48)

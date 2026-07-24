@@ -14,14 +14,35 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
   try {
     const health = await fetch(`${base}/api/v1/health`, { signal: AbortSignal.timeout(2000) })
     if (!health.ok) return null
+    const { setPiServerReachable } = await import("./isPiSession")
+    setPiServerReachable(true)
+    const body = (await health.json()) as { driver?: string }
+    console.info("[PiUI] server up, driver=", body.driver ?? "unknown")
   } catch {
-    console.info("[PiUI] server not up — skip mock chat seed (run npm run dev:server)")
+    console.info("[PiUI] server not up — run npm run dev:server or npm run dev:server:pi")
     return null
   }
 
   try {
     const { ensurePiEventSocket } = await import("./eventSocket")
     ensurePiEventSocket()
+
+    // refresh models once server is known
+    void import("../hooks/useModels").then(m => m.refreshModels?.()).catch(() => {})
+
+    const health2 = await fetch(`${base}/api/v1/health`)
+    const h = (await health2.json()) as { driver?: string }
+    // real pi: open empty session; mock: seed demo chat
+    if (h.driver === "pi") {
+      const { createPiSession } = await import("./sessionApi")
+      const { snapshot } = await createPiSession({ title: "New chat", seedMock: false })
+      const sessionId = applySnapshotToUi(snapshot)
+      window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
+      window.location.hash = `#/session/${sessionId}`
+      console.info("[PiUI] real-pi session ready", sessionId)
+      return sessionId
+    }
+
     const res = await fetch(`${base}/api/v1/dev/mock-chat`, { method: "POST" })
     if (!res.ok) {
       console.warn("[PiUI] mock-chat failed", res.status)
@@ -29,7 +50,6 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
     }
     const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
     const sessionId = applySnapshotToUi(data.snapshot)
-    // notify session list consumers
     window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
     const hash = `#/session/${sessionId}`
     if (!window.location.hash.includes(sessionId)) {
@@ -38,7 +58,6 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
     console.info("[PiUI] mock chat seeded", sessionId)
     return sessionId
   } catch (err) {
-    console.warn("[PiUI] mock chat seed error", err)
+    console.warn("[PiUI] bootstrap error", err)
     return null
   }
-}

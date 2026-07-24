@@ -83,6 +83,33 @@ export class RealPiSession {
     return this.runtime.session.isStreaming
   }
 
+  async setModel(provider: string, modelId: string): Promise<void> {
+    const session = this.runtime.session
+    // ModelRuntime lives on services; try session.setModel with resolved model
+    const models = session as unknown as {
+      setModel?: (m: unknown) => Promise<void>
+      modelRuntime?: { getModel: (p: string, id: string) => unknown }
+    }
+    const runtime = (this.runtime as unknown as { services?: { modelRuntime?: { getModel: (p: string, id: string) => unknown } } })
+      .services?.modelRuntime
+    const model =
+      runtime?.getModel?.(provider, modelId) ??
+      models.modelRuntime?.getModel?.(provider, modelId)
+    if (model && typeof models.setModel === "function") {
+      await models.setModel(model)
+      return
+    }
+    // best-effort: some builds expose setModel(provider, id)
+    const setAny = session as unknown as { setModel?: (...a: unknown[]) => Promise<void> }
+    if (typeof setAny.setModel === "function") {
+      try {
+        await setAny.setModel(model ?? { provider, id: modelId })
+      } catch {
+        console.warn("[RealPiSession] setModel failed", provider, modelId)
+      }
+    }
+  }
+
   async prompt(text: string, onTick?: (p: ProjectionState) => void): Promise<void> {
     const apply = (ev: WorkerEvent) => {
       this.projection = applyWorkerEvent(this.projection, ev)
