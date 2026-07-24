@@ -61,3 +61,4 @@ export async function bootstrapMockChatIfEnabled(): Promise<string | null> {
     console.warn("[PiUI] bootstrap error", err)
     return null
   }
+}
