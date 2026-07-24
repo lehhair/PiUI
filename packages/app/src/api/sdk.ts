@@ -1,10 +1,7 @@
 // ============================================
-// SDK Client - 基于 @opencode-ai/sdk 的统一客户端
-//
-// 职责：
-// 1. 根据当前活动服务器动态创建 SDK client
-// 2. 整合 baseUrl / auth / tauri fetch
-// 3. 为上层 API 模块提供统一的 client 获取方式
+// SDK Client 入口（Phase 3）
+// createOpencodeClient 解析到本地 shim，不装 npm @opencode-ai/sdk
+// Phase 4 整段换成 Pi protocol client
 // ============================================
 
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2/client'

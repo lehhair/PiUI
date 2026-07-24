@@ -175,11 +175,17 @@ function bootstrap() {
 function startApp() {
   bootstrap()
 
-  void initializeNativeDesktopService()
-
+  // PiUI: 不自动拉起 OpenCode serve（initializeNativeDesktopService 已停用）
+  // 桌面 sidecar 以后接 piui-server。
   if (isNativeTauri) {
-    void getSDKClientAsync().catch(err => apiErrorHandler('initialize sdk client', err))
+    console.info('[PiUI] native shell — opencode auto-start disabled')
+  } else {
+    console.info('[PiUI] browser shell — use packages/server on :8787')
   }
 }
+
+// keep reference so tree-shaking does not confuse future re-enable
+void initializeNativeDesktopService
+void getSDKClientAsync
 
 startApp()

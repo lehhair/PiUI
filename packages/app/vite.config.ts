@@ -2,9 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath, URL } from 'node:url'
 import { bundledLanguagesInfo } from 'shiki/langs'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
+const root = fileURLToPath(new URL('.', import.meta.url))
+const sdkShim = fileURLToPath(new URL('./src/shims/opencode-sdk/v2/client.ts', import.meta.url))
 
 const shikiSupportedLangs = bundledLanguagesInfo.flatMap(info => [info.id, ...(info.aliases ?? [])])
 
@@ -34,6 +37,13 @@ export default defineConfig({
     __SHIKI_SUPPORTED_LANGS__: JSON.stringify(shikiSupportedLangs),
   },
   plugins: [katexWoff2Only(), react(), tailwindcss()],
+  resolve: {
+    alias: {
+      // Phase 3: no npm @opencode-ai/sdk. Phase 4 replaces data layer entirely.
+      '@opencode-ai/sdk/v2/client': sdkShim,
+      '@opencode-ai/sdk': sdkShim,
+    },
+  },
   build: {
     rollupOptions: {
       output: {
@@ -69,13 +79,11 @@ export default defineConfig({
     allowedHosts: true,
 
     proxy: {
-      // 开发环境代理 - 将 /api 前缀的请求转发到 OpenCode 后端
-      // 注意：Tauri 模式下前端直接请求后端（通过 plugin-http），不走此代理
+      // Phase 1 server (no OpenCode). Will expand with /api/v1 routes.
       '/api': {
-        target: 'http://127.0.0.1:4096',
+        target: 'http://127.0.0.1:8787',
         changeOrigin: true,
         ws: true,
-        rewrite: path => path.replace(/^\/api/, ''),
       },
     },
   },
