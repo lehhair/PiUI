@@ -176,11 +176,11 @@ function startApp() {
   bootstrap()
 
   // PiUI: 不自动拉起 OpenCode serve（initializeNativeDesktopService 已停用）
-  // 桌面 sidecar 以后接 piui-server。
   if (isNativeTauri) {
     console.info('[PiUI] native shell — opencode auto-start disabled')
   } else {
     console.info('[PiUI] browser shell — use packages/server on :8787')
+    void import('./pi/bootstrapMockChat').then(m => m.bootstrapMockChatIfEnabled())
   }
 }
 

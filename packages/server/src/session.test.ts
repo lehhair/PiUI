@@ -34,6 +34,19 @@ describe("session mock snapshot (no LLM)", () => {
   const root = mkdtempSync(path.join(tmpdir(), "piui-sess-"))
   after(() => rmSync(root, { recursive: true, force: true }))
 
+  it("dev mock-chat seeds workspace + snapshot", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await json(port, "POST", "/api/v1/dev/mock-chat")
+      assert.equal(res.status, 201)
+      assert.ok(res.data.workspace.id)
+      assert.ok(res.data.snapshot.timeline.length >= 2)
+    } finally {
+      await close()
+    }
+  })
+
   it("creates session with projected timeline", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)
