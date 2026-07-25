@@ -96,3 +96,29 @@ test("SessionExecutor emits immutable command status updates", async () => {
   assert.equal(updates[0]?.startedAt, undefined)
   assert.equal(updates[2]?.completedAt !== undefined, true)
 })
+
+test("SessionExecutor invalidates running and queued commands after a runtime crash", async () => {
+  const executor = new SessionExecutor()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let queuedRan = false
+  const running = executor.submit(
+    request("running", "session-a", "session.prompt", "idle-only", { text: "running" }),
+    async () => { await gate },
+  )
+  const queued = executor.submit(
+    request("queued", "session-a", "session.prompt", "idle-only", { text: "queued" }),
+    async () => { queuedRan = true },
+  )
+  await new Promise<void>(resolve => setImmediate(resolve))
+
+  executor.markRuntimeCrashed("session-a")
+  assert.equal(executor.get("running")?.status, "unknown_after_crash")
+  assert.equal(executor.get("queued")?.status, "cancelled")
+  release()
+  const results = await Promise.allSettled([running.promise, queued.promise])
+  assert.deepEqual(results.map(result => result.status), ["rejected", "rejected"])
+  assert.equal(queuedRan, false)
+  assert.equal(executor.get("running")?.status, "unknown_after_crash")
+  assert.equal(executor.get("queued")?.status, "cancelled")
+})

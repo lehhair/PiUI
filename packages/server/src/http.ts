@@ -80,16 +80,22 @@ export interface CreateAppServerOptions {
 export function createAppServer(options: CreateAppServerOptions = {}) {
   const store = new WorkspaceStore()
   const eventHub = options.eventHub ?? new EventHub()
-  const sessions = new SessionRegistry(store, options.driver ?? getDriverMode(), options.piBackend, eventHub)
-  void sessions.warmup().catch(error => {
-    console.warn("[piui-server] Pi session catalog warmup failed", error)
-  })
   const sessionExecutor = new SessionExecutor(command => {
     eventHub.publish({
       type: "command.updated",
       sessionId: command.request.sessionId,
       payload: command,
     })
+  })
+  const sessions = new SessionRegistry(
+    store,
+    options.driver ?? getDriverMode(),
+    options.piBackend,
+    eventHub,
+    sessionId => sessionExecutor.markRuntimeCrashed(sessionId),
+  )
+  void sessions.warmup().catch(error => {
+    console.warn("[piui-server] Pi session catalog warmup failed", error)
   })
   const publishSessionSnapshot = (session: AppSession) => {
     eventHub.publish({
@@ -319,11 +325,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             snapshot: sessions.snapshot(s),
           })
         } catch (e) {
-          const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
-          if (code === "SESSION_NOT_FOUND") {
-            return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-          }
-          return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
+          return handleSessionCmdError(res, e)
         }
       }
 
@@ -650,12 +652,32 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "BODY_TOO_LARGE") {
         return sendProblem(res, 413, "INVALID_REQUEST", "request body too large")
       }
+      if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "SESSION_BUSY") {
+        return sendProblem(res, 409, "SESSION_BUSY", e instanceof Error ? e.message : String(e))
+      }
+      if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "SESSION_RUNTIME_CRASHED") {
+        return sendProblem(res, 503, "SESSION_RUNTIME_CRASHED", e instanceof Error ? e.message : String(e))
+      }
       const msg = e instanceof Error ? e.message : String(e)
       return sendProblem(res, 500, "INTERNAL", msg)
     }
   })
   bindEventHub(server, eventHub)
-  server.on("close", () => { void sessions.dispose() })
+  const closeHttpServer = server.close.bind(server)
+  let closePromise: Promise<void> | undefined
+  server.close = ((callback?: (error?: Error) => void) => {
+    closePromise ??= Promise.all([
+      new Promise<void>((resolve, reject) => {
+        closeHttpServer(error => (error ? reject(error) : resolve()))
+      }),
+      sessions.dispose(),
+    ]).then(() => undefined)
+    void closePromise.then(
+      () => callback?.(),
+      error => callback?.(error instanceof Error ? error : new Error(String(error))),
+    )
+    return server
+  }) as typeof server.close
   return server
 }
 
@@ -663,6 +685,12 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
   if (code === "SESSION_NOT_FOUND") {
     return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+  }
+  if (code === "SESSION_BUSY") {
+    return sendProblem(res, 409, "SESSION_BUSY", e instanceof Error ? e.message : String(e))
+  }
+  if (code === "SESSION_RUNTIME_CRASHED") {
+    return sendProblem(res, 503, "SESSION_RUNTIME_CRASHED", e instanceof Error ? e.message : String(e))
   }
   return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
 }

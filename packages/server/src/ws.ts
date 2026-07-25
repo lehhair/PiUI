@@ -42,6 +42,14 @@ export function attachEventWebSocket(server: HttpServer) {
   return wss
 }
 
+export function closeEventWebSocket(
+  wss: WebSocketServer,
+  callback?: (error?: Error) => void,
+): void {
+  for (const client of wss.clients) client.terminate()
+  wss.close(callback)
+}
+
 function attachV1Connection(ws: WebSocket, req: IncomingMessage, eventHub: EventHub): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1")
   const cursorEpoch = url.searchParams.get("cursorEpoch")

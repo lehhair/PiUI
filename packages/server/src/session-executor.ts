@@ -1,6 +1,7 @@
 import type {
   CommandRecordV2,
   CommandRequestV2,
+  CommandStatusV2,
   CommandTypeV2,
 } from "@piui/protocol"
 
@@ -18,6 +19,7 @@ export interface SubmittedCommand<T, C extends CommandTypeV2 = CommandTypeV2> {
 export class SessionExecutor {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly commands = new Map<string, CommandEntry>()
+  private readonly crashEpochs = new Map<string, number>()
 
   constructor(private readonly onUpdate?: (record: CommandRecordV2) => void) {}
 
@@ -44,27 +46,37 @@ export class SessionExecutor {
       submittedAt: new Date().toISOString(),
     }
     const laneId = commandLane(request)
+    const crashEpoch = request.sessionId ? (this.crashEpochs.get(request.sessionId) ?? 0) : 0
     const previous = laneId ? (this.tails.get(laneId) ?? Promise.resolve()) : Promise.resolve()
     const promise = previous
       .catch(() => undefined)
       .then(async () => {
+        if (
+          record.status === "cancelled" ||
+          (request.sessionId && (this.crashEpochs.get(request.sessionId) ?? 0) !== crashEpoch)
+        ) {
+          throw runtimeCrashError()
+        }
         record.status = "running"
         record.startedAt = new Date().toISOString()
         this.emit(record)
         try {
           const result = await run()
+          if ((record as CommandRecordV2).status === "unknown_after_crash") throw runtimeCrashError()
           record.status = "completed"
           record.completedAt = new Date().toISOString()
           this.emit(record)
           return result
         } catch (error) {
-          record.status = "failed"
-          record.completedAt = new Date().toISOString()
-          record.error = {
-            code: error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL",
-            message: error instanceof Error ? error.message : String(error),
+          if (!isCrashTerminalStatus(record.status)) {
+            record.status = "failed"
+            record.completedAt = new Date().toISOString()
+            record.error = {
+              code: error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL",
+              message: error instanceof Error ? error.message : String(error),
+            }
+            this.emit(record)
           }
-          this.emit(record)
           throw error
         }
       })
@@ -85,6 +97,27 @@ export class SessionExecutor {
     return this.commands.get(commandId)?.record
   }
 
+  markRuntimeCrashed(sessionId: string): void {
+    this.crashEpochs.set(sessionId, (this.crashEpochs.get(sessionId) ?? 0) + 1)
+    for (const { record } of this.commands.values()) {
+      if (record.request.sessionId !== sessionId) continue
+      if (record.status === "running") {
+        record.status = "unknown_after_crash"
+      } else if (record.status === "accepted") {
+        record.status = "cancelled"
+      } else {
+        continue
+      }
+      record.completedAt = new Date().toISOString()
+      record.error = {
+        code: "SESSION_RUNTIME_CRASHED",
+        message: "Pi worker crashed before command completion could be confirmed",
+        retryable: true,
+      }
+      this.emit(record)
+    }
+  }
+
   private emit(record: CommandRecordV2): void {
     this.onUpdate?.({
       ...record,
@@ -92,6 +125,16 @@ export class SessionExecutor {
       error: record.error ? { ...record.error } : undefined,
     })
   }
+}
+
+function runtimeCrashError(): Error {
+  return Object.assign(new Error("Pi worker crashed before command completion could be confirmed"), {
+    code: "SESSION_RUNTIME_CRASHED",
+  })
+}
+
+function isCrashTerminalStatus(status: CommandStatusV2): boolean {
+  return status === "unknown_after_crash" || status === "cancelled"
 }
 
 function commandLane(request: CommandRequestV2): string | undefined {

@@ -47,6 +47,12 @@ export class SessionRegistry {
   private readonly discovering = new Map<string, Promise<void>>()
   private readonly discoveredAt = new Map<string, number>()
   private readonly hiddenIds = new Set<string>()
+  private readonly deleting = new Set<string>()
+  private readonly runtimeDisposals = new WeakMap<PiSessionRuntime, Promise<void>>()
+  private readonly runtimeBindings = new Map<string, {
+    runtime: PiSessionRuntime
+    unsubscribe: () => void
+  }>()
   private readonly driver: DriverMode
   private backendPromise?: Promise<PiSessionBackend>
 
@@ -55,6 +61,7 @@ export class SessionRegistry {
     driver: DriverMode = getDriverMode(),
     private readonly injectedBackend?: PiSessionBackend,
     private readonly eventHub?: EventHub,
+    private readonly onRuntimeCrash?: (sessionId: string, workerGeneration: string | undefined, error: Error) => void,
   ) {
     this.driver = driver
   }
@@ -92,15 +99,21 @@ export class SessionRegistry {
   async delete(id: string): Promise<boolean> {
     const s = this.byId.get(id)
     if (!s) return false
-    if (s.real) {
-      try {
-        await s.real.dispose()
-      } catch {
-        /* ignore */
-      }
-    }
     this.hiddenIds.add(id)
-    return this.byId.delete(id)
+    this.deleting.add(id)
+    this.byId.delete(id)
+    this.unbindRuntime(s)
+    const attached = s.real
+    const pending = this.attaching.get(id)
+    try {
+      await Promise.allSettled([
+        attached ? this.disposeRuntime(attached) : Promise.resolve(),
+        pending?.then(runtime => this.disposeRuntime(runtime)) ?? Promise.resolve(),
+      ])
+    } finally {
+      this.deleting.delete(id)
+    }
+    return true
   }
 
   /**
@@ -177,13 +190,16 @@ export class SessionRegistry {
     }
 
     if (session.real) {
+      const runtime = session.real
+      const generation = session.workerGeneration
       try {
         if (opts?.model?.provider && opts.model.id) {
-          await session.real.setModel(opts.model.provider, opts.model.id)
+          await runtime.setModel(opts.model.provider, opts.model.id)
         }
-        await session.real.prompt(
+        await runtime.prompt(
           trimmed,
           projection => {
+            if (!this.isCurrentRuntime(session, runtime, generation)) return
             session.projection = projection
             session.sequence += 1
             session.updatedAt = new Date().toISOString()
@@ -192,12 +208,15 @@ export class SessionRegistry {
           { deliverAs: opts?.deliverAs },
         )
       } catch (e) {
+        if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
         const msg = e instanceof Error ? e.message : String(e)
-        throw Object.assign(new Error(msg), { code: "INTERNAL" as const })
+        const code = e && typeof e === "object" && "code" in e ? String(e.code) : "INTERNAL"
+        throw Object.assign(new Error(msg), { code })
       }
-      session.projection = session.real.getProjection()
-      session.sessionFile = session.real.getSessionFile() ?? session.sessionFile
-      session.title = session.real.getSessionName() ?? session.title
+      if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+      session.projection = runtime.getProjection()
+      session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
+      session.title = runtime.getSessionName() ?? session.title
       if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
         session.title = trimmed.slice(0, 48)
       }
@@ -236,9 +255,11 @@ export class SessionRegistry {
     const session = await this.find(sessionId)
     if (!session) return undefined
     await this.attach(sessionId)
-    if (session.real) {
-      await session.real.abort()
-      session.projection = session.real.getProjection()
+    const runtime = session.real
+    const generation = session.workerGeneration
+    if (runtime) {
+      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.abort())
+      session.projection = runtime.getProjection()
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -247,8 +268,10 @@ export class SessionRegistry {
 
   async setModel(sessionId: string, provider: string, modelId: string): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    if (session.real) {
-      await session.real.setModel(provider, modelId)
+    const runtime = session.real
+    const generation = session.workerGeneration
+    if (runtime) {
+      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.setModel(provider, modelId))
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -257,8 +280,10 @@ export class SessionRegistry {
 
   async setThinkingLevel(sessionId: string, level: string): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    if (session.real) {
-      await session.real.setThinkingLevel(level)
+    const runtime = session.real
+    const generation = session.workerGeneration
+    if (runtime) {
+      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.setThinkingLevel(level))
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -267,9 +292,11 @@ export class SessionRegistry {
 
   async compact(sessionId: string, instructions?: string): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    if (session.real) {
-      await session.real.compact(instructions)
-      session.projection = session.real.getProjection()
+    const runtime = session.real
+    const generation = session.workerGeneration
+    if (runtime) {
+      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.compact(instructions))
+      session.projection = runtime.getProjection()
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -320,6 +347,14 @@ export class SessionRegistry {
       })
     }
     const runtime = await pending
+    if (this.deleting.has(sessionId) || this.byId.get(sessionId) !== session) {
+      try {
+        await this.disposeRuntime(runtime)
+      } catch {
+        /* preserve SESSION_NOT_FOUND after best-effort cleanup */
+      }
+      throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
+    }
     if (!session.real) {
       this.bindRuntime(session, runtime)
     }
@@ -339,6 +374,7 @@ export class SessionRegistry {
   }
 
   private bindRuntime(session: AppSession, runtime: PiSessionRuntime): void {
+    this.unbindRuntime(session)
     session.real = runtime
     session.projection = runtime.getProjection()
     session.driverSessionId = runtime.getSessionId()
@@ -350,6 +386,8 @@ export class SessionRegistry {
     session.updatedAt = new Date().toISOString()
 
     const generation = session.workerGeneration
+    const binding = { runtime, unsubscribe: () => {} }
+    this.runtimeBindings.set(session.id, binding)
     if (generation) {
       this.eventHub?.publishV2(
         { kind: "session", id: session.id },
@@ -362,10 +400,36 @@ export class SessionRegistry {
       "session.snapshot.updated",
       { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
     )
-    runtime.onCrash?.(error => {
-      if (session.real !== runtime) return
+    let initialState = true
+    const unsubscribeState = runtime.onState?.(() => {
+      if (initialState) {
+        initialState = false
+        return
+      }
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      session.sequence += 1
+      session.updatedAt = new Date().toISOString()
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    })
+    const unsubscribeCrash = runtime.onCrash?.(error => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.runtimeBindings.delete(session.id)
+      binding.unsubscribe()
       session.real = undefined
       session.runtimeError = error.message
+      session.projection = {
+        ...session.projection,
+        isStreaming: false,
+        timeline: session.projection.timeline.map(item =>
+          item.type === "assistant" && item.status === "streaming"
+            ? { ...item, status: "error", stopReason: item.stopReason ?? "error" }
+            : item,
+        ),
+      }
       session.sequence += 1
       session.updatedAt = new Date().toISOString()
       this.eventHub?.publishV2(
@@ -378,7 +442,51 @@ export class SessionRegistry {
         "session.snapshot.updated",
         { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
       )
+      this.onRuntimeCrash?.(session.id, generation, error)
     })
+    binding.unsubscribe = () => {
+      unsubscribeState?.()
+      unsubscribeCrash?.()
+    }
+  }
+
+  private isCurrentRuntime(
+    session: AppSession,
+    runtime: PiSessionRuntime,
+    generation: string | undefined,
+  ): boolean {
+    return session.real === runtime && session.workerGeneration === generation &&
+      this.runtimeBindings.get(session.id)?.runtime === runtime
+  }
+
+  private async runBoundRuntimeCommand(
+    session: AppSession,
+    runtime: PiSessionRuntime,
+    generation: string | undefined,
+    run: () => void | Promise<void>,
+  ): Promise<void> {
+    try {
+      await run()
+    } catch (error) {
+      if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+      throw error
+    }
+    if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+  }
+
+  private unbindRuntime(session: AppSession): void {
+    const binding = this.runtimeBindings.get(session.id)
+    if (!binding) return
+    this.runtimeBindings.delete(session.id)
+    binding.unsubscribe()
+  }
+
+  private disposeRuntime(runtime: PiSessionRuntime): Promise<void> {
+    const existing = this.runtimeDisposals.get(runtime)
+    if (existing) return existing
+    const disposing = runtime.dispose()
+    this.runtimeDisposals.set(runtime, disposing)
+    return disposing
   }
 
   private async discover(cwd?: string): Promise<void> {
@@ -417,20 +525,8 @@ export class SessionRegistry {
 
   private async getBackend(): Promise<PiSessionBackend> {
     if (this.injectedBackend) return this.injectedBackend
-    this.backendPromise ??= import("./pi-worker-client.ts").then(({ PiWorkerSession }) => {
-      const catalog = PiWorkerSession.createCatalog()
-      let standby = PiWorkerSession.createHost()
-      return {
-        list: cwd => catalog.list(cwd),
-        listAll: () => catalog.listAll(),
-        listModels: () => catalog.listModels(),
-        open: (cwd, sessionFile) => {
-          const host = standby
-          standby = PiWorkerSession.createHost()
-          return host.open(cwd, sessionFile)
-        },
-        dispose: () => Promise.all([catalog.dispose(), standby.dispose()]).then(() => undefined),
-      }
+    this.backendPromise ??= import("./runtime-supervisor.ts").then(({ RuntimeSupervisor }) => {
+      return new RuntimeSupervisor()
     })
     return this.backendPromise
   }
@@ -470,10 +566,11 @@ export class SessionRegistry {
   }
 
   async dispose(): Promise<void> {
+    for (const session of this.byId.values()) this.unbindRuntime(session)
     await Promise.all([
       ...[...this.byId.values()].map(async session => {
         try {
-          await session.real?.dispose()
+          if (session.real) await this.disposeRuntime(session.real)
         } catch {
           /* best effort while the HTTP server is closing */
         }
@@ -492,9 +589,9 @@ export class SessionRegistry {
   snapshot(session: AppSession): SessionSnapshotV1 {
     const ui = session.real?.getRuntimeUiState()
     const model = ui?.model ?? session.real?.getModel()
-    const isStreaming =
-      ui?.isStreaming || session.projection.isStreaming || Boolean(session.real?.isStreaming())
-    const isCompacting = ui?.isCompacting ?? false
+    const isStreaming = !session.runtimeError &&
+      Boolean(ui?.isStreaming || session.projection.isStreaming || session.real?.isStreaming())
+    const isCompacting = !session.runtimeError && (ui?.isCompacting ?? false)
     let state: SessionSnapshotV1["session"]["state"] = "idle"
     if (session.runtimeError) state = "crashed"
     else if (isCompacting) state = "compacting"
@@ -547,4 +644,10 @@ export class SessionRegistry {
       },
     }
   }
+}
+
+function runtimeReplacedError(): Error {
+  return Object.assign(new Error("Pi runtime was replaced before the command completed"), {
+    code: "SESSION_RUNTIME_CRASHED",
+  })
 }

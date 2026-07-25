@@ -16,7 +16,7 @@
 
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
-| list/listAll/create/open/resume | 部分 | R2：真实 SDK 恢复与崩溃测试 |
+| list/listAll/create/open/resume | 完整 | R12：升级 conformance |
 | 持久删除 JSONL | 缺失 | R3 |
 | session name | 缺失 | R3 |
 | entries/tree/leaf 读取 | 后端 | R3：类型化并进入 UI |
@@ -92,7 +92,7 @@
 | Git status/diff | 部分 | 当前只有 Git/branch 范围 |
 | PTY | 缺失 | Pi user bash 不能由 PTY 替代 |
 | workspace access | 部分 | 需与 Pi project trust、执行批准分离 |
-| WebSocket replay/resync | 部分 | v2 子协议、分作用域 cursor、局部 resync 已接；R2 补故障恢复与 faux-provider 验收 |
+| WebSocket replay/resync | 完整 | R12：完整故障注入矩阵 |
 
 ## Completion Gate
 

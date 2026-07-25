@@ -82,6 +82,7 @@ npm run dev:app      # vite
 - [x] Pi 基础能力：模型/thinking level/compact/skills·commands/runtime 状态
 - [x] R0：Pi 0.81.1 精确版本、完整 parity matrix、真实 session 性能基线
 - [x] R1：Protocol v2 command/capability、分作用域事件 replay、worker handshake 与 generation
+- [x] R2：worker supervisor、IPC v3 心跳、跨进程单写 lease、generation 隔离与崩溃恢复
 - [x] 阶段 0/1：完整 mock 根测试、全 workspace typecheck/build、render 前 Pi health、旧 SSE 删除、真实 Pi 不再启动即建会话
 - [~] 阶段 6：OpenCode SDK 包、shim、alias、类型 import 和网络 client 已删除；旧 facade 函数继续迁往 Pi API
 - [ ] fork/undo 映射 Pi tree；终端 PTY

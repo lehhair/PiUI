@@ -1,12 +1,18 @@
 let session
 let listCount = 0
+const generation = "fixture-generation"
+const heartbeatIntervalMs = 20
+const heartbeatTimer = setInterval(() => {
+  process.send?.({ kind: "heartbeat", generation, timestamp: Date.now() })
+}, heartbeatIntervalMs)
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 2,
+  workerProtocolVersion: 3,
   piSdkVersion: "0.81.1",
-  generation: "fixture-generation",
+  generation,
   processId: process.pid,
+  heartbeatIntervalMs,
   capabilities: [
     "catalog.sessions",
     "catalog.models",
@@ -47,6 +53,16 @@ function snapshot() {
 }
 
 process.on("message", request => {
+  if (request.generation !== generation) {
+    process.send?.({
+      kind: "response",
+      id: request.id,
+      generation,
+      ok: false,
+      error: { code: "WORKER_GENERATION_MISMATCH", message: "generation mismatch" },
+    })
+    return
+  }
   const command = request.command
   let result
   if (command.type === "list" || command.type === "listAll") {
@@ -67,6 +83,7 @@ process.on("message", request => {
   } else if (command.type === "listModels") {
     result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, supportsImages: false }] }
   } else if (command.type === "open") {
+    if (command.cwd.includes("hang-open")) return
     session = snapshot()
     result = { type: "session", session }
   } else if (command.type === "prompt") {
@@ -74,12 +91,36 @@ process.on("message", request => {
       process.exit(17)
       return
     }
+    if (command.text === "hang") {
+      clearInterval(heartbeatTimer)
+      return
+    }
+    if (command.text === "wait") {
+      setTimeout(() => {
+        process.send?.({ kind: "response", id: request.id, generation, ok: true, result: { type: "session", session: session ?? snapshot() } })
+      }, 120)
+      return
+    }
+    if (command.text === "stale") {
+      process.send?.({
+        kind: "event",
+        generation: "stale-generation",
+        type: "projection",
+        projection: {
+          timeline: [{ type: "user", id: "stale-entry", entryId: "stale-entry", timestamp: 1, text: "stale" }],
+          isStreaming: false,
+        },
+      })
+      result = { type: "session", session: session ?? snapshot() }
+      process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
+      return
+    }
     const projection = {
       timeline: [{ type: "user", id: "fixture-entry", entryId: "fixture-entry", timestamp: 1, text: command.text }],
       isStreaming: false,
     }
     session = { ...(session ?? snapshot()), projection }
-    process.send?.({ kind: "event", type: "projection", projection })
+    process.send?.({ kind: "event", generation, type: "projection", projection })
     result = { type: "session", session }
   } else if (command.type === "listSkills") {
     result = { type: "skills", skills: [{ name: "fixture-skill", source: "fixture" }] }
@@ -90,6 +131,9 @@ process.on("message", request => {
   } else {
     result = { type: "session", session: session ?? snapshot() }
   }
-  process.send?.({ kind: "response", id: request.id, ok: true, result })
-  if (command.type === "dispose") setImmediate(() => process.exit(0))
+  process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
+  if (command.type === "dispose") {
+    clearInterval(heartbeatTimer)
+    setImmediate(() => process.exit(0))
+  }
 })

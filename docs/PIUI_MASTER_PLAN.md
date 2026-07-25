@@ -47,7 +47,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 |---|---|---|
 | R0 | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线 | 已完成 |
 | R1 | Protocol v2、类型化 command/event/capability、worker handshake | 已完成 |
-| R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 未开始 |
+| R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 已完成 |
 | R3 | session tree、navigate、label、fork、clone、import、持久删除 | 未开始 |
 | R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 未开始 |
 | R5 | 多模态 prompt 与完整工具结果 | 未开始 |
@@ -60,6 +60,12 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R12 | conformance、升级门禁、故障注入、发布 | 未开始 |
 
 每项能力的实时状态、来源和完成条件见 `docs/PI_UI_INTEGRATION.md`
+
+R2 已实现 worker IPC v3、全消息 generation 校验、5 秒心跳与连续 3 次缺失判定、由 OS socket
+持有的跨进程 session lease、物理文件身份刷新、catalog worker 自动替换、崩溃命令
+`unknown_after_crash`、排队命令取消、懒重新 attach、限时服务退出，以及真实 Pi SDK + faux provider
+无网络验收。外部 Pi CLI 改写 JSONL 的 fingerprint 冲突检测和 idle suspension 不属于本轮完成范围，
+分别随持久会话和发布故障注入继续实现。
 
 ## 3. 非目标
 
@@ -173,14 +179,13 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 
 ### 5.3 当前测试结论
 
-- `PIUI_DRIVER=mock npm test`：通过
-- `npm run typecheck`：失败
-- `npm run typecheck -w @piui/app`：失败
-- 根测试未运行 app Vitest
-- 根 build 未完整构建 server 和 pi-worker
-- 没有真实 Pi runtime 的无网络集成测试
+- `npm test`：通过，包含 protocol、server、pi-worker、app Vitest 和 live mock server 测试
+- `npm run build`：通过，完整构建 protocol、pi-worker、server 和 app
+- server 与 app TypeScript 检查通过
+- 真实 Pi SDK + faux provider 无网络集成测试通过
+- worker crash、心跳超时、generation 隔离、跨进程 lease 和服务退出故障测试通过
 
-因此当前绿色测试只表示 mock happy path 可用，不代表产品可发布。
+当前结果覆盖 R0-R2 完成条件，但 R3-R12 尚未完成，产品仍未达到发布标准。
 
 ## 6. 目标架构
 

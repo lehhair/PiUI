@@ -60,6 +60,29 @@ export interface PiSessionInfo {
   firstMessage: string
 }
 
+export interface RealPiSessionOpenOptions {
+  agentDir?: string
+  createRuntime?: CreateAgentSessionRuntimeFactory
+  createSessionManager?: (cwd: string, sessionFile?: string) => SessionManager
+}
+
+const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
+  cwd,
+  sessionManager,
+  sessionStartEvent,
+}) => {
+  const services = await createAgentSessionServices({ cwd })
+  return {
+    ...(await createAgentSessionFromServices({
+      services,
+      sessionManager,
+      sessionStartEvent,
+    })),
+    services,
+    diagnostics: services.diagnostics,
+  }
+}
+
 export class RealPiSession {
   private runtime: AgentSessionRuntime
   private projection: ProjectionState = createProjectionState()
@@ -87,37 +110,25 @@ export class RealPiSession {
     })
   }
 
-  static async open(cwd: string, sessionFile?: string): Promise<RealPiSession> {
-    const createRuntime: CreateAgentSessionRuntimeFactory = async ({
-      cwd: runtimeCwd,
-      sessionManager,
-      sessionStartEvent,
-    }) => {
-      const services = await createAgentSessionServices({ cwd: runtimeCwd })
-      return {
-        ...(await createAgentSessionFromServices({
-          services,
-          sessionManager,
-          sessionStartEvent,
-        })),
-        services,
-        diagnostics: services.diagnostics,
-      }
-    }
-
+  static async open(
+    cwd: string,
+    sessionFile?: string,
+    options: RealPiSessionOpenOptions = {},
+  ): Promise<RealPiSession> {
     if (sessionFile && !existsSync(sessionFile)) {
       throw Object.assign(new Error("Pi session file no longer exists"), { code: "SESSION_FILE_NOT_FOUND" })
     }
-    const sessionManager = sessionFile ? SessionManager.open(sessionFile) : SessionManager.create(cwd)
+    const sessionManager = options.createSessionManager?.(cwd, sessionFile) ??
+      (sessionFile ? SessionManager.open(sessionFile) : SessionManager.create(cwd))
     if (sessionFile && pathKey(sessionManager.getCwd()) !== pathKey(cwd)) {
       throw Object.assign(new Error("Pi session workspace does not match the selected workspace"), {
         code: "SESSION_WORKSPACE_MISMATCH",
       })
     }
     const projection = sessionFile ? projectNativeBranch(sessionManager.getBranch()) : undefined
-    const runtime = await createAgentSessionRuntime(createRuntime, {
+    const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime, {
       cwd: sessionManager.getCwd(),
-      agentDir: getAgentDir(),
+      agentDir: options.agentDir ?? getAgentDir(),
       sessionManager,
     })
 

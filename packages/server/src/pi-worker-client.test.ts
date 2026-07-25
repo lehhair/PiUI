@@ -18,7 +18,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 2)
+      assert.equal(hello.workerProtocolVersion, 3)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -72,5 +72,51 @@ describe("PiWorkerSession IPC", () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     await assert.rejects(runtime.prompt("crash"), /exited unexpectedly/)
     await runtime.dispose()
+  })
+
+  it("keeps a pending command alive while heartbeats continue", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture, {
+      heartbeatTimeoutMs: 60,
+    })
+    try {
+      await runtime.prompt("wait")
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("terminates a worker after missed heartbeats", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture, {
+      heartbeatTimeoutMs: 60,
+    })
+    let crashes = 0
+    runtime.onCrash?.(() => { crashes += 1 })
+    await assert.rejects(runtime.prompt("hang"), error => {
+      assert.equal((error as { code?: string }).code, "WORKER_HEARTBEAT_TIMEOUT")
+      return true
+    })
+    assert.equal(crashes, 1)
+    await runtime.dispose()
+  })
+
+  it("ignores events from another worker generation", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
+    try {
+      let ticks = 0
+      await runtime.prompt("stale", () => { ticks += 1 })
+      assert.equal(ticks, 1)
+      assert.equal(runtime.getProjection().timeline.length, 0)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("does not report a graceful dispose as a crash", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
+    let crashes = 0
+    runtime.onCrash?.(() => { crashes += 1 })
+    await runtime.dispose()
+    await new Promise<void>(resolve => setTimeout(resolve, 20))
+    assert.equal(crashes, 0)
   })
 })
