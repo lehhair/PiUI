@@ -15,6 +15,7 @@ import {
 import { CircularProgress } from '../../../components/CircularProgress'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
 import { useHasMessages } from '../../../store'
+import { usePiCapabilities } from '../../../pi/capabilities'
 
 // 状态指示器 - 圆环 + 右下角状态点
 function StatusIndicator({
@@ -80,6 +81,7 @@ export function SidebarFooter({
   onOpenSettings,
 }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
+  const canShare = usePiCapabilities().share
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, isWideMode, toggleWideMode } = useTheme()
   // 统计与 hasMessages 留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
   const hasMessages = useHasMessages()
@@ -304,7 +306,7 @@ export function SidebarFooter({
               </button>
             )}
 
-            <button
+            {canShare && <button
               onClick={() => {
                 closeMenu()
                 setShareDialogOpen(true)
@@ -313,7 +315,7 @@ export function SidebarFooter({
             >
               <ShareIcon size={14} />
               <span>{t('sidebar.shareChat')}</span>
-            </button>
+            </button>}
 
             <button
               onClick={() => {
@@ -383,7 +385,7 @@ export function SidebarFooter({
       </div>
 
       {floatingMenu}
-      <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
+      {canShare && <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />}
       <ContextDetailsDialog
         isOpen={contextDialogOpen}
         onClose={() => setContextDialogOpen(false)}

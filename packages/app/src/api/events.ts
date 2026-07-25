@@ -6,6 +6,7 @@ import { getApiBaseUrl, getAuthHeader } from './http'
 import { createSseTextParser } from './sse'
 import { normalizeTodoItems } from './todo'
 import { isTauri } from '../utils/tauri'
+import { isPiUiBackendMode } from '../pi/serverMode'
 import type {
   ApiMessage,
   EventCallbacks,
@@ -253,24 +254,10 @@ function scheduleReconnect() {
   }, delay)
 }
 
-function isPiBackendMode(): boolean {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { isPiServerReachable } = require('../pi/serverMode') as typeof import('../pi/serverMode')
-    return isPiServerReachable()
-  } catch {
-    return false
-  }
-}
-
 function connectSingleton() {
-  // PiUI: 事件走 WS，禁止 OpenCode SSE
-  if (isPiBackendMode()) {
-    if (import.meta.env.DEV) {
-      console.log('[SSE] skipped — Pi backend uses WebSocket')
-    }
-    return
-  }
+  // PiUI events use PiEventSocket. This transport remains only until the
+  // legacy SDK callers are migrated and can then be removed as a whole.
+  if (isPiUiBackendMode()) return
 
   if (isConnecting || allSubscribers.size === 0) return
 
@@ -652,7 +639,7 @@ function disconnectSingleton() {
 // ============================================
 
 function handleVisibilityChange() {
-  if (isPiBackendMode()) {
+  if (isPiUiBackendMode()) {
     // Pi 模式：不维护 OpenCode SSE 前后台逻辑
     isInBackground = document.visibilityState !== 'visible'
     return
@@ -961,16 +948,8 @@ export function disconnectSSE(error?: string) {
  * 订阅 SSE 事件（单例模式，多个订阅者共享一个连接）
  */
 export function subscribeToEvents(callbacks: EventCallbacks): () => void {
-  // PiUI: 有 piui-server 时用 WS，不再拉 OpenCode SSE
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { isPiServerReachable } = require('../pi/serverMode') as typeof import('../pi/serverMode')
-    if (isPiServerReachable()) {
-      return () => {}
-    }
-  } catch {
-    /* continue with SSE */
-  }
+  // PiUI deliberately has no OpenCode event fallback.
+  if (isPiUiBackendMode()) return () => {}
 
   allSubscribers.add(callbacks)
 

@@ -12,6 +12,7 @@ import {
 import { IconButton } from '../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from './ModelSelector'
 import { ShareDialog } from './ShareDialog'
+import { usePiCapabilities } from '../../pi/capabilities'
 import { messageStore, useHeaderSessionMeta } from '../../store'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -44,7 +45,7 @@ interface SessionTitleControlProps {
   setIsEditingTitle: (value: boolean) => void
   handleRename: () => void
   handleStartEdit: () => void
-  onShare: () => void
+  onShare?: () => void
   clickToRenameTitle: string
   shareTitle: string
 }
@@ -99,7 +100,7 @@ function SessionTitleControl({
           </button>
       )}
 
-      {!isEditingTitle && (
+      {!isEditingTitle && onShare && (
         <>
           <div className={dividerClass} />
           <button type="button" className={shareButtonClass} title={shareTitle} aria-label={shareTitle} onClick={onShare}>
@@ -129,6 +130,7 @@ export function Header({
   const { refresh } = useSessionContext()
   const { currentDirectory } = useDirectory()
   const { presentation, interaction } = useChatViewport()
+  const capabilities = usePiCapabilities()
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -189,7 +191,7 @@ export function Header({
       setIsEditingTitle={setIsEditingTitle}
       handleRename={handleRename}
       handleStartEdit={handleStartEdit}
-      onShare={() => setShareDialogOpen(true)}
+      onShare={capabilities.share ? () => setShareDialogOpen(true) : undefined}
       clickToRenameTitle={t('header.clickToRename')}
       shareTitle={t('header.shareSession')}
     />
@@ -269,7 +271,7 @@ export function Header({
         </div>
       </div>
 
-      <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
+      {capabilities.share && <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />}
 
       <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
     </div>

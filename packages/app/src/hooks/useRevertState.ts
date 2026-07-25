@@ -15,6 +15,7 @@ import {
 } from '../api'
 import { revertErrorHandler } from '../utils'
 import { INITIAL_MESSAGE_LIMIT } from '../constants'
+import { isPiSession } from '../pi/isPiSession'
 
 export interface RevertHistoryItem {
   messageId: string
@@ -81,6 +82,10 @@ export function useRevertState({
   const handleUndo = useCallback(
     async (userMessageId: string) => {
       if (!routeSessionId) return
+      if (isPiSession(routeSessionId)) {
+        revertErrorHandler('undo', new Error('PiUI does not support undo yet'))
+        return
+      }
 
       try {
         // 1. 找到 UI 中要删除的消息（从点击的消息开始到最后）
@@ -140,6 +145,10 @@ export function useRevertState({
 
   const handleRedo = useCallback(async () => {
     if (!routeSessionId || revertHistory.length === 0) return
+    if (isPiSession(routeSessionId)) {
+      revertErrorHandler('redo', new Error('PiUI does not support redo yet'))
+      return
+    }
 
     try {
       // 1. 播放恢复动画
@@ -184,6 +193,10 @@ export function useRevertState({
 
   const handleRedoAll = useCallback(async () => {
     if (!routeSessionId || revertHistory.length === 0) return
+    if (isPiSession(routeSessionId)) {
+      revertErrorHandler('redo all', new Error('PiUI does not support undo yet'))
+      return
+    }
 
     try {
       // 调用 unrevert API 清除所有 revert 状态

@@ -54,18 +54,67 @@ describe("http phase1", () => {
     }
   })
 
-  it("default workspace + CORS preflight", async () => {
+  it("default workspace + local CORS preflight", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces/default`)
+      const origin = "http://localhost:5173"
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces/default`, { headers: { origin } })
       assert.equal(res.status, 200)
-      assert.ok(res.headers.get("access-control-allow-origin"))
+      assert.equal(res.headers.get("access-control-allow-origin"), origin)
       const body = await res.json()
       assert.ok(body.workspace.id)
 
-      const opt = await fetch(`http://127.0.0.1:${port}/api/v1/health`, { method: "OPTIONS" })
+      const opt = await fetch(`http://127.0.0.1:${port}/api/v1/health`, { method: "OPTIONS", headers: { origin } })
       assert.equal(opt.status, 204)
+    } finally {
+      await close()
+    }
+  })
+
+  it("rejects non-local browser origins", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces/default`, {
+        headers: { origin: "https://example.test" },
+      })
+      assert.equal(res.status, 403)
+    } finally {
+      await close()
+    }
+  })
+
+  it("requires the configured bearer token", async () => {
+    const previous = process.env.PIUI_AUTH_TOKEN
+    process.env.PIUI_AUTH_TOKEN = "test-token"
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const missing = await fetch(`http://127.0.0.1:${port}/api/v1/health`)
+      assert.equal(missing.status, 401)
+
+      const accepted = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+        headers: { authorization: "Bearer test-token" },
+      })
+      assert.equal(accepted.status, 200)
+    } finally {
+      await close()
+      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
+      else process.env.PIUI_AUTH_TOKEN = previous
+    }
+  })
+
+  it("rejects request bodies over the configured limit", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rootPath: "x".repeat(1024 * 1024) }),
+      })
+      assert.equal(res.status, 413)
     } finally {
       await close()
     }

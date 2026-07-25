@@ -1,2 +1,2 @@
-/** API 基础地址 - 优先使用环境变量，其次使用同源 /api 前缀（Docker 部署），回退到本地开发地址 */
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:4096'
+/** PiUI backend address for legacy callers not migrated to sessionApi yet. */
+export const API_BASE_URL = import.meta.env.VITE_PIUI_API || 'http://127.0.0.1:8787'

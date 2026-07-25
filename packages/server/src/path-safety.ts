@@ -7,7 +7,7 @@ import path from "node:path"
 
 export class PathSafetyError extends Error {
   constructor(
-    readonly code: "PATH_OUTSIDE_WORKSPACE" | "SYMLINK_ESCAPE" | "INVALID_REQUEST",
+    readonly code: "PATH_OUTSIDE_WORKSPACE" | "SYMLINK_ESCAPE" | "INVALID_REQUEST" | "FILE_TOO_LARGE",
     message: string,
   ) {
     super(message)

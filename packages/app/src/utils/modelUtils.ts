@@ -4,7 +4,7 @@
  * - 使用频率记录和排序
  */
 
-import type { ModelInfo } from '../api'
+import type { ModelInfo } from '../hooks/useModels'
 import { serverStorage } from './perServerStorage'
 
 // ============================================

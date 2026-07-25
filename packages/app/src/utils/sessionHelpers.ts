@@ -2,7 +2,7 @@
 // Session 加载相关的辅助函数
 // ============================================
 
-import type { ModelInfo } from '../api'
+import type { ModelInfo } from '../hooks/useModels'
 import { getModelKey } from './modelUtils'
 
 // ============================================

@@ -321,6 +321,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   const handleUndo = useCallback(
     async (userMessageId: string) => {
       if (!sessionId) return
+      if (isTrackedPiSession(sessionId)) {
+        sessionErrorHandler('undo', new Error('PiUI does not support undo yet'))
+        return
+      }
 
       // 获取当前 session 的 directory（优先用 store 中的，其次用传入的）
       const state = messageStore.getSessionState(sessionId)
@@ -371,6 +375,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
   const handleRedo = useCallback(async () => {
     if (!sessionId) return
+    if (isTrackedPiSession(sessionId)) {
+      sessionErrorHandler('redo', new Error('PiUI does not support redo yet'))
+      return
+    }
 
     const state = messageStore.getSessionState(sessionId)
     if (!state?.revertState) return
@@ -409,6 +417,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
   const handleRedoAll = useCallback(async () => {
     if (!sessionId) return
+    if (isTrackedPiSession(sessionId)) {
+      sessionErrorHandler('redo all', new Error('PiUI does not support undo yet'))
+      return
+    }
 
     const state = messageStore.getSessionState(sessionId)
     const dir = state?.directory || directoryRef.current

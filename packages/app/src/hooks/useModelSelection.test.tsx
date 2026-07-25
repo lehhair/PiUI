@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ModelInfo } from '../api'
+import type { ModelInfo } from './useModels'
 import { STORAGE_KEY_SELECTED_MODEL } from '../constants'
 import { useModelSelection } from './useModelSelection'
 

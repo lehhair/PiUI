@@ -2,11 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
-import { fileURLToPath, URL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { bundledLanguagesInfo } from 'shiki/langs'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
-const root = fileURLToPath(new URL('.', import.meta.url))
 const sdkShim = fileURLToPath(new URL('./src/shims/opencode-sdk/v2/client.ts', import.meta.url))
 
 const shikiSupportedLangs = bundledLanguagesInfo.flatMap(info => [info.id, ...(info.aliases ?? [])])

@@ -1,18 +1,19 @@
 import type { EventEnvelopeV1, SessionSnapshotV1 } from "@piui/protocol"
-import { getApiBase } from "./sessionApi"
+import { getApiBase, getPiAuthToken } from "./sessionApi"
 import { applySnapshotToUi } from "./applySnapshot"
 import { isTrackedPiSession, trackPiSession } from "./piSessionIndex"
-import { reportPiConnectionState } from "../api/events"
 
 type Status = "idle" | "connecting" | "open" | "closed"
 
 function wsUrl(): string {
   const base = getApiBase()
+  const token = getPiAuthToken()
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : ""
   if (!base) {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-    return `${proto}//${window.location.host}/api/v1/events`
+    return `${proto}//${window.location.host}/api/v1/events${suffix}`
   }
-  return base.replace(/^http/, "ws") + "/api/v1/events"
+  return base.replace(/^http/, "ws") + "/api/v1/events" + suffix
 }
 
 class PiEventSocket {
@@ -42,27 +43,20 @@ class PiEventSocket {
     if (this.ws && (this.status === "open" || this.status === "connecting")) return
     this.intentionalClose = false
     this.setStatus("connecting")
-    reportPiConnectionState("connecting")
     try {
       const ws = new WebSocket(wsUrl())
       this.ws = ws
       ws.onopen = () => {
         this.setStatus("open")
-        reportPiConnectionState("connected")
       }
       ws.onclose = () => {
         this.ws = null
         this.setStatus("closed")
         if (!this.intentionalClose) {
-          reportPiConnectionState("disconnected")
           this.scheduleReconnect()
-        } else {
-          reportPiConnectionState("disconnected")
         }
       }
-      ws.onerror = () => {
-        reportPiConnectionState("error", { error: "websocket error" })
-      }
+      ws.onerror = () => this.setStatus("closed")
       ws.onmessage = ev => {
         try {
           const msg = JSON.parse(String(ev.data)) as {

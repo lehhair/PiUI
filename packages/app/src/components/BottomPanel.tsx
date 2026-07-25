@@ -10,6 +10,7 @@ import { ResizablePanel } from './ui/ResizablePanel'
 import { logger } from '../utils/logger'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
+import { usePiCapabilities } from '../pi/capabilities'
 
 const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 const SessionChangesPanel = lazy(() =>
@@ -38,13 +39,15 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useCurrentSessionId()
   const { interaction, layout } = useChatViewport()
+  const ptyEnabled = usePiCapabilities().pty
 
   const [isRestoring, setIsRestoring] = useState(false)
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
 
   useEffect(() => {
+    if (!ptyEnabled) return
     layoutStore.setCurrentTerminalDirectory(normalizedDirectory)
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, ptyEnabled])
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -103,6 +106,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
 
   // 创建新终端
   const handleNewTerminal = useCallback(async () => {
+    if (!ptyEnabled) return
     try {
       logger.log('[BottomPanel] Creating PTY session, directory:', normalizedDirectory)
       const pty = await createPtySession({ cwd: normalizedDirectory }, normalizedDirectory)
@@ -116,7 +120,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
     } catch (error) {
       uiErrorHandler('create terminal', error)
     }
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, ptyEnabled])
 
   // 关闭终端
   const handleCloseTerminal = useCallback(
@@ -188,7 +192,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
             </div>
           ) : null}
 
-          {activeTab.type === 'terminal' ? (
+          {ptyEnabled && activeTab.type === 'terminal' ? (
             <Suspense fallback={<PanelFallback />}>
               <TerminalContent activeTab={activeTab} directory={directory} />
             </Suspense>
@@ -214,7 +218,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
         </>
       )
     },
-    [isRestoring, handleNewTerminal, directory, sessionId, isPanelResizing, t],
+    [isRestoring, handleNewTerminal, directory, sessionId, isPanelResizing, ptyEnabled, t],
   )
 
   return (
@@ -231,8 +235,8 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
       <PanelContainer
         position="bottom"
         directory={normalizedDirectory}
-        onNewTerminal={handleNewTerminal}
-        onCloseTerminal={handleCloseTerminal}
+        onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
+        onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
       >
         {renderContent}
       </PanelContainer>
