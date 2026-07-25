@@ -8,6 +8,8 @@ if (!npmCli) {
 }
 
 const commands = [
+  ["run", "build", "-w", "@piui/protocol"],
+  ["run", "build", "-w", "@piui/pi-worker"],
   ["run", "test:phase0"],
   ["run", "test:phase3"],
   ["run", "test:mvp"],

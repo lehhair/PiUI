@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker",
     "dev": "node --import tsx src/index.ts",
-    "start": "node --import tsx src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts"
   },
