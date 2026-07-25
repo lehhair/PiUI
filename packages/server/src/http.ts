@@ -8,7 +8,7 @@ import {
 import { listFiles, readFileText, writeFileText } from "./files.ts"
 import { searchFilesByName } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
-import { SessionRegistry } from "./session-registry.ts"
+import { SessionRegistry, type AppSession } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { eventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
@@ -40,7 +40,7 @@ async function ensureDefaultWorkspace(): Promise<string> {
   return rec.id
 }
 
-function sessionSummary(s: ReturnType<SessionRegistry["list"]>[number]) {
+function sessionSummary(s: AppSession) {
   return {
     id: s.id,
     workspaceId: s.workspaceId,
@@ -162,8 +162,7 @@ export function createAppServer() {
 
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
-        const list = sessions
-          .list(workspaceId)
+        const list = (await sessions.list(workspaceId))
           .slice()
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
           .map(sessionSummary)
@@ -200,15 +199,17 @@ export function createAppServer() {
 
       const sessionSnap = p.match(/^\/api\/v1\/sessions\/([^/]+)\/snapshot$/)
       if (method === "GET" && sessionSnap) {
-        const s = sessions.get(decodeURIComponent(sessionSnap[1]))
+        const id = decodeURIComponent(sessionSnap[1])
+        const s = await sessions.find(id)
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        return sendJson(res, 200, sessions.snapshot(s))
+        const attached = await sessions.attach(id)
+        return sendJson(res, 200, sessions.snapshot(attached))
       }
 
       const sessionOnly = p.match(/^\/api\/v1\/sessions\/([^/]+)$/)
       if (method === "DELETE" && sessionOnly) {
         const id = decodeURIComponent(sessionOnly[1])
-        if (!sessions.get(id)) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        if (!await sessions.find(id)) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         await sessions.delete(id)
         return sendJson(res, 200, { ok: true, id })
       }
@@ -369,7 +370,7 @@ export function createAppServer() {
       if (method === "GET" && sessionSkills) {
         const id = decodeURIComponent(sessionSkills[1])
         try {
-          return sendJson(res, 200, { skills: sessions.listSkills(id) })
+          return sendJson(res, 200, { skills: await sessions.listSkills(id) })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }
@@ -379,7 +380,7 @@ export function createAppServer() {
       if (method === "GET" && sessionCommands) {
         const id = decodeURIComponent(sessionCommands[1])
         try {
-          return sendJson(res, 200, { commands: sessions.listCommands(id) })
+          return sendJson(res, 200, { commands: await sessions.listCommands(id) })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }

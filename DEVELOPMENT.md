@@ -12,6 +12,8 @@
 
 基线设计：`docs/universal-agent-pi-technical-design.md`
 
+产品边界：`docs/ADR-0002-pi-native-client.md`
+
 ## 原则
 
 1. 壳（布局、主题、ChatArea、侧栏、文件、终端）尽量原样
@@ -19,6 +21,7 @@
 3. 禁止假 OpenCode SSE / 空 Proxy 当架构
 4. 每个 Phase 自测通过后再 commit
 5. **禁止**在开发流程里调用 Pi 付费模型对话
+6. Pi JSONL 和 `SessionManager` 是会话历史唯一来源，PiUI 不复制保存消息
 
 ## 仓库
 
