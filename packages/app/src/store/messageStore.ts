@@ -8,10 +8,18 @@
 // 3. Undo/Redo 通过 revertState 实现
 // 4. RAF 批量通知 React 组件更新
 
-import type { Message, MessageError, Part, FilePart, AgentPart } from '../types/message'
-import type { ApiMessageWithParts, ApiMessage, ApiPart, Attachment } from '../api/types'
+import type {
+  Message,
+  MessageError,
+  MessageInfo,
+  Part,
+  FilePart,
+  AgentPart,
+  UserMessageInfo,
+} from '../types/message'
+import { isUserMessage } from '../types/message'
+import type { Attachment } from '../api/types'
 import { logger } from '../utils/logger'
-import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
 import type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
 
 // Re-export types for consumers
@@ -65,6 +73,10 @@ function shouldPreserveLiveParts(
 ) {
   if (incoming && !messageIsIncomplete(incoming)) return false
   return messageIsIncomplete(previous)
+}
+
+function isUserUIMessage(message: Message): message is Message & { info: UserMessageInfo } {
+  return isUserMessage(message.info)
 }
 
 class MessageStore {
@@ -424,20 +436,6 @@ class MessageStore {
   // Message CRUD
   // ============================================
 
-  setMessages(
-    sessionId: string,
-    apiMessages: ApiMessageWithParts[],
-    options?: {
-      directory?: string
-      title?: string
-      hasMoreHistory?: boolean
-      revertState?: { messageID?: string } | null
-      shareUrl?: string
-    },
-  ) {
-    this.setUiMessages(sessionId, apiMessages.map(toUIMessage), options)
-  }
-
   setUiMessages(
     sessionId: string,
     messages: Message[],
@@ -510,24 +508,6 @@ class MessageStore {
     this.notify([sessionId])
   }
 
-  prependMessages(sessionId: string, apiMessages: ApiMessageWithParts[], hasMore: boolean) {
-    const state = this.sessions.get(sessionId)
-    if (!state) return
-
-    const newMessages = apiMessages.map(toUIMessage)
-
-    // 去重
-    const existingIds = new Set(state.messages.map(m => m.info.id))
-    const unique = newMessages.filter(m => !existingIds.has(m.info.id))
-
-    if (unique.length > 0) {
-      state.messages = [...unique, ...state.messages]
-    }
-    state.hasMoreHistory = hasMore
-
-    this.notify([sessionId])
-  }
-
   clearAll() {
     this.sessions.clear()
     this.sessionAccessTime.clear()
@@ -558,13 +538,13 @@ class MessageStore {
   // SSE Event Handlers
   // ============================================
 
-  handleMessageUpdated(apiMsg: ApiMessage) {
-    const state = this.ensureSession(apiMsg.sessionID)
-    const existingIndex = state.messages.findIndex(m => m.info.id === apiMsg.id)
+  handleMessageUpdated(messageInfo: MessageInfo) {
+    const state = this.ensureSession(messageInfo.sessionID)
+    const existingIndex = state.messages.findIndex(m => m.info.id === messageInfo.id)
 
     if (existingIndex >= 0) {
       const oldMessage = state.messages[existingIndex]
-      const newMessage = { ...oldMessage, info: toUIMessageInfo(apiMsg) }
+      const newMessage = { ...oldMessage, info: messageInfo }
       state.messages = [
         ...state.messages.slice(0, existingIndex),
         newMessage,
@@ -572,30 +552,30 @@ class MessageStore {
       ]
     } else {
       const newMsg: Message = {
-        info: toUIMessageInfo(apiMsg),
+        info: messageInfo,
         parts: [],
-        isStreaming: apiMsg.role === 'assistant',
+        isStreaming: messageInfo.role === 'assistant',
       }
       state.messages = [...state.messages, newMsg]
-      if (apiMsg.role === 'assistant') {
+      if (messageInfo.role === 'assistant') {
         state.isStreaming = true
       }
     }
 
-    this.notify([apiMsg.sessionID])
+    this.notify([messageInfo.sessionID])
   }
 
-  handlePartUpdated(apiPart: ApiPart & { sessionID: string; messageID: string }) {
-    const state = this.sessions.get(apiPart.sessionID)
+  handlePartUpdated(part: Part & { sessionID: string; messageID: string }) {
+    const state = this.sessions.get(part.sessionID)
     if (!state) return
 
-    const msgIndex = state.messages.findIndex(m => m.info.id === apiPart.messageID)
+    const msgIndex = state.messages.findIndex(m => m.info.id === part.messageID)
     if (msgIndex === -1) return
 
     const oldMessage = state.messages[msgIndex]
     const newParts = [...oldMessage.parts]
-    const existingPartIndex = newParts.findIndex(p => p.id === apiPart.id)
-    const incoming = toUIPart(apiPart)
+    const existingPartIndex = newParts.findIndex(p => p.id === part.id)
+    const incoming = part
 
     if (existingPartIndex >= 0) {
       const existing = newParts[existingPartIndex]
@@ -609,7 +589,7 @@ class MessageStore {
 
     const newMessage = { ...oldMessage, parts: newParts }
     state.messages = [...state.messages.slice(0, msgIndex), newMessage, ...state.messages.slice(msgIndex + 1)]
-    this.notify([apiPart.sessionID])
+    this.notify([part.sessionID])
   }
 
   handlePartDelta(data: { sessionID: string; messageID: string; partID: string; field: string; delta: string }) {

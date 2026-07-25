@@ -15,7 +15,6 @@ export type {
   Message as ApiMessage,
   UserMessage as ApiUserMessage,
   AssistantMessage as ApiAssistantMessage,
-  MessageWithParts as ApiMessageWithParts,
   Part as ApiPart,
   TextPart as ApiTextPart,
   ReasoningPart as ApiReasoningPart,

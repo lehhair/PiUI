@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
+import type { AssistantMessageInfo, Message, TextPart } from '../types/message'
 import { messageStore } from './messageStore'
 
-function createAssistantMessage(id: string, sessionID = 'session-1'): ApiMessage {
+function createAssistantMessage(id: string, sessionID = 'session-1'): AssistantMessageInfo {
   return {
     id,
     sessionID,
@@ -35,7 +35,7 @@ function createTextPart(
   messageID: string,
   text: string,
   sessionID = 'session-1',
-): ApiPart & { sessionID: string; messageID: string } {
+): TextPart {
   return {
     id,
     sessionID,
@@ -45,7 +45,7 @@ function createTextPart(
   }
 }
 
-function createMessageWithParts(id: string, text: string, sessionID = 'session-1'): ApiMessageWithParts {
+function createMessageWithParts(id: string, text: string, sessionID = 'session-1'): Message {
   return {
     info: createAssistantMessage(id, sessionID),
     parts: [createTextPart(`part-${id}`, id, text, sessionID)],
@@ -78,33 +78,19 @@ describe('messageStore', () => {
   })
 
   it('marks cached sessions stale after reconnect and clears the flag after a fresh load', () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello')])
 
     expect(messageStore.isSessionStale('session-1')).toBe(false)
 
     messageStore.markAllSessionsStale()
     expect(messageStore.isSessionStale('session-1')).toBe(true)
 
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello again')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello again')])
     expect(messageStore.isSessionStale('session-1')).toBe(false)
   })
 
-  it('accepts exported message envelopes that use message instead of info', () => {
-    messageStore.setMessages('session-1', [
-      {
-        message: createAssistantMessage('message-1'),
-        parts: [createTextPart('part-message-1', 'message-1', 'hello')],
-      } as unknown as ApiMessageWithParts,
-    ])
-
-    const state = messageStore.getSessionState('session-1')
-    expect(state?.messages).toHaveLength(1)
-    expect(state?.messages[0].info.id).toBe('message-1')
-    expect(state?.messages[0].parts[0]).toMatchObject({ id: 'part-message-1', type: 'text', text: 'hello' })
-  })
-
   it('truncates messages after revert point', () => {
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       createMessageWithParts('message-1', 'one'),
       createMessageWithParts('message-2', 'two'),
       createMessageWithParts('message-3', 'three'),
@@ -123,7 +109,7 @@ describe('messageStore', () => {
   })
 
   it('removes a part from a message', () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello')])
 
     messageStore.handlePartRemoved({
       sessionID: 'session-1',
@@ -133,21 +119,6 @@ describe('messageStore', () => {
 
     const state = messageStore.getSessionState('session-1')
     expect(state?.messages[0].parts).toHaveLength(0)
-  })
-
-  it('deduplicates messages in prependMessages', () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-2', 'two')])
-
-    messageStore.prependMessages(
-      'session-1',
-      [createMessageWithParts('message-1', 'one'), createMessageWithParts('message-2', 'duplicate')],
-      true,
-    )
-
-    const state = messageStore.getSessionState('session-1')
-    expect(state?.messages).toHaveLength(2)
-    expect(state?.messages[0].info.id).toBe('message-1')
-    expect(state?.messages[1].info.id).toBe('message-2')
   })
 
   it('creates a session when starting streaming', () => {
@@ -166,7 +137,7 @@ describe('messageStore', () => {
   })
 
   it('does not regress longer live part text when a shorter snapshot arrives while streaming', () => {
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       {
         info: {
           ...createAssistantMessage('message-1'),
@@ -189,20 +160,20 @@ describe('messageStore', () => {
   })
 
   it('adopts a longer server snapshot when reloading messages', () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello')])
     messageStore.setStreaming('session-1', true)
     const live = messageStore.getSessionState('session-1')?.messages[0]
     if (live) live.isStreaming = true
 
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello world')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello world')])
 
     expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
       text: 'hello world',
     })
   })
 
-  it('keeps longer live text when setMessages receives a shorter server snapshot while streaming', () => {
-    messageStore.setMessages('session-1', [
+  it('keeps longer live text when setUiMessages receives a shorter server snapshot while streaming', () => {
+    messageStore.setUiMessages('session-1', [
       {
         info: {
           ...createAssistantMessage('message-1'),
@@ -215,7 +186,7 @@ describe('messageStore', () => {
     const live = messageStore.getSessionState('session-1')?.messages[0]
     if (live) live.isStreaming = true
 
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       {
         info: {
           ...createAssistantMessage('message-1'),
@@ -231,7 +202,7 @@ describe('messageStore', () => {
   })
 
   it('adopts completed server text even when local live text was longer', () => {
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       {
         info: {
           ...createAssistantMessage('message-1'),
@@ -249,7 +220,7 @@ describe('messageStore', () => {
     if (completed.info.role === 'assistant') {
       completed.info.time = { created: 1, completed: 99 }
     }
-    messageStore.setMessages('session-1', [completed])
+    messageStore.setUiMessages('session-1', [completed])
 
     expect(messageStore.getSessionState('session-1')?.messages[0].parts[0]).toMatchObject({
       text: 'hello world',
@@ -261,7 +232,7 @@ describe('messageStore', () => {
     if (completed.info.role === 'assistant') {
       completed.info.time = { created: 1, completed: 10 }
     }
-    messageStore.setMessages('session-1', [completed])
+    messageStore.setUiMessages('session-1', [completed])
 
     messageStore.handlePartUpdated({
       ...createTextPart('part-message-1', 'message-1', 'hello world'),
@@ -280,8 +251,8 @@ describe('messageStore', () => {
     })
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
 
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
-    messageStore.setMessages('session-2', [createMessageWithParts('message-2', 'world', 'session-2')])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    messageStore.setUiMessages('session-2', [createMessageWithParts('message-2', 'world', 'session-2')])
 
     const beforeMessage1 = messageStore.getSessionState('session-1')?.messages[0]
     const beforeMessage2 = messageStore.getSessionState('session-2')?.messages[0]
@@ -325,7 +296,7 @@ describe('messageStore', () => {
 
     const message = createMessageWithParts('message-1', 'settled')
     message.parts.push(createTextPart('part-live', 'message-1', 'live'))
-    messageStore.setMessages('session-1', [message])
+    messageStore.setUiMessages('session-1', [message])
 
     const beforeMessage = messageStore.getSessionState('session-1')?.messages[0]
     const beforeSettledPart = beforeMessage?.parts[0]
@@ -361,7 +332,7 @@ describe('messageStore', () => {
     const unsubscribeSession2 = messageStore.subscribeSession('session-2', session2Subscriber)
     const unsubscribeAll = messageStore.subscribe(allSubscriber)
 
-    messageStore.setMessages('session-2', [createMessageWithParts('message-2', 'world', 'session-2')])
+    messageStore.setUiMessages('session-2', [createMessageWithParts('message-2', 'world', 'session-2')])
     rafCallbacks.shift()?.(0)
 
     expect(session1Subscriber).not.toHaveBeenCalled()
