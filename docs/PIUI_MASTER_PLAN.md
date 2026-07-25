@@ -434,8 +434,8 @@ health response 增加：
 |---|---|---|---|
 | 0 | 基线冻结与真实门禁 | 当前状态可重复验证 | 已完成 |
 | 1 | 单一 Pi 后端 | OpenCode SSE 和双 server 状态停止运行 | 已完成 |
-| 2 | 安全与能力控制 | 本地接口有认证、Origin 和 trust | 待开始 |
-| 3 | 会话执行内核 | 单 session 单写，命令可追踪 | 待开始 |
+| 2 | 安全与能力控制 | 本地接口有认证、Origin 和 trust | 进行中 |
+| 3 | 会话执行内核 | 单 session 单写，命令可追踪 | 进行中 |
 | 4 | 事件协议与多会话状态 | delta、sequence、replay、resync 可用 | 待开始 |
 | 5 | 持久化与 Pi JSONL 恢复 | 重启不丢 workspace/session | 待开始 |
 | 6 | 去除 OpenCode 数据层 | SDK shim、SSE、旧类型全部删除 | 进行中 |
@@ -568,6 +568,8 @@ git status --short
 每个 session 的命令按确定顺序执行，并具有可查询的生命周期。
 
 ### 任务
+
+当前已完成：`SessionExecutor`、session 级串行队列、独立 abort 控制队列、客户端 `commandId`、重复提交幂等、命令状态查询、`command.updated` 生命周期事件，以及 prompt/compact/abort 接入。其余命令、真正的 `202 Accepted` 异步响应、取消与 shutdown 语义仍待实现。
 
 1. 新建 `SessionExecutor`
 2. 每 session 一个队列和一个活动命令

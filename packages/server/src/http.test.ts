@@ -94,6 +94,9 @@ describe("http phase1", () => {
       const missing = await fetch(`http://127.0.0.1:${port}/api/v1/health`)
       assert.equal(missing.status, 401)
 
+      const command = await fetch(`http://127.0.0.1:${port}/api/v1/commands/private-command`)
+      assert.equal(command.status, 401)
+
       const accepted = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
         headers: { authorization: "Bearer test-token" },
       })

@@ -12,6 +12,10 @@ import { parsePiWorkspaceId } from "./workspaceRef"
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 const rawFetch = globalThis.fetch.bind(globalThis)
 
+function newCommandId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `cmd-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 /**
  * Browser dev uses same-origin + Vite proxy (`/api` → :8787) to avoid CORS.
  * Override with VITE_PIUI_API when needed.
@@ -312,13 +316,13 @@ export async function setSessionThinkingLevel(sessionId: string, level: string) 
   return data.snapshot
 }
 
-export async function compactSession(sessionId: string, instructions?: string) {
+export async function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/compact`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ instructions }),
+      body: JSON.stringify({ instructions, commandId }),
     },
   )
   if (!res.ok) {
@@ -365,10 +369,14 @@ export async function listSessionSkills(sessionId: string) {
   }
 }
 
-export async function abortSessionCommand(sessionId: string): Promise<SessionSnapshotV1 | null> {
+export async function abortSessionCommand(sessionId: string, commandId = newCommandId()): Promise<SessionSnapshotV1 | null> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/abort`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ commandId }),
+    },
   )
   if (!res.ok) return null
   const data = (await res.json()) as { snapshot?: SessionSnapshotV1 }
@@ -399,6 +407,7 @@ export async function promptSession(
     stream?: boolean
     model?: { providerID: string; modelID: string }
     deliverAs?: "steer" | "followUp"
+    commandId?: string
   },
 ): Promise<SessionSnapshotV1> {
   const res = await fetch(
@@ -408,6 +417,7 @@ export async function promptSession(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         text,
+        commandId: opts?.commandId ?? newCommandId(),
         stream: opts?.stream === true,
         deliverAs: opts?.deliverAs,
         model: opts?.model
