@@ -2,7 +2,7 @@ export * from "./types.js"
 export * from "./projection.js"
 export * from "./mock-runtime.js"
 // RealPiSession class is heavy — load via loadRealPiSession() when PIUI_DRIVER=pi
-export type { RealPiSession } from "./real-session.js"
+export type { PiSessionInfo, RealPiSession } from "./real-session.js"
 
 export type DriverMode = "mock" | "pi"
 

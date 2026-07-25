@@ -79,9 +79,14 @@ export function projectEntries(entries: PiEntry[]): ProjectionState {
         entryId: e.id,
         parentEntryId: e.parentId,
         timestamp: e.timestamp,
-        status: "completed",
-        provider: "mock",
-        model: "mock",
+        status: e.message.stopReason === "error"
+          ? "error"
+          : e.message.stopReason === "aborted"
+            ? "aborted"
+            : "completed",
+        provider: e.message.provider ?? "mock",
+        model: e.message.model ?? "mock",
+        stopReason: e.message.stopReason,
         content,
       }
       state.timeline.push(item)

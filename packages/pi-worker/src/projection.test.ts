@@ -54,6 +54,32 @@ describe("projectEntries", () => {
     }
   })
 
+  it("preserves native Pi assistant identity and completion state", () => {
+    const state = projectEntries([
+      {
+        type: "message",
+        id: "pi-assistant-entry",
+        parentId: null,
+        timestamp: 123,
+        message: {
+          role: "assistant",
+          provider: "anthropic",
+          model: "claude-test",
+          stopReason: "aborted",
+          content: [{ type: "text", text: "partial" }],
+        },
+      },
+    ])
+
+    const assistant = state.timeline[0]
+    assert.equal(assistant?.type, "assistant")
+    if (assistant?.type !== "assistant") return
+    assert.equal(assistant.entryId, "pi-assistant-entry")
+    assert.equal(assistant.provider, "anthropic")
+    assert.equal(assistant.model, "claude-test")
+    assert.equal(assistant.status, "aborted")
+  })
+
   it("keeps pending tool when result missing", () => {
     const entries: PiEntry[] = [
       {

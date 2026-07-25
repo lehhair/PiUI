@@ -55,6 +55,7 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(created.status, 201)
       assert.equal(created.data.snapshot.timeline.length, 0)
       const id = created.data.session.id as string
+      assert.equal(created.data.snapshot.session.driverSessionId, id)
 
       const listed = await json(port, "GET", "/api/v1/sessions")
       assert.equal(listed.status, 200)
@@ -88,6 +89,23 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(lastUser?.text, "second turn")
       const lastAsst = [...after].reverse().find(t => t.type === "assistant")
       assert.ok(lastAsst)
+    } finally {
+      await close()
+    }
+  })
+
+  it("returns native commands and skills as arrays", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "commands" })
+      const sessionId = created.data.session.id as string
+      const commands = await json(port, "GET", `/api/v1/sessions/${sessionId}/pi/commands`)
+      const skills = await json(port, "GET", `/api/v1/sessions/${sessionId}/pi/skills`)
+      assert.equal(commands.status, 200)
+      assert.ok(Array.isArray(commands.data.commands))
+      assert.equal(skills.status, 200)
+      assert.ok(Array.isArray(skills.data.skills))
     } finally {
       await close()
     }

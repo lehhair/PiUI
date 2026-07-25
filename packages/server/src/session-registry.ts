@@ -7,6 +7,7 @@ import {
   loadRealPiSession,
   runMockTurn,
   type DriverMode,
+  type PiSessionInfo,
   type ProjectionState,
   type RealPiSession,
 } from "@piui/pi-worker"
@@ -23,16 +24,25 @@ export interface AppSession {
   sequence: number
   projection: ProjectionState
   driver: DriverMode
+  sessionFile?: string
   real?: RealPiSession
+}
+
+export interface PiSessionBackend {
+  listAll(): Promise<PiSessionInfo[]>
+  open(cwd: string, sessionFile?: string): Promise<RealPiSession>
 }
 
 export class SessionRegistry {
   private readonly byId = new Map<string, AppSession>()
+  private readonly attaching = new Map<string, Promise<RealPiSession>>()
+  private readonly hiddenIds = new Set<string>()
   private readonly driver: DriverMode
 
   constructor(
     private readonly workspaces: WorkspaceStore,
     driver: DriverMode = getDriverMode(),
+    private readonly injectedBackend?: PiSessionBackend,
   ) {
     this.driver = driver
   }
@@ -41,7 +51,8 @@ export class SessionRegistry {
     return this.driver
   }
 
-  list(workspaceId?: string): AppSession[] {
+  async list(workspaceId?: string): Promise<AppSession[]> {
+    await this.discover()
     const all = [...this.byId.values()]
     return workspaceId ? all.filter(s => s.workspaceId === workspaceId) : all
   }
@@ -60,6 +71,7 @@ export class SessionRegistry {
         /* ignore */
       }
     }
+    this.hiddenIds.add(id)
     return this.byId.delete(id)
   }
 
@@ -83,8 +95,8 @@ export class SessionRegistry {
     let driverSessionId = `mock-${randomUUID().slice(0, 8)}`
 
     if (this.driver === "pi") {
-      const RealPiSession = await loadRealPiSession()
-      real = await RealPiSession.open(ws.canonicalRoot)
+      const backend = await this.getBackend()
+      real = await backend.open(ws.canonicalRoot)
       driverSessionId = real.getSessionId()
       projection = real.getProjection()
     } else if (opts?.seedMock === true) {
@@ -101,7 +113,7 @@ export class SessionRegistry {
 
     const seedMock = opts?.seedMock === true && this.driver === "mock"
     const session: AppSession = {
-      id: randomUUID(),
+      id: driverSessionId,
       workspaceId,
       driverSessionId,
       title: opts?.title ?? (seedMock ? "Mock session" : "New chat"),
@@ -111,6 +123,7 @@ export class SessionRegistry {
       sequence,
       projection,
       driver: this.driver,
+      sessionFile: real?.getSessionFile(),
       real,
     }
     this.byId.set(session.id, session)
@@ -128,10 +141,7 @@ export class SessionRegistry {
       deliverAs?: "steer" | "followUp"
     },
   ): Promise<AppSession> {
-    const session = this.byId.get(sessionId)
-    if (!session) {
-      throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
-    }
+    const session = await this.attach(sessionId)
     const trimmed = text.trim()
     if (!trimmed) {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
@@ -157,6 +167,8 @@ export class SessionRegistry {
         throw Object.assign(new Error(msg), { code: "INTERNAL" as const })
       }
       session.projection = session.real.getProjection()
+      session.sessionFile = session.real.getSessionFile() ?? session.sessionFile
+      session.title = session.real.getSessionName() ?? session.title
       if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
         session.title = trimmed.slice(0, 48)
       }
@@ -188,8 +200,9 @@ export class SessionRegistry {
   }
 
   async abort(sessionId: string): Promise<AppSession | undefined> {
-    const session = this.byId.get(sessionId)
+    const session = await this.find(sessionId)
     if (!session) return undefined
+    await this.attach(sessionId)
     if (session.real) {
       await session.real.abort()
       session.projection = session.real.getProjection()
@@ -199,7 +212,7 @@ export class SessionRegistry {
   }
 
   async setModel(sessionId: string, provider: string, modelId: string): Promise<AppSession> {
-    const session = this.require(sessionId)
+    const session = await this.attach(sessionId)
     if (session.real) {
       await session.real.setModel(provider, modelId)
     }
@@ -208,7 +221,7 @@ export class SessionRegistry {
   }
 
   async setThinkingLevel(sessionId: string, level: string): Promise<AppSession> {
-    const session = this.require(sessionId)
+    const session = await this.attach(sessionId)
     if (session.real) {
       session.real.setThinkingLevel(level)
     }
@@ -217,7 +230,7 @@ export class SessionRegistry {
   }
 
   async compact(sessionId: string, instructions?: string): Promise<AppSession> {
-    const session = this.require(sessionId)
+    const session = await this.attach(sessionId)
     if (session.real) {
       await session.real.compact(instructions)
       session.projection = session.real.getProjection()
@@ -226,13 +239,13 @@ export class SessionRegistry {
     return session
   }
 
-  listSkills(sessionId: string) {
-    const session = this.require(sessionId)
+  async listSkills(sessionId: string) {
+    const session = await this.attach(sessionId)
     return session.real?.listSkills() ?? []
   }
 
-  listCommands(sessionId: string) {
-    const session = this.require(sessionId)
+  async listCommands(sessionId: string) {
+    const session = await this.attach(sessionId)
     if (session.real) return session.real.listCommands()
     return [
       { name: "new", description: "New session", source: "builtin" as const },
@@ -246,6 +259,86 @@ export class SessionRegistry {
       throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
     }
     return session
+  }
+
+  async find(sessionId: string): Promise<AppSession | undefined> {
+    if (!this.byId.has(sessionId)) await this.discover()
+    return this.byId.get(sessionId)
+  }
+
+  async attach(sessionId: string): Promise<AppSession> {
+    const session = await this.find(sessionId)
+    if (!session) {
+      throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
+    }
+    if (session.driver !== "pi" || session.real) return session
+    let pending = this.attaching.get(sessionId)
+    if (!pending) {
+      pending = this.openRealSession(session)
+      this.attaching.set(sessionId, pending)
+      void pending.then(() => {
+        if (this.attaching.get(sessionId) === pending) this.attaching.delete(sessionId)
+      }, () => {
+        if (this.attaching.get(sessionId) === pending) this.attaching.delete(sessionId)
+      })
+    }
+    session.real = await pending
+    session.projection = session.real.getProjection()
+    session.driverSessionId = session.real.getSessionId()
+    session.sessionFile = session.real.getSessionFile() ?? session.sessionFile
+    session.title = session.real.getSessionName() ?? session.title
+    return session
+  }
+
+  private async openRealSession(session: AppSession): Promise<RealPiSession> {
+    if (this.driver !== "pi") {
+      throw Object.assign(new Error("Pi runtime is not enabled"), { code: "DRIVER_UNAVAILABLE" })
+    }
+    const workspace = this.workspaces.get(session.workspaceId)
+    if (!workspace) {
+      throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    }
+    const backend = await this.getBackend()
+    return backend.open(workspace.canonicalRoot, session.sessionFile)
+  }
+
+  private async discover(): Promise<void> {
+    if (this.driver !== "pi") return
+    const backend = await this.getBackend()
+    const infos = await backend.listAll()
+    for (const info of infos) this.addDiscovered(info)
+  }
+
+  private async getBackend(): Promise<PiSessionBackend> {
+    if (this.injectedBackend) return this.injectedBackend
+    const RealPiSession = await loadRealPiSession()
+    return {
+      listAll: () => RealPiSession.listAll(),
+      open: (cwd, sessionFile) => RealPiSession.open(cwd, sessionFile),
+    }
+  }
+
+  private addDiscovered(info: PiSessionInfo): void {
+    if (this.byId.has(info.id) || this.hiddenIds.has(info.id) || !info.cwd) return
+    let workspaceId: string
+    try {
+      workspaceId = this.workspaces.register(info.cwd).id
+    } catch {
+      return
+    }
+    this.byId.set(info.id, {
+      id: info.id,
+      workspaceId,
+      driverSessionId: info.id,
+      title: info.name ?? (info.firstMessage.slice(0, 48) || "New chat"),
+      createdAt: info.createdAt,
+      updatedAt: info.updatedAt,
+      epoch: randomUUID(),
+      sequence: 0,
+      projection: createProjectionState(),
+      driver: "pi",
+      sessionFile: info.path,
+    })
   }
 
   snapshot(session: AppSession): SessionSnapshotV1 {
@@ -274,7 +367,7 @@ export class SessionRegistry {
         updatedAt: session.updatedAt,
       },
       runtime: {
-        attached: true,
+        attached: session.driver === "mock" || Boolean(session.real),
         model: model
           ? { provider: model.provider, id: model.id, displayName: model.displayName }
           : session.driver === "mock"
@@ -297,9 +390,9 @@ export class SessionRegistry {
       native: {
         namespace: "pi",
         schemaVersion: 1,
-        leafId: session.projection.timeline.at(-1)?.id ?? null,
-        entries: [],
-        tree: [],
+        leafId: session.real?.getLeafId() ?? session.projection.timeline.at(-1)?.entryId ?? null,
+        entries: session.real?.getEntries() ?? [],
+        tree: session.real?.getTree() ?? [],
       },
     }
   }

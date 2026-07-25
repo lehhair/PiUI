@@ -10,13 +10,17 @@ import {
   SessionManager,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent"
+import { existsSync } from "node:fs"
+import path from "node:path"
 import {
   applyWorkerEvent,
   createProjectionState,
+  projectEntries,
   type ProjectionState,
 } from "./projection.js"
-import type { PiContentBlock, WorkerEvent } from "./types.js"
+import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
 
 export interface PiRuntimeUiState {
   thinkingLevel: string
@@ -41,6 +45,17 @@ export interface PiCommandInfo {
   name: string
   description?: string
   source: "skill" | "prompt" | "extension" | "builtin"
+}
+
+export interface PiSessionInfo {
+  id: string
+  path: string
+  cwd: string
+  name?: string
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+  firstMessage: string
 }
 
 export class RealPiSession {
@@ -70,7 +85,7 @@ export class RealPiSession {
     })
   }
 
-  static async open(cwd: string): Promise<RealPiSession> {
+  static async open(cwd: string, sessionFile?: string): Promise<RealPiSession> {
     const createRuntime: CreateAgentSessionRuntimeFactory = async ({
       cwd: runtimeCwd,
       sessionManager,
@@ -88,14 +103,34 @@ export class RealPiSession {
       }
     }
 
+    if (sessionFile && !existsSync(sessionFile)) {
+      throw Object.assign(new Error("Pi session file no longer exists"), { code: "SESSION_FILE_NOT_FOUND" })
+    }
+    const sessionManager = sessionFile ? SessionManager.open(sessionFile) : SessionManager.create(cwd)
+    if (sessionFile && pathKey(sessionManager.getCwd()) !== pathKey(cwd)) {
+      throw Object.assign(new Error("Pi session workspace does not match the selected workspace"), {
+        code: "SESSION_WORKSPACE_MISMATCH",
+      })
+    }
+    const projection = sessionFile ? projectNativeBranch(sessionManager.getBranch()) : undefined
     const runtime = await createAgentSessionRuntime(createRuntime, {
-      cwd,
+      cwd: sessionManager.getCwd(),
       agentDir: getAgentDir(),
-      sessionManager: SessionManager.create(cwd),
+      sessionManager,
     })
 
     await runtime.session.bindExtensions({})
-    return new RealPiSession(runtime)
+    const result = new RealPiSession(runtime)
+    if (projection) result.projection = projection
+    return result
+  }
+
+  static async list(cwd: string): Promise<PiSessionInfo[]> {
+    return (await SessionManager.list(cwd)).map(sessionInfo)
+  }
+
+  static async listAll(): Promise<PiSessionInfo[]> {
+    return (await SessionManager.listAll()).map(sessionInfo)
   }
 
   onState(listener: (s: PiRuntimeUiState) => void): () => void {
@@ -119,6 +154,22 @@ export class RealPiSession {
 
   getSessionFile(): string | undefined {
     return this.runtime.session.sessionFile
+  }
+
+  getSessionName(): string | undefined {
+    return this.runtime.session.sessionManager.getSessionName()
+  }
+
+  getEntries(): unknown[] {
+    return this.runtime.session.sessionManager.getEntries()
+  }
+
+  getTree(): unknown[] {
+    return this.runtime.session.sessionManager.getTree()
+  }
+
+  getLeafId(): string | null {
+    return this.runtime.session.sessionManager.getLeafId()
   }
 
   getModel() {
@@ -240,6 +291,8 @@ export class RealPiSession {
       apply({ type: "agent_end" })
       this.unsub?.()
       this.unsub = null
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      onTick?.(this.projection)
       this.emitState()
     }
   }
@@ -319,6 +372,87 @@ export class RealPiSession {
   _getAsst() {
     return this.currentAsstId
   }
+}
+
+function sessionInfo(info: {
+  id: string
+  path: string
+  cwd: string
+  name?: string
+  created: Date
+  modified: Date
+  messageCount: number
+  firstMessage: string
+}): PiSessionInfo {
+  return {
+    id: info.id,
+    path: info.path,
+    cwd: info.cwd,
+    name: info.name,
+    createdAt: info.created.toISOString(),
+    updatedAt: info.modified.toISOString(),
+    messageCount: info.messageCount,
+    firstMessage: info.firstMessage,
+  }
+}
+
+function pathKey(value: string): string {
+  const resolved = path.resolve(value)
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+function projectNativeBranch(entries: SessionEntry[]): ProjectionState {
+  const projected: PiEntry[] = []
+  for (const entry of entries) {
+    if (entry.type !== "message") continue
+    const message = entry.message as unknown as Record<string, unknown>
+    const role = message.role
+    const messageTimestamp = typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp)
+    const timestamp = Number.isFinite(messageTimestamp) ? messageTimestamp : 0
+    if (role === "user") {
+      projected.push({
+        type: "message",
+        id: entry.id,
+        parentId: entry.parentId,
+        timestamp,
+        message: { role: "user", content: extractText(message.content) },
+      })
+    } else if (role === "assistant") {
+      projected.push({
+        type: "message",
+        id: entry.id,
+        parentId: entry.parentId,
+        timestamp,
+        message: {
+          role: "assistant",
+          content: toContentBlocks(message.content),
+          provider: typeof message.provider === "string" ? message.provider : undefined,
+          model: typeof message.model === "string" ? message.model : undefined,
+          stopReason: isStopReason(message.stopReason) ? message.stopReason : undefined,
+          errorMessage: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
+        },
+      })
+    } else if (role === "toolResult") {
+      projected.push({
+        type: "message",
+        id: entry.id,
+        parentId: entry.parentId,
+        timestamp,
+        message: {
+          role: "toolResult",
+          toolCallId: String(message.toolCallId ?? ""),
+          toolName: typeof message.toolName === "string" ? message.toolName : undefined,
+          isError: Boolean(message.isError),
+          result: extractText(message.content),
+        },
+      })
+    }
+  }
+  return projectEntries(projected)
+}
+
+function isStopReason(value: unknown): value is "stop" | "length" | "toolUse" | "error" | "aborted" {
+  return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted"
 }
 
 function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: RealPiSession): WorkerEvent[] {

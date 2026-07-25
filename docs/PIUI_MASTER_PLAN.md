@@ -661,16 +661,13 @@ server 重启和页面刷新后，workspace、session、消息和 Pi runtime 可
 
 ### 存储选择
 
-第一版建议使用 SQLite 保存 catalog 和 command metadata，Pi JSONL 继续作为 Pi 原生会话内容来源。
+SQLite 只保存 Pi 不负责的 UI 元数据。Pi session 由 `SessionManager.list/listAll` 发现，Pi JSONL 继续作为 Pi 原生会话内容来源。
 
 SQLite 保存：
 
-- workspaces
-- sessions
-- session 与 `sessionFile` 映射
-- archived 状态
-- trust 状态
-- command metadata
+- 常用 workspace 与 trust
+- UI 归档、布局和草稿
+- 必要的 command metadata
 - schema version
 
 不复制保存完整 Pi 消息正文，避免双数据源冲突。UI snapshot 可按需从 JSONL 重建并做短期缓存。
@@ -679,11 +676,11 @@ SQLite 保存：
 
 1. 选择数据目录
 2. 引入 SQLite 和 migration
-3. 持久化 WorkspaceRecord
-4. 持久化 SessionRecord
-5. 保存 `sessionFile`
-6. server 启动时加载 catalog
-7. session 首次访问时按需 attach runtime
+3. 持久化 UI workspace 与 trust
+4. 通过 `SessionManager.list/listAll` 发现 Pi session
+5. 使用 Pi session ID 作为 PiUI session ID
+6. server 不接受浏览器提供的任意 `sessionFile`
+7. session 首次访问时按服务端发现的路径 attach runtime
 8. 从 Pi JSONL entries 重建 projection
 9. 保存并恢复 leafId/tree
 10. 支持扫描 Pi 已有 session

@@ -30,6 +30,10 @@ export interface PiMessageEntry {
     toolCallId?: string
     toolName?: string
     isError?: boolean
+    provider?: string
+    model?: string
+    stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted"
+    errorMessage?: string
     /** toolResult text content */
     result?: string | Array<{ type: "text"; text: string }>
   }
