@@ -16,7 +16,6 @@ import {
 } from './Icons'
 import { getSkills } from '../api/skill'
 import type { Skill } from '../types/api/skill'
-import { useDirectory } from '../hooks'
 import { apiErrorHandler } from '../utils'
 
 // ============================================
@@ -25,11 +24,11 @@ import { apiErrorHandler } from '../utils'
 
 interface SkillPanelProps {
   isResizing?: boolean
+  sessionId?: string | null
 }
 
-export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing }: SkillPanelProps) {
+export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing, sessionId }: SkillPanelProps) {
   const { t } = useTranslation(['components', 'common'])
-  const { currentDirectory } = useDirectory()
   const [skills, setSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +38,7 @@ export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing }: 
     try {
       setLoading(true)
       setError(null)
-      const data = await getSkills(currentDirectory)
+      const data = await getSkills(sessionId)
       setSkills(data)
     } catch (err) {
       apiErrorHandler('load skills', err)
@@ -47,7 +46,7 @@ export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing }: 
     } finally {
       setLoading(false)
     }
-  }, [currentDirectory, t])
+  }, [sessionId, t])
 
   useEffect(() => {
     loadSkills()

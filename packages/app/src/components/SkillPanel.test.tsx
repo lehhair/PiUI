@@ -8,10 +8,6 @@ vi.mock('../api/skill', () => ({
   getSkills: (...args: unknown[]) => getSkillsMock(...args),
 }))
 
-vi.mock('../hooks', () => ({
-  useDirectory: () => ({ currentDirectory: '/workspace/demo' }),
-}))
-
 vi.mock('../utils', () => ({
   apiErrorHandler: vi.fn(),
 }))
@@ -30,9 +26,10 @@ describe('SkillPanel', () => {
   })
 
   it('renders semantic controls for refresh, search, and expandable items', async () => {
-    render(<SkillPanel />)
+    render(<SkillPanel sessionId="session-1" />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument())
+    expect(getSkillsMock).toHaveBeenCalledWith('session-1')
 
     const searchInput = screen.getByRole('textbox', { name: 'Filter skills...' })
     const itemButton = screen.getByRole('button', { name: /deploy-to-vercel/i })

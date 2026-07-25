@@ -26,6 +26,7 @@ import { updateSession } from '../../api'
 import { useDirectory } from '../../contexts/useDirectory'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport, canUseSplitPane } from './chatViewport'
+import { usePiCapabilities } from '../../pi/capabilities'
 import {
   getInternalDragSnapshot,
   isPointInsideElement,
@@ -63,6 +64,7 @@ export function PaneHeader({
 }: PaneHeaderProps) {
   const { t } = useTranslation('chat')
   const viewport = useChatViewport()
+  const canRename = usePiCapabilities().sessionRename
   const sessionState = useSessionState(sessionId)
   const { currentDirectory } = useDirectory()
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
@@ -91,10 +93,10 @@ export function PaneHeader({
   }, [isEditing])
 
   const handleStartEdit = useCallback(() => {
-    if (!sessionId) return
+    if (!sessionId || !canRename) return
     setEditValue(title)
     setIsEditing(true)
-  }, [sessionId, title])
+  }, [canRename, sessionId, title])
 
   const handleRename = useCallback(async () => {
     if (!sessionId || !editValue.trim() || editValue === title) {
@@ -185,7 +187,7 @@ export function PaneHeader({
             }}
             className="px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-text-100 bg-transparent border-none outline-none w-[140px]"
           />
-        ) : (
+        ) : canRename ? (
           <button
             onClick={handleStartEdit}
             className="px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-text-200 hover:text-text-100 transition-colors truncate max-w-[200px] cursor-text select-none"
@@ -193,6 +195,10 @@ export function PaneHeader({
           >
             {title}
           </button>
+        ) : (
+          <span className="px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-text-200 truncate max-w-[200px] select-none">
+            {title}
+          </span>
         )}
       </div>
 

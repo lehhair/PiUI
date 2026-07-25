@@ -5,7 +5,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import {
   messageStore,
-  useSessionFamily,
   useSessionState,
   autoApproveStore,
   useActiveSessionStore,
@@ -41,6 +40,7 @@ import { isPiSession } from '../pi/isPiSession'
 import { promptSession } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
+import { usePiCapabilities } from '../pi/capabilities'
 
 const handleError = createErrorHandler('session')
 
@@ -95,6 +95,7 @@ export function useChatSession({
   navigateHome,
 }: UseChatSessionOptions) {
   const { statusMap } = useActiveSessionStore()
+  const capabilities = usePiCapabilities()
 
   // Agents
   const agents: ApiAgent[] = []
@@ -186,9 +187,6 @@ export function useChatSession({
     [getSessionTitle],
   )
 
-  // Session family for permission polling
-  const sessionFamily = useSessionFamily(routeSessionId)
-
   // Session Manager
   const { loadSession, loadMoreHistory, handleUndo, handleRedo, handleRedoAll, clearRevert } = useSessionManager({
     sessionId: routeSessionId,
@@ -205,7 +203,6 @@ export function useChatSession({
     handlePermissionReply,
     handleQuestionReply,
     handleQuestionReject,
-    refreshPendingRequests,
     resetPendingRequests,
     isReplying,
   } = usePermissionHandler()
@@ -253,18 +250,6 @@ export function useChatSession({
   useEffect(() => {
     autoRetriedIdsRef.current.clear()
   }, [approvePendingOnFullAuto, fullAutoMode])
-
-  useEffect(() => {
-    if (!routeSessionId || !approvePendingOnFullAuto || fullAutoMode !== 'session') return
-    void refreshPendingRequests(sessionFamily, effectiveDirectory)
-  }, [
-    approvePendingOnFullAuto,
-    effectiveDirectory,
-    fullAutoMode,
-    refreshPendingRequests,
-    routeSessionId,
-    sessionFamily,
-  ])
 
   useEffect(() => {
     if (!approvePendingOnFullAuto || fullAutoMode === 'off' || pendingPermissionRequests.length === 0) return
@@ -374,8 +359,6 @@ export function useChatSession({
         if (routeSessionId) {
           // 使用 force 模式，确保覆盖本地可能不完整的数据
           loadSession(routeSessionId, { force: true })
-          // 重连后刷新待处理的权限请求和问题，避免用户错过后台产生的请求
-          refreshPendingRequests(sessionFamily, effectiveDirectory)
         }
         refetchModels().catch(() => {})
       },
@@ -385,14 +368,12 @@ export function useChatSession({
       paneId,
       effectiveDirectory,
       routeSessionId,
-      sessionFamily,
       replyPermissionOnceAutomatically,
       setPendingPermissionRequests,
       setPendingQuestionRequests,
       buildNotificationTitle,
       sendNotification,
       loadSession,
-      refreshPendingRequests,
       refetchModels,
     ],
   )
@@ -816,7 +797,7 @@ export function useChatSession({
 
   // Archive current session
   const handleArchiveSession = useCallback(async () => {
-    if (!routeSessionId) return
+    if (!routeSessionId || !capabilities.sessionArchive) return
     try {
       await updateSession(routeSessionId, { time: { archived: Date.now() } }, effectiveDirectory)
       navigateHome()
@@ -824,7 +805,7 @@ export function useChatSession({
     } catch (error) {
       handleError('archive session', error)
     }
-  }, [routeSessionId, effectiveDirectory, navigateHome, handleNewChat])
+  }, [routeSessionId, capabilities.sessionArchive, effectiveDirectory, navigateHome, handleNewChat])
 
   // Navigate to previous session
   const handlePreviousSession = useCallback(() => {

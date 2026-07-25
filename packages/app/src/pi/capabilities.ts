@@ -5,6 +5,8 @@ export interface PiCapabilities {
   undo: boolean
   fileWrite: boolean
   gitDiff: boolean
+  sessionRename: boolean
+  sessionArchive: boolean
 }
 
 const unavailable: PiCapabilities = {
@@ -14,6 +16,8 @@ const unavailable: PiCapabilities = {
   undo: false,
   fileWrite: false,
   gitDiff: false,
+  sessionRename: false,
+  sessionArchive: false,
 }
 
 let current = unavailable

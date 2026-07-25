@@ -11,6 +11,7 @@ import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
 import type { ApiSession } from '../../api'
 import { startInternalDrag } from '../../lib/internalDragCore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../store/pinnedSessionsStore'
+import { usePiCapabilities } from '../../pi/capabilities'
 
 interface SessionListProps {
   sessions: ApiSession[]
@@ -402,6 +403,7 @@ export function SessionListItem({
   onToggleCheck,
 }: SessionListItemProps) {
   const { t } = useTranslation(['commands', 'common', 'chat'])
+  const canRename = usePiCapabilities().sessionRename
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState(session.title || '')
   const [showActions, setShowActions] = useState(false)
@@ -448,6 +450,7 @@ export function SessionListItem({
 
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (!canRename) return
     setShowActions(false)
     setEditTitle(session.title || '')
     setIsEditing(true)
@@ -726,15 +729,17 @@ export function SessionListItem({
             >
               <PinIcon className="w-3 h-3" />
             </button>
-            <button
-              type="button"
-              onClick={handleStartEdit}
-              className="p-1 rounded hover:bg-bg-300 text-text-500 hover:text-text-200 transition-colors focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
-              title={t('sessions.rename')}
-              aria-label={t('sessions.rename')}
-            >
-              <PencilIcon className="w-3 h-3" />
-            </button>
+            {canRename && (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="p-1 rounded hover:bg-bg-300 text-text-500 hover:text-text-200 transition-colors focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
+                title={t('sessions.rename')}
+                aria-label={t('sessions.rename')}
+              >
+                <PencilIcon className="w-3 h-3" />
+              </button>
+            )}
             <button
               type="button"
               onClick={handleDelete}
@@ -874,15 +879,17 @@ export function SessionListItem({
           >
             <PinIcon className="w-3.5 h-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={handleStartEdit}
-            className="p-1.5 rounded-md hover:bg-bg-300 active:bg-bg-300 text-text-400 hover:text-text-100 transition-colors focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
-            title={t('sessions.rename')}
-            aria-label={t('sessions.rename')}
-          >
-            <PencilIcon className="w-3.5 h-3.5" />
-          </button>
+          {canRename && (
+            <button
+              type="button"
+              onClick={handleStartEdit}
+              className="p-1.5 rounded-md hover:bg-bg-300 active:bg-bg-300 text-text-400 hover:text-text-100 transition-colors focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
+              title={t('sessions.rename')}
+              aria-label={t('sessions.rename')}
+            >
+              <PencilIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDelete}

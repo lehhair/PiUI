@@ -1,263 +1,140 @@
 // ============================================
-// Session API Functions
-// Transitional session facade; Pi paths are handled before unsupported calls.
+// Pi-native Session API Functions
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
-import { normalizeTodoItems } from './todo'
-import { formatPathForApi } from '../utils/directoryUtils'
-import { getSessionMessages } from './message'
-import { normalizeFileDiffs } from '../types/api/file'
-import type { ApiSession, SessionListParams, FileDiff, ApiMessageWithParts, ApiUserMessage } from './types'
+import { UnsupportedPiCapabilityError } from './sdk'
+import { applySnapshotToUi } from '../pi/applySnapshot'
+import {
+  abortSessionCommand,
+  createPiSession,
+  deletePiSession,
+  fetchSnapshot,
+  listPiSessions,
+  resolveWorkspaceId,
+} from '../pi/sessionApi'
+import { snapshotToApiSession, toApiSession } from '../pi/toApiSession'
+import type { ApiSession, SessionListParams, FileDiff } from './types'
 import type { SessionStatusMap } from '../types/api/session'
 import type { TodoItem } from '../types/api/event'
 
-function normalizeSessionList(value: unknown): ApiSession[] {
-  if (Array.isArray(value)) return value as ApiSession[]
-  throw new Error('Invalid OpenCode session list response')
+function unsupported(capability: string): never {
+  throw new UnsupportedPiCapabilityError(capability)
 }
 
-// ============================================
-// Session Status & Diff
-// ============================================
-
-/**
- * 获取所有 session 的当前状态
- */
 export async function getSessionStatus(directory?: string): Promise<SessionStatusMap> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.status({ directory: formatPathForApi(directory) }))
-}
-
-/**
- * 获取 session 的 diff
- * 返回可在 UI 中渲染的 SnapshotFileDiff（过滤缺少 file 的异常项）
- */
-export async function getSessionDiff(sessionId: string, directory?: string, messageId?: string): Promise<FileDiff[]> {
-  const sdk = getSDKClient()
-  return normalizeFileDiffs(
-    unwrap(
-      await sdk.session.diff({
-        sessionID: sessionId,
-        directory: formatPathForApi(directory),
-        messageID: messageId,
-      }),
-    ),
+  const workspaceId = directory ? await resolveWorkspaceId(directory) : null
+  const sessions = (await listPiSessions()).filter(session => !workspaceId || session.workspaceId === workspaceId)
+  const snapshots = await Promise.all(sessions.map(session => fetchSnapshot(session.id)))
+  return Object.fromEntries(
+    snapshots.map(snapshot => [
+      snapshot.session.id,
+      snapshot.session.state === 'idle' ? { type: 'idle' as const } : { type: 'busy' as const },
+    ]),
   )
 }
 
-function isUserMessage(message: ApiMessageWithParts): message is ApiMessageWithParts & { info: ApiUserMessage } {
-  return message.info.role === 'user'
+export async function getSessionDiff(
+  _sessionId: string,
+  _directory?: string,
+  _messageId?: string,
+): Promise<FileDiff[]> {
+  return unsupported('session diff')
 }
 
-/**
- * 获取当前可见用户消息对应的本轮 diff
- */
-export async function getLastTurnDiff(sessionId: string, directory?: string): Promise<FileDiff[]> {
-  const [session, messages] = await Promise.all([
-    getSession(sessionId, directory),
-    getSessionMessages(sessionId, undefined, directory),
-  ])
-
-  const userMessages = messages.filter(isUserMessage)
-  const revertMessageId = session.revert?.messageID
-  const visibleUserMessages = revertMessageId
-    ? userMessages.filter(message => message.info.id < revertMessageId)
-    : userMessages
-
-  return normalizeFileDiffs(visibleUserMessages.at(-1)?.info.summary?.diffs)
+export async function getLastTurnDiff(_sessionId: string, _directory?: string): Promise<FileDiff[]> {
+  return unsupported('turn diff')
 }
 
-// ============================================
-// Session CRUD
-// ============================================
-
-/**
- * 获取 session 列表
- */
 export async function getSessions(params: SessionListParams = {}): Promise<ApiSession[]> {
-  const sdk = getSDKClient()
-  const { directory, roots, start, search, limit } = params
-  return normalizeSessionList(
-    unwrap(
-      await sdk.session.list({
-        directory: formatPathForApi(directory),
-        roots,
-        start,
-        search,
-        limit,
-      }),
-    ),
-  )
+  const workspaceId = params.directory ? await resolveWorkspaceId(params.directory) : null
+  let sessions = (await listPiSessions())
+    .filter(session => !workspaceId || session.workspaceId === workspaceId)
+    .filter(session => !params.search || session.title.toLowerCase().includes(params.search.toLowerCase()))
+
+  if (params.start != null) {
+    sessions = sessions.filter(session => Date.parse(session.updatedAt) < params.start!)
+  }
+  if (params.limit != null) sessions = sessions.slice(0, Math.max(0, params.limit))
+  return sessions.map(session => toApiSession(session, params.directory))
 }
 
-/**
- * 获取单个 session
- */
 export async function getSession(sessionId: string, directory?: string): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.get({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+  return snapshotToApiSession(await fetchSnapshot(sessionId), directory)
 }
 
-/**
- * 创建 session
- */
 export async function createSession(
-  params: {
-    directory?: string
-    title?: string
-    parentID?: string
-  } = {},
+  params: { directory?: string; title?: string; parentID?: string } = {},
 ): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  const { directory, title, parentID } = params
-  return unwrap(
-    await sdk.session.create({
-      directory: formatPathForApi(directory),
-      title,
-      parentID,
-    }),
-  )
+  if (params.parentID) return unsupported('child sessions')
+  const workspaceId = await resolveWorkspaceId(params.directory)
+  if (!workspaceId) throw new Error('No Pi workspace is available')
+  const { snapshot } = await createPiSession({ workspaceId, title: params.title })
+  applySnapshotToUi(snapshot)
+  return snapshotToApiSession(snapshot, params.directory)
 }
 
-/**
- * 更新 session
- */
 export async function updateSession(
-  sessionId: string,
-  params: { title?: string; time?: { archived?: number } },
-  directory?: string,
+  _sessionId: string,
+  _params: { title?: string; time?: { archived?: number } },
+  _directory?: string,
 ): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(
-    await sdk.session.update({
-      sessionID: sessionId,
-      directory: formatPathForApi(directory),
-      ...params,
-    }),
-  )
+  return unsupported('session metadata updates')
 }
 
-/**
- * 删除 session
- */
-export async function deleteSession(sessionId: string, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.session.delete({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+export async function deleteSession(sessionId: string, _directory?: string): Promise<boolean> {
+  await deletePiSession(sessionId)
   return true
 }
 
-// ============================================
-// Session Actions
-// ============================================
-
-/**
- * 中止 session
- */
-export async function abortSession(sessionId: string, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.session.abort({ sessionID: sessionId, directory: formatPathForApi(directory) }))
-  return true
+export async function abortSession(sessionId: string, _directory?: string): Promise<boolean> {
+  const snapshot = await abortSessionCommand(sessionId)
+  if (snapshot) applySnapshotToUi(snapshot)
+  return snapshot != null
 }
 
-/**
- * 回退消息
- */
 export async function revertMessage(
-  sessionId: string,
-  messageId: string,
-  partId?: string,
-  directory?: string,
+  _sessionId: string,
+  _messageId: string,
+  _partId?: string,
+  _directory?: string,
 ): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(
-    await sdk.session.revert({
-      sessionID: sessionId,
-      directory: formatPathForApi(directory),
-      messageID: messageId,
-      partID: partId,
-    }),
-  )
+  return unsupported('message revert')
 }
 
-/**
- * 恢复已回退的消息
- */
-export async function unrevertSession(sessionId: string, directory?: string): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.unrevert({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+export async function unrevertSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+  return unsupported('message revert')
 }
 
-/**
- * 分享 session
- */
-export async function shareSession(sessionId: string, directory?: string): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.share({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+export async function shareSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+  return unsupported('session sharing')
 }
 
-/**
- * 取消分享 session
- */
-export async function unshareSession(sessionId: string, directory?: string): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.unshare({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+export async function unshareSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+  return unsupported('session sharing')
 }
 
-/**
- * Fork session
- */
-export async function forkSession(sessionId: string, messageId?: string, directory?: string): Promise<ApiSession> {
-  const sdk = getSDKClient()
-  return unwrap(
-    await sdk.session.fork({
-      sessionID: sessionId,
-      directory: formatPathForApi(directory),
-      messageID: messageId,
-    }),
-  )
+export async function forkSession(
+  _sessionId: string,
+  _messageId?: string,
+  _directory?: string,
+): Promise<ApiSession> {
+  return unsupported('session forks')
 }
 
-/**
- * 总结 session
- */
 export async function summarizeSession(
-  sessionId: string,
-  params: { providerID: string; modelID: string; auto?: boolean },
-  directory?: string,
+  _sessionId: string,
+  _params: { providerID: string; modelID: string; auto?: boolean },
+  _directory?: string,
 ): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(
-    await sdk.session.summarize({
-      sessionID: sessionId,
-      directory: formatPathForApi(directory),
-      ...params,
-    }),
-  )
-  return true
+  return unsupported('legacy session summarization')
 }
 
-/**
- * 获取子 session
- */
-export async function getSessionChildren(sessionId: string, directory?: string): Promise<ApiSession[]> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.session.children({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+export async function getSessionChildren(_sessionId: string, _directory?: string): Promise<ApiSession[]> {
+  return unsupported('child sessions')
 }
 
-/**
- * Session Todo
- */
 export type ApiTodo = TodoItem
 
-/**
- * 获取 session 的 todo 列表
- * SDK 的 Todo 没有 id 字段，用 index+content+status 合成
- */
-export async function getSessionTodos(sessionId: string, directory?: string): Promise<ApiTodo[]> {
-  const sdk = getSDKClient()
-  const todos = unwrap<Array<{ content: string; status: string; priority?: string }>>(
-    await sdk.session.todo({ sessionID: sessionId, directory: formatPathForApi(directory) }),
-  )
-  return normalizeTodoItems(todos)
+export async function getSessionTodos(_sessionId: string, _directory?: string): Promise<ApiTodo[]> {
+  return unsupported('session todos')
 }

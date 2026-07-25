@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { RefObject } from 'react'
 import { CheckIcon, ClockIcon, CircleIcon, CloseIcon, FastForwardIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
-import { useTodos, useTodoStats, useCurrentTask, todoStore } from '../../../store'
-import { getSessionTodos } from '../../../api/session'
+import { useTodos, useTodoStats, useCurrentTask } from '../../../store'
 import { autoApproveStore, type FullAutoMode } from '../../../store/autoApproveStore'
 import type { TodoItem } from '../../../types/api/event'
 
@@ -44,25 +43,10 @@ export const InputFooter = memo(function InputFooter({
   const currentTask = useCurrentTask(sessionId ?? null)
   const [panelState, setPanelState] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed')
   const popoverRef = useRef<HTMLDivElement>(null)
-  const loadedRef = useRef<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const openingFrameRef = useRef<number | null>(null)
   const previousSessionIdRef = useRef(sessionId)
   const fullAutoMode = useFullAutoMode(paneId)
-
-  // 加载 session 时拉取初始 todos
-  useEffect(() => {
-    if (!sessionId || loadedRef.current === sessionId) return
-    loadedRef.current = sessionId
-
-    getSessionTodos(sessionId)
-      .then(apiTodos => {
-        if (apiTodos.length > 0) {
-          todoStore.setTodos(sessionId, apiTodos)
-        }
-      })
-      .catch(() => {})
-  }, [sessionId])
 
   const clearPanelTimers = useCallback(() => {
     if (closeTimerRef.current !== null) {
