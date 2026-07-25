@@ -12,9 +12,9 @@ import {
   listPiSessions,
   resolveWorkspaceId,
 } from '../pi/sessionApi'
-import { snapshotToApiSession, toApiSession } from '../pi/toApiSession'
-import type { ApiSession, SessionListParams, FileDiff } from './types'
-import type { SessionStatusMap } from '../types/api/session'
+import { snapshotToUiSession, toUiSession } from '../pi/sessionModel'
+import type { FileDiff } from './types'
+import type { SessionListParams, SessionStatusMap, UiSession } from '../types/session'
 import type { TodoItem } from '../types/api/event'
 
 function unsupported(capability: string): never {
@@ -45,7 +45,7 @@ export async function getLastTurnDiff(_sessionId: string, _directory?: string): 
   return unsupported('turn diff')
 }
 
-export async function getSessions(params: SessionListParams = {}): Promise<ApiSession[]> {
+export async function getSessions(params: SessionListParams = {}): Promise<UiSession[]> {
   const workspaceId = params.directory ? await resolveWorkspaceId(params.directory) : null
   let sessions = (await listPiSessions())
     .filter(session => !workspaceId || session.workspaceId === workspaceId)
@@ -55,29 +55,28 @@ export async function getSessions(params: SessionListParams = {}): Promise<ApiSe
     sessions = sessions.filter(session => Date.parse(session.updatedAt) < params.start!)
   }
   if (params.limit != null) sessions = sessions.slice(0, Math.max(0, params.limit))
-  return sessions.map(session => toApiSession(session, params.directory))
+  return sessions.map(session => toUiSession(session, params.directory))
 }
 
-export async function getSession(sessionId: string, directory?: string): Promise<ApiSession> {
-  return snapshotToApiSession(await fetchSnapshot(sessionId), directory)
+export async function getSession(sessionId: string, directory?: string): Promise<UiSession> {
+  return snapshotToUiSession(await fetchSnapshot(sessionId), directory)
 }
 
 export async function createSession(
-  params: { directory?: string; title?: string; parentID?: string } = {},
-): Promise<ApiSession> {
-  if (params.parentID) return unsupported('child sessions')
+  params: { directory?: string; title?: string } = {},
+): Promise<UiSession> {
   const workspaceId = await resolveWorkspaceId(params.directory)
   if (!workspaceId) throw new Error('No Pi workspace is available')
   const { snapshot } = await createPiSession({ workspaceId, title: params.title })
   applySnapshotToUi(snapshot)
-  return snapshotToApiSession(snapshot, params.directory)
+  return snapshotToUiSession(snapshot, params.directory)
 }
 
 export async function updateSession(
   _sessionId: string,
-  _params: { title?: string; time?: { archived?: number } },
+  _params: { title?: string; archivedAt?: number | null },
   _directory?: string,
-): Promise<ApiSession> {
+): Promise<UiSession> {
   return unsupported('session metadata updates')
 }
 
@@ -97,19 +96,19 @@ export async function revertMessage(
   _messageId: string,
   _partId?: string,
   _directory?: string,
-): Promise<ApiSession> {
+): Promise<UiSession> {
   return unsupported('message revert')
 }
 
-export async function unrevertSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+export async function unrevertSession(_sessionId: string, _directory?: string): Promise<UiSession> {
   return unsupported('message revert')
 }
 
-export async function shareSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+export async function shareSession(_sessionId: string, _directory?: string): Promise<string> {
   return unsupported('session sharing')
 }
 
-export async function unshareSession(_sessionId: string, _directory?: string): Promise<ApiSession> {
+export async function unshareSession(_sessionId: string, _directory?: string): Promise<void> {
   return unsupported('session sharing')
 }
 
@@ -117,7 +116,7 @@ export async function forkSession(
   _sessionId: string,
   _messageId?: string,
   _directory?: string,
-): Promise<ApiSession> {
+): Promise<UiSession> {
   return unsupported('session forks')
 }
 
@@ -129,7 +128,7 @@ export async function summarizeSession(
   return unsupported('legacy session summarization')
 }
 
-export async function getSessionChildren(_sessionId: string, _directory?: string): Promise<ApiSession[]> {
+export async function getSessionChildren(_sessionId: string, _directory?: string): Promise<UiSession[]> {
   return unsupported('child sessions')
 }
 

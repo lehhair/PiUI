@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
-import type { ApiSession, SessionListParams } from '../api'
+import type { SessionListParams, UiSession } from '../types/session'
 import {
   createPiSession,
   createWorkspace,
@@ -7,7 +7,7 @@ import {
   isPiServerUp,
   listPiSessions,
 } from '../pi/sessionApi'
-import { toApiSession, snapshotToApiSession } from '../pi/toApiSession'
+import { toUiSession, snapshotToUiSession } from '../pi/sessionModel'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { isTrackedPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -19,7 +19,7 @@ import { SessionContext, type SessionContextValue } from './SessionContext.share
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
 
-  const [sessions, setSessions] = useState<ApiSession[]>([])
+  const [sessions, setSessions] = useState<UiSession[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -53,7 +53,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             const q = search.toLowerCase()
             list = list.filter(s => (s.title || '').toLowerCase().includes(q))
           }
-          const data = list.map(s => toApiSession(s))
+          const data = list.map(s => toUiSession(s))
           if (requestId !== requestIdRef.current) return
           if (append) {
             setSessions(prev => {
@@ -158,10 +158,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           workspaceId,
         })
         applySnapshotToUi(snapshot)
-        const apiSession = snapshotToApiSession(snapshot, dir || undefined)
-        setSessions(prev => [apiSession, ...prev.filter(s => s.id !== summary.id)])
+        const session = snapshotToUiSession(snapshot, dir || undefined)
+        setSessions(prev => [session, ...prev.filter(s => s.id !== summary.id)])
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
-        return apiSession
+        return session
       }
 
       throw new Error('PiUI server unavailable')

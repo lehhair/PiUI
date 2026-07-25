@@ -4,7 +4,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { updateSession, deleteSession as apiDeleteSession, type ApiSession } from '../../../api'
+import { updateSession, deleteSession as apiDeleteSession } from '../../../api'
+import type { UiSession } from '../../../types/session'
 import { SpinnerIcon } from '../../../components/Icons'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
@@ -13,11 +14,11 @@ import { uiErrorHandler } from '../../../utils'
 import { SessionListItem } from '../../sessions'
 
 interface SessionChildrenSlotProps {
-  parentSession: ApiSession
+  parentSession: UiSession
   selectedSessionId: string | null
   fetchAll?: boolean
-  children?: ApiSession[]
-  onSelect: (session: ApiSession) => void
+  children?: UiSession[]
+  onSelect: (session: UiSession) => void
   /** 删除子 session 后如果它正好被选中，通知外部切走 */
   onDeleteSelected?: () => void
   // ---- 编辑模式 ----
@@ -39,7 +40,7 @@ export function SessionChildrenSlot({
 }: SessionChildrenSlotProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { preferTouchUi } = useInputCapabilities()
-  const [fetched, setFetched] = useState<ApiSession[]>([])
+  const [fetched, setFetched] = useState<UiSession[]>([])
   const [loading, setLoading] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; sessionId: string | null }>({
     isOpen: false,
@@ -112,7 +113,6 @@ export function SessionChildrenSlot({
             onDelete={() => setDeleteConfirm({ isOpen: true, sessionId: child.id })}
             preferTouchUi={preferTouchUi}
             density="minimal"
-            showStats={false}
             showDirectory={false}
             isEditMode={isEditMode}
             isChecked={isChecked}

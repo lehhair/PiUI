@@ -12,7 +12,7 @@
 // 与 notificationStore 完全独立，不互相依赖
 
 import { useCallback, useSyncExternalStore } from 'react'
-import type { SessionStatus, SessionStatusMap } from '../types/api/session'
+import type { SessionStatus, SessionStatusMap } from '../types/session'
 
 // ============================================
 // Types

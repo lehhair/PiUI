@@ -30,8 +30,8 @@ export function ShareDialog({ isOpen, onClose }: ShareDialogProps) {
     setLoading(true)
     setError(null)
     try {
-      const updatedSession = await shareSession(sessionId, sessionDirectory)
-      messageStore.setShareUrl(sessionId, updatedSession.share?.url)
+      const url = await shareSession(sessionId, sessionDirectory)
+      messageStore.setShareUrl(sessionId, url)
     } catch (e) {
       setError(t('shareDialog.failedCreate'))
       apiErrorHandler('share session', e)

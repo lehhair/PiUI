@@ -1,0 +1,31 @@
+import { describe, expect, it } from "vitest"
+import { toUiSession } from "./sessionModel"
+
+describe("toUiSession", () => {
+  it("maps summary fields for sidebar", () => {
+    const s = toUiSession({
+      id: "abc",
+      workspaceId: "w",
+      title: "Hello",
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-02T00:00:00.000Z",
+    })
+    expect(s.id).toBe("abc")
+    expect(s.title).toBe("Hello")
+    expect(s.directory).toBe("piws:w")
+    expect(s.workspaceId).toBe("w")
+    expect(s.updatedAt).toBe(Date.parse("2020-01-02T00:00:00.000Z"))
+  })
+
+  it("uses stable timestamp fallbacks", () => {
+    const s = toUiSession({
+      id: "abc",
+      workspaceId: "w",
+      title: "Hello",
+      createdAt: "invalid",
+      updatedAt: "invalid",
+    })
+    expect(s.createdAt).toBe(0)
+    expect(s.updatedAt).toBe(0)
+  })
+})

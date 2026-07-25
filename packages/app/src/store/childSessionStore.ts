@@ -7,9 +7,6 @@
 // 2. 支持权限请求冒泡（子 session 的权限请求显示在父界面）
 // 3. 存储子 session 的基本信息（用于显示来源）
 
-import type { ApiSession } from '../api/types'
-import i18n from '../i18n'
-
 // ============================================
 // Types
 // ============================================
@@ -54,32 +51,6 @@ class ChildSessionStore {
   // ============================================
   // Session Tracking
   // ============================================
-
-  /**
-   * 注册一个新的子 session（从 session.created 事件调用）
-   */
-  registerChildSession(session: ApiSession) {
-    if (!session.parentID) return // 不是子 session
-
-    // 添加到 parent -> children 映射
-    let children = this.childrenByParent.get(session.parentID)
-    if (!children) {
-      children = new Set()
-      this.childrenByParent.set(session.parentID, children)
-    }
-    children.add(session.id)
-
-    // 存储 session 信息
-    this.sessionInfo.set(session.id, {
-      id: session.id,
-      parentID: session.parentID,
-      title: session.title || i18n.t('chat:permissionDialog.subtaskFallback'),
-      status: 'running',
-      createdAt: session.time.created,
-    })
-
-    this.notify()
-  }
 
   /**
    * 更新子 session 状态

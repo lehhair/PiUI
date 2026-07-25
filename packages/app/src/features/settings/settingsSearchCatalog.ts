@@ -80,7 +80,6 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'workspace.terminalCopyOnSelect',
     'workspace.terminalRightClickPaste',
     'appearance.folderStyleRecents',
-    'appearance.folderStyleRecentsShowDiff',
     'appearance.showChildSessions',
   ]),
   ...definitions('appearance', [

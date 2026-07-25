@@ -31,23 +31,18 @@ vi.mock('../pi/sessionApi', () => ({
   resolveWorkspaceId: (...args: unknown[]) => resolveWorkspaceIdMock(...args),
 }))
 
-vi.mock('../pi/toApiSession', () => ({
-  toApiSession: (session: unknown) => session,
+vi.mock('../pi/sessionModel', () => ({
+  toUiSession: (session: unknown) => session,
 }))
 
 function makeSession(id: string, directory = '/workspace/demo') {
   return {
     id,
-    slug: id,
     workspaceId: 'project-1',
-    projectID: 'project-1',
     directory,
     title: `Session ${id}`,
-    version: '1',
-    time: {
-      created: 1,
-      updated: 2,
-    },
+    createdAt: 1,
+    updatedAt: 2,
   }
 }
 
@@ -107,7 +102,7 @@ describe('useSessions', () => {
   it('filters sessions by the resolved Pi workspace', async () => {
     listPiSessionsMock.mockResolvedValue([
       makeSession('session-1'),
-      { ...makeSession('session-2'), workspaceId: 'project-2', projectID: 'project-2' },
+      { ...makeSession('session-2'), workspaceId: 'project-2' },
     ])
 
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))

@@ -1,4 +1,4 @@
-import type { Session, SessionStatus } from './session'
+import type { SessionStatus } from '../session'
 import type { Message, Part } from './message'
 import type { PermissionRequest, QuestionRequest } from './permission'
 import type { Project } from './project'
@@ -50,8 +50,6 @@ export interface EventCallbacks {
   onPartDelta?: (data: PartDeltaPayload) => void
   onPartRemoved?: (data: PartRemovedPayload) => void
   onServerConnected?: (data: ServerConnectedPayload) => void
-  onSessionCreated?: (session: Session) => void
-  onSessionUpdated?: (session: Session) => void
   onSessionDeleted?: (sessionId: string) => void
   onSessionIdle?: (data: SessionIdlePayload) => void
   onSessionError?: (data: SessionErrorPayload) => void

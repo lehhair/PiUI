@@ -17,7 +17,6 @@ export function WorkspaceSettings() {
   } = useTheme()
   const {
     sidebarFolderRecents,
-    sidebarFolderRecentsShowDiff,
     sidebarShowChildSessions,
     terminalCopyOnSelect,
     terminalRightClickPaste,
@@ -108,17 +107,6 @@ export function WorkspaceSettings() {
           <Toggle
             enabled={sidebarFolderRecents}
             onChange={() => layoutStore.setSidebarFolderRecents(!sidebarFolderRecents)}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t('appearance.folderStyleRecentsShowDiff')}
-          description={t('appearance.folderStyleRecentsShowDiffDesc')}
-          onClick={() => layoutStore.setSidebarFolderRecentsShowDiff(!sidebarFolderRecentsShowDiff)}
-        >
-          <Toggle
-            enabled={sidebarFolderRecentsShowDiff}
-            onChange={() => layoutStore.setSidebarFolderRecentsShowDiff(!sidebarFolderRecentsShowDiff)}
           />
         </SettingRow>
 

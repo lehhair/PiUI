@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ApiSession } from '../../../api'
+import type { UiSession } from '../../../types/session'
 import {
   FolderIcon,
   FolderOpenIcon,
@@ -17,7 +17,6 @@ import { useDelayedRender, useSessions, useVcsInfo } from '../../../hooks'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { useInView } from '../../../hooks/useInView'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
-import { useLayoutStore } from '../../../store'
 import { useBusySessions } from '../../../store/activeSessionStore'
 import { useNotifications } from '../../../store/notificationStore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../../store/pinnedSessionsStore'
@@ -43,15 +42,15 @@ interface FolderRecentListProps {
   expandedProjectIds: string[]
   onExpandedProjectIdsChange: React.Dispatch<React.SetStateAction<string[]>>
   onSelectProject: (project: FolderRecentProject) => void
-  onSelectSession: (session: ApiSession) => void
-  onRenameSession: (session: ApiSession, newTitle: string) => Promise<void>
-  onDeleteSession: (session: ApiSession) => Promise<void>
+  onSelectSession: (session: UiSession) => void
+  onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
+  onDeleteSession: (session: UiSession) => Promise<void>
   onReorderProject: (draggedPath: string, targetPath: string) => void
   expandedChildSessionIds?: Set<string>
-  inlineChildSessions?: Map<string, ApiSession[]>
-  onSelectChildSession?: (session: ApiSession) => void
+  inlineChildSessions?: Map<string, UiSession[]>
+  onSelectChildSession?: (session: UiSession) => void
   workspaceDirectoriesByProjectId?: Map<string, string[]>
-  pinnedSessions?: ApiSession[]
+  pinnedSessions?: UiSession[]
   unavailablePinnedEntries?: PinnedSessionEntry[]
   // ---- 编辑模式 ----
   isEditMode?: boolean
@@ -62,7 +61,7 @@ interface FolderRecentListProps {
 }
 
 interface PendingDeleteSession {
-  session: ApiSession
+  session: UiSession
   removeLocal: () => void
 }
 
@@ -436,7 +435,6 @@ export function FolderRecentList({
 }: FolderRecentListProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { preferTouchUi } = useInputCapabilities()
-  const { sidebarFolderRecentsShowDiff } = useLayoutStore()
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteSession | null>(null)
   const allBusySessions = useBusySessions()
   const allNotifications = useNotifications()
@@ -535,7 +533,6 @@ export function FolderRecentList({
                 unavailableEntries={unavailablePinnedEntries}
                 selectedSessionId={selectedSessionId}
                 preferTouchUi={preferTouchUi}
-                showSessionDiffStats={sidebarFolderRecentsShowDiff}
                 onSelectSession={onSelectSession}
                 onRenameSession={onRenameSession}
                 onRequestDeleteSession={setPendingDelete}
@@ -577,7 +574,6 @@ export function FolderRecentList({
                   isExpanded={isExpanded}
                   folderStatus={folderStatusByProjectId.get(project.id) ?? null}
                   preferTouchUi={preferTouchUi}
-                  showSessionDiffStats={sidebarFolderRecentsShowDiff}
                   currentDirectory={currentDirectory}
                   selectedSessionId={selectedSessionId}
                   onSelectProject={() => handleSelectDirectory(project.worktree, project.sectionKind)}
@@ -642,17 +638,16 @@ export function FolderRecentList({
 // ============================================
 
 interface PinnedFolderSectionProps {
-  sessions: ApiSession[]
+  sessions: UiSession[]
   unavailableEntries: PinnedSessionEntry[]
   selectedSessionId: string | null
   preferTouchUi: boolean
-  showSessionDiffStats: boolean
-  onSelectSession: (session: ApiSession) => void
-  onRenameSession: (session: ApiSession, newTitle: string) => Promise<void>
+  onSelectSession: (session: UiSession) => void
+  onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
   expandedChildSessionIds?: Set<string>
-  inlineChildSessions?: Map<string, ApiSession[]>
-  onSelectChildSession?: (session: ApiSession) => void
+  inlineChildSessions?: Map<string, UiSession[]>
+  onSelectChildSession?: (session: UiSession) => void
   isEditMode?: boolean
   selectedSessionIds?: Set<string>
   onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void
@@ -663,7 +658,6 @@ function PinnedFolderSection({
   unavailableEntries,
   selectedSessionId,
   preferTouchUi,
-  showSessionDiffStats,
   onSelectSession,
   onRenameSession,
   onRequestDeleteSession,
@@ -714,7 +708,6 @@ function PinnedFolderSection({
                 onDelete={() => onRequestDeleteSession({ session, removeLocal: () => {} })}
                 preferTouchUi={preferTouchUi}
                 density="minimal"
-                showStats={showSessionDiffStats}
                 showDirectory={false}
                 isEditMode={isEditMode}
                 isChecked={isChecked}
@@ -782,18 +775,17 @@ interface FolderRecentSectionProps {
   isExpanded: boolean
   folderStatus: FolderStatus | null
   preferTouchUi: boolean
-  showSessionDiffStats: boolean
   currentDirectory?: string
   selectedSessionId: string | null
   onSelectProject: () => void
   onSelectDirectory: (directory: string, sectionKind?: FolderRecentProject['sectionKind']) => void
   onToggle: () => void
-  onSelectSession: (session: ApiSession) => void
-  onRenameSession: (session: ApiSession, newTitle: string) => Promise<void>
+  onSelectSession: (session: UiSession) => void
+  onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
   expandedChildSessionIds?: Set<string>
-  inlineChildSessions?: Map<string, ApiSession[]>
-  onSelectChildSession?: (session: ApiSession) => void
+  inlineChildSessions?: Map<string, UiSession[]>
+  onSelectChildSession?: (session: UiSession) => void
   workspaceDirectories?: string[]
   workspaceFolderStatusByDirectory?: Map<string, FolderStatus>
   draggableWorkspaceDirectories?: string[]
@@ -824,7 +816,6 @@ function FolderRecentSection({
   isExpanded,
   folderStatus,
   preferTouchUi,
-  showSessionDiffStats,
   currentDirectory,
   selectedSessionId,
   onSelectProject,
@@ -1048,7 +1039,6 @@ function FolderRecentSection({
                   currentDirectory={currentDirectory}
                   selectedSessionId={selectedSessionId}
                   preferTouchUi={preferTouchUi}
-                  showSessionDiffStats={showSessionDiffStats}
                   onSelectDirectory={onSelectDirectory}
                   onSelectSession={onSelectSession}
                   onRenameSession={onRenameSession}
@@ -1093,7 +1083,6 @@ function FolderRecentSection({
                         onDelete={() => handleDelete(session.id)}
                         preferTouchUi={preferTouchUi}
                         density="minimal"
-                        showStats={showSessionDiffStats}
                         showDirectory={false}
                         isEditMode={isEditMode}
                         isChecked={isChecked}
@@ -1164,14 +1153,13 @@ interface WorkspaceFolderListProps {
   currentDirectory?: string
   selectedSessionId: string | null
   preferTouchUi: boolean
-  showSessionDiffStats: boolean
   onSelectDirectory: (directory: string, sectionKind?: FolderRecentProject['sectionKind']) => void
-  onSelectSession: (session: ApiSession) => void
-  onRenameSession: (session: ApiSession, newTitle: string) => Promise<void>
+  onSelectSession: (session: UiSession) => void
+  onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
   expandedChildSessionIds?: Set<string>
-  inlineChildSessions?: Map<string, ApiSession[]>
-  onSelectChildSession?: (session: ApiSession) => void
+  inlineChildSessions?: Map<string, UiSession[]>
+  onSelectChildSession?: (session: UiSession) => void
   isEditMode?: boolean
   selectedSessionIds?: Set<string>
   onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void
@@ -1185,7 +1173,6 @@ function WorkspaceFolderList({
   currentDirectory,
   selectedSessionId,
   preferTouchUi,
-  showSessionDiffStats,
   onSelectDirectory,
   onSelectSession,
   onRenameSession,
@@ -1273,7 +1260,6 @@ function WorkspaceFolderList({
                 : (folderStatusByWorkspaceDirectory?.get(workspaceProject.worktree) ?? null)
             }
             preferTouchUi={preferTouchUi}
-            showSessionDiffStats={showSessionDiffStats}
             currentDirectory={currentDirectory}
             selectedSessionId={selectedSessionId}
             onSelectProject={() => onSelectDirectory(workspaceProject.worktree, 'workspace')}

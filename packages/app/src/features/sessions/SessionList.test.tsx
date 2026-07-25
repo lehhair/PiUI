@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiSession } from '../../api'
+import type { UiSession } from '../../types/session'
 import { pinnedSessionsStore } from '../../store/pinnedSessionsStore'
 import { SessionListItem } from './SessionList'
 import { setPiCapabilities } from '../../pi/capabilities'
@@ -35,12 +35,14 @@ vi.mock('../chat/sidebar/SessionChildrenSlot', () => ({
 }))
 
 describe('SessionListItem', () => {
-  const session: ApiSession = {
+  const session: UiSession = {
     id: 'session-1',
+    workspaceId: 'workspace-1',
     title: 'Session One',
     directory: '/workspace/demo',
-    time: { updated: 1 },
-  } as ApiSession
+    createdAt: 1,
+    updatedAt: 1,
+  }
 
   beforeEach(() => {
     useSessionActiveEntryMock.mockReturnValue(null)

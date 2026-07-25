@@ -25,10 +25,10 @@ import {
   forkSession,
   extractUserMessageContent,
   type ApiPermissionRequest,
-  type ApiSession,
   type ApiAgent,
   type Attachment,
 } from '../api'
+import type { UiSession } from '../types/session'
 import type { ModelInfo } from './useModels'
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
@@ -783,7 +783,7 @@ export function useChatSession({
 
   // Session selection
   const handleSelectSession = useCallback(
-    (session: ApiSession) => {
+    (session: UiSession) => {
       navigateToSession(session.id, session.directory)
     },
     [navigateToSession],
@@ -799,7 +799,7 @@ export function useChatSession({
   const handleArchiveSession = useCallback(async () => {
     if (!routeSessionId || !capabilities.sessionArchive) return
     try {
-      await updateSession(routeSessionId, { time: { archived: Date.now() } }, effectiveDirectory)
+      await updateSession(routeSessionId, { archivedAt: Date.now() }, effectiveDirectory)
       navigateHome()
       handleNewChat()
     } catch (error) {
