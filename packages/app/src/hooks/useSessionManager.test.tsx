@@ -3,13 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionManager } from './useSessionManager'
 
 const {
-  getSessionMock,
-  getSessionMessagesMock,
+  fetchSnapshotMock,
   messageStoreMock,
   sessionErrorHandlerMock,
 } = vi.hoisted(() => ({
-  getSessionMock: vi.fn(),
-  getSessionMessagesMock: vi.fn(),
+  fetchSnapshotMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -22,12 +20,12 @@ const {
   sessionErrorHandlerMock: vi.fn(),
 }))
 
-vi.mock('../api', () => ({
-  getSession: (...args: unknown[]) => getSessionMock(...args),
-  getSessionMessages: (...args: unknown[]) => getSessionMessagesMock(...args),
-  revertMessage: vi.fn(),
-  unrevertSession: vi.fn(),
-  extractUserMessageContent: vi.fn(),
+vi.mock('../pi/sessionApi', () => ({
+  fetchSnapshot: (...args: unknown[]) => fetchSnapshotMock(...args),
+}))
+
+vi.mock('../pi/applySnapshot', () => ({
+  applySnapshotToUi: vi.fn(),
 }))
 
 vi.mock('../store', () => ({
@@ -40,8 +38,7 @@ vi.mock('../utils', () => ({
 
 describe('useSessionManager', () => {
   beforeEach(() => {
-    getSessionMock.mockReset()
-    getSessionMessagesMock.mockReset()
+    fetchSnapshotMock.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -52,15 +49,12 @@ describe('useSessionManager', () => {
     sessionErrorHandlerMock.mockReset()
 
     messageStoreMock.getSessionState.mockReturnValue(null)
-    getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo' })
-    getSessionMessagesMock.mockResolvedValue([])
   })
 
   it('reports missing route sessions when loading returns not found', async () => {
     const onSessionMissing = vi.fn()
     const notFoundError = Object.assign(new Error('session not found'), { status: 404 })
-    getSessionMock.mockRejectedValue(notFoundError)
-    getSessionMessagesMock.mockRejectedValue(notFoundError)
+    fetchSnapshotMock.mockRejectedValue(notFoundError)
 
     renderHook(() =>
       useSessionManager({

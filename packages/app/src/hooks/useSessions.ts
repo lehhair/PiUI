@@ -1,15 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  getSessions,
-  createSession,
-  deleteSession,
-  subscribeToEvents,
-  type ApiSession,
-  type SessionListParams,
-} from '../api'
-import { serverStore } from '../store/serverStore'
+import { type ApiSession, type SessionListParams } from '../api'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { autoDetectPathStyle, isSameDirectory } from '../utils'
+import { createPiSession, deletePiSession, listPiSessions, resolveWorkspaceId } from '../pi/sessionApi'
+import { toApiSession } from '../pi/toApiSession'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -48,7 +42,7 @@ interface UseSessionsResult {
 }
 
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult {
-  const { pageSize = 20, initialSearch = '', rootsOnly = true, directory, enabled = true } = options
+  const { pageSize = 20, initialSearch = '', directory, enabled = true } = options
 
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
   const normalizedDirectory = directory ? directory.replace(/\\/g, '/').replace(/\/$/, '') : undefined
@@ -103,12 +97,15 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       }
 
       try {
-        const data = await getSessions({
-          roots: rootsOnly,
-          limit: currentLimitRef.current,
-          directory: normalizedDirectory,
-          ...queryParams,
-        })
+        const scopedWorkspaceId = normalizedDirectory ? await resolveWorkspaceId(normalizedDirectory) : null
+        const all = (await listPiSessions())
+          .filter(summary => !scopedWorkspaceId || summary.workspaceId === scopedWorkspaceId)
+          .map(summary => toApiSession(summary, normalizedDirectory))
+        const searchTerm = queryParams.search?.trim().toLowerCase()
+        const data = all
+          .filter(session => matchesDirectory(session))
+          .filter(session => !searchTerm || session.title.toLowerCase().includes(searchTerm))
+          .slice(0, currentLimitRef.current)
 
         // 检查是否是最新的请求
         if (requestId !== requestIdRef.current) return
@@ -147,7 +144,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
       }
     },
-    [rootsOnly, normalizedDirectory, enabled],
+    [matchesDirectory, enabled],
   )
 
   fetchSessionsRef.current = fetchSessions
@@ -188,74 +185,16 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   useEffect(() => {
     if (!enabled) return
 
-    const unsubscribe = subscribeToEvents({
-      onSessionCreated: session => {
-        if (session.parentID) return
-        if (!matchesDirectory(session)) return
-
-        if (searchRef.current) {
-          void fetchSessionsRef.current({ search: searchRef.current || undefined })
-          return
-        }
-
-        setSessions(prev => {
-          if (prev.some(item => item.id === session.id)) return prev
-          return [session, ...prev]
-        })
-      },
-      onSessionUpdated: session => {
-        if (session.parentID) return
-
-        if (searchRef.current) {
-          if (matchesDirectory(session)) {
-            void fetchSessionsRef.current({ search: searchRef.current || undefined })
-          } else {
-            setSessions(prev => prev.filter(item => item.id !== session.id))
-          }
-          return
-        }
-
-        setSessions(prev => {
-          const index = prev.findIndex(item => item.id === session.id)
-
-          if (!matchesDirectory(session)) {
-            return index === -1 ? prev : prev.filter(item => item.id !== session.id)
-          }
-
-          if (index === -1) {
-            return [session, ...prev]
-          }
-
-          const updated = prev.filter(item => item.id !== session.id)
-          return [session, ...updated]
-        })
-      },
-      onSessionDeleted: sessionId => {
-        setSessions(prev => prev.filter(item => item.id !== sessionId))
-      },
-      onReconnected: reason => {
-        if (reason === 'server-switch') return
-        if (isFetchingRef.current) {
-          queuedReconnectRefreshRef.current = true
-          return
-        }
-        setSessions([])
-        void fetchSessionsRef.current({ search: searchRef.current || undefined })
-      },
-    })
-
-    return unsubscribe
-  }, [enabled, matchesDirectory, pageSize])
-
-  useEffect(() => {
-    if (!enabled) return
-
-    return serverStore.onServerChange(() => {
-      currentLimitRef.current = pageSize
-      setSessions([])
+    const refreshFromEvent = () => {
+      if (isFetchingRef.current) {
+        queuedReconnectRefreshRef.current = true
+        return
+      }
       void fetchSessionsRef.current({ search: searchRef.current || undefined })
-    })
-  }, [enabled, pageSize])
+    }
+    window.addEventListener('piui:sessions-changed', refreshFromEvent)
+    return () => window.removeEventListener('piui:sessions-changed', refreshFromEvent)
+  }, [enabled, matchesDirectory, pageSize])
 
   // 加载更多：递增 limit 重新拉取完整列表（与 SessionContext 一致）
   const loadMore = useCallback(async () => {
@@ -278,10 +217,9 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const create = useCallback(
     async (title?: string) => {
       // 创建时也要传 directory
-      const newSession = await createSession({
-        title,
-        directory: normalizedDirectory,
-      })
+      const workspaceId = await resolveWorkspaceId(normalizedDirectory)
+      const { summary } = await createPiSession({ title, workspaceId: workspaceId ?? undefined })
+      const newSession = toApiSession(summary, normalizedDirectory)
 
       if (searchRef.current) {
         void fetchSessionsRef.current({ search: searchRef.current || undefined })
@@ -300,11 +238,11 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 删除会话
   const remove = useCallback(
     async (sessionId: string) => {
-      await deleteSession(sessionId, normalizedDirectory)
+      await deletePiSession(sessionId)
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
     },
-    [normalizedDirectory],
+    [],
   )
 
   const patchLocalSession = useCallback((sessionId: string, patch: Partial<ApiSession>) => {
