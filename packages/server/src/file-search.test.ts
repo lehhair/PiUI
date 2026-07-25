@@ -3,13 +3,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { searchFilesByName } from "./file-search.ts"
+import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
 import type { WorkspaceRecord } from "./workspace-store.ts"
 
 describe("searchFilesByName", () => {
   const root = mkdtempSync(path.join(tmpdir(), "piui-search-"))
   mkdirSync(path.join(root, "src"))
   writeFileSync(path.join(root, "src", "hello.ts"), "export {}\n")
+  writeFileSync(path.join(root, "src", "message.ts"), "const first = 'PiUI'\nconst second = 'piui client'\n")
+  writeFileSync(path.join(root, "src", "unicode.txt"), "你好 PiUI\n")
+  writeFileSync(path.join(root, "src", "binary.dat"), Buffer.from([0, 80, 105, 85, 73]))
   writeFileSync(path.join(root, "README.md"), "# x\n")
   mkdirSync(path.join(root, "node_modules", "pkg"), { recursive: true })
   writeFileSync(path.join(root, "node_modules", "pkg", "hello.ts"), "skip\n")
@@ -28,5 +31,17 @@ describe("searchFilesByName", () => {
     const hits = searchFilesByName(ws, "hello")
     assert.ok(hits.some(p => p.includes("src/hello.ts")))
     assert.ok(!hits.some(p => p.includes("node_modules")))
+  })
+
+  it("finds text with line metadata and skips binary files", () => {
+    const hits = searchWorkspaceText(ws, "piui")
+
+    assert.ok(hits.some(hit => hit.path.text === "src/message.ts" && hit.line_number === 1))
+    assert.ok(hits.some(hit => hit.path.text === "src/message.ts" && hit.line_number === 2))
+    const unicodeHit = hits.find(hit => hit.path.text === "src/unicode.txt")
+    assert.equal(unicodeHit?.submatches[0]?.start, 7)
+    assert.equal(unicodeHit?.submatches[0]?.end, 11)
+    assert.ok(!hits.some(hit => hit.path.text.includes("binary.dat")))
+    assert.ok(!hits.some(hit => hit.path.text.includes("node_modules")))
   })
 })

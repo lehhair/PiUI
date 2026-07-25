@@ -5,7 +5,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getVcsInfo } from '../api/vcs'
-import { serverStore } from '../store/serverStore'
 import type { VcsInfo } from '../types/api/vcs'
 
 const POLL_INTERVAL = 15000 // 15s 轮询
@@ -73,16 +72,6 @@ export function useVcsInfo(directory?: string): UseVcsInfoResult {
 
     const timer = setInterval(fetchVcs, POLL_INTERVAL)
     return () => clearInterval(timer)
-  }, [directory, fetchVcs])
-
-  useEffect(() => {
-    if (!directory) return
-
-    return serverStore.onServerChange(() => {
-      setVcsInfo(null)
-      setError(null)
-      void fetchVcs()
-    })
   }, [directory, fetchVcs])
 
   return { vcsInfo, isLoading, error, refresh: fetchVcs }

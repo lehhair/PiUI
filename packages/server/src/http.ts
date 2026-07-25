@@ -6,7 +6,7 @@ import {
   type WorkspaceCreateRequestV1,
 } from "@piui/protocol"
 import { listFiles, readFileText, writeFileText } from "./files.ts"
-import { searchFilesByName } from "./file-search.ts"
+import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
 import { SessionRegistry, type AppSession, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
@@ -506,6 +506,19 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               limit: Number.isFinite(limit) ? limit : 50,
             })
             return sendJson(res, 200, { query: q, paths })
+          } catch (e) {
+            return handlePathError(res, e)
+          }
+        }
+
+        if (method === "GET" && rest === "search/text") {
+          const q = url.searchParams.get("q") ?? ""
+          const limit = Number(url.searchParams.get("limit") ?? 50)
+          try {
+            const matches = searchWorkspaceText(ws, q, {
+              limit: Number.isFinite(limit) ? limit : 50,
+            })
+            return sendJson(res, 200, { query: q, matches })
           } catch (e) {
             return handlePathError(res, e)
           }

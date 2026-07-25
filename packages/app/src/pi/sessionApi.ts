@@ -224,6 +224,24 @@ export async function searchWorkspaceFiles(
   return data.paths
 }
 
+export async function searchWorkspaceText(workspaceId: string, pattern: string, limit = 50) {
+  const q = new URLSearchParams({ q: pattern, limit: String(limit) })
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/search/text?${q}`,
+  )
+  if (!res.ok) throw new Error(`searchWorkspaceText ${res.status}`)
+  const data = (await res.json()) as {
+    matches: Array<{
+      path: { text: string }
+      lines: { text: string }
+      line_number: number
+      absolute_offset: number
+      submatches: Array<{ start: number; end: number; match: { text: string } }>
+    }>
+  }
+  return data.matches
+}
+
 export async function writeWorkspaceFile(
   workspaceId: string,
   path: string,

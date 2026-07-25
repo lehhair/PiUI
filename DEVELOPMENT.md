@@ -57,12 +57,12 @@ npm run dev:app      # vite
 
 ## 当前
 
-当前属于“单会话演示可用”，尚未达到稳定产品标准。OpenCode SDK shim、旧 SSE/server 状态、内存会话和缺失的 PTY 后端仍需按主计划处理。下列勾选表示对应能力已有基础实现，不代表已经满足主计划中的完整完成标准。
+当前 Pi 原生会话、聊天、文件和 Git 主流程可用，尚未达到稳定产品标准。前端过渡 facade、UI 元数据持久化、fork/undo 和 PTY 后端仍需按主计划处理。下列勾选表示对应能力已有基础实现，不代表已经满足主计划中的完整完成标准。
 
 - [x] Phase 0 结构
 - [x] Phase 1 health + workspace + 安全文件 list/read
 - [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
-- [x] Phase 3 去掉 npm `@opencode-ai/sdk`，本地 shim + `vite build` 通过
+- [x] Phase 3 去掉 npm `@opencode-ai/sdk` 和网络 shim，过渡 facade 不发网络请求，`vite build` 通过
 - [x] Phase 4 mock session snapshot API + `sessionProjectionStore`（无真实 prompt）
 - [x] Phase 5 timeline→Message 桥接 + mock-chat 灌进 ChatArea（无真实 prompt）
 - [x] **最小完成体**：seed 会话 → 输入发送 → mock 回复进 ChatArea（`npm run test:mvp`）
@@ -70,7 +70,7 @@ npm run dev:app      # vite
 - [x] **最小可用**：文件树 list/read 接 server + 会话绑 workspace + abort 占位
 - [x] mock 流式：WS `/api/v1/events` + prompt stream 增量 snapshot
 - [x] workspace git status / info / diff（文件树改动标记）
-- [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
+- [x] 文件名/正文搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
 - [x] 真实 Pi runtime 与模型枚举运行在独立 worker 子进程，server 仅通过私有 IPC 调用
 - [x] 前端 snapshot 按 Pi session ID 隔离，WS 支持 epoch/sequence 去重、有限重放和 resync
