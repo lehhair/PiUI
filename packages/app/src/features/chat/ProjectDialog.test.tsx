@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectDialog } from './ProjectDialog'
 import { listDirectory } from '../../api'
@@ -41,6 +41,17 @@ describe('ProjectDialog', () => {
 
     expect(await screen.findByPlaceholderText('Type path...')).toHaveValue('')
     expect(listDirectory).not.toHaveBeenCalled()
+  })
+
+  it('keeps the full absolute path when entering and adding a child directory', async () => {
+    const onSelect = vi.fn()
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={onSelect} initialPath="/workspace/project" />)
+
+    fireEvent.click(await screen.findByText('src'))
+    expect(screen.getByPlaceholderText('Type path...')).toHaveValue('/workspace/project/src/')
+
+    fireEvent.click(screen.getByText('Add current'))
+    expect(onSelect).toHaveBeenCalledWith('/workspace/project/src')
   })
 
   it('reloads the same directory when reopened', async () => {
