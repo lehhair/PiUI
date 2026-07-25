@@ -4,7 +4,7 @@
  */
 
 import type { SessionSnapshotV1 } from "@piui/protocol"
-import type { PiSessionSummary } from "./toApiSession"
+import type { PiSessionSummary } from "../types/session"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
 import { parsePiWorkspaceId } from "./workspaceRef"

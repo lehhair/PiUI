@@ -1,8 +1,8 @@
 import { createContext } from 'react'
-import type { ApiSession } from '../api'
+import type { UiSession } from '../types/session'
 
 export interface SessionContextValue {
-  sessions: ApiSession[]
+  sessions: UiSession[]
   isLoading: boolean
   isLoadingMore: boolean
   hasMore: boolean
@@ -10,7 +10,7 @@ export interface SessionContextValue {
   setSearch: (term: string) => void
   refresh: () => Promise<void>
   loadMore: () => Promise<void>
-  createSession: (title?: string) => Promise<ApiSession>
+  createSession: (title?: string) => Promise<UiSession>
   deleteSession: (id: string) => Promise<void>
 }
 

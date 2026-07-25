@@ -5,7 +5,7 @@ import { notificationStore } from '../../../store/notificationStore'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { formatNotificationTime } from './sidebarUtils'
 import type { NotificationEntry } from '../../../store/notificationStore'
-import type { ApiSession } from '../../../api'
+import type { UiSession } from '../../../types/session'
 
 const notifTypeConfig = {
   completed: {
@@ -24,8 +24,8 @@ const notifTypeConfig = {
 
 interface NotificationItemProps {
   entry: NotificationEntry
-  resolvedSession?: ApiSession
-  onSelect: (session: ApiSession) => void
+  resolvedSession?: UiSession
+  onSelect: (session: UiSession) => void
 }
 
 export function NotificationItem({ entry, resolvedSession, onSelect }: NotificationItemProps) {

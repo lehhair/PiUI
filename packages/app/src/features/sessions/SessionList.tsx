@@ -8,20 +8,20 @@ import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import { notificationStore, useHasUnreadCompletedNotification } from '../../store/notificationStore'
 import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
-import type { ApiSession } from '../../api'
+import type { UiSession } from '../../types/session'
 import { startInternalDrag } from '../../lib/internalDragCore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../store/pinnedSessionsStore'
 import { usePiCapabilities } from '../../pi/capabilities'
 
 interface SessionListProps {
-  sessions: ApiSession[]
+  sessions: UiSession[]
   selectedId: string | null
   isLoading: boolean
   isLoadingMore: boolean
   hasMore: boolean
   search: string
   onSearchChange: (search: string) => void
-  onSelect: (session: ApiSession) => void
+  onSelect: (session: UiSession) => void
   onDelete: (sessionId: string) => void
   onRename: (sessionId: string, newTitle: string) => void
   onLoadMore: () => void
@@ -29,13 +29,12 @@ interface SessionListProps {
   showHeader?: boolean
   grouped?: boolean
   density?: 'default' | 'compact' | 'minimal'
-  showStats?: boolean
   showDirectory?: boolean
   /** 拉 /children 全量展示的父 session ID */
   expandedChildSessionIds?: Set<string>
   /** 按父 ID 分组的直接挂出来的子 session */
-  inlineChildSessions?: Map<string, ApiSession[]>
-  onSelectChildSession?: (session: ApiSession) => void
+  inlineChildSessions?: Map<string, UiSession[]>
+  onSelectChildSession?: (session: UiSession) => void
   pinnedDividerAfterIds?: Set<string>
   /** 拉不到的置顶（灰色展示，可取消） */
   unavailablePinnedEntries?: PinnedSessionEntry[]
@@ -68,7 +67,6 @@ export function SessionList({
   showHeader = true,
   grouped = true,
   density = 'default',
-  showStats = true,
   showDirectory = false,
   expandedChildSessionIds,
   inlineChildSessions,
@@ -113,7 +111,7 @@ export function SessionList({
 
   // 分组逻辑
   const groupedSessions = useMemo(() => {
-    const groups: Record<TimeGroup, ApiSession[]> = {
+    const groups: Record<TimeGroup, UiSession[]> = {
       today: [],
       yesterday: [],
       previous7Days: [],
@@ -128,7 +126,7 @@ export function SessionList({
     const monthAgo = today - 86400000 * 30
 
     sessions.forEach(session => {
-      const updated = session.time.updated ?? session.time.created
+      const updated = session.updatedAt
       if (updated >= today) {
         groups.today.push(session)
       } else if (updated >= yesterday) {
@@ -236,7 +234,6 @@ export function SessionList({
                             onRename={newTitle => onRename(session.id, newTitle)}
                             preferTouchUi={preferTouchUi}
                             density={density}
-                            showStats={showStats}
                             showDirectory={showDirectory}
                             isEditMode={isEditMode}
                             isChecked={isChecked}
@@ -304,7 +301,6 @@ export function SessionList({
                     onRename={newTitle => onRename(session.id, newTitle)}
                     preferTouchUi={preferTouchUi}
                     density={density}
-                    showStats={showStats}
                     showDirectory={showDirectory}
                     isEditMode={isEditMode}
                     isChecked={isChecked}
@@ -367,14 +363,13 @@ export function SessionList({
 // ============================================
 
 export interface SessionListItemProps {
-  session: ApiSession
+  session: UiSession
   isSelected: boolean
   onSelect: () => void
   onDelete: () => void
   onRename: (newTitle: string) => void
   preferTouchUi: boolean
   density?: 'default' | 'compact' | 'minimal'
-  showStats?: boolean
   showDirectory?: boolean
   // ---- 编辑模式 ----
   isEditMode?: boolean
@@ -394,7 +389,6 @@ export function SessionListItem({
   onRename,
   preferTouchUi,
   density = 'default',
-  showStats = true,
   showDirectory = false,
   isEditMode = false,
   isChecked = false,
@@ -426,11 +420,6 @@ export function SessionListItem({
   const itemRef = useRef<HTMLDivElement>(null)
   const isCompact = density === 'compact'
   const isMinimal = density === 'minimal'
-  const hasSummaryStats = Boolean(
-    showStats &&
-    session.summary &&
-    (session.summary.additions > 0 || session.summary.deletions > 0 || session.summary.files > 0),
-  )
   const itemPaddingClass = isCompact ? 'pl-[6px] pr-3 py-2' : 'px-3 py-2.5'
   const pinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
@@ -685,23 +674,11 @@ export function SessionListItem({
               {session.title || t('sessions.untitledChat')}
             </span>
 
-            {((hasSummaryStats && session.summary) || session.time?.updated) && (
+            {session.updatedAt > 0 && (
               <div
                 className={`${actionsVisible ? 'hidden' : 'flex group-hover:hidden'} shrink-0 items-center gap-1.5 text-[length:var(--fs-xxs)] text-text-500`}
               >
-                {hasSummaryStats && session.summary && (
-                  <span className="flex shrink-0 items-center gap-1 font-mono">
-                    {session.summary.additions > 0 && (
-                      <span className="text-success-100">+{session.summary.additions}</span>
-                    )}
-                    {session.summary.deletions > 0 && (
-                      <span className="text-danger-100">-{session.summary.deletions}</span>
-                    )}
-                    {session.summary.files > 0 && <span>{session.summary.files}f</span>}
-                  </span>
-                )}
-
-                {session.time?.updated && <span className="shrink-0">{formatRelativeTime(session.time.updated)}</span>}
+                <span className="shrink-0">{formatRelativeTime(session.updatedAt)}</span>
               </div>
             )}
           </div>
@@ -830,20 +807,8 @@ export function SessionListItem({
                 <span className="opacity-30 shrink-0">·</span>
               </>
             ) : null}
-            {session.time?.updated && (
-              <span className="shrink-0 opacity-60">{formatRelativeTime(session.time.updated)}</span>
-            )}
-            {showStats && session.summary && (
-              <>
-                <span className="opacity-30">·</span>
-                <span className="flex items-center gap-1.5 font-mono shrink-0">
-                  {session.summary.additions > 0 && (
-                    <span className="text-success-100">+{session.summary.additions}</span>
-                  )}
-                  {session.summary.deletions > 0 && <span className="text-danger-100">-{session.summary.deletions}</span>}
-                  {session.summary.files > 0 && <span>{session.summary.files}f</span>}
-                </span>
-              </>
+            {session.updatedAt > 0 && (
+              <span className="shrink-0 opacity-60">{formatRelativeTime(session.updatedAt)}</span>
             )}
             {showDirectory && session.directory && (
               <>

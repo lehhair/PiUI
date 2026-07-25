@@ -7,11 +7,6 @@ export type { ModelInfo, FileCapabilities, Attachment, AttachmentType } from '..
 export type { Model as ApiModel, Provider as ApiProvider, ProvidersResponse } from '../types/api/model'
 export type { Project as ApiProject, PathResponse as ApiPath } from '../types/api/project'
 export type {
-  Session as ApiSession,
-  SessionListParams,
-  SessionRevert as SessionRevertState,
-} from '../types/api/session'
-export type {
   PermissionRequest as ApiPermissionRequest,
   PermissionReply,
   QuestionOption as ApiQuestionOption,

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { type ApiSession, type SessionListParams } from '../api'
+import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { autoDetectPathStyle, isSameDirectory } from '../utils'
 import { createPiSession, deletePiSession, listPiSessions, resolveWorkspaceId } from '../pi/sessionApi'
-import { toApiSession } from '../pi/toApiSession'
+import { toUiSession } from '../pi/sessionModel'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -19,7 +19,7 @@ interface UseSessionsOptions {
 }
 
 interface UseSessionsResult {
-  sessions: ApiSession[]
+  sessions: UiSession[]
   isLoading: boolean
   isLoadingMore: boolean
   error: Error | null
@@ -32,11 +32,11 @@ interface UseSessionsResult {
   /** 刷新列表 */
   refresh: () => Promise<void>
   /** 创建新会话 */
-  create: (title?: string) => Promise<ApiSession>
+  create: (title?: string) => Promise<UiSession>
   /** 删除会话 */
   remove: (sessionId: string) => Promise<void>
   /** 本地更新会话 */
-  patchLocalSession: (sessionId: string, patch: Partial<ApiSession>) => void
+  patchLocalSession: (sessionId: string, patch: Partial<UiSession>) => void
   /** 本地移除会话 */
   removeLocalSession: (sessionId: string) => void
 }
@@ -47,7 +47,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
   const normalizedDirectory = directory ? directory.replace(/\\/g, '/').replace(/\/$/, '') : undefined
 
-  const [sessions, setSessions] = useState<ApiSession[]>([])
+  const [sessions, setSessions] = useState<UiSession[]>([])
   const [isLoading, setIsLoading] = useState(enabled)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -74,7 +74,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   }, [search])
 
   const matchesDirectory = useCallback(
-    (session: ApiSession) => !normalizedDirectory || isSameDirectory(normalizedDirectory, session.directory),
+    (session: UiSession) => !normalizedDirectory || isSameDirectory(normalizedDirectory, session.directory),
     [normalizedDirectory],
   )
 
@@ -100,7 +100,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         const scopedWorkspaceId = normalizedDirectory ? await resolveWorkspaceId(normalizedDirectory) : null
         const all = (await listPiSessions())
           .filter(summary => !scopedWorkspaceId || summary.workspaceId === scopedWorkspaceId)
-          .map(summary => toApiSession(summary, normalizedDirectory))
+          .map(summary => toUiSession(summary, normalizedDirectory))
         const searchTerm = queryParams.search?.trim().toLowerCase()
         const data = all
           .filter(session => matchesDirectory(session))
@@ -219,7 +219,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       // 创建时也要传 directory
       const workspaceId = await resolveWorkspaceId(normalizedDirectory)
       const { summary } = await createPiSession({ title, workspaceId: workspaceId ?? undefined })
-      const newSession = toApiSession(summary, normalizedDirectory)
+      const newSession = toUiSession(summary, normalizedDirectory)
 
       if (searchRef.current) {
         void fetchSessionsRef.current({ search: searchRef.current || undefined })
@@ -245,7 +245,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     [],
   )
 
-  const patchLocalSession = useCallback((sessionId: string, patch: Partial<ApiSession>) => {
+  const patchLocalSession = useCallback((sessionId: string, patch: Partial<UiSession>) => {
     setSessions(prev => prev.map(session => (session.id === sessionId ? { ...session, ...patch } : session)))
   }, [])
 

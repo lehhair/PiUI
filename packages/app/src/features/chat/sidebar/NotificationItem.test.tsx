@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiSession } from '../../../api'
+import type { UiSession } from '../../../types/session'
 import type { NotificationEntry } from '../../../store/notificationStore'
 import { NotificationItem } from './NotificationItem'
 
@@ -30,11 +30,14 @@ describe('NotificationItem', () => {
     timestamp: Date.now(),
     read: false,
   }
-  const resolvedSession: ApiSession = {
+  const resolvedSession: UiSession = {
     id: 'session-1',
+    workspaceId: 'workspace-1',
     title: 'Build finished',
     directory: '/workspace',
-  } as ApiSession
+    createdAt: 1,
+    updatedAt: 1,
+  }
 
   beforeEach(() => {
     markReadMock.mockReset()

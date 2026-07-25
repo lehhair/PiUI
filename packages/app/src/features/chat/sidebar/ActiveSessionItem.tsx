@@ -1,14 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import type { ActiveSessionEntry } from '../../../store/activeSessionStore'
-import type { ApiSession } from '../../../api'
+import type { UiSession } from '../../../types/session'
 import { startInternalDrag } from '../../../lib/internalDragCore'
 
 interface ActiveSessionItemProps {
   entry: ActiveSessionEntry
   /** 从 sessions 列表或 API 拉取到的完整 session 对象 */
-  resolvedSession?: ApiSession
+  resolvedSession?: UiSession
   isSelected: boolean
-  onSelect: (session: ApiSession) => void
+  onSelect: (session: UiSession) => void
 }
 
 export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect }: ActiveSessionItemProps) {

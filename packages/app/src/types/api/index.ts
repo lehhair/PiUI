@@ -3,7 +3,7 @@
 // ============================================
 //
 // 所有 API 类型都从这里导出
-// 使用方式: import type { Session, Message, Part } from '@/types/api'
+// 使用方式: import type { Message, Part } from '@/types/api'
 //
 
 // Common types
@@ -15,20 +15,6 @@ export type {
   MessageAbortedError,
   APIError,
 } from './common'
-
-// Session types
-export type {
-  Session,
-  SessionStatus,
-  SessionStatusMap,
-  SessionSummary,
-  SessionShare,
-  SessionRevert,
-  SessionListParams,
-  SessionCreateParams,
-  SessionUpdateParams,
-  SessionForkParams,
-} from './session'
 
 // Message types
 export type {

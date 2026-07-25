@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import { SidePanel } from './sidebar/SidePanel'
 import { ProjectDialog } from './ProjectDialog'
 import { useDirectory } from '../../hooks'
-import { type ApiSession } from '../../api'
+import type { UiSession } from '../../types/session'
 import { useChatViewport } from './chatViewport'
 
 function clampSidebarWidth(width: number, minWidth: number, maxWidth: number) {
@@ -19,7 +19,7 @@ type SidebarSwipeAxis = 'pending' | 'horizontal' | 'vertical'
 interface SidebarProps {
   isOpen: boolean
   selectedSessionId: string | null
-  onSelectSession: (session: ApiSession) => void
+  onSelectSession: (session: UiSession) => void
   onNewSession: () => void
   onOpen: () => void
   onClose: () => void
@@ -208,7 +208,7 @@ export const Sidebar = memo(function Sidebar({
   }, [])
 
   const handleSelectSession = useCallback(
-    (session: ApiSession) => {
+    (session: UiSession) => {
       onSelectSession(session)
       if (isOverlay) {
         onClose()

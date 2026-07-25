@@ -37,9 +37,9 @@ import {
   deleteSession as apiDeleteSession,
   getSession,
   subscribeToConnectionState,
-  type ApiSession,
   type ConnectionInfo,
 } from '../../../api'
+import type { UiSession } from '../../../types/session'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
 
@@ -51,7 +51,7 @@ import { uiErrorHandler } from '../../../utils'
 
 interface SidePanelProps {
   onNewSession: () => void
-  onSelectSession: (session: ApiSession) => void
+  onSelectSession: (session: UiSession) => void
   onCloseMobile?: () => void
   selectedSessionId: string | null
   onAddProject: () => void
@@ -317,14 +317,14 @@ export function SidePanel({
     pinnedSessionsStore.getSnapshot,
   )
   // 缓存通过 API 拉取的 session 数据（sessions 列表中不存在的）
-  const [fetchedSessions, setFetchedSessions] = useState<Record<string, ApiSession>>({})
+  const [fetchedSessions, setFetchedSessions] = useState<Record<string, UiSession>>({})
   // 防止 busySessions 等数组引用抖动时 cancel+重拉，导致 /session 风暴
   const inflightSessionIdsRef = useRef(new Set<string>())
   const failedSessionIdsRef = useRef(new Set<string>())
 
-  // 为 active sessions 构建 sessionId -> ApiSession 的查找表
+  // Build the lookup used by active sessions and notifications.
   const sessionLookup = useMemo(() => {
-    const map = new Map<string, ApiSession>()
+    const map = new Map<string, UiSession>()
     for (const s of sessions) {
       map.set(s.id, s)
     }
@@ -341,14 +341,14 @@ export function SidePanel({
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
     const pinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
-      .filter((session): session is ApiSession => Boolean(session))
+      .filter((session): session is UiSession => Boolean(session))
     const rest = sessions.filter(s => !pinnedSet.has(s.id))
     return [...pinned, ...rest]
   }, [pinnedEntries, sessionLookup, sessions])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
-      .filter((session): session is ApiSession => Boolean(session))
+      .filter((session): session is UiSession => Boolean(session))
       .at(-1)
     if (!lastPinned) return undefined
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
@@ -358,7 +358,7 @@ export function SidePanel({
     () =>
       pinnedEntries
         .map(entry => sessionLookup.get(entry.sessionId))
-        .filter((session): session is ApiSession => Boolean(session)),
+        .filter((session): session is UiSession => Boolean(session)),
     [pinnedEntries, sessionLookup],
   )
   // 当前 lookup 里没有的置顶：灰色展示，始终可取消
@@ -460,14 +460,7 @@ export function SidePanel({
   // ---- 子 session 展示数据 ----
   const rootSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
 
-  const findParentId = useCallback(
-    (id: string) => {
-      const s = sessionLookup.get(id)
-      if (s?.parentID) return s.parentID
-      return childSessionStore.getSessionInfo(id)?.parentID
-    },
-    [sessionLookup],
-  )
+  const findParentId = useCallback((id: string) => childSessionStore.getSessionInfo(id)?.parentID, [])
 
   // 开关开 → 拉 /children 全量：选中的 root 或选中子 session 时保持其父展开
   const expandedChildSessionIds = useMemo(() => {
@@ -481,8 +474,8 @@ export function SidePanel({
   // 开关关 → 只挂活跃的 + 选中的子 session
   const inlineChildSessions = useMemo(() => {
     if (search) return undefined
-    const map = new Map<string, ApiSession[]>()
-    const add = (parentId: string, session: ApiSession) => {
+    const map = new Map<string, UiSession[]>()
+    const add = (parentId: string, session: UiSession) => {
       if (expandedChildSessionIds?.has(parentId)) return
       let arr = map.get(parentId)
       if (!arr) {
@@ -790,7 +783,7 @@ export function SidePanel({
   )
 
   const handleSelect = useCallback(
-    (session: ApiSession) => {
+    (session: UiSession) => {
       // Global 模式下，点击 session 自动切换到该 session 的工作目录并添加到项目列表
       // piws: 是 Pi workspace 标记，不是本机路径，不要塞进项目列表
       if (
@@ -810,7 +803,7 @@ export function SidePanel({
 
   // Active tab 专用：跨目录的 session 需要确保目录在项目列表中
   const handleSelectActive = useCallback(
-    (session: ApiSession) => {
+    (session: UiSession) => {
       if (session.directory && !String(session.directory).startsWith('piws:')) {
         addDirectory(session.directory)
       }
@@ -867,7 +860,7 @@ export function SidePanel({
   )
 
   const handleRenameFolderSession = useCallback(
-    async (session: ApiSession, newTitle: string) => {
+    async (session: UiSession, newTitle: string) => {
       try {
         await updateSession(session.id, { title: newTitle }, session.directory)
         pinnedSessionsStore.update(session.id, { title: newTitle })
@@ -882,7 +875,7 @@ export function SidePanel({
   )
 
   const handleDeleteFolderSession = useCallback(
-    async (session: ApiSession) => {
+    async (session: UiSession) => {
       await apiDeleteSession(session.id, session.directory)
       pinnedSessionsStore.unpin(session.id)
 
@@ -1408,7 +1401,6 @@ export function SidePanel({
                   showHeader={false}
                   grouped={false}
                   density="compact"
-                  showStats
                   showDirectory={!currentDirectory}
                   expandedChildSessionIds={expandedChildSessionIds}
                   inlineChildSessions={inlineChildSessions}
