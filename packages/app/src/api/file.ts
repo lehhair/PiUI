@@ -41,14 +41,15 @@ function mapPiType(t: string): FileNode['type'] {
 /** Normalize explorer path to workspace-relative for Pi file API. */
 function toPiRelativePath(path: string, directory?: string): string {
   if (!path || isRootDirectoryPath(path)) return ''
-  let p = path.replace(/\\/g, '/')
+  const p = path.replace(/\\/g, '/')
   // virtual labels
-  if (p === 'piui' || p.startsWith('piui/') || p.startsWith('piws:')) return ''
+  if (p === 'piui' || p.startsWith('piui/')) return ''
 
   const root = directory?.replace(/\\/g, '/').replace(/\/+$/, '')
   if (root && (/^[a-zA-Z]:/.test(root) || root.startsWith('/'))) {
-    const lp = p.toLowerCase()
-    const lr = root.toLowerCase()
+    const caseInsensitive = /^[a-zA-Z]:/.test(root) || root.startsWith('//')
+    const lp = caseInsensitive ? p.toLowerCase() : p
+    const lr = caseInsensitive ? root.toLowerCase() : root
     if (lp === lr || lp === `${lr}/`) return ''
     if (lp.startsWith(`${lr}/`)) return p.slice(root.length + 1)
     // absolute path that is not under workspace root → list root instead of 403

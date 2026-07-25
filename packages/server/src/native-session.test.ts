@@ -403,7 +403,7 @@ describe("native Pi session discovery", () => {
     }
     const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
 
-    const first = registry.warmup()
+    const first = registry.list()
     const second = registry.list()
     await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(scans, 1)

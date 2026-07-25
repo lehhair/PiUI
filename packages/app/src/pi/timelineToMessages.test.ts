@@ -11,6 +11,7 @@ function sampleSnapshot(): SessionSnapshotV1 {
     session: {
       id: "sess-1",
       workspaceId: "w1",
+      directory: "/workspace",
       driverId: "pi",
       driverSessionId: "d1",
       title: "mock",

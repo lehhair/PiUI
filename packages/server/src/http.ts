@@ -95,9 +95,6 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     eventHub,
     sessionId => sessionExecutor.markRuntimeCrashed(sessionId),
   )
-  void sessions.warmup().catch(error => {
-    console.warn("[piui-server] Pi session catalog warmup failed", error)
-  })
   const publishSessionSnapshot = (session: AppSession) => {
     eventHub.publish({
       type: "session.snapshot",

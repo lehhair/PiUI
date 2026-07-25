@@ -62,6 +62,43 @@ describe("http phase1", () => {
     }
   })
 
+  it("scans only the requested workspace catalog", async () => {
+    let scopedCwd: string | undefined
+    let globalScans = 0
+    const server = createAppServer({
+      driver: "pi",
+      piBackend: {
+        list: async cwd => {
+          scopedCwd = cwd
+          return []
+        },
+        listAll: async () => {
+          globalScans += 1
+          return []
+        },
+        open: async () => { throw new Error("not used") },
+      },
+    })
+    const { port, close } = await listen(server)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      assert.equal(globalScans, 0)
+
+      const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
+      const workspaceId = workspace.data.workspace.id as string
+      const sessions = await json(
+        port,
+        "GET",
+        `/api/v1/sessions?workspaceId=${encodeURIComponent(workspaceId)}`,
+      )
+      assert.equal(sessions.status, 200)
+      assert.equal(scopedCwd, path.resolve(root))
+      assert.equal(globalScans, 0)
+    } finally {
+      await close()
+    }
+  })
+
   it("default workspace + local CORS preflight", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

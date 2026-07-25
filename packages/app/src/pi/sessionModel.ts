@@ -1,11 +1,10 @@
 import type { SessionSnapshotV1 } from "@piui/protocol"
 import type { PiSessionSummary, UiSession } from "../types/session"
-import { toPiWorkspaceDirectory } from "./workspaceRef"
 import { getPathByWorkspaceId } from "./workspaceCache"
 
 function defaultDirectory(workspaceId: string, override?: string): string {
   if (override) return override
-  return getPathByWorkspaceId(workspaceId) ?? toPiWorkspaceDirectory(workspaceId)
+  return getPathByWorkspaceId(workspaceId) ?? ""
 }
 
 function sessionTimestamps(summary: PiSessionSummary) {
@@ -35,6 +34,6 @@ export function snapshotToUiSession(snapshot: SessionSnapshotV1, directory?: str
       createdAt: snapshot.session.createdAt,
       updatedAt: snapshot.session.updatedAt,
     },
-    directory,
+    directory ?? snapshot.session.directory,
   )
 }

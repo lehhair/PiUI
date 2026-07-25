@@ -11,7 +11,6 @@ import type {
 import type { PiSessionSummary } from "../types/session"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
-import { parsePiWorkspaceId } from "./workspaceRef"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
@@ -187,12 +186,9 @@ async function ensureDefaultWorkspaceId(): Promise<string | null> {
   return id
 }
 
-/** Resolve workspace id from absolute path, piws:id, or default workspace. */
+/** Resolve workspace id from an absolute path or the default workspace. */
 export async function resolveWorkspaceId(directory?: string): Promise<string | null> {
   if (directory) {
-    const fromMarker = parsePiWorkspaceId(directory)
-    if (fromMarker) return fromMarker
-    // absolute path
     if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
       const { workspace } = await createWorkspace(directory)
       return workspace.id

@@ -12,7 +12,7 @@ describe("toUiSession", () => {
     })
     expect(s.id).toBe("abc")
     expect(s.title).toBe("Hello")
-    expect(s.directory).toBe("piws:w")
+    expect(s.directory).toBe("")
     expect(s.workspaceId).toBe("w")
     expect(s.updatedAt).toBe(Date.parse("2020-01-02T00:00:00.000Z"))
   })

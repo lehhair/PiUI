@@ -210,6 +210,7 @@ export interface SessionSnapshotV1 {
   session: {
     id: string
     workspaceId: string
+    directory: string
     driverId: "pi"
     driverSessionId: string
     title?: string
