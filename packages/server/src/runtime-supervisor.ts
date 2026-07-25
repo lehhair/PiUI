@@ -82,6 +82,10 @@ export class RuntimeSupervisor {
         throw new Error("Runtime supervisor is disposed")
       }
       const release = once(() => lease?.release())
+      runtime.setReplacementHandler(async replacement => {
+        if (replacement.cancelled) return
+        await lease?.replace(replacement.targetSessionFile, replacement.targetSessionId)
+      })
       runtime.onClose(() => {
         this.active.delete(runtime)
         release()

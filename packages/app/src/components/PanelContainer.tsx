@@ -16,6 +16,7 @@ import {
   PlugIcon,
   TeachIcon,
   GitWorktreeIcon,
+  GitBranchIcon,
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
 import { updatePtySession } from '../api/pty'
@@ -44,6 +45,7 @@ const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
   terminal: <TerminalIcon size={12} />,
   files: <FolderIcon size={12} />,
   changes: <GitCommitIcon size={12} />,
+  'session-tree': <GitBranchIcon size={12} />,
   mcp: <PlugIcon size={12} />,
   skill: <TeachIcon size={12} />,
   worktree: <GitWorktreeIcon size={12} />,
@@ -67,6 +69,8 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
       if (changesTabs.length <= 1) return t('panelContainer.changes')
       return `${t('panelContainer.changes')} ${changesTabs.findIndex(item => item.id === tab.id) + 1}`
     }
+    case 'session-tree':
+      return t('panelContainer.sessionTree')
     case 'mcp':
       return t('panelContainer.mcp')
     case 'skill':
@@ -101,6 +105,7 @@ export const PanelContainer = memo(function PanelContainer({
     if (tab.type === 'terminal') return capabilities.pty
     if (tab.type === 'mcp') return capabilities.mcp
     if (tab.type === 'worktree') return capabilities.worktree
+    if (tab.type === 'session-tree') return capabilities.sessionTree
     return true
   })
   const activeTabId = layout.activeTabId[position]
@@ -226,10 +231,12 @@ export const PanelContainer = memo(function PanelContainer({
   // 移动到另一个面板
   const handleMoveToOtherPanel = useCallback(() => {
     if (!contextMenu) return
+    const tab = tabs.find(item => item.id === contextMenu.tabId)
+    if (tab?.type === 'session-tree') return
     const targetPosition: PanelPosition = position === 'bottom' ? 'right' : 'bottom'
     layoutStore.moveTab(contextMenu.tabId, targetPosition)
     setContextMenu(null)
-  }, [contextMenu, position])
+  }, [contextMenu, position, tabs])
 
   const startRename = useCallback(
     (tab: PanelTab) => {
@@ -343,7 +350,7 @@ export const PanelContainer = memo(function PanelContainer({
           ))}
 
           {/* New Tab Button */}
-          {onNewTerminal && (
+          {(
             <button
               ref={addButtonRef}
               onClick={() => {
@@ -408,12 +415,14 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.renameTerminal')}
               </button>
             )}
-            <button
-              onClick={handleMoveToOtherPanel}
-              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              {otherPanelLabel}
-            </button>
+            {contextTab?.type !== 'session-tree' && (
+              <button
+                onClick={handleMoveToOtherPanel}
+                className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                {otherPanelLabel}
+              </button>
+            )}
           </div>,
           document.body,
         )}
@@ -468,6 +477,20 @@ export const PanelContainer = memo(function PanelContainer({
               </span>
               {t('panelContainer.changes')}
             </button>
+            {position === 'right' && capabilities.sessionTree && (
+              <button
+                onClick={() => {
+                  layoutStore.addSessionTreeTab()
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <GitBranchIcon size={12} />
+                </span>
+                {t('panelContainer.sessionTree')}
+              </button>
+            )}
             {capabilities.mcp && (
               <button
                 onClick={() => {

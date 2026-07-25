@@ -171,11 +171,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           capabilities: {
             pty: false,
             share: false,
-            fork: false,
-            undo: false,
+            fork: true,
+            undo: true,
             fileWrite: true,
             gitDiff: true,
-            sessionRename: false,
+            sessionRename: true,
             sessionArchive: false,
             mcp: false,
             worktree: false,
@@ -262,9 +262,21 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const id = decodeURIComponent(sessionOnly[1])
         const session = await sessions.find(id)
         if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        await sessions.delete(id)
+        const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+        const submitted = sessionExecutor.submit(
+          {
+            protocolVersion: 2,
+            commandId,
+            type: "session.delete",
+            concurrency: "idle-only",
+            sessionId: id,
+            payload: { durable: true },
+          },
+          () => sessions.delete(id),
+        )
+        await submitted.promise
         publishSessionUpdated(session)
-        return sendJson(res, 200, { ok: true, id })
+        return sendJson(res, 200, { ok: true, id, commandId, command: submitted.record })
       }
 
       const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/prompt$/)
@@ -462,6 +474,182 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           })
         } catch (e) {
           return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionNavigate = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/navigate-tree$/)
+      if (method === "POST" && sessionNavigate) {
+        const id = decodeURIComponent(sessionNavigate[1])
+        const raw = await readBody(req)
+        let body: { entryId?: string; summarize?: boolean; commandId?: string }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.entryId) return sendProblem(res, 400, "INVALID_REQUEST", "entryId required")
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.navigateTree",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { entryId: body.entryId, summarizeAbandonedBranch: body.summarize === true },
+            },
+            () => sessions.navigateTree(id, body.entryId!, body.summarize),
+          )
+          const result = await submitted.promise
+          publishSessionSnapshot(result.session)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            editorText: result.editorText,
+            cancelled: result.cancelled,
+            aborted: result.aborted,
+            snapshot: sessions.snapshot(result.session),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionLabel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-label$/)
+      if (method === "POST" && sessionLabel) {
+        const id = decodeURIComponent(sessionLabel[1])
+        const raw = await readBody(req)
+        let body: { entryId?: string; label?: string; commandId?: string }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.entryId) return sendProblem(res, 400, "INVALID_REQUEST", "entryId required")
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.setLabel",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { entryId: body.entryId, label: body.label },
+            },
+            () => sessions.setLabel(id, body.entryId!, body.label),
+          )
+          const session = await submitted.promise
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(session) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionName = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-name$/)
+      if (method === "POST" && sessionName) {
+        const id = decodeURIComponent(sessionName[1])
+        const raw = await readBody(req)
+        let body: { name?: string; commandId?: string }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (typeof body.name !== "string") return sendProblem(res, 400, "INVALID_REQUEST", "name required")
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.setName",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { name: body.name },
+            },
+            () => sessions.setSessionName(id, body.name!),
+          )
+          const session = await submitted.promise
+          publishSessionSnapshot(session)
+          publishSessionUpdated(session)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(session) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionReplacement = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/(fork|clone|import)$/)
+      if (method === "POST" && sessionReplacement) {
+        const id = decodeURIComponent(sessionReplacement[1])
+        const operation = sessionReplacement[2]
+        const raw = await readBody(req)
+        let body: {
+          entryId?: string
+          position?: "before" | "at"
+          inputPath?: string
+          cwdOverride?: string
+          commandId?: string
+        }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = operation === "fork"
+            ? sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.fork",
+                  concurrency: "idle-only",
+                  sessionId: id,
+                  payload: {
+                    entryId: body.entryId ?? "",
+                    position: body.position === "before" ? "before" : "at",
+                  },
+                },
+                () => {
+                  if (!body.entryId) throw Object.assign(new Error("entryId required"), { code: "INVALID_REQUEST" })
+                  return sessions.forkSession(id, body.entryId, body.position === "before" ? "before" : "at")
+                },
+              )
+            : operation === "clone"
+              ? sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.clone",
+                    concurrency: "idle-only",
+                    sessionId: id,
+                    payload: { entryId: body.entryId },
+                  },
+                  () => sessions.cloneSession(id, body.entryId),
+                )
+              : sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.import",
+                    concurrency: "idle-only",
+                    sessionId: id,
+                    payload: { inputPath: body.inputPath ?? "", cwdOverride: body.cwdOverride },
+                  },
+                  () => {
+                    if (!body.inputPath) throw Object.assign(new Error("inputPath required"), { code: "INVALID_REQUEST" })
+                    return sessions.importSession(id, body.inputPath, body.cwdOverride)
+                  },
+                )
+          const result = await submitted.promise
+          publishSessionSnapshot(result.source)
+          if (result.target !== result.source) publishSessionSnapshot(result.target)
+          publishSessionUpdated(result.source)
+          publishSessionUpdated(result.target)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            replacement: result.replacement,
+            sourceSnapshot: sessions.snapshot(result.source),
+            targetSnapshot: sessions.snapshot(result.target),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
         }
       }
 

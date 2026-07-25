@@ -1,4 +1,9 @@
-import type { TimelineItemV1 } from "@piui/protocol"
+import type {
+  PiSessionEntryV1,
+  PiSessionTreeNodeV1,
+  SessionReplacementResultV1,
+  TimelineItemV1,
+} from "@piui/protocol"
 import type { PiCommandInfo, PiRuntimeUiState, PiSessionInfo, PiSkillInfo } from "./real-session.js"
 
 export interface ProjectionWire {
@@ -12,8 +17,8 @@ export interface WorkerSessionWire {
   sessionName?: string
   projection: ProjectionWire
   state: PiRuntimeUiState
-  entries: unknown[]
-  tree: unknown[]
+  entries: PiSessionEntryV1[]
+  tree: PiSessionTreeNodeV1[]
   leafId: string | null
 }
 
@@ -40,6 +45,9 @@ export type PiWorkerCapability =
   | "runtime.model"
   | "runtime.thinking"
   | "runtime.compact"
+  | "runtime.tree"
+  | "runtime.fork"
+  | "runtime.import"
   | "runtime.skills"
   | "runtime.commands"
 
@@ -63,6 +71,12 @@ export type WorkerCommand =
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinkingLevel"; level: string }
   | { type: "compact"; instructions?: string }
+  | { type: "navigateTree"; entryId: string; summarize?: boolean }
+  | { type: "setLabel"; entryId: string; label?: string }
+  | { type: "setSessionName"; name: string }
+  | { type: "fork"; entryId: string; position: "before" | "at" }
+  | { type: "clone"; entryId?: string }
+  | { type: "importSession"; inputPath: string; cwdOverride?: string }
   | { type: "listSkills" }
   | { type: "listCommands" }
   | { type: "dispose" }
@@ -80,6 +94,8 @@ export type WorkerResult =
   | { type: "session"; session: WorkerSessionWire }
   | { type: "skills"; skills: PiSkillInfo[] }
   | { type: "commands"; commands: PiCommandInfo[] }
+  | { type: "navigation"; editorText?: string; cancelled: boolean; aborted?: boolean; session: WorkerSessionWire }
+  | { type: "replacement"; replacement: SessionReplacementResultV1; session: WorkerSessionWire }
   | { type: "ok" }
 
 export type WorkerResponse =

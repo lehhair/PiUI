@@ -3,7 +3,11 @@
  * No OpenCode SDK. No real LLM calls from the browser.
  */
 
-import type { SessionSnapshotV1 } from "@piui/protocol"
+import type {
+  CommandRecordV2,
+  SessionReplacementResultV1,
+  SessionSnapshotV1,
+} from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
@@ -113,13 +117,33 @@ export async function createPiSession(opts?: {
   return { summary: data.session, snapshot: data.snapshot }
 }
 
-export async function deletePiSession(sessionId: string): Promise<void> {
+export async function deletePiSession(sessionId: string): Promise<{
+  ok: true
+  id: string
+  commandId: string
+  command: CommandRecordV2<"session.delete">
+}> {
   const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   })
-  if (!res.ok) throw new Error(`deletePiSession ${res.status}`)
+  if (!res.ok) {
+    let code: string | undefined
+    try {
+      code = ((await res.json()) as { code?: string }).code
+    } catch {
+      /* no structured error body */
+    }
+    throw Object.assign(new Error(`deletePiSession ${res.status}`), { status: res.status, code })
+  }
+  const result = (await res.json()) as {
+    ok: true
+    id: string
+    commandId: string
+    command: CommandRecordV2<"session.delete">
+  }
   untrackPiSession(sessionId)
   sessionProjectionStore.clear(sessionId)
+  return result
 }
 
 export async function createWorkspace(rootPath: string, displayName?: string) {
@@ -335,6 +359,101 @@ export async function setSessionThinkingLevel(sessionId: string, level: string) 
   if (!res.ok) throw new Error(`setSessionThinkingLevel ${res.status}`)
   const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
   return data.snapshot
+}
+
+interface SessionCommandResult<T extends keyof import("@piui/protocol").CommandPayloadsV2> {
+  commandId: string
+  command: CommandRecordV2<T>
+}
+
+export interface SessionReplacementResponse<T extends "session.fork" | "session.clone" | "session.import">
+  extends SessionCommandResult<T> {
+  replacement: SessionReplacementResultV1
+  sourceSnapshot: SessionSnapshotV1
+  targetSnapshot: SessionSnapshotV1
+}
+
+async function postSessionCommand<T>(sessionId: string, command: string, body: unknown): Promise<T> {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/${command}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) throw new Error(`${command} ${res.status}`)
+  return (await res.json()) as T
+}
+
+export function navigatePiSessionTree(
+  sessionId: string,
+  entryId: string,
+  summarize = false,
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<
+    SessionCommandResult<"session.navigateTree"> & {
+      editorText?: string
+      cancelled: boolean
+      aborted: boolean
+      snapshot: SessionSnapshotV1
+    }
+  >(sessionId, "navigate-tree", { entryId, summarize, commandId })
+}
+
+export function setPiSessionLabel(
+  sessionId: string,
+  entryId: string,
+  label?: string,
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.setLabel"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-label",
+    { entryId, label, commandId },
+  )
+}
+
+export function setPiSessionName(sessionId: string, name: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.setName"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-name",
+    { name, commandId },
+  )
+}
+
+export function forkPiSession(
+  sessionId: string,
+  entryId: string,
+  position: "before" | "at" = "at",
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionReplacementResponse<"session.fork">>(sessionId, "fork", {
+    entryId,
+    position,
+    commandId,
+  })
+}
+
+export function clonePiSession(sessionId: string, entryId?: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionReplacementResponse<"session.clone">>(sessionId, "clone", {
+    entryId,
+    commandId,
+  })
+}
+
+export function importPiSession(
+  sessionId: string,
+  inputPath: string,
+  cwdOverride?: string,
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionReplacementResponse<"session.import">>(sessionId, "import", {
+    inputPath,
+    cwdOverride,
+    commandId,
+  })
 }
 
 export async function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {

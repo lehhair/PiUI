@@ -18,6 +18,9 @@ const Terminal = lazy(() => import('./Terminal').then(module => ({ default: modu
 const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
 const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
+const SessionTreePanel = lazy(() =>
+  import('./SessionTreePanel').then(module => ({ default: module.SessionTreePanel })),
+)
 
 function PanelFallback() {
   const { t } = useTranslation(['components', 'common'])
@@ -33,9 +36,16 @@ interface RightPanelProps {
   sessionId?: string | null
   inline?: boolean
   renderPanelContent?: boolean
+  onNavigateSession?: (session: { id: string; directory?: string }) => void
 }
 
-export const RightPanel = memo(function RightPanel({ directory, sessionId, inline = false, renderPanelContent = true }: RightPanelProps) {
+export const RightPanel = memo(function RightPanel({
+  directory,
+  sessionId,
+  inline = false,
+  renderPanelContent = true,
+  onNavigateSession,
+}: RightPanelProps) {
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
@@ -151,10 +161,25 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
               <WorktreePanel isResizing={isPanelResizing} />
             </Suspense>
           ) : null}
+
+          {activeTab.type === 'session-tree' ? (
+            sessionId ? (
+              <Suspense fallback={<PanelFallback />}>
+                <SessionTreePanel
+                  sessionId={sessionId}
+                  onNavigateSession={onNavigateSession}
+                />
+              </Suspense>
+            ) : (
+              <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+                {t('rightPanel.noActiveSession')}
+              </div>
+            )
+          ) : null}
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, ptyEnabled, t],
+    [normalizedDirectory, sessionId, isPanelResizing, ptyEnabled, t, onNavigateSession],
   )
 
   if (inline) {

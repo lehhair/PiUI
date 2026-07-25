@@ -52,6 +52,13 @@ describe("PiWorkerSession IPC", () => {
       await runtime.prompt("hello", () => { ticks += 1 })
       assert.equal(ticks > 0, true)
       assert.equal(runtime.getProjection().timeline[0]?.entryId, "fixture-entry")
+      assert.equal(runtime.getEntries()[0]?.type, "message")
+      assert.equal(runtime.getTree()[0]?.entry.id, "fixture-entry")
+      assert.equal((await runtime.navigateTree("fixture-entry")).editorText, "fixture draft")
+      await runtime.setLabel("fixture-entry", "checkpoint")
+      assert.equal(runtime.getTree()[0]?.label, "checkpoint")
+      await runtime.setSessionName("Renamed fixture")
+      assert.equal(runtime.getSessionName(), "Renamed fixture")
     } finally {
       await runtime.dispose()
     }

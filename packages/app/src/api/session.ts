@@ -11,11 +11,14 @@ import {
   fetchSnapshot,
   listPiSessions,
   resolveWorkspaceId,
+  setPiSessionName,
 } from '../pi/sessionApi'
 import { snapshotToUiSession, toUiSession } from '../pi/sessionModel'
 import type { FileDiff } from './types'
 import type { SessionListParams, SessionStatusMap, UiSession } from '../types/session'
 import type { TodoItem } from '../types/api/event'
+import { paneLayoutStore } from '../store/paneLayoutStore'
+import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 
 function unsupported(capability: string): never {
   throw new UnsupportedPiCapabilityError(capability)
@@ -73,15 +76,22 @@ export async function createSession(
 }
 
 export async function updateSession(
-  _sessionId: string,
-  _params: { title?: string; archivedAt?: number | null },
-  _directory?: string,
+  sessionId: string,
+  params: { title?: string; archivedAt?: number | null },
+  directory?: string,
 ): Promise<UiSession> {
-  return unsupported('session metadata updates')
+  if (params.title === undefined || params.archivedAt !== undefined) {
+    return unsupported('session metadata updates')
+  }
+  const { snapshot } = await setPiSessionName(sessionId, params.title)
+  applySnapshotToUi(snapshot)
+  return snapshotToUiSession(snapshot, directory)
 }
 
 export async function deleteSession(sessionId: string, _directory?: string): Promise<boolean> {
   await deletePiSession(sessionId)
+  clearSessionRuntimeState(sessionId)
+  paneLayoutStore.clearSession(sessionId)
   return true
 }
 

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   fetchSnapshot: vi.fn(),
   listPiSessions: vi.fn(),
   resolveWorkspaceId: vi.fn(),
+  setPiSessionName: vi.fn(),
   applySnapshotToUi: vi.fn(),
 }))
 
@@ -27,6 +28,7 @@ vi.mock('../pi/sessionApi', () => ({
   fetchSnapshot: mocks.fetchSnapshot,
   listPiSessions: mocks.listPiSessions,
   resolveWorkspaceId: mocks.resolveWorkspaceId,
+  setPiSessionName: mocks.setPiSessionName,
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
@@ -97,9 +99,19 @@ describe('Pi session facade', () => {
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(snapshot('busy'))
   })
 
-  it('reports unsupported legacy-only session operations explicitly', async () => {
+  it('renames Pi sessions and reports legacy-only operations explicitly', async () => {
+    const renamed = snapshot('session-1')
+    mocks.setPiSessionName.mockResolvedValue({ snapshot: renamed })
+
     await expect(getSessionDiff('session-1')).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
-    await expect(updateSession('session-1', { title: 'Renamed' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
+    await expect(updateSession('session-1', { title: 'Renamed' }, '/workspace')).resolves.toEqual(
+      expect.objectContaining({ id: 'session-1' }),
+    )
+    expect(mocks.setPiSessionName).toHaveBeenCalledWith('session-1', 'Renamed')
+    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(renamed)
+    await expect(updateSession('session-1', { archivedAt: Date.now() })).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+    })
     await expect(getSessionTodos('session-1')).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
   })
 })

@@ -48,7 +48,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R0 | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线 | 已完成 |
 | R1 | Protocol v2、类型化 command/event/capability、worker handshake | 已完成 |
 | R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 已完成 |
-| R3 | session tree、navigate、label、fork、clone、import、持久删除 | 未开始 |
+| R3 | session tree、navigate、label、fork、clone、import、持久删除 | 已完成 |
 | R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 未开始 |
 | R5 | 多模态 prompt 与完整工具结果 | 未开始 |
 | R6 | Pi user bash 与流式执行控制 | 未开始 |
@@ -66,6 +66,12 @@ R2 已实现 worker IPC v3、全消息 generation 校验、5 秒心跳与连续 
 `unknown_after_crash`、排队命令取消、懒重新 attach、限时服务退出，以及真实 Pi SDK + faux provider
 无网络验收。外部 Pi CLI 改写 JSONL 的 fingerprint 冲突检测和 idle suspension 不属于本轮完成范围，
 分别随持久会话和发布故障注入继续实现。
+
+R3 已实现类型化 Pi entries/tree/leaf、tree navigation 与编辑器文本恢复、entry label、session name、
+fork/clone/import runtime replacement、target-before-source lease 转移、持久 JSONL 删除，以及右侧会话树 UI。
+fork 后仅发起操作的 pane 切换到 target，其他 source viewer 保留原分支快照；lease commit 失败时关闭已替换
+worker 并让 source 回到可重新 attach 状态。branch summary 的交互选择、外部 JSONL 冲突检测和 leaf checkpoint
+持久恢复继续分别在 R4 和后续持久会话阶段完成。
 
 ## 3. 非目标
 
@@ -174,7 +180,7 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 3. attachments 没有进入真实 prompt
 4. Git diff 内容不足，Git 状态解析有边界错误
 5. 文件写入未完整接入编辑器
-6. fork、undo、redo、tree 未接 Pi
+6. undo/redo 快捷操作尚未映射为 Pi tree navigation；会话树和显式 navigate 已接入
 7. PTY、Tauri 桌面壳未完成
 
 ### 5.3 当前测试结论
@@ -185,7 +191,7 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 - 真实 Pi SDK + faux provider 无网络集成测试通过
 - worker crash、心跳超时、generation 隔离、跨进程 lease 和服务退出故障测试通过
 
-当前结果覆盖 R0-R2 完成条件，但 R3-R12 尚未完成，产品仍未达到发布标准。
+当前结果覆盖 R0-R3 完成条件，但 R4-R12 尚未完成，产品仍未达到发布标准。
 
 ## 6. 目标架构
 

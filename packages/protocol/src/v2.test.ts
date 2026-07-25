@@ -9,6 +9,7 @@ import {
   parseEventStreamKeyV2,
   type EventEnvelopeV2,
   type CommandRequestV2,
+  type SessionSnapshotV1,
 } from "./index.js"
 
 describe("protocol v2 foundation", () => {
@@ -49,5 +50,32 @@ describe("protocol v2 foundation", () => {
     }
     assert.equal(command.concurrency, "idle-only")
     assert.equal(command.payload.entryId, "entry-1")
+  })
+
+  it("types native Pi tree entries and replacement commands", () => {
+    const native: SessionSnapshotV1["native"] = {
+      namespace: "pi",
+      schemaVersion: 1,
+      leafId: "entry-1",
+      entries: [{
+        type: "message",
+        id: "entry-1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        role: "user",
+        preview: "hello",
+      }],
+      tree: [],
+    }
+    const fork: CommandRequestV2<"session.fork"> = {
+      protocolVersion: 2,
+      commandId: "fork-1",
+      type: "session.fork",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: { entryId: "entry-1", position: "before" },
+    }
+    assert.equal(native.entries[0]?.type, "message")
+    assert.equal(fork.payload.position, "before")
   })
 })

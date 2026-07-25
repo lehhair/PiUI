@@ -30,6 +30,9 @@ const workerCapabilities: PiWorkerCapability[] = [
   "runtime.model",
   "runtime.thinking",
   "runtime.compact",
+  "runtime.tree",
+  "runtime.fork",
+  "runtime.import",
   "runtime.skills",
   "runtime.commands",
 ]
@@ -106,6 +109,28 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
     case "compact":
       await requireRuntime().compact(command.instructions)
       return { type: "session", session: sessionWire() }
+    case "navigateTree": {
+      const result = await requireRuntime().navigateTree(command.entryId, command.summarize)
+      return { type: "navigation", ...result, session: sessionWire() }
+    }
+    case "setLabel":
+      await requireRuntime().setLabel(command.entryId, command.label)
+      return { type: "session", session: sessionWire() }
+    case "setSessionName":
+      await requireRuntime().setSessionName(command.name)
+      return { type: "session", session: sessionWire() }
+    case "fork": {
+      const replacement = await requireRuntime().fork(command.entryId, command.position)
+      return { type: "replacement", replacement, session: sessionWire() }
+    }
+    case "clone": {
+      const replacement = await requireRuntime().clone(command.entryId)
+      return { type: "replacement", replacement, session: sessionWire() }
+    }
+    case "importSession": {
+      const replacement = await requireRuntime().importSession(command.inputPath, command.cwdOverride)
+      return { type: "replacement", replacement, session: sessionWire() }
+    }
     case "listSkills":
       return { type: "skills", skills: await requireRuntime().listSkills() }
     case "listCommands":

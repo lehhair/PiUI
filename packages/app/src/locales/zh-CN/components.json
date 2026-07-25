@@ -45,6 +45,7 @@
   "panelContainer": {
     "files": "文件",
     "changes": "变更",
+    "sessionTree": "会话树",
     "mcp": "MCP",
     "skills": "Skills",
     "worktrees": "Worktrees",
@@ -54,6 +55,31 @@
     "moveToRight": "移动到右侧面板",
     "moveToBottom": "移动到底部面板",
     "mcpServers": "MCP 服务器"
+  },
+  "sessionTree": {
+    "empty": "暂无会话历史",
+    "current": "当前节点",
+    "navigate": "回到这里",
+    "fork": "从这里 Fork",
+    "clone": "克隆到这里",
+    "label": "编辑标签",
+    "labelPlaceholder": "分支标签",
+    "import": "导入 JSONL",
+    "importPath": "Pi JSONL 文件路径",
+    "importCwd": "工作目录覆盖（可选）",
+    "runImport": "导入",
+    "cancel": "取消",
+    "failed": "会话树命令失败",
+    "entryTypes": {
+      "thinking_level_change": "思考等级",
+      "model_change": "模型",
+      "compaction": "上下文压缩",
+      "branch_summary": "分支摘要",
+      "custom": "自定义记录",
+      "custom_message": "自定义消息",
+      "label": "标签",
+      "session_info": "会话信息"
+    }
   },
   "sessionChanges": {
     "loadingChanges": "加载变更中...",

@@ -82,6 +82,48 @@ export interface AssistantTimelineItemV1 {
 
 export type TimelineItemV1 = UserTimelineItemV1 | AssistantTimelineItemV1
 
+export interface PiSessionEntryBaseV1 {
+  id: string
+  parentId: string | null
+  timestamp: string
+}
+
+export type PiSessionEntryV1 =
+  | (PiSessionEntryBaseV1 & {
+      type: "message"
+      role: "user" | "assistant" | "toolResult" | "bashExecution" | "branchSummary" | "compactionSummary" | "custom"
+      preview: string
+    })
+  | (PiSessionEntryBaseV1 & { type: "thinking_level_change"; thinkingLevel: string })
+  | (PiSessionEntryBaseV1 & { type: "model_change"; provider: string; modelId: string })
+  | (PiSessionEntryBaseV1 & {
+      type: "compaction"
+      summary: string
+      firstKeptEntryId: string
+      tokensBefore: number
+    })
+  | (PiSessionEntryBaseV1 & { type: "branch_summary"; fromId: string; summary: string })
+  | (PiSessionEntryBaseV1 & { type: "custom"; customType: string })
+  | (PiSessionEntryBaseV1 & { type: "custom_message"; customType: string; preview: string; display: boolean })
+  | (PiSessionEntryBaseV1 & { type: "label"; targetId: string; label?: string })
+  | (PiSessionEntryBaseV1 & { type: "session_info"; name?: string })
+
+export interface PiSessionTreeNodeV1 {
+  entry: PiSessionEntryV1
+  children: PiSessionTreeNodeV1[]
+  label?: string
+  labelTimestamp?: string
+}
+
+export interface SessionReplacementResultV1 {
+  sourceSessionId: string
+  targetSessionId: string
+  targetSessionFile?: string
+  targetCwd?: string
+  selectedText?: string
+  cancelled: boolean
+}
+
 export interface SessionSnapshotV1 {
   protocolVersion: 1
   epoch: string
@@ -114,7 +156,7 @@ export interface SessionSnapshotV1 {
     namespace: "pi"
     schemaVersion: 1
     leafId: string | null
-    entries: unknown[]
-    tree: unknown[]
+    entries: PiSessionEntryV1[]
+    tree: PiSessionTreeNodeV1[]
   }
 }

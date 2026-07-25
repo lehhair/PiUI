@@ -74,6 +74,65 @@ describe("RuntimeSupervisor", () => {
     }
   })
 
+  it("moves the lease from the source session to a fork target", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-fork-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sourceFile = path.join(root, "source.jsonl")
+    const first = new RuntimeSupervisor({ workerEntry: fixture, leases: new SessionLeaseManager(lockRoot) })
+    const second = new RuntimeSupervisor({ workerEntry: fixture, leases: new SessionLeaseManager(lockRoot) })
+    try {
+      const forkedRuntime = await first.open(root, sourceFile)
+      const replacement = await forkedRuntime.fork("fixture-entry", "at")
+      assert.notEqual(replacement.targetSessionId, replacement.sourceSessionId)
+      const targetFile = replacement.targetSessionFile
+      assert.ok(targetFile)
+
+      const sourceRuntime = await second.open(root, sourceFile)
+      await assert.rejects(second.open(root, targetFile), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      await sourceRuntime.dispose()
+      await forkedRuntime.dispose()
+    } finally {
+      await first.dispose()
+      await second.dispose()
+    }
+  })
+
+  it("disposes a replaced worker when the target lease cannot be acquired", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-fork-fail-"))
+    roots.push(root)
+    let released = false
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: fixture,
+      leases: {
+        acquire: async sessionFile => ({
+          key: sessionFile,
+          refresh: async () => undefined,
+          replace: async () => {
+            throw Object.assign(new Error("target is busy"), { code: "SESSION_BUSY" })
+          },
+          release: () => { released = true },
+        }),
+        dispose: () => undefined,
+      },
+    })
+    try {
+      const runtime = await supervisor.open(root, path.join(root, "source.jsonl"))
+      const closed = new Promise<void>(resolve => runtime.onClose(resolve))
+      await assert.rejects(runtime.fork("fixture-entry", "at"), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_REPLACEMENT_COMMIT_FAILED")
+        return true
+      })
+      await closed
+      assert.equal(released, true)
+    } finally {
+      await supervisor.dispose()
+    }
+  })
+
   it("keeps the lease until an unhealthy worker process really closes", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-heartbeat-"))
     roots.push(root)
@@ -156,7 +215,12 @@ describe("RuntimeSupervisor", () => {
         acquire: async sessionFile => {
           acquireStarted()
           await acquireGate
-          return { key: sessionFile, refresh: async () => undefined, release: () => { leaseReleased = true } }
+          return {
+            key: sessionFile,
+            refresh: async () => undefined,
+            replace: async () => undefined,
+            release: () => { leaseReleased = true },
+          }
         },
         dispose: () => undefined,
       },
@@ -192,6 +256,7 @@ describe("RuntimeSupervisor", () => {
             refreshStarted()
             await refreshGate
           },
+          replace: async () => undefined,
           release: () => undefined,
         }),
         dispose: () => undefined,

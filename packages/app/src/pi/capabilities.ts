@@ -6,6 +6,11 @@ export interface PiCapabilities {
   share: boolean
   fork: boolean
   undo: boolean
+  sessionTree: boolean
+  sessionNavigate: boolean
+  sessionDelete: boolean
+  sessionClone: boolean
+  sessionImport: boolean
   fileWrite: boolean
   gitDiff: boolean
   sessionRename: boolean
@@ -20,6 +25,11 @@ const unavailable: PiCapabilities = {
   share: false,
   fork: false,
   undo: false,
+  sessionTree: false,
+  sessionNavigate: false,
+  sessionDelete: false,
+  sessionClone: false,
+  sessionImport: false,
   fileWrite: false,
   gitDiff: false,
   sessionRename: false,
@@ -44,6 +54,11 @@ export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
     share: enabled("session.share"),
     fork: enabled("session.fork"),
     undo: enabled("session.navigate"),
+    sessionTree: enabled("session.tree"),
+    sessionNavigate: enabled("session.navigate"),
+    sessionDelete: enabled("session.delete"),
+    sessionClone: enabled("session.clone"),
+    sessionImport: enabled("session.import"),
     fileWrite: enabled("files.write"),
     gitDiff: enabled("git.diff"),
     sessionRename: enabled("session.name"),

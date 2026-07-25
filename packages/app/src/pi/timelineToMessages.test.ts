@@ -29,10 +29,11 @@ function sampleSnapshot(): SessionSnapshotV1 {
       activeTools: [],
     },
     timeline: [
-      { type: "user", id: "u1", timestamp: 1000, text: "read me" },
+      { type: "user", id: "u1", entryId: "entry-u1", timestamp: 1000, text: "read me" },
       {
         type: "assistant",
         id: "a1",
+        entryId: "entry-a1",
         parentEntryId: "u1",
         timestamp: 1001,
         status: "completed",
@@ -66,6 +67,8 @@ describe("timelineToUiMessages", () => {
       modelID: "model-1",
     })
     expect(msgs[1]?.info.role).toBe("assistant")
+    expect(msgs[0]?.info.entryId).toBe("entry-u1")
+    expect(msgs[1]?.info.entryId).toBe("entry-a1")
     const parts = msgs[1]!.parts
     expect(parts.some(p => p.type === "reasoning")).toBe(true)
     expect(parts.some(p => p.type === "text")).toBe(true)

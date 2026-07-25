@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
@@ -88,6 +88,261 @@ describe("native Pi session discovery", () => {
     const [a, b] = await Promise.all([first, second])
     assert.equal(a.real, runtime)
     assert.equal(b.real, runtime)
+  })
+
+  it("keeps the source session and binds a replaced runtime to the fork target", async () => {
+    const sourceProjection = createProjectionState()
+    const targetProjection = { ...createProjectionState(), isStreaming: false }
+    let sessionId = "pi-fork-source"
+    let sessionFile = path.join(root, "fork-source.jsonl")
+    let projection = sourceProjection
+    const runtime = {
+      getWorkerGeneration: () => "fork-generation",
+      onState: () => () => {},
+      onCrash: () => () => {},
+      getSessionId: () => sessionId,
+      getSessionFile: () => sessionFile,
+      getSessionName: () => "Forked session",
+      getProjection: () => projection,
+      getRuntimeUiState: () => ({
+        thinkingLevel: "off",
+        availableThinkingLevels: ["off"],
+        isStreaming: false,
+        isCompacting: false,
+        retryAttempt: 0,
+        queue: { steering: [], followUp: [] },
+        activeTools: [],
+      }),
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
+      getEntries: () => [{
+        id: sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        type: "message",
+        role: "user",
+        preview: sessionId === "pi-fork-source" ? "source" : "target",
+      }],
+      getTree: () => [{
+        entry: {
+          id: sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          type: "message",
+          role: "user",
+          preview: sessionId === "pi-fork-source" ? "source" : "target",
+        },
+        children: [],
+      }],
+      fork: async () => {
+        const sourceSessionId = sessionId
+        sessionId = "pi-fork-target"
+        sessionFile = path.join(root, "fork-target.jsonl")
+        projection = targetProjection
+        return {
+          sourceSessionId,
+          targetSessionId: sessionId,
+          targetSessionFile: sessionFile,
+          targetCwd: root,
+          cancelled: false,
+        }
+      },
+      dispose: async () => {},
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-fork-source",
+        path: path.join(root, "fork-source.jsonl"),
+        cwd: root,
+        name: "Source session",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 1,
+        firstMessage: "source",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+
+    const result = await registry.forkSession("pi-fork-source", "source-entry", "at")
+    assert.equal(result.source.id, "pi-fork-source")
+    assert.equal(result.source.real, undefined)
+    assert.equal(result.source.projection, sourceProjection)
+    assert.equal(result.target.id, "pi-fork-target")
+    assert.equal(result.target.real, runtime)
+    assert.equal(result.target.projection, targetProjection)
+    assert.equal(registry.get("pi-fork-source"), result.source)
+    assert.equal(registry.get("pi-fork-target"), result.target)
+    const sourceSnapshot = registry.snapshot(result.source)
+    assert.equal(sourceSnapshot.native.leafId, "source-entry")
+    assert.equal(sourceSnapshot.native.entries[0]?.id, "source-entry")
+    assert.equal(sourceSnapshot.native.tree[0]?.entry.id, "source-entry")
+  })
+
+  it("detaches a source runtime after replacement lease commit failure", async () => {
+    let disposals = 0
+    const runtime = {
+      getWorkerGeneration: () => "failed-replacement-generation",
+      onState: () => () => {},
+      onCrash: () => () => {},
+      getSessionId: () => "pi-failed-replacement",
+      getSessionFile: () => path.join(root, "failed-replacement.jsonl"),
+      getSessionName: () => "Source",
+      getProjection: () => createProjectionState(),
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => null,
+      fork: async () => {
+        throw Object.assign(new Error("lease failed"), { code: "SESSION_REPLACEMENT_COMMIT_FAILED" })
+      },
+      dispose: async () => { disposals += 1 },
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-failed-replacement",
+        path: path.join(root, "failed-replacement.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 1,
+        firstMessage: "source",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+
+    await assert.rejects(registry.forkSession("pi-failed-replacement", "source-entry", "at"), error => {
+      assert.equal((error as { code?: string }).code, "SESSION_REPLACEMENT_COMMIT_FAILED")
+      return true
+    })
+    assert.equal(registry.get("pi-failed-replacement")?.real, undefined)
+    assert.equal(disposals, 1)
+  })
+
+  it("rejects a replacement that reuses the source JSONL", async () => {
+    const sessionFile = path.join(root, "replacement-file-conflict.jsonl")
+    let sessionId = "pi-file-conflict-source"
+    let disposals = 0
+    const runtime = {
+      getWorkerGeneration: () => "file-conflict-generation",
+      onState: () => () => {},
+      onCrash: () => () => {},
+      getSessionId: () => sessionId,
+      getSessionFile: () => sessionFile,
+      getSessionName: () => "Source",
+      getProjection: () => createProjectionState(),
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => null,
+      fork: async () => {
+        const sourceSessionId = sessionId
+        sessionId = "pi-file-conflict-target"
+        return {
+          sourceSessionId,
+          targetSessionId: sessionId,
+          targetSessionFile: sessionFile,
+          targetCwd: root,
+          cancelled: false,
+        }
+      },
+      dispose: async () => { disposals += 1 },
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-file-conflict-source",
+        path: sessionFile,
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 1,
+        firstMessage: "source",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+
+    await assert.rejects(registry.forkSession("pi-file-conflict-source", "source-entry", "at"), error => {
+      assert.equal((error as { code?: string }).code, "SESSION_REPLACEMENT_FILE_CONFLICT")
+      return true
+    })
+    assert.equal(registry.get("pi-file-conflict-source")?.real, undefined)
+    assert.equal(registry.get("pi-file-conflict-target"), undefined)
+    assert.equal(disposals, 1)
+  })
+
+  it("deletes a persisted JSONL only after disposing its runtime", async () => {
+    const sessionFile = path.join(root, "durable-delete.jsonl")
+    writeFileSync(sessionFile, "{}\n")
+    let disposed = false
+    const runtime = {
+      getSessionId: () => "pi-durable-delete",
+      getSessionFile: () => sessionFile,
+      getSessionName: () => "Delete me",
+      getProjection: () => createProjectionState(),
+      onState: () => () => {},
+      onCrash: () => () => {},
+      dispose: async () => { disposed = true },
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-durable-delete",
+        path: sessionFile,
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+    await registry.attach("pi-durable-delete")
+
+    assert.equal(await registry.delete("pi-durable-delete"), true)
+    assert.equal(disposed, true)
+    assert.equal(existsSync(sessionFile), false)
+  })
+
+  it("restores a detached registry record when durable unlink fails", async () => {
+    const sessionFile = path.join(root, "not-a-jsonl-file")
+    mkdirSync(sessionFile)
+    let disposed = false
+    const runtime = {
+      getSessionId: () => "pi-delete-failure",
+      getSessionFile: () => sessionFile,
+      getSessionName: () => "Keep me",
+      getProjection: () => createProjectionState(),
+      onState: () => () => {},
+      onCrash: () => () => {},
+      dispose: async () => { disposed = true },
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-delete-failure",
+        path: sessionFile,
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+    await registry.attach("pi-delete-failure")
+
+    await assert.rejects(registry.delete("pi-delete-failure"))
+    assert.equal(disposed, true)
+    assert.ok(registry.get("pi-delete-failure"))
+    assert.equal(registry.get("pi-delete-failure")?.real, undefined)
   })
 
   it("disposes a runtime that finishes opening after its session was deleted", async () => {

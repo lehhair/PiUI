@@ -1,5 +1,9 @@
+import path from "node:path"
+
 let session
 let listCount = 0
+let replacementCount = 0
+let runtimeCwd = "/fixture"
 const generation = "fixture-generation"
 const heartbeatIntervalMs = 20
 const heartbeatTimer = setInterval(() => {
@@ -22,6 +26,9 @@ process.send?.({
     "runtime.model",
     "runtime.thinking",
     "runtime.compact",
+    "runtime.tree",
+    "runtime.fork",
+    "runtime.import",
     "runtime.skills",
     "runtime.commands",
   ],
@@ -39,16 +46,24 @@ function state() {
   }
 }
 
-function snapshot() {
+function snapshot(sessionId = "fixture-session", sessionFile = "/fixture/session.jsonl") {
+  const entry = {
+    type: "message",
+    id: "fixture-entry",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    role: "user",
+    preview: "fixture",
+  }
   return {
-    sessionId: "fixture-session",
-    sessionFile: "/fixture/session.jsonl",
+    sessionId,
+    sessionFile,
     sessionName: "Fixture",
     projection: { timeline: [], isStreaming: false },
     state: state(),
-    entries: [],
-    tree: [],
-    leafId: null,
+    entries: [entry],
+    tree: [{ entry, children: [] }],
+    leafId: entry.id,
   }
 }
 
@@ -84,7 +99,8 @@ process.on("message", request => {
     result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, supportsImages: false }] }
   } else if (command.type === "open") {
     if (command.cwd.includes("hang-open")) return
-    session = snapshot()
+    runtimeCwd = command.cwd
+    session = snapshot("fixture-session", command.sessionFile ?? path.join(command.cwd, "session.jsonl"))
     result = { type: "session", session }
   } else if (command.type === "prompt") {
     if (command.text === "crash") {
@@ -126,6 +142,34 @@ process.on("message", request => {
     result = { type: "skills", skills: [{ name: "fixture-skill", source: "fixture" }] }
   } else if (command.type === "listCommands") {
     result = { type: "commands", commands: [{ name: "fixture-command", source: "builtin" }] }
+  } else if (command.type === "navigateTree") {
+    result = { type: "navigation", cancelled: false, editorText: "fixture draft", session: session ?? snapshot() }
+  } else if (command.type === "setLabel") {
+    const current = session ?? snapshot()
+    current.tree[0].label = command.label
+    session = current
+    result = { type: "session", session }
+  } else if (command.type === "setSessionName") {
+    session = { ...(session ?? snapshot()), sessionName: command.name }
+    result = { type: "session", session }
+  } else if (command.type === "fork" || command.type === "clone" || command.type === "importSession") {
+    const sourceSessionId = (session ?? snapshot()).sessionId
+    replacementCount += 1
+    const targetSessionId = `fixture-replacement-${replacementCount}`
+    const targetSessionFile = path.join(runtimeCwd, `${targetSessionId}.jsonl`)
+    session = snapshot(targetSessionId, targetSessionFile)
+    result = {
+      type: "replacement",
+      replacement: {
+        sourceSessionId,
+        targetSessionId,
+        targetSessionFile,
+        targetCwd: runtimeCwd,
+        selectedText: command.position === "before" ? "fixture draft" : undefined,
+        cancelled: false,
+      },
+      session,
+    }
   } else if (command.type === "dispose") {
     result = { type: "ok" }
   } else {

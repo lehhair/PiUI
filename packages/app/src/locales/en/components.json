@@ -45,6 +45,7 @@
   "panelContainer": {
     "files": "Files",
     "changes": "Changes",
+    "sessionTree": "Session Tree",
     "mcp": "MCP",
     "skills": "Skills",
     "worktrees": "Worktrees",
@@ -54,6 +55,31 @@
     "moveToRight": "Move to Right Panel",
     "moveToBottom": "Move to Bottom Panel",
     "mcpServers": "MCP Servers"
+  },
+  "sessionTree": {
+    "empty": "No session history yet",
+    "current": "Current leaf",
+    "navigate": "Return here",
+    "fork": "Fork here",
+    "clone": "Clone here",
+    "label": "Edit label",
+    "labelPlaceholder": "Branch label",
+    "import": "Import JSONL",
+    "importPath": "Path to a Pi JSONL file",
+    "importCwd": "Working directory override (optional)",
+    "runImport": "Import",
+    "cancel": "Cancel",
+    "failed": "Session tree command failed",
+    "entryTypes": {
+      "thinking_level_change": "Thinking level",
+      "model_change": "Model",
+      "compaction": "Compaction",
+      "branch_summary": "Branch summary",
+      "custom": "Custom entry",
+      "custom_message": "Custom message",
+      "label": "Label",
+      "session_info": "Session info"
+    }
   },
   "sessionChanges": {
     "loadingChanges": "Loading changes...",

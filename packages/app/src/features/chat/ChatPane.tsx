@@ -35,6 +35,7 @@ import type { Attachment } from '../../api'
 import type { MessageError } from '../../types/message'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
+import { usePiCapabilities } from '../../pi/capabilities'
 
 interface ChatPaneProps {
   paneId: string
@@ -141,6 +142,7 @@ export const ChatPane = memo(function ChatPane({
   navigatePaneHome,
 }: ChatPaneProps) {
   const { t } = useTranslation(['chat', 'common'])
+  const capabilities = usePiCapabilities()
   const showCompactShell = displayMode === 'split' && !isPaneFullscreen
 
   // Read the outer (App-level) viewport BEFORE this component's own Provider shadows it.
@@ -842,7 +844,7 @@ export const ChatPane = memo(function ChatPane({
                 hasMoreHistory={hasMoreHistory}
                 onLoadMore={loadMoreHistory}
                 onUndo={handleUndoWithAnimation}
-                onFork={handleForkMessage}
+                onFork={capabilities.fork ? handleForkMessage : undefined}
                 canUndo={canUndo}
                 registerMessage={registerMessage}
                 retryStatus={retryStatus}

@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatSession } from './useChatSession'
+import { setPiCapabilities } from '../pi/capabilities'
+import { trackPiSession, untrackPiSession } from '../pi/piSessionIndex'
 
 const {
   createSessionMock,
@@ -24,6 +26,9 @@ const {
   refreshPendingRequestsMock,
   useSessionStateMock,
   activeSessionStatusMap,
+  forkPiSessionMock,
+  applySnapshotToUiMock,
+  extractUserMessageContentMock,
 } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   compactSessionMock: vi.fn(),
@@ -48,6 +53,9 @@ const {
   refreshPendingRequestsMock: vi.fn((_sessionIds?: string | string[], _directory?: string) => Promise.resolve()),
   useSessionStateMock: vi.fn((_sessionId: string | null) => null as null | { isStreaming: boolean; messages: unknown[] }),
   activeSessionStatusMap: {} as Record<string, { type: string; attempt?: number; message?: string; next?: number }>,
+  forkPiSessionMock: vi.fn(),
+  applySnapshotToUiMock: vi.fn(),
+  extractUserMessageContentMock: vi.fn(),
 }))
 
 const autoApproveState = vi.hoisted(() => ({
@@ -146,16 +154,17 @@ vi.mock('../api', () => ({
   getSessionChildren: vi.fn(() => Promise.resolve([])),
   updateSession: vi.fn(),
   forkSession: vi.fn(),
-  extractUserMessageContent: vi.fn(),
+  extractUserMessageContent: extractUserMessageContentMock,
 }))
 
 vi.mock('../pi/sessionApi', () => ({
   promptSession: (...args: unknown[]) => promptSessionMock(...args),
   compactSession: (...args: unknown[]) => compactSessionMock(...args),
   abortSessionCommand: vi.fn(),
+  forkPiSession: (...args: unknown[]) => forkPiSessionMock(...args),
 }))
 
-vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: vi.fn() }))
+vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: applySnapshotToUiMock }))
 
 vi.mock('../pi/eventSocket', () => ({ ensurePiEventSocket: vi.fn() }))
 
@@ -193,6 +202,9 @@ describe('useChatSession handleCommand', () => {
     handlePermissionReplyMock.mockReset()
     refreshPendingRequestsMock.mockReset()
     useSessionStateMock.mockReset()
+    forkPiSessionMock.mockReset()
+    applySnapshotToUiMock.mockReset()
+    extractUserMessageContentMock.mockReset()
     pendingPermissionRequestsMock.length = 0
     for (const key of Object.keys(activeSessionStatusMap)) {
       delete activeSessionStatusMap[key]
@@ -211,6 +223,7 @@ describe('useChatSession handleCommand', () => {
     autoApproveState.approvePendingOnFullAuto = false
     getSelectableAgentsMock.mockResolvedValue([{ name: 'build', mode: 'primary', hidden: false }])
     isSystemEnabledMock.mockImplementation((type: string) => type !== 'permission')
+    setPiCapabilities(undefined)
 
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => window.setTimeout(() => cb(0), 16))
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => {
@@ -288,6 +301,121 @@ describe('useChatSession handleCommand', () => {
     )
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
+  })
+
+  it('forks a Pi user entry before the message and navigates only this pane to the target', async () => {
+    const sourceSnapshot = { session: { id: 'session-1' } }
+    const targetSnapshot = { session: { id: 'session-2' } }
+    const navigateToSession = vi.fn()
+    trackPiSession('session-1', 'workspace-1')
+    setPiCapabilities({ fork: true })
+    extractUserMessageContentMock.mockReturnValue({ text: 'original prompt', attachments: [] })
+    forkPiSessionMock.mockResolvedValue({
+      replacement: {
+        sourceSessionId: 'session-1',
+        targetSessionId: 'session-2',
+        targetCwd: '/workspace/fork',
+        selectedText: 'editable prompt',
+        cancelled: false,
+      },
+      sourceSnapshot,
+      targetSnapshot,
+    })
+
+    let activeSessionId = 'session-1'
+    const { result, rerender } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: activeSessionId,
+        navigateToSession,
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleForkMessage({
+        info: {
+          id: 'message-1',
+          entryId: 'entry-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'provider-1', modelID: 'model-1' },
+        },
+        parts: [],
+      })
+    })
+
+    expect(forkPiSessionMock).toHaveBeenCalledWith('session-1', 'entry-1', 'before')
+    expect(applySnapshotToUiMock).toHaveBeenNthCalledWith(1, sourceSnapshot, { activate: false })
+    expect(applySnapshotToUiMock).toHaveBeenNthCalledWith(2, targetSnapshot)
+    expect(navigateToSession).toHaveBeenCalledWith('session-2', '/workspace/fork')
+    activeSessionId = 'session-2'
+    rerender()
+    expect(result.current.restoredContent?.text).toBe('editable prompt')
+    untrackPiSession('session-1')
+  })
+
+  it('forks a merged assistant turn at its final native entry', async () => {
+    const firstAssistant = {
+      info: {
+        id: 'assistant-1',
+        entryId: 'entry-assistant-1',
+        sessionID: 'session-1',
+        role: 'assistant' as const,
+        time: { created: 1 },
+        parentID: 'user-1',
+        modelID: 'model-1',
+        providerID: 'provider-1',
+        mode: 'chat',
+        agent: 'build',
+        path: { cwd: '/workspace/demo', root: '/workspace/demo' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [],
+    }
+    const finalAssistant = {
+      ...firstAssistant,
+      info: { ...firstAssistant.info, id: 'assistant-2', entryId: 'entry-assistant-2' },
+    }
+    useSessionStateMock.mockReturnValue({
+      isStreaming: false,
+      messages: [firstAssistant, finalAssistant],
+    })
+    trackPiSession('session-1', 'workspace-1')
+    setPiCapabilities({ fork: true })
+    forkPiSessionMock.mockResolvedValue({
+      replacement: {
+        sourceSessionId: 'session-1',
+        targetSessionId: 'session-2',
+        cancelled: false,
+      },
+      sourceSnapshot: { session: { id: 'session-1' } },
+      targetSnapshot: { session: { id: 'session-2' } },
+    })
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleForkMessage(firstAssistant, 'assistant-2')
+    })
+
+    expect(forkPiSessionMock).toHaveBeenCalledWith('session-1', 'entry-assistant-2', 'at')
+    untrackPiSession('session-1')
   })
 
   it('does not poll permissions when session full auto pending sweep is enabled', async () => {

@@ -6,7 +6,7 @@
 export type PanelPosition = 'bottom' | 'right'
 
 // 面板内容类型
-export type PanelTabType = 'terminal' | 'files' | 'changes' | 'mcp' | 'skill' | 'worktree'
+export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'mcp' | 'skill' | 'worktree'
 type PersistedPanelTabType = Exclude<PanelTabType, 'terminal'>
 
 // 统一的面板标签
@@ -164,7 +164,7 @@ export interface PersistedTerminalLayoutMap {
 }
 
 const PANEL_POSITIONS: PanelPosition[] = ['bottom', 'right']
-const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'mcp', 'skill', 'worktree']
+const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'mcp', 'skill', 'worktree']
 
 function isPanelPosition(value: unknown): value is PanelPosition {
   return typeof value === 'string' && PANEL_POSITIONS.includes(value as PanelPosition)
@@ -297,6 +297,7 @@ export class LayoutStore {
       // 默认 tabs: files 和 changes 在右侧面板
       { id: 'files', type: 'files', position: 'right', previewFile: null, previewFiles: [] },
       { id: 'changes', type: 'changes', position: 'right' },
+      { id: 'session-tree', type: 'session-tree', position: 'right' },
     ],
     activeTabId: {
       bottom: null,
@@ -442,6 +443,9 @@ export class LayoutStore {
           this.state.rightPanelOpen = restored.rightPanelOpen
           this.state.bottomPanelOpen = restored.bottomPanelOpen
         }
+      }
+      if (!this.state.panelTabs.some(tab => tab.type === 'session-tree')) {
+        this.state.panelTabs.push({ id: 'session-tree', type: 'session-tree', position: 'right' })
       }
     } catch {
       // ignore
@@ -616,6 +620,10 @@ export class LayoutStore {
   // 添加 Changes 标签
   addChangesTab(position: PanelPosition) {
     return this.addTab({ type: 'changes', position })
+  }
+
+  addSessionTreeTab() {
+    return this.addSingletonTab('session-tree', 'right', 'session-tree')
   }
 
   // 添加 MCP 标签

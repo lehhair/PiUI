@@ -11,6 +11,7 @@ import { toUiSession, snapshotToUiSession } from '../pi/sessionModel'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { isTrackedPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
+import { paneLayoutStore } from '../store/paneLayoutStore'
 import { useDirectory } from './useDirectory'
 import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
@@ -174,17 +175,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (isTrackedPiSession(id) || (await isPiServerUp())) {
         try {
           await deletePiSession(id)
-        } catch {
-          // Session may already be gone after a server restart.
+        } catch (error) {
+          if ((error as { status?: number }).status !== 404) throw error
         }
         pinnedSessionsStore.unpin(id)
         clearSessionRuntimeState(id)
+        paneLayoutStore.clearSession(id)
         setSessions(prev => prev.filter(s => s.id !== id))
         return
       }
       throw new Error('PiUI server unavailable')
     },
-    [currentDirectory],
+    [],
   )
 
   // 稳定化 Provider value，避免每次渲染创建新对象导致子组件不必要重渲染
