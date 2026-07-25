@@ -2,7 +2,7 @@
 // Global API - 全局管理
 // ============================================
 
-import type { GlobalHealthResponse as HealthInfo } from '@opencode-ai/sdk/v2/client'
+export interface HealthInfo { healthy: boolean; version?: string }
 import { getSDKClient, unwrap } from './sdk'
 import { formatPathForApi } from '../utils/directoryUtils'
 

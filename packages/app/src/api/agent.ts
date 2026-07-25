@@ -1,6 +1,6 @@
 // ============================================
 // Agent API Functions
-// 基于 @opencode-ai/sdk: /agent 相关接口
+// Agent metadata facade pending a native PiUI endpoint.
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'

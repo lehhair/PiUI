@@ -70,7 +70,8 @@ npm run dev:app      # vite
 - [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
 - [x] Pi 能力对齐 UI（有壳才接）：模型/thinking level/compact/skills·commands/steer·followUp/runtime 状态
-- [~] 阶段 0/1：固定 mock 根测试、Pi app 子集测试、server typecheck、render 前 Pi health 探测、旧 SSE 禁用、真实 Pi 不再启动即建会话
+- [x] 阶段 0/1：完整 mock 根测试、全 workspace typecheck/build、render 前 Pi health、旧 SSE 删除、真实 Pi 不再启动即建会话
+- [~] 阶段 6：OpenCode SDK 包、shim、alias、类型 import 和网络 client 已删除；旧 facade 函数继续迁往 Pi API
 - [ ] fork/undo 映射 Pi tree；终端 PTY
 - 矩阵：`docs/PI_UI_INTEGRATION.md`
 

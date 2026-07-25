@@ -1,25 +1,47 @@
-import type {
-  ConfigProvidersResponse as SDKConfigProvidersResponse,
-  Model as SDKModel,
-  Provider as SDKProvider,
-  ProviderAuthAuthorization as SDKProviderAuthAuthorization,
-  ProviderAuthMethod as SDKProviderAuthMethod,
-} from '@opencode-ai/sdk/v2/client'
+export interface ModelIOCapabilities {
+  text?: boolean
+  image?: boolean
+  pdf?: boolean
+  audio?: boolean
+  video?: boolean
+}
 
-export type ModelIOCapabilities = SDKModel['capabilities']['input']
+export interface ModelCapabilities {
+  input: ModelIOCapabilities
+  output?: ModelIOCapabilities
+  toolcall?: boolean
+  reasoning?: boolean
+}
 
-export type ModelCapabilities = SDKModel['capabilities']
+export interface ModelLimit {
+  context?: number
+  output?: number
+}
 
-export type ModelLimit = SDKModel['limit']
+export type ModelStatus = 'available' | 'unavailable' | 'deprecated'
 
-export type ModelStatus = SDKModel['status']
+export interface Model {
+  id: string
+  name: string
+  providerID: string
+  capabilities: ModelCapabilities
+  limit?: ModelLimit
+  status?: ModelStatus
+}
 
-export type Model = SDKModel
+export interface Provider {
+  id: string
+  name: string
+  models: Record<string, Model>
+}
 
-export type Provider = SDKProvider
+export interface ProvidersResponse {
+  providers: Provider[]
+}
 
-export type ProvidersResponse = SDKConfigProvidersResponse
+export type ProviderAuthMethod = 'api' | 'oauth' | 'none'
 
-export type ProviderAuthMethod = SDKProviderAuthMethod
-
-export type ProviderAuthAuthorization = SDKProviderAuthAuthorization
+export interface ProviderAuthAuthorization {
+  url: string
+  method?: ProviderAuthMethod
+}

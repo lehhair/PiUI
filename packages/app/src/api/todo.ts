@@ -1,7 +1,8 @@
-import type { Todo as SDKTodo } from '@opencode-ai/sdk/v2/client'
 import type { TodoItem } from '../types/api/event'
 
-function buildTodoId(todo: SDKTodo, index: number): string {
+interface LegacyTodo { content: string; status: string; priority?: string }
+
+function buildTodoId(todo: LegacyTodo, index: number): string {
   const content = String(todo.content ?? '').slice(0, 32)
   const status = String(todo.status ?? '')
   const priority = String(todo.priority ?? '')
@@ -24,11 +25,11 @@ function normalizeTodoPriority(priority: string): TodoItem['priority'] {
   return isTodoPriority(priority) ? priority : 'medium'
 }
 
-export function normalizeTodoItems(todos: SDKTodo[] | null | undefined): TodoItem[] {
+export function normalizeTodoItems(todos: LegacyTodo[] | null | undefined): TodoItem[] {
   return (todos ?? []).map((todo, index) => ({
     id: buildTodoId(todo, index),
     content: todo.content,
     status: normalizeTodoStatus(todo.status),
-    priority: normalizeTodoPriority(todo.priority),
+    priority: normalizeTodoPriority(todo.priority ?? 'medium'),
   }))
 }

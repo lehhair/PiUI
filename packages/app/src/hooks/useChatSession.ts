@@ -40,8 +40,8 @@ import {
   type ApiSession,
   type ApiAgent,
   type Attachment,
-  type ModelInfo,
 } from '../api'
+import type { ModelInfo } from './useModels'
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
@@ -384,7 +384,7 @@ export function useChatSession({
         // 自动批准检查（实验性功能）
         if (
           autoApproveStore.enabled &&
-          autoApproveStore.shouldAutoApprove(request.sessionID, request.permission, request.patterns)
+          autoApproveStore.shouldAutoApprove(request.sessionID, request.permission, request.patterns ?? [])
         ) {
           // 匹配规则，自动用 once 批准，不弹框
           replyPermissionOnceAutomatically(request)

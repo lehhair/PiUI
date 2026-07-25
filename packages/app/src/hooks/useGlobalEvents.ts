@@ -1,13 +1,14 @@
 import { useEffect } from 'react'
+import type { PermissionRequest, QuestionRequest } from '../types/api/permission'
 
 /**
  * PiUI keeps the pane-consumer contract while Pi permission/question events
  * are not implemented. Session streaming is delivered by PiEventSocket.
  */
 export interface SessionEventCallbacks {
-  onPermissionAsked?: (request: unknown) => void
+  onPermissionAsked?: (request: PermissionRequest) => void
   onPermissionReplied?: (data: { sessionID: string; requestID: string }) => void
-  onQuestionAsked?: (request: unknown) => void
+  onQuestionAsked?: (request: QuestionRequest) => void
   onQuestionReplied?: (data: { sessionID: string; requestID: string }) => void
   onQuestionRejected?: (data: { sessionID: string; requestID: string }) => void
   onScrollRequest?: () => void

@@ -1,154 +1,48 @@
-// ============================================
-// Event API Types
-// SDK 是类型真相源，本地只保留必要的运行时适配
-// ============================================
-
-import type {
-  EventMessagePartDelta as SDKEventMessagePartDelta,
-  EventMessagePartRemoved as SDKEventMessagePartRemoved,
-  EventPermissionReplied as SDKEventPermissionReplied,
-  EventQuestionRejected as SDKEventQuestionRejected,
-  EventQuestionReplied as SDKEventQuestionReplied,
-  EventSessionDiff as SDKEventSessionDiff,
-  EventSessionIdle as SDKEventSessionIdle,
-  EventSessionStatus as SDKEventSessionStatus,
-  EventTodoUpdated as SDKEventTodoUpdated,
-  EventVcsBranchUpdated as SDKEventVcsBranchUpdated,
-  EventWorktreeFailed as SDKEventWorktreeFailed,
-  EventWorktreeReady as SDKEventWorktreeReady,
-  GlobalEvent as SDKGlobalEvent,
-  Todo as SDKTodo,
-} from '@opencode-ai/sdk/v2/client'
-import type { Session } from './session'
+import type { Session, SessionStatus } from './session'
 import type { Message, Part } from './message'
 import type { PermissionRequest, QuestionRequest } from './permission'
 import type { Project } from './project'
 
-// ============================================
-// Event Payload Types
-// ============================================
+export interface SessionIdlePayload { sessionID: string }
+export interface SessionErrorPayload { sessionID: string; name: string; data: unknown }
+export interface SessionStatusPayload { sessionID: string; status: SessionStatus }
+export interface SessionDiffPayload { sessionID: string; diff: unknown[] }
+export interface PartRemovedPayload { sessionID: string; messageID: string; partID: string }
+export interface PartDeltaPayload { sessionID: string; messageID: string; partID: string; field: string; delta: string }
+export interface PermissionRepliedPayload { sessionID: string; requestID: string }
+export interface QuestionRepliedPayload { sessionID: string; requestID: string; answers?: unknown[] }
+export interface QuestionRejectedPayload { sessionID: string; requestID: string }
 
-export type SessionIdlePayload = SDKEventSessionIdle['properties']
-
-export interface SessionErrorPayload {
-  sessionID: string
-  name: string
-  data: unknown
-}
-
-export type SessionStatusPayload = SDKEventSessionStatus['properties']
-
-export type SessionDiffPayload = SDKEventSessionDiff['properties']
-
-export type PartRemovedPayload = SDKEventMessagePartRemoved['properties']
-
-export type PartDeltaPayload = SDKEventMessagePartDelta['properties']
-
-export type PermissionRepliedPayload = SDKEventPermissionReplied['properties']
-
-export type QuestionRepliedPayload = SDKEventQuestionReplied['properties']
-
-export type QuestionRejectedPayload = SDKEventQuestionRejected['properties']
-
-export type TodoItem = SDKTodo & {
-  // SDK 的 Todo 没有 id，这里是前端适配层补上的稳定 key
+export interface TodoItem {
   id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  priority: 'high' | 'medium' | 'low'
 }
 
-export type TodoUpdatedPayload = Omit<SDKEventTodoUpdated['properties'], 'todos'> & {
-  todos: TodoItem[]
+export interface TodoUpdatedPayload { sessionID: string; todos: TodoItem[] }
+export interface WorktreeReadyPayload { directory: string; branch?: string }
+export interface WorktreeFailedPayload { directory?: string; error: string; message?: string }
+export interface VcsBranchUpdatedPayload { branch: string }
+export interface ServerConnectedPayload { timestamp?: unknown }
+
+export interface GlobalEvent {
+  directory?: string
+  payload: { type: string; properties: Record<string, unknown> }
 }
 
-export type WorktreeReadyPayload = SDKEventWorktreeReady['properties']
-
-export type WorktreeFailedPayload = SDKEventWorktreeFailed['properties']
-
-export type VcsBranchUpdatedPayload = SDKEventVcsBranchUpdated['properties']
-
-export interface ServerConnectedPayload {
-  timestamp?: unknown
-}
-
-// ============================================
-// Global Event Type
-// ============================================
-
-export type GlobalEvent = SDKGlobalEvent
-
-/**
- * 事件类型常量
- */
 export const EventTypes = {
-  // Session events
-  SESSION_CREATED: 'session.created',
-  SESSION_UPDATED: 'session.updated',
-  SESSION_DELETED: 'session.deleted',
-  SESSION_IDLE: 'session.idle',
-  SESSION_ERROR: 'session.error',
-  SESSION_STATUS: 'session.status',
-  SESSION_DIFF: 'session.diff',
-  SESSION_COMPACTED: 'session.compacted',
+  SESSION_CREATED: 'session.created', SESSION_UPDATED: 'session.updated', SESSION_DELETED: 'session.deleted',
+  SESSION_IDLE: 'session.idle', SESSION_ERROR: 'session.error', SESSION_STATUS: 'session.status',
+  SESSION_DIFF: 'session.diff', SESSION_COMPACTED: 'session.compacted', MESSAGE_UPDATED: 'message.updated',
+  MESSAGE_REMOVED: 'message.removed', MESSAGE_PART_UPDATED: 'message.part.updated',
+  MESSAGE_PART_DELTA: 'message.part.delta', MESSAGE_PART_REMOVED: 'message.part.removed',
+  PERMISSION_ASKED: 'permission.asked', PERMISSION_REPLIED: 'permission.replied', QUESTION_ASKED: 'question.asked',
+  QUESTION_REPLIED: 'question.replied', QUESTION_REJECTED: 'question.rejected', TODO_UPDATED: 'todo.updated',
+  PROJECT_UPDATED: 'project.updated', SERVER_CONNECTED: 'server.connected', VCS_BRANCH_UPDATED: 'vcs.branch.updated',
+} as const
 
-  // Message events
-  MESSAGE_UPDATED: 'message.updated',
-  MESSAGE_REMOVED: 'message.removed',
-  MESSAGE_PART_UPDATED: 'message.part.updated',
-  MESSAGE_PART_DELTA: 'message.part.delta',
-  MESSAGE_PART_REMOVED: 'message.part.removed',
-
-  // Permission events
-  PERMISSION_ASKED: 'permission.asked',
-  PERMISSION_REPLIED: 'permission.replied',
-
-  // Question events
-  QUESTION_ASKED: 'question.asked',
-  QUESTION_REPLIED: 'question.replied',
-  QUESTION_REJECTED: 'question.rejected',
-
-  // Todo events
-  TODO_UPDATED: 'todo.updated',
-
-  // TUI events
-  TUI_PROMPT_APPEND: 'tui.prompt.append',
-  TUI_COMMAND_EXECUTE: 'tui.command.execute',
-  TUI_TOAST_SHOW: 'tui.toast.show',
-  TUI_SESSION_SELECT: 'tui.session.select',
-
-  // Project events
-  PROJECT_UPDATED: 'project.updated',
-
-  // Server events
-  SERVER_CONNECTED: 'server.connected',
-  SERVER_INSTANCE_DISPOSED: 'server.instance.disposed',
-  GLOBAL_DISPOSED: 'global.disposed',
-
-  // File events
-  FILE_EDITED: 'file.edited',
-  FILE_WATCHER_UPDATED: 'file.watcher.updated',
-
-  // Other events
-  INSTALLATION_UPDATED: 'installation.updated',
-  INSTALLATION_UPDATE_AVAILABLE: 'installation.update-available',
-  WORKTREE_READY: 'worktree.ready',
-  WORKTREE_FAILED: 'worktree.failed',
-  WORKSPACE_READY: 'workspace.ready',
-  WORKSPACE_FAILED: 'workspace.failed',
-  LSP_UPDATED: 'lsp.updated',
-  MCP_TOOLS_CHANGED: 'mcp.tools.changed',
-  MCP_BROWSER_OPEN_FAILED: 'mcp.browser.open.failed',
-  VCS_BRANCH_UPDATED: 'vcs.branch.updated',
-  COMMAND_EXECUTED: 'command.executed',
-  PTY_CREATED: 'pty.created',
-  PTY_UPDATED: 'pty.updated',
-  PTY_EXITED: 'pty.exited',
-  PTY_DELETED: 'pty.deleted',
-} as const satisfies Record<string, SDKGlobalEvent['payload']['type']>
-
-export type EventType = SDKGlobalEvent['payload']['type']
-
-// ============================================
-// Event Callbacks Interface
-// ============================================
+export type EventType = (typeof EventTypes)[keyof typeof EventTypes]
 
 export interface EventCallbacks {
   onMessageUpdated?: (message: Message) => void

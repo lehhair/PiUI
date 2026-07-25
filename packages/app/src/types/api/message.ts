@@ -1,87 +1,42 @@
 import type {
-  AgentPart as SDKAgentPart,
-  AgentPartInput as SDKAgentPartInput,
-  AssistantMessage as SDKAssistantMessage,
-  CompactionPart as SDKCompactionPart,
-  FilePart as SDKFilePart,
-  FilePartInput as SDKFilePartInput,
-  FilePartSource as SDKFilePartSource,
-  PatchPart as SDKPatchPart,
-  ReasoningPart as SDKReasoningPart,
-  RetryPart as SDKRetryPart,
-  SnapshotPart as SDKSnapshotPart,
-  StepFinishPart as SDKStepFinishPart,
-  StepStartPart as SDKStepStartPart,
-  SubtaskPart as SDKSubtaskPart,
-  SubtaskPartInput as SDKSubtaskPartInput,
-  TextPart as SDKTextPart,
-  TextPartInput as SDKTextPartInput,
-  ToolPart as SDKToolPart,
-  ToolState as SDKToolState,
-  UserMessage as SDKUserMessage,
-} from '@opencode-ai/sdk/v2/client'
+  AgentPart,
+  AssistantMessageInfo,
+  CompactionPart,
+  FilePart,
+  FilePartSource,
+  MessageSummary,
+  Part,
+  PatchPart,
+  ReasoningPart,
+  RetryPart,
+  SnapshotPart,
+  StepFinishPart,
+  StepStartPart,
+  SubtaskPart,
+  TextPart,
+  ToolPart,
+  ToolState,
+  UserMessageInfo,
+} from '../message'
 
-export type MessageSummary = NonNullable<SDKUserMessage['summary']>
-
-export type UserMessage = SDKUserMessage
-
-export type AssistantMessage = SDKAssistantMessage
-
+export type UserMessage = UserMessageInfo
+export type AssistantMessage = AssistantMessageInfo
 export type Message = UserMessage | AssistantMessage
+export type { MessageSummary, TextPart, ReasoningPart, ToolState, ToolPart, FilePart, AgentPart }
+export type { StepStartPart, StepFinishPart, SnapshotPart, PatchPart, SubtaskPart, RetryPart, CompactionPart, Part }
+export type FileSource = FilePartSource
+export type FileSourceType = FileSource['type']
 
-export type TextPart = SDKTextPart
+export interface MessageWithParts { info: Message; parts: Part[] }
 
-export type ReasoningPart = SDKReasoningPart
-
-export type ToolState = SDKToolState
-
-export type ToolPart = SDKToolPart
-
-export type FileSource = SDKFilePartSource
-
-export type FileSourceType = NonNullable<FileSource>['type']
-
-export type FilePart = SDKFilePart
-
-export type AgentPart = SDKAgentPart
-
-export type StepStartPart = SDKStepStartPart
-
-export type StepFinishPart = SDKStepFinishPart
-
-export type SnapshotPart = SDKSnapshotPart
-
-export type PatchPart = SDKPatchPart
-
-export type SubtaskPart = SDKSubtaskPart
-
-export type RetryPart = SDKRetryPart
-
-export type CompactionPart = SDKCompactionPart
-
-export type Part =
-  | TextPart
-  | ReasoningPart
-  | ToolPart
-  | FilePart
-  | AgentPart
-  | StepStartPart
-  | StepFinishPart
-  | SnapshotPart
-  | PatchPart
-  | SubtaskPart
-  | RetryPart
-  | CompactionPart
-
-export interface MessageWithParts {
-  info: Message
-  parts: Part[]
+export interface TextPartInput { type: 'text'; text: string; synthetic?: boolean }
+export interface FilePartInput { type: 'file'; mime: string; filename?: string; url: string; source?: FileSource }
+export interface AgentPartInput { type: 'agent'; name: string; source?: { value: string; start: number; end: number } }
+export interface SubtaskPartInput {
+  type: 'subtask'
+  prompt: string
+  description: string
+  agent: string
+  model?: { providerID: string; modelID: string }
+  command?: string
 }
-
-export type TextPartInput = SDKTextPartInput
-
-export type FilePartInput = SDKFilePartInput
-
-export type AgentPartInput = SDKAgentPartInput
-
-export type SubtaskPartInput = SDKSubtaskPartInput

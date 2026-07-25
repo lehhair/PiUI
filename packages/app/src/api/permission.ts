@@ -1,6 +1,6 @@
 // ============================================
 // Permission & Question API Functions
-// 基于 @opencode-ai/sdk: /permission, /question 相关接口
+// Permission/question are disabled until PiUI protocol support lands.
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
@@ -16,7 +16,7 @@ import type { ApiPermissionRequest, PermissionReply, ApiQuestionRequest, Questio
  */
 export async function getPendingPermissions(sessionId?: string, directory?: string): Promise<ApiPermissionRequest[]> {
   const sdk = getSDKClient()
-  const permissions = unwrap(await sdk.permission.list({ directory: formatPathForApi(directory) }))
+  const permissions = unwrap<ApiPermissionRequest[]>(await sdk.permission.list({ directory: formatPathForApi(directory) }))
   return sessionId ? permissions.filter((p: ApiPermissionRequest) => p.sessionID === sessionId) : permissions
 }
 
@@ -64,7 +64,7 @@ export async function replyPermission(
  */
 export async function getPendingQuestions(sessionId?: string, directory?: string): Promise<ApiQuestionRequest[]> {
   const sdk = getSDKClient()
-  const questions = unwrap(await sdk.question.list({ directory: formatPathForApi(directory) }))
+  const questions = unwrap<ApiQuestionRequest[]>(await sdk.question.list({ directory: formatPathForApi(directory) }))
   return sessionId ? questions.filter((q: ApiQuestionRequest) => q.sessionID === sessionId) : questions
 }
 

@@ -1,21 +1,24 @@
-import type {
-  PermissionRequest as SDKPermissionRequest,
-  QuestionAnswer as SDKQuestionAnswer,
-  QuestionInfo as SDKQuestionInfo,
-  QuestionOption as SDKQuestionOption,
-  QuestionRequest as SDKQuestionRequest,
-} from '@opencode-ai/sdk/v2/client'
+export interface PermissionToolInfo { callID?: string; messageID?: string }
 
-export type PermissionToolInfo = NonNullable<SDKPermissionRequest['tool']>
-
-export type PermissionRequest = SDKPermissionRequest
+export interface PermissionRequest {
+  id: string
+  sessionID: string
+  permission: string
+  patterns?: string[]
+  always?: string[]
+  metadata?: Record<string, unknown>
+  tool?: PermissionToolInfo
+}
 
 export type PermissionReply = 'once' | 'always' | 'reject'
 
-export type QuestionOption = SDKQuestionOption
-
-export type QuestionInfo = SDKQuestionInfo
-
-export type QuestionRequest = SDKQuestionRequest
-
-export type QuestionAnswer = SDKQuestionAnswer
+export interface QuestionOption { label: string; description?: string }
+export interface QuestionInfo {
+  header?: string
+  question: string
+  options: QuestionOption[]
+  multiple?: boolean
+  custom?: boolean
+}
+export interface QuestionRequest { id: string; sessionID: string; questions: QuestionInfo[]; tool?: PermissionToolInfo }
+export type QuestionAnswer = string[]

@@ -432,13 +432,13 @@ health response 增加：
 
 | 阶段 | 名称 | 结果 | 状态 |
 |---|---|---|---|
-| 0 | 基线冻结与真实门禁 | 当前状态可重复验证 | 待开始 |
-| 1 | 单一 Pi 后端 | OpenCode SSE 和双 server 状态停止运行 | 待开始 |
+| 0 | 基线冻结与真实门禁 | 当前状态可重复验证 | 已完成 |
+| 1 | 单一 Pi 后端 | OpenCode SSE 和双 server 状态停止运行 | 已完成 |
 | 2 | 安全与能力控制 | 本地接口有认证、Origin 和 trust | 待开始 |
 | 3 | 会话执行内核 | 单 session 单写，命令可追踪 | 待开始 |
 | 4 | 事件协议与多会话状态 | delta、sequence、replay、resync 可用 | 待开始 |
 | 5 | 持久化与 Pi JSONL 恢复 | 重启不丢 workspace/session | 待开始 |
-| 6 | 去除 OpenCode 数据层 | SDK shim、SSE、旧类型全部删除 | 待开始 |
+| 6 | 去除 OpenCode 数据层 | SDK shim、SSE、旧类型全部删除 | 进行中 |
 | 7 | Pi 会话能力完善 | 模型、thinking、queue、compact、tree 完整 | 待开始 |
 | 8 | 文件与 Git 完善 | 编辑、完整 diff 和常用 Git 操作可用 | 待开始 |
 | 9 | PTY 与桌面端 | Pi 原生 PTY，可选 Tauri 壳 | 待开始 |
