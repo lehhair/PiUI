@@ -106,6 +106,8 @@ export interface SessionSnapshotV1 {
     queue: QueueStateV1
     contextUsage?: ContextUsageV1
     activeTools: string[]
+    workerGeneration?: string
+    runtimeError?: string
   }
   timeline: TimelineItemV1[]
   native: {

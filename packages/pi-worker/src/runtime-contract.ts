@@ -2,6 +2,8 @@ import type { ProjectionState } from "./projection.js"
 import type { PiCommandInfo, PiRuntimeUiState, PiSkillInfo } from "./real-session.js"
 
 export interface PiSessionRuntime {
+  getWorkerGeneration?(): string | undefined
+  onCrash?(listener: (error: Error) => void): () => void
   onState(listener: (state: PiRuntimeUiState) => void): () => void
   getProjection(): ProjectionState
   getSessionId(): string

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import {
   PROTOCOL_VERSION,
   problem,
+  type CommandRequestV2,
   type HealthResponseV1,
   type WorkspaceCreateRequestV1,
 } from "@piui/protocol"
@@ -78,18 +79,35 @@ export interface CreateAppServerOptions {
 
 export function createAppServer(options: CreateAppServerOptions = {}) {
   const store = new WorkspaceStore()
-  const sessions = new SessionRegistry(store, options.driver ?? getDriverMode(), options.piBackend)
+  const eventHub = options.eventHub ?? new EventHub()
+  const sessions = new SessionRegistry(store, options.driver ?? getDriverMode(), options.piBackend, eventHub)
   void sessions.warmup().catch(error => {
     console.warn("[piui-server] Pi session catalog warmup failed", error)
   })
-  const eventHub = options.eventHub ?? new EventHub()
   const sessionExecutor = new SessionExecutor(command => {
     eventHub.publish({
       type: "command.updated",
-      sessionId: command.sessionId,
+      sessionId: command.request.sessionId,
       payload: command,
     })
   })
+  const publishSessionSnapshot = (session: AppSession) => {
+    eventHub.publish({
+      type: "session.snapshot",
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+      reason: "command",
+      payload: sessions.snapshot(session),
+    })
+  }
+  const publishSessionUpdated = (session: AppSession) => {
+    eventHub.publish({
+      type: "session.updated",
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+      payload: sessionSummary(session),
+    })
+  }
   let defaultWorkspaceId: string | null = null
   const ensureDefaultWorkspace = async (): Promise<string> => {
     if (defaultWorkspaceId && store.get(defaultWorkspaceId)) return defaultWorkspaceId
@@ -168,6 +186,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           title: sessions.getDriver() === "mock" ? "Mock chat" : "New chat",
           seedMock: sessions.getDriver() === "mock",
         })
+        publishSessionUpdated(s)
         const rec = store.get(workspaceId)!
         return sendJson(res, 201, {
           workspace: {
@@ -208,6 +227,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             title: body.title,
             seedMock: body.seedMock === true,
           })
+          publishSessionUpdated(s)
           return sendJson(res, 201, {
             session: sessionSummary(s),
             snapshot: sessions.snapshot(s),
@@ -234,8 +254,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionOnly = p.match(/^\/api\/v1\/sessions\/([^/]+)$/)
       if (method === "DELETE" && sessionOnly) {
         const id = decodeURIComponent(sessionOnly[1])
-        if (!await sessions.find(id)) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        const session = await sessions.find(id)
+        if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         await sessions.delete(id)
+        publishSessionUpdated(session)
         return sendJson(res, 200, { ok: true, id })
       }
 
@@ -265,26 +287,30 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           // stream defaults off for tests/speed; client passes stream:true for UI
           const stream = body.stream === true
           const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
-          const submitted = sessionExecutor.submit(id, commandId, "prompt", () => sessions.prompt(id, body.text ?? "", {
-              stream,
-              model: body.model,
-              deliverAs: body.deliverAs,
-              onTick: sess => {
-                eventHub.publish({
-                  type: "session.snapshot",
-                  sessionId: sess.id,
-                  workspaceId: sess.workspaceId,
-                  payload: sessions.snapshot(sess),
-                })
-              },
-            }))
+          const request: CommandRequestV2<"session.prompt"> = {
+            protocolVersion: 2,
+            commandId,
+            type: "session.prompt",
+            concurrency: body.deliverAs ? "run-control" : "idle-only",
+            sessionId: id,
+            payload: {
+              text: body.text ?? "",
+              delivery: body.deliverAs ?? "prompt",
+              model: body.model?.provider && body.model.id
+                ? { provider: body.model.provider, modelId: body.model.id }
+                : undefined,
+            },
+          }
+          const submitted = sessionExecutor.submit(request, () => sessions.prompt(id, body.text ?? "", {
+            stream,
+            model: body.model,
+            deliverAs: body.deliverAs,
+            onTick: sess => {
+              publishSessionSnapshot(sess)
+            },
+          }))
           const s = await submitted.promise
-          eventHub.publish({
-            type: "session.updated",
-            sessionId: s.id,
-            workspaceId: s.workspaceId,
-            payload: sessionSummary(s),
-          })
+          publishSessionUpdated(s)
           return sendJson(res, 200, {
             commandId,
             accepted: true,
@@ -308,9 +334,21 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         let body: { commandId?: string } = {}
         try { body = JSON.parse(raw || "{}") as { commandId?: string } } catch { /* empty ok */ }
         const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
-        const submitted = sessionExecutor.submitControl(id, commandId, "abort", () => sessions.abort(id))
+        const submitted = sessionExecutor.submit(
+          {
+            protocolVersion: 2,
+            commandId,
+            type: "session.abort",
+            concurrency: "run-control",
+            sessionId: id,
+            payload: {},
+          },
+          () => sessions.abort(id),
+        )
         const s = await submitted.promise
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        publishSessionSnapshot(s)
+        publishSessionUpdated(s)
         return sendJson(res, 200, {
           commandId,
           accepted: true,
@@ -334,8 +372,22 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           return sendProblem(res, 400, "INVALID_REQUEST", "provider and id required")
         }
         try {
-          const s = await sessions.setModel(id, body.provider, body.id)
-          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.setModel",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { provider: body.provider, modelId: body.id },
+            },
+            () => sessions.setModel(id, body.provider!, body.id!),
+          )
+          const s = await submitted.promise
+          publishSessionSnapshot(s)
+          publishSessionUpdated(s)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(s) })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }
@@ -353,8 +405,22 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
         if (!body.level) return sendProblem(res, 400, "INVALID_REQUEST", "level required")
         try {
-          const s = await sessions.setThinkingLevel(id, body.level)
-          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.setThinkingLevel",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { level: body.level },
+            },
+            () => sessions.setThinkingLevel(id, body.level!),
+          )
+          const s = await submitted.promise
+          publishSessionSnapshot(s)
+          publishSessionUpdated(s)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(s) })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }
@@ -372,14 +438,20 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
         try {
           const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
-          const submitted = sessionExecutor.submit(id, commandId, "compact", () => sessions.compact(id, body.instructions))
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.compact",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { instructions: body.instructions },
+            },
+            () => sessions.compact(id, body.instructions),
+          )
           const s = await submitted.promise
-          eventHub.publish({
-            type: "session.snapshot",
-            sessionId: s.id,
-            workspaceId: s.workspaceId,
-            payload: sessions.snapshot(s),
-          })
+          publishSessionSnapshot(s)
+          publishSessionUpdated(s)
           return sendJson(res, 200, {
             commandId,
             reused: submitted.reused,

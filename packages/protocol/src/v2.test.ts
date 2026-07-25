@@ -5,6 +5,8 @@ import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_V2,
   SUPPORTED_PROTOCOL_VERSIONS,
+  eventStreamKeyV2,
+  parseEventStreamKeyV2,
   type EventEnvelopeV2,
   type CommandRequestV2,
 } from "./index.js"
@@ -32,6 +34,8 @@ describe("protocol v2 foundation", () => {
     }
     assert.equal(event.stream.kind, "session")
     assert.equal(event.payload.workerGeneration, "worker-1")
+    assert.equal(eventStreamKeyV2(event.stream), "session:session-1")
+    assert.deepEqual(parseEventStreamKeyV2("session:session-1"), event.stream)
   })
 
   it("declares command concurrency explicitly", () => {

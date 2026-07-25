@@ -12,6 +12,7 @@ import {
   type ProjectionState,
 } from "@piui/pi-worker"
 import type { WorkspaceStore } from "./workspace-store.ts"
+import type { EventHub } from "./event-hub.ts"
 
 export interface AppSession {
   id: string
@@ -26,6 +27,8 @@ export interface AppSession {
   driver: DriverMode
   sessionFile?: string
   real?: PiSessionRuntime
+  workerGeneration?: string
+  runtimeError?: string
 }
 
 export interface PiSessionBackend {
@@ -51,6 +54,7 @@ export class SessionRegistry {
     private readonly workspaces: WorkspaceStore,
     driver: DriverMode = getDriverMode(),
     private readonly injectedBackend?: PiSessionBackend,
+    private readonly eventHub?: EventHub,
   ) {
     this.driver = driver
   }
@@ -148,9 +152,10 @@ export class SessionRegistry {
       projection,
       driver: this.driver,
       sessionFile: real?.getSessionFile(),
-      real,
+      real: undefined,
     }
     this.byId.set(session.id, session)
+    if (real) this.bindRuntime(session, real)
     return session
   }
 
@@ -196,7 +201,9 @@ export class SessionRegistry {
       if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
         session.title = trimmed.slice(0, 48)
       }
+      session.sequence += 1
       session.updatedAt = new Date().toISOString()
+      opts?.onTick?.(session)
       return session
     }
 
@@ -219,7 +226,9 @@ export class SessionRegistry {
     if (session.title === "Mock session" || session.title === "Mock chat" || session.title === "New chat") {
       session.title = trimmed.slice(0, 48)
     }
+    session.sequence += 1
     session.updatedAt = new Date().toISOString()
+    opts?.onTick?.(session)
     return session
   }
 
@@ -312,12 +321,7 @@ export class SessionRegistry {
     }
     const runtime = await pending
     if (!session.real) {
-      session.real = runtime
-      session.projection = runtime.getProjection()
-      session.driverSessionId = runtime.getSessionId()
-      session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
-      session.title = runtime.getSessionName() ?? session.title
-      session.sequence += 1
+      this.bindRuntime(session, runtime)
     }
     return session
   }
@@ -332,6 +336,49 @@ export class SessionRegistry {
     }
     const backend = await this.getBackend()
     return backend.open(workspace.canonicalRoot, session.sessionFile)
+  }
+
+  private bindRuntime(session: AppSession, runtime: PiSessionRuntime): void {
+    session.real = runtime
+    session.projection = runtime.getProjection()
+    session.driverSessionId = runtime.getSessionId()
+    session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
+    session.title = runtime.getSessionName() ?? session.title
+    session.workerGeneration = runtime.getWorkerGeneration?.()
+    session.runtimeError = undefined
+    session.sequence += 1
+    session.updatedAt = new Date().toISOString()
+
+    const generation = session.workerGeneration
+    if (generation) {
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.runtime.replaced",
+        { sessionId: session.id, workerGeneration: generation },
+      )
+    }
+    this.eventHub?.publishV2(
+      { kind: "session", id: session.id },
+      "session.snapshot.updated",
+      { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+    )
+    runtime.onCrash?.(error => {
+      if (session.real !== runtime) return
+      session.real = undefined
+      session.runtimeError = error.message
+      session.sequence += 1
+      session.updatedAt = new Date().toISOString()
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.runtime.crashed",
+        { sessionId: session.id, workerGeneration: generation, message: error.message },
+      )
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    })
   }
 
   private async discover(cwd?: string): Promise<void> {
@@ -449,7 +496,8 @@ export class SessionRegistry {
       ui?.isStreaming || session.projection.isStreaming || Boolean(session.real?.isStreaming())
     const isCompacting = ui?.isCompacting ?? false
     let state: SessionSnapshotV1["session"]["state"] = "idle"
-    if (isCompacting) state = "compacting"
+    if (session.runtimeError) state = "crashed"
+    else if (isCompacting) state = "compacting"
     else if (ui?.retryAttempt) state = "retrying"
     else if (isStreaming) state = "running"
 
@@ -486,6 +534,8 @@ export class SessionRegistry {
         activeTools: ui?.activeTools?.length
           ? ui.activeTools
           : ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        workerGeneration: session.workerGeneration,
+        runtimeError: session.runtimeError,
       },
       timeline: session.projection.timeline as TimelineItemV1[],
       native: {

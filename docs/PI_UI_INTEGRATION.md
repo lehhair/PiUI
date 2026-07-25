@@ -92,7 +92,7 @@
 | Git status/diff | 部分 | 当前只有 Git/branch 范围 |
 | PTY | 缺失 | Pi user bash 不能由 PTY 替代 |
 | workspace access | 部分 | 需与 Pi project trust、执行批准分离 |
-| WebSocket replay/resync | 部分 | R1 改为分作用域 cursor |
+| WebSocket replay/resync | 部分 | v2 子协议、分作用域 cursor、局部 resync 已接；R2 补故障恢复与 faux-provider 验收 |
 
 ## Completion Gate
 

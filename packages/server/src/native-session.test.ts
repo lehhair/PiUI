@@ -6,6 +6,7 @@ import { after, describe, it } from "node:test"
 import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
+import { EventHub } from "./event-hub.ts"
 
 describe("native Pi session discovery", () => {
   const root = mkdtempSync(path.join(tmpdir(), "piui-native-session-"))
@@ -129,5 +130,70 @@ describe("native Pi session discovery", () => {
 
     await registry.list(workspace.id)
     assert.equal(scopedCwd, workspace.canonicalRoot)
+  })
+
+  it("records worker generation and publishes runtime replacement and crash", async () => {
+    const projection = createProjectionState()
+    let crash: ((error: Error) => void) | undefined
+    const runtime = {
+      getWorkerGeneration: () => "worker-generation-1",
+      onCrash: (listener: (error: Error) => void) => {
+        crash = listener
+        return () => { crash = undefined }
+      },
+      getSessionId: () => "pi-lifecycle-id",
+      getSessionFile: () => path.join(root, "lifecycle.jsonl"),
+      getSessionName: () => "Lifecycle session",
+      getProjection: () => projection,
+      getRuntimeUiState: () => ({
+        thinkingLevel: "off",
+        availableThinkingLevels: ["off"],
+        isStreaming: false,
+        isCompacting: false,
+        retryAttempt: 0,
+        queue: { steering: [], followUp: [] },
+        activeTools: [],
+      }),
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => null,
+      getEntries: () => [],
+      getTree: () => [],
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-lifecycle-id",
+        path: path.join(root, "lifecycle.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => runtime,
+    }
+    const eventHub = new EventHub()
+    const eventTypes: string[] = []
+    eventHub.subscribeV2(event => eventTypes.push(event.type))
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend, eventHub)
+    await registry.list()
+
+    const attached = await registry.attach("pi-lifecycle-id")
+    assert.equal(registry.snapshot(attached).runtime.workerGeneration, "worker-generation-1")
+    assert.deepEqual(eventTypes, ["session.runtime.replaced", "session.snapshot.updated"])
+
+    assert.ok(crash)
+    crash(new Error("worker stopped"))
+    assert.equal(registry.snapshot(attached).session.state, "crashed")
+    assert.equal(registry.snapshot(attached).runtime.runtimeError, "worker stopped")
+    assert.equal(attached.real, undefined)
+    assert.deepEqual(eventTypes, [
+      "session.runtime.replaced",
+      "session.snapshot.updated",
+      "session.runtime.crashed",
+      "session.snapshot.updated",
+    ])
   })
 })

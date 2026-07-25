@@ -1,6 +1,7 @@
 import {
   PI_CAPABILITY_IDS,
   PI_PARITY_SDK_VERSION,
+  EVENT_WS_SUBPROTOCOL_V2,
   PROTOCOL_V2,
   SUPPORTED_PROTOCOL_VERSIONS,
   type CapabilityDescriptorV2,
@@ -58,5 +59,10 @@ export function createProtocolHandshakeV2(): ProtocolHandshakeV2 {
     supportedProtocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
     piSdkVersion: PI_PARITY_SDK_VERSION,
     capabilities: createCapabilityManifestV2(),
+    eventTransport: {
+      webSocketPath: "/api/v1/events",
+      subprotocol: EVENT_WS_SUBPROTOCOL_V2,
+      cursorMode: "scoped-map",
+    },
   }
 }

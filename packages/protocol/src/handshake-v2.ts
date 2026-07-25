@@ -1,4 +1,5 @@
 import type { CapabilityManifestV2 } from "./capabilities-v2.js"
+import { EVENT_WS_SUBPROTOCOL_V2 } from "./events-v2.js"
 
 export const PI_PARITY_SDK_VERSION = "0.81.1" as const
 export const PROTOCOL_V2 = 2 as const
@@ -10,4 +11,9 @@ export interface ProtocolHandshakeV2 {
   supportedProtocolVersions: readonly [1, 2]
   piSdkVersion: typeof PI_PARITY_SDK_VERSION
   capabilities: CapabilityManifestV2
+  eventTransport: {
+    webSocketPath: "/api/v1/events"
+    subprotocol: typeof EVENT_WS_SUBPROTOCOL_V2
+    cursorMode: "scoped-map"
+  }
 }

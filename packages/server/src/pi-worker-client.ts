@@ -43,6 +43,7 @@ export interface PiWorkerHost {
 export class PiWorkerSession implements PiSessionRuntime {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly stateListeners = new Set<(state: PiRuntimeUiState) => void>()
+  private readonly crashListeners = new Set<(error: Error) => void>()
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
@@ -53,6 +54,8 @@ export class PiWorkerSession implements PiSessionRuntime {
   private resolveReady!: (hello: WorkerHello) => void
   private rejectReady!: (error: Error) => void
   private readySettled = false
+  private exitHandled = false
+  private workerHello?: WorkerHello
   private readonly readyTimer: NodeJS.Timeout
 
   private constructor(child: ChildProcess) {
@@ -130,6 +133,15 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   getWorkerHandshake(): Promise<WorkerHello> {
     return this.ready
+  }
+
+  getWorkerGeneration(): string | undefined {
+    return this.workerHello?.generation
+  }
+
+  onCrash(listener: (error: Error) => void): () => void {
+    this.crashListeners.add(listener)
+    return () => this.crashListeners.delete(listener)
   }
 
   private async listCatalogSessions(
@@ -274,6 +286,7 @@ export class PiWorkerSession implements PiSessionRuntime {
       }
       this.readySettled = true
       clearTimeout(this.readyTimer)
+      this.workerHello = message
       this.resolveReady(message)
       return
     }
@@ -301,9 +314,14 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   private handleExit(error: Error): void {
+    if (this.exitHandled) return
+    this.exitHandled = true
     this.rejectHandshake(error)
     for (const pending of this.pending.values()) pending.reject(error)
     this.pending.clear()
+    if (!this.disposed) {
+      for (const listener of this.crashListeners) listener(error)
+    }
   }
 
   private rejectHandshake(error: Error): void {
