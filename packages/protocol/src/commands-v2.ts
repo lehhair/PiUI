@@ -5,6 +5,7 @@ export interface CommandPayloadsV2 {
     text: string
     attachments?: Array<{ type: "image"; mimeType: string; data: string }>
     delivery?: "prompt" | "steer" | "followUp"
+    model?: { provider: string; modelId: string }
   }
   "session.abort": Record<string, never>
   "session.setModel": { provider: string; modelId: string }

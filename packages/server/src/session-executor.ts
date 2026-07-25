@@ -1,12 +1,16 @@
-import type { CommandRecordV1 } from "@piui/protocol"
+import type {
+  CommandRecordV2,
+  CommandRequestV2,
+  CommandTypeV2,
+} from "@piui/protocol"
 
 interface CommandEntry {
-  record: CommandRecordV1
+  record: CommandRecordV2
   promise: Promise<unknown>
 }
 
-export interface SubmittedCommand<T> {
-  record: CommandRecordV1
+export interface SubmittedCommand<T, C extends CommandTypeV2 = CommandTypeV2> {
+  record: CommandRecordV2<C>
   promise: Promise<T>
   reused: boolean
 }
@@ -15,43 +19,32 @@ export class SessionExecutor {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly commands = new Map<string, CommandEntry>()
 
-  constructor(private readonly onUpdate?: (record: CommandRecordV1) => void) {}
+  constructor(private readonly onUpdate?: (record: CommandRecordV2) => void) {}
 
-  private emit(record: CommandRecordV1) {
-    this.onUpdate?.({ ...record, error: record.error ? { ...record.error } : undefined })
-  }
-
-  submit<T>(sessionId: string, commandId: string, kind: string, run: () => Promise<T>): SubmittedCommand<T> {
-    return this.enqueue(sessionId, sessionId, commandId, kind, run)
-  }
-
-  submitControl<T>(sessionId: string, commandId: string, kind: string, run: () => Promise<T>): SubmittedCommand<T> {
-    return this.enqueue(sessionId, `control:${sessionId}`, commandId, kind, run)
-  }
-
-  private enqueue<T>(
-    sessionId: string,
-    laneId: string,
-    commandId: string,
-    kind: string,
-    run: () => Promise<T>,
-  ): SubmittedCommand<T> {
-    const existing = this.commands.get(commandId)
+  submit<T, C extends CommandTypeV2>(request: CommandRequestV2<C>, run: () => Promise<T>): SubmittedCommand<T, C> {
+    const existing = this.commands.get(request.commandId)
     if (existing) {
-      if (existing.record.sessionId !== sessionId || existing.record.kind !== kind) {
+      if (
+        existing.record.request.sessionId !== request.sessionId ||
+        existing.record.request.workspaceId !== request.workspaceId ||
+        existing.record.request.type !== request.type
+      ) {
         throw Object.assign(new Error("commandId already used for another command"), { code: "COMMAND_CONFLICT" })
       }
-      return { record: existing.record, promise: existing.promise as Promise<T>, reused: true }
+      return {
+        record: existing.record as CommandRecordV2<C>,
+        promise: existing.promise as Promise<T>,
+        reused: true,
+      }
     }
 
-    const record: CommandRecordV1 = {
-      commandId,
-      sessionId,
-      kind,
+    const record: CommandRecordV2<C> = {
+      request,
       status: "accepted",
       submittedAt: new Date().toISOString(),
     }
-    const previous = this.tails.get(laneId) ?? Promise.resolve()
+    const laneId = commandLane(request)
+    const previous = laneId ? (this.tails.get(laneId) ?? Promise.resolve()) : Promise.resolve()
     const promise = previous
       .catch(() => undefined)
       .then(async () => {
@@ -75,17 +68,38 @@ export class SessionExecutor {
           throw error
         }
       })
-    const tail = promise.then(() => undefined, () => undefined)
-    this.tails.set(laneId, tail)
-    tail.finally(() => {
-      if (this.tails.get(laneId) === tail) this.tails.delete(laneId)
-    })
-    this.commands.set(commandId, { record, promise })
+
+    if (laneId) {
+      const tail = promise.then(() => undefined, () => undefined)
+      this.tails.set(laneId, tail)
+      tail.finally(() => {
+        if (this.tails.get(laneId) === tail) this.tails.delete(laneId)
+      })
+    }
+    this.commands.set(request.commandId, { record, promise })
     this.emit(record)
     return { record, promise, reused: false }
   }
 
-  get(commandId: string): CommandRecordV1 | undefined {
+  get(commandId: string): CommandRecordV2 | undefined {
     return this.commands.get(commandId)?.record
   }
+
+  private emit(record: CommandRecordV2): void {
+    this.onUpdate?.({
+      ...record,
+      request: { ...record.request, payload: { ...record.request.payload } },
+      error: record.error ? { ...record.error } : undefined,
+    })
+  }
+}
+
+function commandLane(request: CommandRequestV2): string | undefined {
+  if (request.concurrency === "query") return undefined
+  if (!request.sessionId) {
+    throw Object.assign(new Error(`${request.type} requires sessionId`), { code: "INVALID_REQUEST" })
+  }
+  return request.concurrency === "run-control"
+    ? `control:${request.sessionId}`
+    : `session:${request.sessionId}`
 }

@@ -46,7 +46,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | R0 | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线 | 已完成 |
-| R1 | Protocol v2、类型化 command/event/capability、worker handshake | 进行中 |
+| R1 | Protocol v2、类型化 command/event/capability、worker handshake | 已完成 |
 | R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 未开始 |
 | R3 | session tree、navigate、label、fork、clone、import、持久删除 | 未开始 |
 | R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 未开始 |

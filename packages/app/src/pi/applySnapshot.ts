@@ -6,7 +6,7 @@ import { snapshotToUiMessages } from "./timelineToMessages"
 
 /** Push a Pi snapshot into the UI stores consumed by ChatArea. */
 export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activate?: boolean }) {
-  trackPiSession(snapshot.session.id)
+  trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
   if (!sessionProjectionStore.replace(snapshot, options)) return snapshot.session.id
   const messages = snapshotToUiMessages(snapshot)
   messageStore.setUiMessages(snapshot.session.id, messages, {

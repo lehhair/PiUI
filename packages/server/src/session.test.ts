@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
 import { createAppServer } from "./http.ts"
+import { EventHub } from "./event-hub.ts"
 
 async function listen(server: ReturnType<typeof createServer>) {
   await new Promise<void>((resolve, reject) => {
@@ -48,7 +49,12 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("create empty session, list, delete", async () => {
-    const server = createAppServer()
+    const eventHub = new EventHub()
+    const workspaceEvents: string[] = []
+    eventHub.subscribeV2(event => {
+      if (event.type === "workspace.sessions.updated") workspaceEvents.push(event.payload.sessionId ?? "")
+    })
+    const server = createAppServer({ eventHub })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "blank" })
@@ -56,6 +62,7 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(created.data.snapshot.timeline.length, 0)
       const id = created.data.session.id as string
       assert.equal(created.data.snapshot.session.driverSessionId, id)
+      assert.deepEqual(workspaceEvents, [id])
 
       const listed = await json(port, "GET", "/api/v1/sessions")
       assert.equal(listed.status, 200)
@@ -63,6 +70,7 @@ describe("session mock snapshot (no LLM)", () => {
 
       const del = await json(port, "DELETE", `/api/v1/sessions/${id}`)
       assert.equal(del.status, 200)
+      assert.deepEqual(workspaceEvents, [id, id])
       const listed2 = await json(port, "GET", "/api/v1/sessions")
       assert.ok(!(listed2.data.sessions as { id: string }[]).some(s => s.id === id))
     } finally {
@@ -92,7 +100,12 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("prompt appends mock turn without LLM", async () => {
-    const server = createAppServer()
+    const eventHub = new EventHub()
+    const snapshots: Array<{ reason: string; snapshot: { sequence: number; session: { title?: string } } }> = []
+    eventHub.subscribeV2(event => {
+      if (event.type === "session.snapshot.updated") snapshots.push(event.payload)
+    })
+    const server = createAppServer({ eventHub })
     const { port, close } = await listen(server)
     try {
       const seeded = await json(port, "POST", "/api/v1/dev/mock-chat")
@@ -110,6 +123,9 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(lastUser?.text, "second turn")
       const lastAsst = [...after].reverse().find(t => t.type === "assistant")
       assert.ok(lastAsst)
+      assert.equal(snapshots.at(-1)?.reason, "command")
+      assert.equal(snapshots.at(-1)?.snapshot.sequence, prompted.data.snapshot.sequence)
+      assert.equal(snapshots.at(-1)?.snapshot.session.title, "second turn")
     } finally {
       await close()
     }
@@ -133,7 +149,14 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("increments snapshot sequence for runtime state changes", async () => {
-    const server = createAppServer()
+    const eventHub = new EventHub()
+    const commandSnapshots: number[] = []
+    eventHub.subscribeV2(event => {
+      if (event.type === "session.snapshot.updated" && event.payload.reason === "command") {
+        commandSnapshots.push(event.payload.snapshot.sequence)
+      }
+    })
+    const server = createAppServer({ eventHub })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "sequence" })
@@ -147,6 +170,7 @@ describe("session mock snapshot (no LLM)", () => {
       )
       assert.equal(changed.status, 200)
       assert.equal(changed.data.snapshot.sequence, before + 1)
+      assert.deepEqual(commandSnapshots, [changed.data.snapshot.sequence])
     } finally {
       await close()
     }
