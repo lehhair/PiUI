@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { SessionProvider } from './SessionContext'
 import { SessionContext } from './SessionContext.shared'
+import { activeSessionStore } from '../store/activeSessionStore'
 
 const mocks = vi.hoisted(() => ({
   isPiServerUp: vi.fn(),
@@ -31,6 +32,7 @@ describe('SessionProvider', () => {
     mocks.listPiSessions.mockResolvedValue([])
     mocks.resolveWorkspaceId.mockResolvedValue(null)
     mocks.currentDirectory = null
+    activeSessionStore.initialize({})
   })
 
   it('does not fall back to the legacy SDK when PiUI server is unavailable', async () => {
@@ -71,6 +73,7 @@ describe('SessionProvider', () => {
       {
         id: 'session-a',
         workspaceId: 'workspace-a',
+        state: 'running',
         title: 'Project A',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-02T00:00:00.000Z',
@@ -82,5 +85,13 @@ describe('SessionProvider', () => {
 
     expect(mocks.resolveWorkspaceId).toHaveBeenCalledWith('E:/work/project-a')
     expect(mocks.listPiSessions).toHaveBeenCalledWith('workspace-a')
+    expect(activeSessionStore.getBusySessions()).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-a',
+        title: 'Project A',
+        directory: 'E:/work/project-a',
+        status: { type: 'busy' },
+      }),
+    ])
   })
 })

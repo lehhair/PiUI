@@ -13,6 +13,7 @@ import { applySnapshotToUi } from '../pi/applySnapshot'
 import { isTrackedPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
+import { activeSessionStore } from '../store/activeSessionStore'
 import { useDirectory } from './useDirectory'
 import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
@@ -60,6 +61,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           }
           const data = list.map(s => toUiSession(s, directory || undefined))
           if (requestId !== requestIdRef.current) return
+          activeSessionStore.syncPiSummaries(
+            data.map((session, index) => ({
+              id: session.id,
+              title: session.title,
+              directory: session.directory,
+              state: list[index]?.state,
+            })),
+          )
           if (append) {
             setSessions(prev => {
               const existingIds = new Set(prev.map(s => s.id))

@@ -1,5 +1,6 @@
 import type { SessionSnapshotV1 } from "@piui/protocol"
 import { messageStore } from "../store/messageStore"
+import { activeSessionStore } from "../store/activeSessionStore"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 import { trackPiSession } from "./piSessionIndex"
 import { cacheWorkspace } from "./workspaceCache"
@@ -9,6 +10,7 @@ import { snapshotToUiMessages } from "./timelineToMessages"
 export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activate?: boolean }) {
   trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
   if (snapshot.session.directory) cacheWorkspace(snapshot.session.directory, snapshot.session.workspaceId)
+  activeSessionStore.syncPiSnapshot(snapshot)
   if (!sessionProjectionStore.replace(snapshot, options)) return snapshot.session.id
   const messages = snapshotToUiMessages(snapshot)
   messageStore.setUiMessages(snapshot.session.id, messages, {

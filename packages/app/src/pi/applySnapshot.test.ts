@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest"
 import type { SessionSnapshotV1 } from "@piui/protocol"
 import { applySnapshotToUi } from "./applySnapshot"
 import { messageStore } from "../store/messageStore"
+import { activeSessionStore } from "../store/activeSessionStore"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 
 const snap: SessionSnapshotV1 = {
@@ -50,6 +51,7 @@ describe("applySnapshotToUi", () => {
   beforeEach(() => {
     messageStore.clearAll()
     sessionProjectionStore.clear()
+    activeSessionStore.initialize({})
   })
 
   it("fills both stores", () => {
@@ -92,5 +94,27 @@ describe("applySnapshotToUi", () => {
       },
     })
     expect(messageStore.getSessionState("s-apply")?.isStreaming).toBe(false)
+    expect(activeSessionStore.getBusySessions()[0]?.status).toMatchObject({
+      type: "retry",
+      attempt: 1,
+      message: "overloaded",
+    })
+  })
+
+  it("publishes running snapshots to the active session list", () => {
+    applySnapshotToUi({
+      ...snap,
+      sequence: 2,
+      session: { ...snap.session, state: "running" },
+      runtime: { ...snap.runtime, isStreaming: true },
+    })
+    expect(activeSessionStore.getBusySessions()).toEqual([
+      expect.objectContaining({
+        sessionId: "s-apply",
+        title: "t",
+        directory: "/workspace",
+        status: { type: "busy" },
+      }),
+    ])
   })
 })

@@ -7,6 +7,7 @@ import {
   messageStore,
   useSessionState,
   autoApproveStore,
+  activeSessionStore,
   useActiveSessionStore,
   type RevertHistoryItem,
 } from '../store'
@@ -516,6 +517,7 @@ export function useChatSession({
         const delivery = busy ? input.options?.delivery : undefined
         if (busy && !delivery) throw new Error('Choose steer or follow-up while the session is running')
         messageStore.setStreaming(sessionId, true)
+        activeSessionStore.updateStatus(sessionId, { type: 'busy' })
         let commandId: string | undefined
         try {
           const { ensurePiEventSocket } = await import('../pi/eventSocket')
@@ -531,7 +533,10 @@ export function useChatSession({
           return true
         } catch (error) {
           if (commandId) pendingPiCommandIds.current.delete(commandId)
-          if (!busy) messageStore.setStreaming(sessionId, false)
+          if (!busy) {
+            messageStore.setStreaming(sessionId, false)
+            activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+          }
           throw error
         }
       } catch (error) {

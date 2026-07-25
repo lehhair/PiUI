@@ -94,6 +94,12 @@ vi.mock('../store', () => ({
     getSessionAndDescendants: vi.fn(() => []),
   },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
+  activeSessionStore: {
+    updateStatus: (sessionId: string, status: { type: string }) => {
+      if (status.type === 'idle') delete activeSessionStatusMap[sessionId]
+      else activeSessionStatusMap[sessionId] = status
+    },
+  },
 }))
 
 vi.mock('../hooks', () => ({
@@ -299,6 +305,7 @@ describe('useChatSession handleCommand', () => {
       '/review src/App.tsx',
       expect.objectContaining({ stream: true }),
     )
+    expect(activeSessionStatusMap['session-1']).toEqual({ type: 'busy' })
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
   })

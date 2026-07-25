@@ -12,6 +12,7 @@
 // 与 notificationStore 完全独立，不互相依赖
 
 import { useCallback, useSyncExternalStore } from 'react'
+import type { SessionSnapshotV1 } from '@piui/protocol'
 import type { SessionStatus, SessionStatusMap } from '../types/session'
 
 // ============================================
@@ -316,6 +317,77 @@ class ActiveSessionStore {
     }
 
     this.state = { ...this.state, statusMap: newMap }
+    this.notify()
+  }
+
+  syncPiSnapshot(snapshot: SessionSnapshotV1) {
+    const { session, runtime } = snapshot
+    const existing = this.sessionMeta.get(session.id)
+    this.sessionMeta.set(session.id, {
+      title: session.title ?? existing?.title,
+      directory: session.directory || existing?.directory,
+    })
+
+    if (session.state === 'retrying' && (runtime.retry.phase === 'waiting' || runtime.retry.phase === 'running')) {
+      const waiting = runtime.retry.phase === 'waiting' ? runtime.retry : undefined
+      const parsedNext = waiting ? Date.parse(waiting.nextAttemptAt) : Number.NaN
+      this.updateStatus(session.id, {
+        type: 'retry',
+        attempt: runtime.retry.attempt,
+        message: waiting?.errorMessage ?? 'Retrying',
+        next: Number.isFinite(parsedNext) ? parsedNext : Date.now() + (waiting?.delayMs ?? 0),
+      })
+      return
+    }
+
+    this.updateStatus(
+      session.id,
+      session.state === 'running' || session.state === 'compacting' ? { type: 'busy' } : { type: 'idle' },
+    )
+  }
+
+  syncPiSummary(summary: {
+    id: string
+    title?: string
+    directory?: string
+    state?: SessionSnapshotV1['session']['state']
+  }) {
+    this.syncPiSummaries([summary])
+  }
+
+  syncPiSummaries(summaries: Array<{
+    id: string
+    title?: string
+    directory?: string
+    state?: SessionSnapshotV1['session']['state']
+  }>) {
+    const nextMap = { ...this.state.statusMap }
+    let changed = false
+
+    for (const summary of summaries) {
+      const existingMeta = this.sessionMeta.get(summary.id)
+      const title = summary.title ?? existingMeta?.title
+      const directory = summary.directory ?? existingMeta?.directory
+      if (title !== existingMeta?.title || directory !== existingMeta?.directory) {
+        this.sessionMeta.set(summary.id, { title, directory })
+        changed = true
+      }
+
+      if (!summary.state) continue
+      const existingStatus = nextMap[summary.id]
+      if (summary.state === 'retrying' && existingStatus?.type === 'retry') continue
+      const busy = summary.state === 'running' || summary.state === 'retrying' || summary.state === 'compacting'
+      if (busy && existingStatus?.type !== 'busy') {
+        nextMap[summary.id] = { type: 'busy' }
+        changed = true
+      } else if (!busy && existingStatus) {
+        delete nextMap[summary.id]
+        changed = true
+      }
+    }
+
+    if (!changed) return
+    this.state = { ...this.state, statusMap: nextMap }
     this.notify()
   }
 
