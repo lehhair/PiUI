@@ -1,17 +1,16 @@
 // ============================================
 // File Search API Functions
-// Pi server first; OpenCode SDK only as fallback
+// Pi-native workspace file APIs
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
-import { formatPathForApi } from '../utils/directoryUtils'
 import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch } from './types'
-import { serverStore } from '../store/serverStore'
 import {
-  isPiServerUp,
+  getWorkspaceGitStatus,
   listWorkspaceFiles,
   readWorkspaceFile,
   resolveWorkspaceId,
+  searchWorkspaceFiles,
+  searchWorkspaceText,
 } from '../pi/sessionApi'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
@@ -24,7 +23,13 @@ function isRootDirectoryPath(path: string): boolean {
 }
 
 function getRootDirectoryCacheKey(directory?: string): string {
-  return `${serverStore.getActiveServerId()}::${formatPathForApi(directory) ?? ''}`
+  return directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''
+}
+
+async function requireWorkspaceId(directory?: string): Promise<string> {
+  const workspaceId = await resolveWorkspaceId(directory)
+  if (!workspaceId) throw new Error('No PiUI workspace is available')
+  return workspaceId
 }
 
 function mapPiType(t: string): FileNode['type'] {
@@ -55,8 +60,7 @@ function toPiRelativePath(path: string, directory?: string): string {
   return p.replace(/^\//, '')
 }
 
-async function fetchDirectoryPi(path: string, directory?: string): Promise<FileNode[] | null> {
-  if (!(await isPiServerUp())) return null
+async function fetchDirectory(path: string, directory?: string): Promise<FileNode[]> {
   // Prefer absolute directory as workspace; fall back to current path if it is absolute
   const workspaceDir =
     directory && (/^[a-zA-Z]:/.test(directory) || directory.startsWith('/'))
@@ -64,8 +68,7 @@ async function fetchDirectoryPi(path: string, directory?: string): Promise<FileN
       : path && (/^[a-zA-Z]:/.test(path) || path.startsWith('/'))
         ? path
         : directory
-  const workspaceId = await resolveWorkspaceId(workspaceDir)
-  if (!workspaceId) return null
+  const workspaceId = await requireWorkspaceId(workspaceDir)
   const rel = toPiRelativePath(path, workspaceDir)
   const listed = await listWorkspaceFiles(workspaceId, rel)
   return listed.entries
@@ -79,20 +82,6 @@ async function fetchDirectoryPi(path: string, directory?: string): Promise<FileN
     })) as FileNode[]
 }
 
-async function fetchDirectory(path: string, directory?: string): Promise<FileNode[]> {
-  const pi = await fetchDirectoryPi(path, directory)
-  if (pi) return pi
-
-  const sdk = getSDKClient()
-  const isAbsolute = /^[a-zA-Z]:/.test(path) || path.startsWith('/')
-
-  if (isAbsolute && !directory) {
-    return unwrap(await sdk.file.list({ directory: formatPathForApi(path), path: '' }))
-  }
-
-  return unwrap(await sdk.file.list({ path, directory: formatPathForApi(directory) }))
-}
-
 /**
  * 搜索文件或目录
  */
@@ -104,28 +93,11 @@ export async function searchFiles(
     limit?: number
   } = {},
 ): Promise<string[]> {
-  if (await isPiServerUp()) {
-    const workspaceId = await resolveWorkspaceId(options.directory)
-    if (!workspaceId) return []
-    try {
-      const { searchWorkspaceFiles } = await import('../pi/sessionApi')
-      return await searchWorkspaceFiles(workspaceId, query, {
-        type: options.type,
-        limit: options.limit,
-      })
-    } catch {
-      return []
-    }
-  }
-  const sdk = getSDKClient()
-  return unwrap(
-    await sdk.find.files({
-      query,
-      directory: formatPathForApi(options.directory),
-      type: options.type,
-      limit: options.limit,
-    }),
-  ) as string[]
+  const workspaceId = await requireWorkspaceId(options.directory)
+  return searchWorkspaceFiles(workspaceId, query, {
+    type: options.type,
+    limit: options.limit,
+  })
 }
 
 /**
@@ -169,60 +141,49 @@ export async function prefetchRootDirectory(directory?: string): Promise<void> {
  * 读取文件内容
  */
 export async function getFileContent(path: string, directory?: string): Promise<FileContent> {
-  if (await isPiServerUp()) {
-    const workspaceId = await resolveWorkspaceId(directory)
-    if (workspaceId) {
-      const rel = toPiRelativePath(path, directory)
-      const file = await readWorkspaceFile(workspaceId, rel)
-      return {
-        type: 'text',
-        content: file.content,
-        encoding: file.encoding,
-      } as FileContent
-    }
+  const workspaceId = await requireWorkspaceId(directory)
+  const rel = toPiRelativePath(path, directory)
+  const file = await readWorkspaceFile(workspaceId, rel)
+  return {
+    type: 'text',
+    content: file.content,
+    encoding: file.encoding,
   }
-  const sdk = getSDKClient()
-  return unwrap(await sdk.file.read({ path, directory: formatPathForApi(directory) }))
 }
 
 /**
  * 获取文件 git 状态
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
-  if (await isPiServerUp()) {
-    const workspaceId = await resolveWorkspaceId(directory)
-    if (!workspaceId) return []
-    try {
-      const { getWorkspaceGitStatus } = await import('../pi/sessionApi')
-      const st = await getWorkspaceGitStatus(workspaceId)
-      return st.items.map(item => ({
-        path: item.path,
-        status: item.status,
-        added: item.added ?? 0,
-        removed: item.removed ?? 0,
-      })) as FileStatusItem[]
-    } catch {
-      return []
-    }
+  try {
+    const workspaceId = await requireWorkspaceId(directory)
+    const status = await getWorkspaceGitStatus(workspaceId)
+    return status.items.map(item => ({
+      path: item.path,
+      status: item.status,
+      added: item.added ?? 0,
+      removed: item.removed ?? 0,
+    }))
+  } catch {
+    return []
   }
-  const sdk = getSDKClient()
-  return unwrap(await sdk.file.status({ directory: formatPathForApi(directory) }))
 }
 
 /**
  * 搜索代码符号
  */
 export async function searchSymbols(query: string, directory?: string): Promise<SymbolInfo[]> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.find.symbols({ query, directory: formatPathForApi(directory) }))
+  void query
+  void directory
+  throw new Error('PiUI symbol search is not supported yet')
 }
 
 /**
  * 搜索文件正文内容
  */
 export async function searchText(pattern: string, directory?: string): Promise<TextSearchMatch[]> {
-  const sdk = getSDKClient()
-  return unwrap(await sdk.find.text({ pattern, directory: formatPathForApi(directory) }))
+  const workspaceId = await requireWorkspaceId(directory)
+  return searchWorkspaceText(workspaceId, pattern)
 }
 
 /**

@@ -148,6 +148,11 @@ describe("http phase1", () => {
       assert.match(file.data.content, /hello phase1/)
       assert.ok(file.data.etag)
 
+      const searched = await json(port, "GET", `/api/v1/workspaces/${id}/search/text?q=phase1`)
+      assert.equal(searched.status, 200)
+      assert.equal(searched.data.matches[0].path.text, "pkg/a.txt")
+      assert.equal(searched.data.matches[0].line_number, 1)
+
       const escape = await json(
         port,
         "GET",
