@@ -38,6 +38,14 @@ function mapPiType(t: string): FileNode['type'] {
   return 'file'
 }
 
+function toAbsoluteEntryPath(workspaceDir: string | undefined, entryPath: string): string {
+  const entry = entryPath.replace(/\\/g, '/')
+  if (/^[a-zA-Z]:\//.test(entry) || entry.startsWith('/')) return entry
+  if (!workspaceDir || (!/^[a-zA-Z]:[\\/]/.test(workspaceDir) && !workspaceDir.startsWith('/'))) return entry
+  const root = workspaceDir.replace(/\\/g, '/').replace(/\/+$/, '')
+  return `${root || '/'}${root ? '/' : ''}${entry.replace(/^\/+/, '')}`
+}
+
 /** Normalize explorer path to workspace-relative for Pi file API. */
 function toPiRelativePath(path: string, directory?: string): string {
   if (!path || isRootDirectoryPath(path)) return ''
@@ -77,7 +85,7 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
     .map(e => ({
       name: e.name,
       path: e.path,
-      absolute: e.path,
+      absolute: toAbsoluteEntryPath(workspaceDir, e.path),
       type: mapPiType(e.type),
       ignored: false,
     })) as FileNode[]

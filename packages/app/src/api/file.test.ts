@@ -29,8 +29,8 @@ describe('Pi workspace file API', () => {
     mocks.readWorkspaceFile.mockResolvedValue({ content: '# PiUI', encoding: 'utf-8' })
 
     await expect(listDirectory('.', 'C:/workspace')).resolves.toEqual([
-      { name: 'src', path: 'src', absolute: 'src', type: 'directory', ignored: false },
-      { name: 'README.md', path: 'README.md', absolute: 'README.md', type: 'file', ignored: false },
+      { name: 'src', path: 'src', absolute: 'C:/workspace/src', type: 'directory', ignored: false },
+      { name: 'README.md', path: 'README.md', absolute: 'C:/workspace/README.md', type: 'file', ignored: false },
     ])
     await expect(getFileContent('README.md', 'C:/workspace')).resolves.toEqual({
       type: 'text',
@@ -39,6 +39,18 @@ describe('Pi workspace file API', () => {
     })
     expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('workspace-1', '')
     expect(mocks.readWorkspaceFile).toHaveBeenCalledWith('workspace-1', 'README.md')
+  })
+
+  it('keeps the selected POSIX parent in child directory paths', async () => {
+    mocks.listWorkspaceFiles.mockResolvedValue({
+      entries: [{ name: 'abcc', path: 'abcc', type: 'directory' }],
+    })
+
+    await expect(listDirectory('/abc/')).resolves.toEqual([
+      { name: 'abcc', path: 'abcc', absolute: '/abc/abcc', type: 'directory', ignored: false },
+    ])
+    expect(mocks.resolveWorkspaceId).toHaveBeenCalledWith('/abc/')
+    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('workspace-1', '')
   })
 
   it('delegates filename and text searches without an SDK fallback', async () => {
