@@ -17,6 +17,7 @@ import { listModelsForUi } from "./models.ts"
 import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
 import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
+import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
 
 function sessionSummary(s: AppSession) {
   return {
@@ -78,6 +79,9 @@ export interface CreateAppServerOptions {
 export function createAppServer(options: CreateAppServerOptions = {}) {
   const store = new WorkspaceStore()
   const sessions = new SessionRegistry(store, options.driver ?? getDriverMode(), options.piBackend)
+  void sessions.warmup().catch(error => {
+    console.warn("[piui-server] Pi session catalog warmup failed", error)
+  })
   const eventHub = options.eventHub ?? new EventHub()
   const sessionExecutor = new SessionExecutor(command => {
     eventHub.publish({
@@ -136,6 +140,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           service: "piui-server" as const,
           phase: 1,
           driver: sessions.getDriver(),
+          protocolV2: createProtocolHandshakeV2(),
         }
         return sendJson(res, 200, {
           ...body,
@@ -177,7 +182,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       }
 
       if (method === "GET" && p === "/api/v1/drivers/pi/models") {
-        return sendJson(res, 200, await listModelsForUi(sessions.getDriver()))
+        return sendJson(res, 200, await listModelsForUi(sessions.getDriver(), () => sessions.listModels()))
       }
 
       if (method === "GET" && p === "/api/v1/sessions") {

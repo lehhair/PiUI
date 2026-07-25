@@ -1,4 +1,25 @@
 let session
+let listCount = 0
+
+process.send?.({
+  kind: "hello",
+  workerProtocolVersion: 2,
+  piSdkVersion: "0.81.1",
+  generation: "fixture-generation",
+  processId: process.pid,
+  capabilities: [
+    "catalog.sessions",
+    "catalog.models",
+    "runtime.open",
+    "runtime.prompt",
+    "runtime.abort",
+    "runtime.model",
+    "runtime.thinking",
+    "runtime.compact",
+    "runtime.skills",
+    "runtime.commands",
+  ],
+})
 
 function state() {
   return {
@@ -28,14 +49,15 @@ function snapshot() {
 process.on("message", request => {
   const command = request.command
   let result
-  if (command.type === "listAll") {
+  if (command.type === "list" || command.type === "listAll") {
+    listCount += 1
     result = {
       type: "sessions",
       sessions: [{
         id: "fixture-session",
         path: "/fixture/session.jsonl",
         cwd: "/fixture",
-        name: "Fixture",
+        name: `Fixture ${listCount}`,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         messageCount: 0,

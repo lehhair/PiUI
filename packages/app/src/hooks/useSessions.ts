@@ -98,7 +98,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
       try {
         const scopedWorkspaceId = normalizedDirectory ? await resolveWorkspaceId(normalizedDirectory) : null
-        const all = (await listPiSessions())
+        const all = (await listPiSessions(scopedWorkspaceId ?? undefined))
           .filter(summary => !scopedWorkspaceId || summary.workspaceId === scopedWorkspaceId)
           .map(summary => toUiSession(summary, normalizedDirectory))
         const searchTerm = queryParams.search?.trim().toLowerCase()

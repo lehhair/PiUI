@@ -1,8 +1,10 @@
 import { fork, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
+import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import {
   getPiWorkerEntryUrl,
+  PI_WORKER_PROTOCOL_VERSION,
   restoreProjection,
   type PiCommandInfo,
   type PiModelInfo,
@@ -10,8 +12,10 @@ import {
   type PiSessionInfo,
   type PiSessionRuntime,
   type PiSkillInfo,
+  type PiWorkerCapability,
   type ProjectionState,
   type WorkerCommand,
+  type WorkerHello,
   type WorkerMessage,
   type WorkerResult,
   type WorkerSessionWire,
@@ -20,6 +24,20 @@ import {
 interface PendingRequest {
   resolve: (result: WorkerResult) => void
   reject: (error: Error) => void
+}
+
+export interface PiWorkerCatalog {
+  getHandshake(): Promise<WorkerHello>
+  list(cwd: string): Promise<PiSessionInfo[]>
+  listAll(): Promise<PiSessionInfo[]>
+  listModels(): Promise<PiModelInfo[]>
+  dispose(): Promise<void>
+}
+
+export interface PiWorkerHost {
+  getHandshake(): Promise<WorkerHello>
+  open(cwd: string, sessionFile?: string): Promise<PiWorkerSession>
+  dispose(): Promise<void>
 }
 
 export class PiWorkerSession implements PiSessionRuntime {
@@ -31,9 +49,23 @@ export class PiWorkerSession implements PiSessionRuntime {
   private projection: ProjectionState = restoreProjection([])
   private projectionListener?: (projection: ProjectionState) => void
   private disposed = false
+  private readonly ready: Promise<WorkerHello>
+  private resolveReady!: (hello: WorkerHello) => void
+  private rejectReady!: (error: Error) => void
+  private readySettled = false
+  private readonly readyTimer: NodeJS.Timeout
 
   private constructor(child: ChildProcess) {
     this.child = child
+    this.ready = new Promise<WorkerHello>((resolve, reject) => {
+      this.resolveReady = resolve
+      this.rejectReady = reject
+    })
+    this.readyTimer = setTimeout(() => {
+      this.rejectHandshake(new Error("Pi worker handshake timeout"))
+      this.terminate()
+    }, 15_000)
+    this.readyTimer.unref()
     child.on("message", message => this.handleMessage(message as WorkerMessage))
     child.on("error", error => this.handleExit(error))
     child.on("exit", (code, signal) => {
@@ -43,38 +75,75 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   static async open(cwd: string, sessionFile?: string, workerEntry = getPiWorkerEntryUrl()): Promise<PiWorkerSession> {
-    const client = new PiWorkerSession(spawnWorker(workerEntry))
-    try {
-      const result = await client.request({ type: "open", cwd, sessionFile })
-      client.applySession(expectSession(result))
-      return client
-    } catch (error) {
-      client.terminate()
-      throw error
-    }
+    return PiWorkerSession.createHost(workerEntry).open(cwd, sessionFile)
   }
 
   static async listAll(workerEntry = getPiWorkerEntryUrl()): Promise<PiSessionInfo[]> {
-    const child = spawnWorker(workerEntry)
-    const client = new PiWorkerSession(child)
+    const catalog = PiWorkerSession.createCatalog(workerEntry)
     try {
-      const result = await client.request({ type: "listAll" })
-      if (result.type !== "sessions") throw new Error(`unexpected Pi worker result: ${result.type}`)
-      return result.sessions
+      return await catalog.listAll()
     } finally {
-      await client.dispose()
+      await catalog.dispose()
     }
   }
 
   static async listModels(workerEntry = getPiWorkerEntryUrl()): Promise<PiModelInfo[]> {
-    const client = new PiWorkerSession(spawnWorker(workerEntry))
+    const catalog = PiWorkerSession.createCatalog(workerEntry)
     try {
-      const result = await client.request({ type: "listModels" })
-      if (result.type !== "models") throw new Error(`unexpected Pi worker result: ${result.type}`)
-      return result.models
+      return await catalog.listModels()
     } finally {
-      await client.dispose()
+      await catalog.dispose()
     }
+  }
+
+  static createCatalog(workerEntry = getPiWorkerEntryUrl()): PiWorkerCatalog {
+    const client = new PiWorkerSession(spawnWorker(workerEntry))
+    return {
+      getHandshake: () => client.getWorkerHandshake(),
+      list: cwd => client.listCatalogSessions({ type: "list", cwd }),
+      listAll: () => client.listCatalogSessions({ type: "listAll" }),
+      listModels: () => client.listCatalogModels(),
+      dispose: () => client.dispose(),
+    }
+  }
+
+  static createHost(workerEntry = getPiWorkerEntryUrl()): PiWorkerHost {
+    const client = new PiWorkerSession(spawnWorker(workerEntry))
+    let opened = false
+    return {
+      getHandshake: () => client.getWorkerHandshake(),
+      open: async (cwd, sessionFile) => {
+        if (opened) throw new Error("Pi worker host is already in use")
+        opened = true
+        try {
+          const result = await client.request({ type: "open", cwd, sessionFile })
+          client.applySession(expectSession(result))
+          return client
+        } catch (error) {
+          await client.dispose()
+          throw error
+        }
+      },
+      dispose: () => client.dispose(),
+    }
+  }
+
+  getWorkerHandshake(): Promise<WorkerHello> {
+    return this.ready
+  }
+
+  private async listCatalogSessions(
+    command: Extract<WorkerCommand, { type: "list" | "listAll" }>,
+  ): Promise<PiSessionInfo[]> {
+    const result = await this.request(command)
+    if (result.type !== "sessions") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.sessions
+  }
+
+  private async listCatalogModels(): Promise<PiModelInfo[]> {
+    const result = await this.request({ type: "listModels" })
+    if (result.type !== "models") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.models
   }
 
   onState(listener: (state: PiRuntimeUiState) => void): () => void {
@@ -159,8 +228,15 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
   }
 
-  private request(command: WorkerCommand): Promise<WorkerResult> {
+  private async request(command: WorkerCommand): Promise<WorkerResult> {
+    const hello = await this.ready
     if (this.disposed || !this.child.connected) return Promise.reject(new Error("Pi worker is not connected"))
+    const requiredCapability = workerCapabilityFor(command)
+    if (requiredCapability && !hello.capabilities.includes(requiredCapability)) {
+      throw Object.assign(new Error(`Pi worker does not support ${requiredCapability}`), {
+        code: "CAPABILITY_DISABLED",
+      })
+    }
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
@@ -173,6 +249,34 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   private handleMessage(message: WorkerMessage): void {
+    if (message.kind === "hello") {
+      if (message.workerProtocolVersion !== PI_WORKER_PROTOCOL_VERSION) {
+        this.rejectHandshake(
+          Object.assign(
+            new Error(
+              `Pi worker protocol mismatch: expected ${PI_WORKER_PROTOCOL_VERSION}, received ${message.workerProtocolVersion}`,
+            ),
+            { code: "WORKER_PROTOCOL_MISMATCH" },
+          ),
+        )
+        this.terminate()
+        return
+      }
+      if (message.piSdkVersion !== PI_PARITY_SDK_VERSION) {
+        this.rejectHandshake(
+          Object.assign(
+            new Error(`Pi SDK mismatch: expected ${PI_PARITY_SDK_VERSION}, received ${message.piSdkVersion}`),
+            { code: "PI_SDK_VERSION_MISMATCH" },
+          ),
+        )
+        this.terminate()
+        return
+      }
+      this.readySettled = true
+      clearTimeout(this.readyTimer)
+      this.resolveReady(message)
+      return
+    }
     if (message.kind === "response") {
       const pending = this.pending.get(message.id)
       if (!pending) return
@@ -197,13 +301,49 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   private handleExit(error: Error): void {
+    this.rejectHandshake(error)
     for (const pending of this.pending.values()) pending.reject(error)
     this.pending.clear()
+  }
+
+  private rejectHandshake(error: Error): void {
+    if (this.readySettled) return
+    this.readySettled = true
+    clearTimeout(this.readyTimer)
+    this.rejectReady(error)
   }
 
   private terminate(): void {
     if (this.child.connected) this.child.disconnect()
     if (!this.child.killed) this.child.kill()
+  }
+}
+
+function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undefined {
+  switch (command.type) {
+    case "list":
+    case "listAll":
+      return "catalog.sessions"
+    case "listModels":
+      return "catalog.models"
+    case "open":
+      return "runtime.open"
+    case "prompt":
+      return "runtime.prompt"
+    case "abort":
+      return "runtime.abort"
+    case "setModel":
+      return "runtime.model"
+    case "setThinkingLevel":
+      return "runtime.thinking"
+    case "compact":
+      return "runtime.compact"
+    case "listSkills":
+      return "runtime.skills"
+    case "listCommands":
+      return "runtime.commands"
+    case "dispose":
+      return undefined
   }
 }
 

@@ -77,7 +77,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiSessionsMock).toHaveBeenCalledWith()
+    expect(listPiSessionsMock).toHaveBeenCalledWith('project-1')
   })
 
   it('passes the scoped directory when removing a session', async () => {

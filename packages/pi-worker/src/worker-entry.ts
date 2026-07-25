@@ -1,16 +1,33 @@
+import { randomUUID } from "node:crypto"
+import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import { RealPiSession } from "./real-session.js"
 import type { PiSessionRuntime } from "./runtime-contract.js"
-import type {
-  ProjectionWire,
-  WorkerCommand,
-  WorkerMessage,
-  WorkerRequest,
-  WorkerResult,
-  WorkerSessionWire,
+import {
+  PI_WORKER_PROTOCOL_VERSION,
+  type PiWorkerCapability,
+  type ProjectionWire,
+  type WorkerCommand,
+  type WorkerMessage,
+  type WorkerRequest,
+  type WorkerResult,
+  type WorkerSessionWire,
 } from "./worker-protocol.js"
 
 let runtime: PiSessionRuntime | undefined
 let unsubscribeState: (() => void) | undefined
+const workerGeneration = randomUUID()
+const workerCapabilities: PiWorkerCapability[] = [
+  "catalog.sessions",
+  "catalog.models",
+  "runtime.open",
+  "runtime.prompt",
+  "runtime.abort",
+  "runtime.model",
+  "runtime.thinking",
+  "runtime.compact",
+  "runtime.skills",
+  "runtime.commands",
+]
 
 function send(message: WorkerMessage): void {
   process.send?.(message)
@@ -41,6 +58,8 @@ function requireRuntime(): PiSessionRuntime {
 
 async function execute(command: WorkerCommand): Promise<WorkerResult> {
   switch (command.type) {
+    case "list":
+      return { type: "sessions", sessions: await RealPiSession.list(command.cwd) }
     case "listAll":
       return { type: "sessions", sessions: await RealPiSession.listAll() }
     case "listModels":
@@ -105,6 +124,15 @@ process.on("message", (value: unknown) => {
       })
     },
   )
+})
+
+send({
+  kind: "hello",
+  workerProtocolVersion: PI_WORKER_PROTOCOL_VERSION,
+  piSdkVersion: PI_PARITY_SDK_VERSION,
+  generation: workerGeneration,
+  processId: process.pid,
+  capabilities: workerCapabilities,
 })
 
 process.on("disconnect", () => {

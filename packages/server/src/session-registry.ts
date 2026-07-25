@@ -6,6 +6,7 @@ import {
   getDriverMode,
   runMockTurn,
   type DriverMode,
+  type PiModelInfo,
   type PiSessionInfo,
   type PiSessionRuntime,
   type ProjectionState,
@@ -28,15 +29,23 @@ export interface AppSession {
 }
 
 export interface PiSessionBackend {
+  list?(cwd: string): Promise<PiSessionInfo[]>
   listAll(): Promise<PiSessionInfo[]>
+  listModels?(): Promise<PiModelInfo[]>
   open(cwd: string, sessionFile?: string): Promise<PiSessionRuntime>
+  dispose?(): Promise<void>
 }
+
+const DISCOVERY_TTL_MS = 5_000
 
 export class SessionRegistry {
   private readonly byId = new Map<string, AppSession>()
   private readonly attaching = new Map<string, Promise<PiSessionRuntime>>()
+  private readonly discovering = new Map<string, Promise<void>>()
+  private readonly discoveredAt = new Map<string, number>()
   private readonly hiddenIds = new Set<string>()
   private readonly driver: DriverMode
+  private backendPromise?: Promise<PiSessionBackend>
 
   constructor(
     private readonly workspaces: WorkspaceStore,
@@ -50,10 +59,26 @@ export class SessionRegistry {
     return this.driver
   }
 
-  async list(workspaceId?: string): Promise<AppSession[]> {
+  async warmup(): Promise<void> {
     await this.discover()
+  }
+
+  async list(workspaceId?: string): Promise<AppSession[]> {
+    if (workspaceId) {
+      const workspace = this.workspaces.get(workspaceId)
+      if (!workspace) return []
+      await this.discover(workspace.canonicalRoot)
+    } else {
+      await this.discover()
+    }
     const all = [...this.byId.values()]
     return workspaceId ? all.filter(s => s.workspaceId === workspaceId) : all
+  }
+
+  async listModels(): Promise<PiModelInfo[]> {
+    if (this.driver !== "pi") return []
+    const backend = await this.getBackend()
+    return backend.listModels?.() ?? []
   }
 
   get(id: string): AppSession | undefined {
@@ -309,28 +334,77 @@ export class SessionRegistry {
     return backend.open(workspace.canonicalRoot, session.sessionFile)
   }
 
-  private async discover(): Promise<void> {
+  private async discover(cwd?: string): Promise<void> {
     if (this.driver !== "pi") return
+    const allKey = "*"
+    const key = cwd ?? allKey
+    const now = Date.now()
+    const allPending = this.discovering.get(allKey)
+    if (allPending) return allPending
+    if (cwd && now - (this.discoveredAt.get(allKey) ?? 0) < DISCOVERY_TTL_MS) return
+    if (now - (this.discoveredAt.get(key) ?? 0) < DISCOVERY_TTL_MS) return
+
+    const existing = this.discovering.get(key)
+    if (existing) return existing
+
+    const pending = this.scanDiscovered(cwd).finally(() => {
+      if (this.discovering.get(key) === pending) this.discovering.delete(key)
+    })
+    this.discovering.set(key, pending)
+    return pending
+  }
+
+  private async scanDiscovered(cwd?: string): Promise<void> {
     const backend = await this.getBackend()
-    const infos = await backend.listAll()
+    const infos = cwd && backend.list ? await backend.list(cwd) : await backend.listAll()
+    const seen = new Set(infos.map(info => info.id))
     for (const info of infos) this.addDiscovered(info)
+
+    const workspaceId = cwd ? this.workspaces.register(cwd).id : undefined
+    for (const [id, session] of this.byId) {
+      if (session.driver !== "pi" || session.real || seen.has(id)) continue
+      if (!workspaceId || session.workspaceId === workspaceId) this.byId.delete(id)
+    }
+    this.discoveredAt.set(cwd ?? "*", Date.now())
   }
 
   private async getBackend(): Promise<PiSessionBackend> {
     if (this.injectedBackend) return this.injectedBackend
-    const { PiWorkerSession } = await import("./pi-worker-client.ts")
-    return {
-      listAll: () => PiWorkerSession.listAll(),
-      open: (cwd, sessionFile) => PiWorkerSession.open(cwd, sessionFile),
-    }
+    this.backendPromise ??= import("./pi-worker-client.ts").then(({ PiWorkerSession }) => {
+      const catalog = PiWorkerSession.createCatalog()
+      let standby = PiWorkerSession.createHost()
+      return {
+        list: cwd => catalog.list(cwd),
+        listAll: () => catalog.listAll(),
+        listModels: () => catalog.listModels(),
+        open: (cwd, sessionFile) => {
+          const host = standby
+          standby = PiWorkerSession.createHost()
+          return host.open(cwd, sessionFile)
+        },
+        dispose: () => Promise.all([catalog.dispose(), standby.dispose()]).then(() => undefined),
+      }
+    })
+    return this.backendPromise
   }
 
   private addDiscovered(info: PiSessionInfo): void {
-    if (this.byId.has(info.id) || this.hiddenIds.has(info.id) || !info.cwd) return
+    if (this.hiddenIds.has(info.id) || !info.cwd) return
     let workspaceId: string
     try {
       workspaceId = this.workspaces.register(info.cwd).id
     } catch {
+      return
+    }
+    const existing = this.byId.get(info.id)
+    if (existing) {
+      if (!existing.real) {
+        existing.workspaceId = workspaceId
+        existing.title = info.name ?? (info.firstMessage.slice(0, 48) || "New chat")
+        existing.createdAt = info.createdAt
+        existing.updatedAt = info.updatedAt
+        existing.sessionFile = info.path
+      }
       return
     }
     this.byId.set(info.id, {
@@ -349,13 +423,23 @@ export class SessionRegistry {
   }
 
   async dispose(): Promise<void> {
-    await Promise.all([...this.byId.values()].map(async session => {
-      try {
-        await session.real?.dispose()
-      } catch {
-        /* best effort while the HTTP server is closing */
-      }
-    }))
+    await Promise.all([
+      ...[...this.byId.values()].map(async session => {
+        try {
+          await session.real?.dispose()
+        } catch {
+          /* best effort while the HTTP server is closing */
+        }
+      }),
+      (async () => {
+        try {
+          const backend = this.injectedBackend ?? (this.backendPromise ? await this.backendPromise : undefined)
+          await backend?.dispose?.()
+        } catch {
+          /* best effort while the HTTP server is closing */
+        }
+      })(),
+    ])
   }
 
   snapshot(session: AppSession): SessionSnapshotV1 {

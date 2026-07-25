@@ -1,7 +1,7 @@
 /**
  * List models for UI. Lazy-loads Pi ModelRuntime only when driver=pi.
  */
-import { getDriverMode } from "@piui/pi-worker"
+import { getDriverMode, type PiModelInfo } from "@piui/pi-worker"
 
 export interface ModelDtoV1 {
   id: string
@@ -39,7 +39,10 @@ const MOCK_MODELS: ModelDtoV1[] = [
   },
 ]
 
-export async function listModelsForUi(driver = getDriverMode()): Promise<{
+export async function listModelsForUi(
+  driver = getDriverMode(),
+  listPiModels?: () => Promise<PiModelInfo[]>,
+): Promise<{
   driver: string
   models: ModelDtoV1[]
   error?: string
@@ -49,8 +52,9 @@ export async function listModelsForUi(driver = getDriverMode()): Promise<{
   }
 
   try {
-    const { PiWorkerSession } = await import("./pi-worker-client.ts")
-    const available = await PiWorkerSession.listModels()
+    const available = listPiModels
+      ? await listPiModels()
+      : await (await import("./pi-worker-client.ts")).PiWorkerSession.listModels()
     const models: ModelDtoV1[] = available.map(m => {
       return {
         id: m.id,

@@ -84,8 +84,9 @@ export async function listPiModels(): Promise<{
   return (await res.json()) as { driver: string; models: PiModelDto[]; error?: string }
 }
 
-export async function listPiSessions(): Promise<PiSessionSummary[]> {
-  const res = await fetch(`${getApiBase()}/api/v1/sessions`)
+export async function listPiSessions(workspaceId?: string): Promise<PiSessionSummary[]> {
+  const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""
+  const res = await fetch(`${getApiBase()}/api/v1/sessions${query}`)
   if (!res.ok) throw new Error(`listPiSessions ${res.status}`)
   const data = (await res.json()) as { sessions: PiSessionSummary[] }
   for (const s of data.sessions) trackPiSession(s.id)

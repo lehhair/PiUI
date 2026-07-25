@@ -5,6 +5,11 @@
 > Pi 源码参考：`E:\dev\re_agent_UI\pi`  
 > UI 基线：`_archive/opencodeui-baseline`  
 > 当前版本：`0.1.0`
+> Pi parity 基线：`@earendil-works/pi-coding-agent@0.81.1`
+
+> 2026-07-25 修订：项目目标已提升为 Pi SDK/headless 与内置工作流完整覆盖。能力状态以
+> `docs/PI_UI_INTEGRATION.md` 为准，后续实施采用 R0-R12 路线。本文后半部分保留的旧阶段记录仅作历史参考，
+> 其中“双 session ID”“没有 OCUI 界面就跳过”“单一 trust”及第二 driver 假设均不再适用。
 
 ## 1. 文档目的
 
@@ -36,6 +41,26 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 9. 自动测试不得调用付费模型
 10. 生产代码中不再存在 OpenCode SDK、OpenCode SSE 或假成功 shim
 
+### 2.1 Pi Native Parity 路线
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| R0 | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线 | 已完成 |
+| R1 | Protocol v2、类型化 command/event/capability、worker handshake | 进行中 |
+| R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 未开始 |
+| R3 | session tree、navigate、label、fork、clone、import、持久删除 | 未开始 |
+| R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 未开始 |
+| R5 | 多模态 prompt 与完整工具结果 | 未开始 |
+| R6 | Pi user bash 与流式执行控制 | 未开始 |
+| R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
+| R8 | settings、resources、reload、diagnostics | 未开始 |
+| R9 | packages 与三层 trust | 未开始 |
+| R10 | provider auth、模型、scoped models、llama.cpp | 未开始 |
+| R11 | stats、context usage、HTML/JSONL export、share | 未开始 |
+| R12 | conformance、升级门禁、故障注入、发布 | 未开始 |
+
+每项能力的实时状态、来源和完成条件见 `docs/PI_UI_INTEGRATION.md`
+
 ## 3. 非目标
 
 以下内容不作为第一版发布阻断项：
@@ -45,8 +70,8 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 3. 在 Pi 没有对应语义时强行复刻 OpenCode 功能
 4. 第一版支持公网多租户服务
 5. 第一版同步多台设备的会话
-6. 第一版实现 Pi TUI 的全部 extension 自定义界面
-7. 第一版内置所有 provider 的 OAuth 和密钥管理
+6. 像素级复刻 Pi TUI 的终端绘制、ANSI 布局和硬件光标
+7. 在 React 中执行扩展提供的任意 TUI `Component`；此类能力提供稳定降级或原生 TUI 入口
 
 PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构。
 

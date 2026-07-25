@@ -88,4 +88,46 @@ describe("native Pi session discovery", () => {
     assert.equal(a.real, runtime)
     assert.equal(b.real, runtime)
   })
+
+  it("deduplicates concurrent and recent discovery scans", async () => {
+    let scans = 0
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const backend: PiSessionBackend = {
+      listAll: async () => {
+        scans += 1
+        await gate
+        return []
+      },
+      open: async () => { throw new Error("not used") },
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+
+    const first = registry.warmup()
+    const second = registry.list()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(scans, 1)
+    release()
+    await Promise.all([first, second])
+    await registry.list()
+    assert.equal(scans, 1)
+  })
+
+  it("uses Pi scoped listing when a workspace is known", async () => {
+    const workspaces = new WorkspaceStore()
+    const workspace = workspaces.register(root)
+    let scopedCwd: string | undefined
+    const backend: PiSessionBackend = {
+      list: async cwd => {
+        scopedCwd = cwd
+        return []
+      },
+      listAll: async () => { throw new Error("global scan should not run") },
+      open: async () => { throw new Error("not used") },
+    }
+    const registry = new SessionRegistry(workspaces, "pi", backend)
+
+    await registry.list(workspace.id)
+    assert.equal(scopedCwd, workspace.canonicalRoot)
+  })
 })

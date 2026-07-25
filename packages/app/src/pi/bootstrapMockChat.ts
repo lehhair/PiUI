@@ -1,8 +1,8 @@
 /** PiUI backend bootstrap. Mock seeding is intentionally a separate dev-only step. */
 import { applySnapshotToUi } from "./applySnapshot"
 import { getApiBase, piFetch } from "./sessionApi"
-import type { SessionSnapshotV1 } from "@piui/protocol"
-import { setPiCapabilities } from "./capabilities"
+import type { ProtocolHandshakeV2, SessionSnapshotV1 } from "@piui/protocol"
+import { setPiCapabilities, setPiCapabilityManifest } from "./capabilities"
 
 export interface PiBackendBootstrapResult {
   available: boolean
@@ -19,6 +19,7 @@ export async function initializePiBackend(): Promise<PiBackendBootstrapResult> {
       protocolVersion?: number
       service?: string
       capabilities?: Record<string, boolean>
+      protocolV2?: ProtocolHandshakeV2
     }
     if (body.service !== "piui-server" || body.protocolVersion !== 1) {
       throw new Error("unexpected backend")
@@ -26,7 +27,8 @@ export async function initializePiBackend(): Promise<PiBackendBootstrapResult> {
 
     const { setPiServerReachable } = await import("./serverMode")
     setPiServerReachable(true)
-    setPiCapabilities(body.capabilities)
+    if (body.protocolV2) setPiCapabilityManifest(body.protocolV2.capabilities)
+    else setPiCapabilities(body.capabilities)
     console.info("[PiUI] server up, driver=", body.driver ?? "unknown")
     const { ensurePiEventSocket } = await import("./eventSocket")
     ensurePiEventSocket()
