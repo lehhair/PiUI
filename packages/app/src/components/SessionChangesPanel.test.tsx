@@ -5,30 +5,19 @@ import { changeScopeStore } from '../store/changeScopeStore'
 import { layoutStore } from '../store/layoutStore'
 import { FullscreenProvider } from '../contexts'
 
-const { getCurrentProject, initGitProject, getSessionDiff, getLastTurnDiff, getVcsInfo, getVcsDiff } = vi.hoisted(
-  () => ({
-    getCurrentProject: vi.fn(),
-    initGitProject: vi.fn(),
-    getSessionDiff: vi.fn(),
-    getLastTurnDiff: vi.fn(),
-    getVcsInfo: vi.fn(),
-    getVcsDiff: vi.fn(),
-  }),
-)
+const { getCurrentProject, getVcsInfo, getVcsDiff } = vi.hoisted(() => ({
+  getCurrentProject: vi.fn(),
+  getVcsInfo: vi.fn(),
+  getVcsDiff: vi.fn(),
+}))
 
 vi.mock('../api/client', () => ({
   getCurrentProject,
-  initGitProject,
 }))
 
 vi.mock('../api/vcs', () => ({
   getVcsInfo,
   getVcsDiff,
-}))
-
-vi.mock('../api/session', () => ({
-  getSessionDiff,
-  getLastTurnDiff,
 }))
 
 vi.mock('./DiffViewer', () => ({
@@ -94,38 +83,6 @@ describe('SessionChangesPanel', () => {
         },
       ]
     })
-    getSessionDiff.mockResolvedValue([
-      {
-        file: 'src/app.ts',
-        before: 'const a = 1',
-        after: 'const a = 2',
-        additions: 1,
-        deletions: 1,
-      },
-      {
-        file: 'src/components/Button.tsx',
-        before: 'export const Button = 1',
-        after: 'export const Button = 2',
-        additions: 1,
-        deletions: 1,
-      },
-    ])
-    getLastTurnDiff.mockResolvedValue([
-      {
-        file: 'src/turn.ts',
-        before: 'const turn = 1',
-        after: 'const turn = 2',
-        additions: 1,
-        deletions: 1,
-      },
-    ])
-    initGitProject.mockResolvedValue({
-      id: 'project-1',
-      worktree: '/repo',
-      vcs: 'git',
-      time: { created: 0, updated: 0 },
-      sandboxes: [],
-    })
   })
 
   afterEach(() => {
@@ -133,7 +90,7 @@ describe('SessionChangesPanel', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads last turn diffs and shows the first file preview by default', async () => {
+  it('loads Git diffs and shows the first file preview by default', async () => {
     renderSessionChangesPanel()
 
     await act(async () => {
@@ -142,16 +99,16 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo')
+    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo')
     expect(screen.getByText('1f')).toBeInTheDocument()
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
     expect(screen.getByTestId('diff-viewer')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Change mode: Last turn changes/ })).toBeInTheDocument()
-    expect(screen.getAllByText('turn.ts').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /Change mode: Git changes/ })).toBeInTheDocument()
+    expect(screen.getAllByText('git.ts').length).toBeGreaterThan(0)
   })
 
-  it('switches to session changes on demand', async () => {
+  it('does not offer unsupported session or turn scopes', async () => {
     renderSessionChangesPanel()
 
     await act(async () => {
@@ -167,18 +124,8 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    fireEvent.click(screen.getByText('Session changes'))
-
-    await act(async () => {
-      vi.advanceTimersByTime(240)
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    expect(getSessionDiff).toHaveBeenCalledWith('session-1', '/repo')
-    expect(changeScopeStore.getMode('session-1')).toBe('session')
-    expect(screen.getByText('2f')).toBeInTheDocument()
-    expect(screen.getAllByText('app.ts').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Session changes')).not.toBeInTheDocument()
+    expect(screen.queryByText('Last turn changes')).not.toBeInTheDocument()
   })
 
   it('switches to branch changes when available', async () => {
@@ -228,12 +175,12 @@ describe('SessionChangesPanel', () => {
     })
 
     const menu = screen.getByRole('menu', { name: 'Change mode' })
-    const lastTurnOption = screen.getByRole('menuitemradio', { name: 'Last turn changes' })
     const gitChangesOption = screen.getByRole('menuitemradio', { name: 'Git changes' })
+    const branchChangesOption = screen.getByRole('menuitemradio', { name: 'Branch changes' })
 
-    expect(lastTurnOption).toHaveFocus()
-    fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(gitChangesOption).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(branchChangesOption).toHaveFocus()
 
     const treeButton = screen.getByRole('button', { name: 'Tree' })
     const listButton = screen.getByRole('button', { name: 'List' })
@@ -269,10 +216,10 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByRole('menuitemradio', { name: 'Session changes' })).toHaveFocus()
+    expect(screen.getByRole('menuitemradio', { name: 'Branch changes' })).toHaveFocus()
   })
 
-  it('offers git initialization when the project is not a git repository', async () => {
+  it('does not offer unsupported Git initialization', async () => {
     getCurrentProject.mockResolvedValueOnce({
       id: 'global',
       worktree: '/repo',
@@ -287,15 +234,8 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Initialize Git repository' }))
-
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    expect(initGitProject).toHaveBeenCalledWith('/repo')
-    expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo')
+    expect(screen.getByText('No Git repository detected')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Initialize Git repository' })).not.toBeInTheDocument()
   })
 
   it('opens the selected change file in the files panel from the context menu', async () => {
@@ -313,10 +253,10 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    const fileButtons = screen.getAllByRole('button', { name: /turn\.ts/ })
+    const fileButtons = screen.getAllByRole('button', { name: /git\.ts/ })
     fireEvent.contextMenu(fileButtons[0])
     fireEvent.click(screen.getByRole('button', { name: 'Open in Files' }))
 
-    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/turn.ts', name: 'turn.ts' }, 'bottom')
+    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/git.ts', name: 'git.ts' }, 'bottom')
   })
 })

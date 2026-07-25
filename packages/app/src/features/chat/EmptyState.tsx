@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageSquareIcon, FolderIcon, ChevronDownIcon, NewChatIcon } from '../../components/Icons'
-import { getPath, type ApiProject, type ApiPath } from '../../api'
-import { serverStore } from '../../store/serverStore'
-import { handleError } from '../../utils'
+import type { ApiProject } from '../../api'
 
 interface EmptyStateProps {
   currentProject: ApiProject | null
@@ -13,38 +11,11 @@ interface EmptyStateProps {
 
 export function EmptyState({ currentProject, projects, onStartChat }: EmptyStateProps) {
   const { t } = useTranslation(['chat', 'common'])
-  const [pathInfo, setPathInfo] = useState<ApiPath | null>(null)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [customPath, setCustomPath] = useState('')
   const [isCustomMode, setIsCustomMode] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const pathRequestIdRef = useRef(0)
-
-  // 获取当前路径信息
-  useEffect(() => {
-    let mounted = true
-
-    const loadPathInfo = () => {
-      const requestId = ++pathRequestIdRef.current
-      const reportError = handleError('get path', 'api')
-      getPath()
-        .then(info => {
-          if (mounted && requestId === pathRequestIdRef.current) setPathInfo(info)
-        })
-        .catch(error => {
-          if (mounted && requestId === pathRequestIdRef.current) reportError(error)
-        })
-    }
-
-    loadPathInfo()
-    const unsubscribe = serverStore.onServerChange(loadPathInfo)
-
-    return () => {
-      mounted = false
-      unsubscribe()
-    }
-  }, [])
 
   // 点击外部关闭下拉
   useEffect(() => {
@@ -65,7 +36,7 @@ export function EmptyState({ currentProject, projects, onStartChat }: EmptyState
   }, [isCustomMode])
 
   // 当前选中的目录
-  const currentDirectory = currentProject?.id === 'global' ? pathInfo?.directory || '' : currentProject?.worktree || ''
+  const currentDirectory = currentProject?.id === 'global' ? '' : currentProject?.worktree || ''
 
   // 处理开始聊天
   const handleStart = () => {

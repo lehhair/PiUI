@@ -66,7 +66,7 @@
     "noBranchChanges": "No branch changes yet",
     "noTurnChanges": "No changes in the current turn",
     "noGit": "No Git repository detected",
-    "noGitHint": "Initialize Git to start tracking session and current-turn changes",
+    "noGitHint": "Version control details are unavailable for this directory",
     "initGit": "Initialize Git repository",
     "initializingGit": "Initializing...",
     "fileCount_one": "{{count}} file",

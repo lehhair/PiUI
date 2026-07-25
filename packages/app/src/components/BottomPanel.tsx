@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { TerminalIcon } from './Icons'
 import { PanelContainer } from './PanelContainer'
 import { layoutStore, useLayoutStore, type TerminalTab, type PanelTab } from '../store/layoutStore'
-import { serverStore } from '../store/serverStore'
 import { createPtySession, removePtySession, listPtySessions } from '../api/pty'
 import { useCurrentSessionId } from '../store'
 import { ResizablePanel } from './ui/ResizablePanel'
@@ -67,6 +66,11 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   const hasRestoredDirectoryRef = useRef(false)
   const restoreRequestIdRef = useRef(0)
   useEffect(() => {
+    if (!ptyEnabled) {
+      restoreRequestIdRef.current += 1
+      setIsRestoring(false)
+      return
+    }
     // 目录没变就不重复拉取
     if (hasRestoredDirectoryRef.current && prevDirectoryRef.current === normalizedDirectory) return
     hasRestoredDirectoryRef.current = true
@@ -99,10 +103,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
     }
 
     void restoreSessions(++restoreRequestIdRef.current)
-    return serverStore.onServerChange(() => {
-      void restoreSessions(++restoreRequestIdRef.current)
-    })
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, ptyEnabled])
 
   // 创建新终端
   const handleNewTerminal = useCallback(async () => {
@@ -125,13 +126,14 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   // 关闭终端
   const handleCloseTerminal = useCallback(
     async (ptyId: string) => {
+      if (!ptyEnabled) return
       try {
         await removePtySession(ptyId, normalizedDirectory)
       } catch {
         // ignore - may already be closed
       }
     },
-    [normalizedDirectory],
+    [normalizedDirectory, ptyEnabled],
   )
 
   // 渲染内容

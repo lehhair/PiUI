@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectDialog } from './ProjectDialog'
-import { getPath, listDirectory } from '../../api'
+import { listDirectory } from '../../api'
 
 vi.mock('../../components/ui/Dialog', () => ({
   Dialog: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) =>
@@ -9,7 +9,6 @@ vi.mock('../../components/ui/Dialog', () => ({
 }))
 
 vi.mock('../../api', () => ({
-  getPath: vi.fn().mockResolvedValue({ home: '/workspace/project' }),
   listDirectory: vi.fn().mockResolvedValue([
     { name: '.config', type: 'directory', absolute: '/workspace/project/.config' },
     { name: 'src', type: 'directory', absolute: '/workspace/project/src' },
@@ -18,12 +17,16 @@ vi.mock('../../api', () => ({
 }))
 
 describe('ProjectDialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('initializes from path api and loads directory entries', async () => {
-    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+  it('initializes from the selected path and loads directory entries', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} initialPath="/workspace/project" />)
 
     expect(await screen.findByDisplayValue('/workspace/project/')).toBeInTheDocument()
     expect(await screen.findByText('.config')).toBeInTheDocument()
@@ -33,15 +36,22 @@ describe('ProjectDialog', () => {
     expect(screen.getByText('Add current')).toBeInTheDocument()
   })
 
+  it('does not browse a host root when no initial path is available', async () => {
+    render(<ProjectDialog isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+
+    expect(await screen.findByPlaceholderText('Type path...')).toHaveValue('')
+    expect(listDirectory).not.toHaveBeenCalled()
+  })
+
   it('reloads the same directory when reopened', async () => {
-    const { rerender } = render(<ProjectDialog key="first" isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+    const props = { onClose: vi.fn(), onSelect: vi.fn(), initialPath: '/workspace/project' }
+    const { rerender } = render(<ProjectDialog key="first" isOpen={true} {...props} />)
 
     expect(await screen.findByText('src')).toBeInTheDocument()
 
-    rerender(<ProjectDialog key="closed" isOpen={false} onClose={vi.fn()} onSelect={vi.fn()} />)
-    rerender(<ProjectDialog key="second" isOpen={true} onClose={vi.fn()} onSelect={vi.fn()} />)
+    rerender(<ProjectDialog key="closed" isOpen={false} {...props} />)
+    rerender(<ProjectDialog key="second" isOpen={true} {...props} />)
 
-    await waitFor(() => expect(vi.mocked(getPath).mock.calls.length).toBeGreaterThanOrEqual(2))
     await waitFor(() => expect(vi.mocked(listDirectory).mock.calls.length).toBeGreaterThanOrEqual(2))
     expect(await screen.findByText('src')).toBeInTheDocument()
   })
