@@ -70,6 +70,27 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
+  it("does not share in-memory sessions across server instances", async () => {
+    const firstServer = createAppServer()
+    const first = await listen(firstServer)
+    try {
+      const created = await json(first.port, "POST", "/api/v1/sessions", { title: "first server" })
+      assert.equal(created.status, 201)
+    } finally {
+      await first.close()
+    }
+
+    const secondServer = createAppServer()
+    const second = await listen(secondServer)
+    try {
+      const listed = await json(second.port, "GET", "/api/v1/sessions")
+      assert.equal(listed.status, 200)
+      assert.deepEqual(listed.data.sessions, [])
+    } finally {
+      await second.close()
+    }
+  })
+
   it("prompt appends mock turn without LLM", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

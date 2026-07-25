@@ -56,4 +56,14 @@ describe("phase3 no opencode npm sdk", () => {
     // must not call initializeNativeDesktopService()
     assert.doesNotMatch(main, /void initializeNativeDesktopService\(\)/)
   })
+
+  it("server reaches the Pi SDK only through worker IPC", () => {
+    const sourceRoot = join(root, "packages/server/src")
+    const files = readdirSync(sourceRoot, { recursive: true, withFileTypes: true })
+      .filter(entry => entry.isFile() && /\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name))
+      .map(entry => join(entry.parentPath, entry.name))
+    for (const file of files) {
+      assert.doesNotMatch(readFileSync(file, "utf8"), /@earendil-works\/pi-coding-agent|RealPiSession/)
+    }
+  })
 })

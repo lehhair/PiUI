@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { createProjectionState, type RealPiSession } from "@piui/pi-worker"
+import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 
@@ -18,7 +18,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(root, "native.jsonl"),
       getSessionName: () => "Native session",
       getProjection: () => projection,
-    } as unknown as RealPiSession
+    } as unknown as PiSessionRuntime
     const opened: Array<{ cwd: string; sessionFile?: string }> = []
     const backend: PiSessionBackend = {
       listAll: async () => [{
@@ -56,7 +56,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(root, "concurrent.jsonl"),
       getSessionName: () => undefined,
       getProjection: () => projection,
-    } as unknown as RealPiSession
+    } as unknown as PiSessionRuntime
     let opens = 0
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })

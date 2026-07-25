@@ -47,4 +47,14 @@ export class EventHub {
   }
 }
 
-export const eventHub = new EventHub()
+const serverHubs = new WeakMap<object, EventHub>()
+
+export function bindEventHub(server: object, hub: EventHub): void {
+  serverHubs.set(server, hub)
+}
+
+export function getBoundEventHub(server: object): EventHub {
+  const hub = serverHubs.get(server)
+  if (!hub) throw new Error("PiUI event hub is not bound to this server")
+  return hub
+}

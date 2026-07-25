@@ -39,33 +39,29 @@ const MOCK_MODELS: ModelDtoV1[] = [
   },
 ]
 
-export async function listModelsForUi(): Promise<{
+export async function listModelsForUi(driver = getDriverMode()): Promise<{
   driver: string
   models: ModelDtoV1[]
   error?: string
 }> {
-  const driver = getDriverMode()
   if (driver === "mock") {
     return { driver, models: MOCK_MODELS }
   }
 
   try {
-    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
-    const runtime = await ModelRuntime.create({ allowModelNetwork: false })
-    const available = await runtime.getAvailable()
+    const { PiWorkerSession } = await import("./pi-worker-client.ts")
+    const available = await PiWorkerSession.listModels()
     const models: ModelDtoV1[] = available.map(m => {
-      const input = (m as { input?: string[] }).input
-      const supportsImages = Array.isArray(input) ? input.includes("image") : false
       return {
         id: m.id,
         name: m.name || m.id,
-        providerId: m.provider,
-        providerName: m.provider,
-        family: (m as { family?: string }).family || "",
-        contextLimit: m.contextWindow ?? 0,
-        outputLimit: m.maxTokens ?? 0,
-        supportsReasoning: Boolean((m as { reasoning?: boolean }).reasoning),
-        supportsImages,
+        providerId: m.providerId,
+        providerName: m.providerId,
+        family: m.family,
+        contextLimit: m.contextLimit,
+        outputLimit: m.outputLimit,
+        supportsReasoning: m.supportsReasoning,
+        supportsImages: m.supportsImages,
         supportsPdf: false,
         supportsAudio: false,
         supportsVideo: false,
@@ -76,8 +72,8 @@ export async function listModelsForUi(): Promise<{
     if (models.length === 0) {
       return {
         driver,
-        models: MOCK_MODELS,
-        error: "no models available — check ~/.pi/agent auth",
+        models: [],
+        error: "no Pi models available - check ~/.pi/agent auth",
       }
     }
     return { driver, models }
@@ -85,7 +81,7 @@ export async function listModelsForUi(): Promise<{
     const msg = e instanceof Error ? e.message : String(e)
     return {
       driver,
-      models: MOCK_MODELS,
+      models: [],
       error: msg,
     }
   }

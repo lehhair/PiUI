@@ -8,5 +8,5 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "exclude": ["src/**/*.test.ts", "dist"]
+  "exclude": ["src/**/*.test.ts", "src/**/*-fixture.mjs", "dist"]
 }
