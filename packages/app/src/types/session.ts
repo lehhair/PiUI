@@ -10,6 +10,7 @@ export interface UiSession {
 export interface PiSessionSummary {
   id: string
   workspaceId: string
+  directory?: string
   title: string
   createdAt: string
   updatedAt: string

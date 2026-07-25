@@ -28,4 +28,16 @@ describe("toUiSession", () => {
     expect(s.createdAt).toBe(0)
     expect(s.updatedAt).toBe(0)
   })
+
+  it("uses the real directory returned with a session summary", () => {
+    const s = toUiSession({
+      id: "abc",
+      workspaceId: "w",
+      directory: "E:/work/project-a",
+      title: "Hello",
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-02T00:00:00.000Z",
+    })
+    expect(s.directory).toBe("E:/work/project-a")
+  })
 })
