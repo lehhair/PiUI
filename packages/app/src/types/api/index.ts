@@ -36,7 +36,6 @@ export type {
   UserMessage,
   AssistantMessage,
   MessageSummary,
-  MessageWithParts,
   Part,
   TextPart,
   ReasoningPart,

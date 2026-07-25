@@ -27,8 +27,6 @@ export type { StepStartPart, StepFinishPart, SnapshotPart, PatchPart, SubtaskPar
 export type FileSource = FilePartSource
 export type FileSourceType = FileSource['type']
 
-export interface MessageWithParts { info: Message; parts: Part[] }
-
 export interface TextPartInput { type: 'text'; text: string; synthetic?: boolean }
 export interface FilePartInput { type: 'file'; mime: string; filename?: string; url: string; source?: FileSource }
 export interface AgentPartInput { type: 'agent'; name: string; source?: { value: string; start: number; end: number } }

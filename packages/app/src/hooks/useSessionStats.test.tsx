@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
+import type { Message, TextPart, UserMessageInfo } from '../types/message'
 import { messageStore } from '../store/messageStore'
 import { useSessionStats } from './useSessionStats'
 
@@ -11,7 +11,7 @@ vi.mock('../store/paneLayoutStore', () => ({
   },
 }))
 
-function createUserMessage(id: string, created: number): ApiMessage {
+function createUserMessage(id: string, created: number): UserMessageInfo {
   return {
     id,
     sessionID: 'session-1',
@@ -26,7 +26,7 @@ function createTextPart(
   id: string,
   messageID: string,
   text: string,
-): ApiPart & { sessionID: string; messageID: string } {
+): TextPart {
   return {
     id,
     sessionID: 'session-1',
@@ -36,7 +36,7 @@ function createTextPart(
   }
 }
 
-function createMessageWithParts(id: string, text: string, created: number): ApiMessageWithParts {
+function createMessageWithParts(id: string, text: string, created: number): Message {
   return {
     info: createUserMessage(id, created),
     parts: [createTextPart(`part-${id}`, id, text)],
@@ -49,7 +49,7 @@ describe('useSessionStats', () => {
   })
 
   it('returns estimated context after a compaction turn', async () => {
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       {
         info: {
           id: 'user-1',
@@ -121,7 +121,7 @@ describe('useSessionStats', () => {
   })
 
   it('reuses the same stats object when numeric fields do not change', async () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
     await act(async () => {
       await new Promise(resolve => requestAnimationFrame(resolve))
     })

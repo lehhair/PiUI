@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
+import type { Message, TextPart, UserMessageInfo } from '../types/message'
 import { messageStore } from './messageStore'
 import {
   useHasMessages,
@@ -25,7 +25,7 @@ vi.mock('./paneLayoutStore', () => ({
   },
 }))
 
-function createUserMessage(id: string, created: number): ApiMessage {
+function createUserMessage(id: string, created: number): UserMessageInfo {
   return {
     id,
     sessionID: 'session-1',
@@ -40,7 +40,7 @@ function createTextPart(
   id: string,
   messageID: string,
   text: string,
-): ApiPart & { sessionID: string; messageID: string } {
+): TextPart {
   return {
     id,
     sessionID: 'session-1',
@@ -50,7 +50,7 @@ function createTextPart(
   }
 }
 
-function createMessageWithParts(id: string, text: string, created: number): ApiMessageWithParts {
+function createMessageWithParts(id: string, text: string, created: number): Message {
   return {
     info: createUserMessage(id, created),
     parts: [createTextPart(`part-${id}`, id, text)],
@@ -63,7 +63,7 @@ describe('useSessionState', () => {
   })
 
   it('returns only visible messages after revert', () => {
-    messageStore.setMessages('session-1', [
+    messageStore.setUiMessages('session-1', [
       createMessageWithParts('message-1', 'one', 1),
       createMessageWithParts('message-2', 'two', 2),
       createMessageWithParts('message-3', 'three', 3),
@@ -80,7 +80,7 @@ describe('useSessionState', () => {
   })
 
   it('disables undo when no visible user messages remain', () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
     messageStore.setRevertState('session-1', {
       messageId: 'message-1',
       history: [],
@@ -93,8 +93,8 @@ describe('useSessionState', () => {
   })
 
   it('does not re-render when another session changes', async () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
-    messageStore.setMessages('session-2', [
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-2', [
       {
         info: { ...createUserMessage('message-2', 2), sessionID: 'session-2' },
         parts: [{ ...createTextPart('part-message-2', 'message-2', 'two'), sessionID: 'session-2' }],
@@ -127,8 +127,8 @@ describe('focused snapshot reuse', () => {
   })
 
   it('reuses the focused snapshot object when only unrelated session data changes', async () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
-    messageStore.setMessages('session-2', [
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-2', [
       {
         info: { ...createUserMessage('message-2', 2), sessionID: 'session-2' },
         parts: [{ ...createTextPart('part-message-2', 'message-2', 'two'), sessionID: 'session-2' }],
@@ -150,7 +150,7 @@ describe('focused snapshot reuse', () => {
   })
 
   it('keeps selector result stable when selected fields do not change', async () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
 
     let renderCount = 0
     const { result } = renderHook(() => {
@@ -174,7 +174,7 @@ describe('focused snapshot reuse', () => {
   })
 
   it('keeps header meta and hasMessages stable across text deltas', async () => {
-    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
     messageStore.updateSessionMetadata('session-1', { title: 'Hello', directory: '/repo' })
     await act(async () => {
       await new Promise(resolve => requestAnimationFrame(resolve))
