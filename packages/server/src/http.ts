@@ -15,9 +15,18 @@ import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
 import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
+import { SessionExecutor } from "./session-executor.ts"
+import { randomUUID } from "node:crypto"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
+const sessionExecutor = new SessionExecutor(command => {
+  eventHub.publish({
+    type: "command.updated",
+    sessionId: command.sessionId,
+    payload: command,
+  })
+})
 let defaultWorkspaceId: string | null = null
 
 async function ensureDefaultWorkspace(): Promise<string> {
@@ -103,8 +112,16 @@ export function createAppServer() {
         res.end()
         return
       }
+
       if (!requestHasValidToken(req, authToken)) {
         return sendProblem(res, 401, "INVALID_REQUEST", "missing or invalid authorization token")
+      }
+
+      const commandStatus = p.match(/^\/api\/v1\/commands\/([^/]+)$/)
+      if (method === "GET" && commandStatus) {
+        const command = sessionExecutor.get(decodeURIComponent(commandStatus[1]))
+        if (!command) return sendProblem(res, 404, "INVALID_REQUEST", "command not found")
+        return sendJson(res, 200, { command })
       }
 
       if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
@@ -205,6 +222,7 @@ export function createAppServer() {
           stream?: boolean
           model?: { provider?: string; id?: string }
           deliverAs?: "steer" | "followUp"
+          commandId?: string
         }
         try {
           body = JSON.parse(raw || "{}") as {
@@ -212,6 +230,7 @@ export function createAppServer() {
             stream?: boolean
             model?: { provider?: string; id?: string }
             deliverAs?: "steer" | "followUp"
+            commandId?: string
           }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
@@ -219,19 +238,21 @@ export function createAppServer() {
         try {
           // stream defaults off for tests/speed; client passes stream:true for UI
           const stream = body.stream === true
-          const s = await sessions.prompt(id, body.text ?? "", {
-            stream,
-            model: body.model,
-            deliverAs: body.deliverAs,
-            onTick: sess => {
-              eventHub.publish({
-                type: "session.snapshot",
-                sessionId: sess.id,
-                workspaceId: sess.workspaceId,
-                payload: sessions.snapshot(sess),
-              })
-            },
-          })
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(id, commandId, "prompt", () => sessions.prompt(id, body.text ?? "", {
+              stream,
+              model: body.model,
+              deliverAs: body.deliverAs,
+              onTick: sess => {
+                eventHub.publish({
+                  type: "session.snapshot",
+                  sessionId: sess.id,
+                  workspaceId: sess.workspaceId,
+                  payload: sessions.snapshot(sess),
+                })
+              },
+            }))
+          const s = await submitted.promise
           eventHub.publish({
             type: "session.updated",
             sessionId: s.id,
@@ -239,8 +260,10 @@ export function createAppServer() {
             payload: sessionSummary(s),
           })
           return sendJson(res, 200, {
-            commandId: `cmd-${Date.now()}`,
+            commandId,
             accepted: true,
+            reused: submitted.reused,
+            command: submitted.record,
             snapshot: sessions.snapshot(s),
           })
         } catch (e) {
@@ -255,10 +278,18 @@ export function createAppServer() {
       const sessionAbort = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort$/)
       if (method === "POST" && sessionAbort) {
         const id = decodeURIComponent(sessionAbort[1])
-        const s = await sessions.abort(id)
+        const raw = await readBody(req)
+        let body: { commandId?: string } = {}
+        try { body = JSON.parse(raw || "{}") as { commandId?: string } } catch { /* empty ok */ }
+        const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+        const submitted = sessionExecutor.submitControl(id, commandId, "abort", () => sessions.abort(id))
+        const s = await submitted.promise
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         return sendJson(res, 200, {
+          commandId,
           accepted: true,
+          reused: submitted.reused,
+          command: submitted.record,
           snapshot: sessions.snapshot(s),
         })
       }
@@ -307,21 +338,28 @@ export function createAppServer() {
       if (method === "POST" && sessionCompact) {
         const id = decodeURIComponent(sessionCompact[1])
         const raw = await readBody(req)
-        let body: { instructions?: string } = {}
+        let body: { instructions?: string; commandId?: string } = {}
         try {
-          body = JSON.parse(raw || "{}") as { instructions?: string }
+          body = JSON.parse(raw || "{}") as { instructions?: string; commandId?: string }
         } catch {
           /* empty ok */
         }
         try {
-          const s = await sessions.compact(id, body.instructions)
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(id, commandId, "compact", () => sessions.compact(id, body.instructions))
+          const s = await submitted.promise
           eventHub.publish({
             type: "session.snapshot",
             sessionId: s.id,
             workspaceId: s.workspaceId,
             payload: sessions.snapshot(s),
           })
-          return sendJson(res, 200, { snapshot: sessions.snapshot(s) })
+          return sendJson(res, 200, {
+            commandId,
+            reused: submitted.reused,
+            command: submitted.record,
+            snapshot: sessions.snapshot(s),
+          })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }

@@ -93,6 +93,31 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
+  it("reuses a prompt commandId without executing the turn twice", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "idempotent" })
+      const sessionId = created.data.session.id as string
+      const body = { text: "only once", commandId: "prompt-once" }
+
+      const first = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, body)
+      const second = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, body)
+      assert.equal(first.status, 200)
+      assert.equal(second.status, 200)
+      assert.equal(second.data.reused, true)
+      const users = (second.data.snapshot.timeline as Array<{ type: string; text?: string }>)
+        .filter(item => item.type === "user" && item.text === "only once")
+      assert.equal(users.length, 1)
+
+      const command = await json(port, "GET", "/api/v1/commands/prompt-once")
+      assert.equal(command.status, 200)
+      assert.equal(command.data.command.status, "completed")
+    } finally {
+      await close()
+    }
+  })
+
   it("creates session with projected timeline", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

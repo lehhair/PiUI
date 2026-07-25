@@ -11,6 +11,7 @@ export * from "./workspace.js"
 export * from "./events.js"
 export * from "./session.js"
 export * from "./git.js"
+export * from "./command.js"
 
 export interface HealthResponseV1 {
   ok: true
