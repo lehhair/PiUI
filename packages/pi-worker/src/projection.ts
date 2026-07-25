@@ -23,6 +23,23 @@ export function createProjectionState(): ProjectionState {
   }
 }
 
+export function restoreProjection(timeline: TimelineItemV1[], isStreaming = false): ProjectionState {
+  const state = createProjectionState()
+  state.timeline = timeline
+  state.isStreaming = isStreaming
+  timeline.forEach((item, index) => {
+    const entryId = item.entryId ?? item.id
+    state.byEntryId.set(entryId, index)
+    if (item.type !== "assistant") return
+    item.content.forEach((content, toolIndex) => {
+      if (content.type === "tool") {
+        state.toolsByCallId.set(content.callId, { timelineId: entryId, toolIndex })
+      }
+    })
+  })
+  return state
+}
+
 function textFromContent(content: PiContentBlock[] | string | undefined): string {
   if (content == null) return ""
   if (typeof content === "string") return content

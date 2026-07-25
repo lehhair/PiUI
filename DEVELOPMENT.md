@@ -30,7 +30,7 @@ docs/                         设计文档
 packages/app/                 OCUI 视觉壳（GPL）
 packages/protocol/            版本化协议
 packages/server/              Orchestrator（127.0.0.1）
-packages/pi-worker/           投影 + mock runtime（无真实模型）
+packages/pi-worker/           Pi SDK worker + 投影 + mock runtime
 _archive/opencodeui-baseline  只读参考
 _archive/wip-phase0-*         清理前半成品
 ```
@@ -72,6 +72,7 @@ npm run dev:app      # vite
 - [x] workspace git status / info / diff（文件树改动标记）
 - [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
+- [x] 真实 Pi runtime 与模型枚举运行在独立 worker 子进程，server 仅通过私有 IPC 调用
 - [x] Pi 能力对齐 UI（有壳才接）：模型/thinking level/compact/skills·commands/steer·followUp/runtime 状态
 - [x] 阶段 0/1：完整 mock 根测试、全 workspace typecheck/build、render 前 Pi health、旧 SSE 删除、真实 Pi 不再启动即建会话
 - [~] 阶段 6：OpenCode SDK 包、shim、alias、类型 import 和网络 client 已删除；旧 facade 函数继续迁往 Pi API

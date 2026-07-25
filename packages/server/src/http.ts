@@ -8,37 +8,15 @@ import {
 import { listFiles, readFileText, writeFileText } from "./files.ts"
 import { searchFilesByName } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
-import { SessionRegistry, type AppSession } from "./session-registry.ts"
+import { SessionRegistry, type AppSession, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
-import { eventHub } from "./event-hub.ts"
+import { bindEventHub, EventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
-import { getDriverMode } from "@piui/pi-worker"
+import { getDriverMode, type DriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
 import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
 import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
-
-const store = new WorkspaceStore()
-const sessions = new SessionRegistry(store)
-const sessionExecutor = new SessionExecutor(command => {
-  eventHub.publish({
-    type: "command.updated",
-    sessionId: command.sessionId,
-    payload: command,
-  })
-})
-let defaultWorkspaceId: string | null = null
-
-async function ensureDefaultWorkspace(): Promise<string> {
-  if (defaultWorkspaceId && store.get(defaultWorkspaceId)) return defaultWorkspaceId
-  const { mkdtempSync } = await import("node:fs")
-  const { tmpdir } = await import("node:os")
-  const path = await import("node:path")
-  const root = mkdtempSync(path.join(tmpdir(), "piui-default-"))
-  const rec = store.register(root, "piui-default")
-  defaultWorkspaceId = rec.id
-  return rec.id
-}
 
 function sessionSummary(s: AppSession) {
   return {
@@ -91,9 +69,36 @@ function parseUrl(req: IncomingMessage) {
   return new URL(req.url ?? "/", `http://${host}`)
 }
 
-export function createAppServer() {
+export interface CreateAppServerOptions {
+  driver?: DriverMode
+  piBackend?: PiSessionBackend
+  eventHub?: EventHub
+}
+
+export function createAppServer(options: CreateAppServerOptions = {}) {
+  const store = new WorkspaceStore()
+  const sessions = new SessionRegistry(store, options.driver ?? getDriverMode(), options.piBackend)
+  const eventHub = options.eventHub ?? new EventHub()
+  const sessionExecutor = new SessionExecutor(command => {
+    eventHub.publish({
+      type: "command.updated",
+      sessionId: command.sessionId,
+      payload: command,
+    })
+  })
+  let defaultWorkspaceId: string | null = null
+  const ensureDefaultWorkspace = async (): Promise<string> => {
+    if (defaultWorkspaceId && store.get(defaultWorkspaceId)) return defaultWorkspaceId
+    const { mkdtempSync } = await import("node:fs")
+    const { tmpdir } = await import("node:os")
+    const path = await import("node:path")
+    const root = mkdtempSync(path.join(tmpdir(), "piui-default-"))
+    const rec = store.register(root, "piui-default")
+    defaultWorkspaceId = rec.id
+    return rec.id
+  }
   const authToken = process.env.PIUI_AUTH_TOKEN
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
       const url = parseUrl(req)
       const method = req.method ?? "GET"
@@ -140,8 +145,8 @@ export function createAppServer() {
         const workspaceId = await ensureDefaultWorkspace()
         // seedMock only applies in mock driver; real pi starts empty
         const s = await sessions.create(workspaceId, {
-          title: getDriverMode() === "mock" ? "Mock chat" : "New chat",
-          seedMock: getDriverMode() === "mock",
+          title: sessions.getDriver() === "mock" ? "Mock chat" : "New chat",
+          seedMock: sessions.getDriver() === "mock",
         })
         const rec = store.get(workspaceId)!
         return sendJson(res, 201, {
@@ -157,7 +162,7 @@ export function createAppServer() {
       }
 
       if (method === "GET" && p === "/api/v1/drivers/pi/models") {
-        return sendJson(res, 200, await listModelsForUi())
+        return sendJson(res, 200, await listModelsForUi(sessions.getDriver()))
       }
 
       if (method === "GET" && p === "/api/v1/sessions") {
@@ -544,6 +549,9 @@ export function createAppServer() {
       return sendProblem(res, 500, "INTERNAL", msg)
     }
   })
+  bindEventHub(server, eventHub)
+  server.on("close", () => { void sessions.dispose() })
+  return server
 }
 
 function handleSessionCmdError(res: ServerResponse, e: unknown) {
@@ -569,5 +577,3 @@ function handlePathError(res: ServerResponse, e: unknown) {
   const msg = e instanceof Error ? e.message : String(e)
   return sendProblem(res, 400, "INVALID_REQUEST", msg)
 }
-
-export { store as workspaceStoreForTests }

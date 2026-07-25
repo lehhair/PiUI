@@ -2,11 +2,12 @@ import type { Server as HttpServer, IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 import { WebSocketServer, WebSocket } from "ws"
 import type { EventEnvelopeV1 } from "@piui/protocol"
-import { eventHub } from "./event-hub.ts"
+import { getBoundEventHub } from "./event-hub.ts"
 import { requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
 
 export function attachEventWebSocket(server: HttpServer) {
   const wss = new WebSocketServer({ noServer: true })
+  const eventHub = getBoundEventHub(server)
   const authToken = process.env.PIUI_AUTH_TOKEN
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {

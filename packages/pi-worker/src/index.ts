@@ -1,8 +1,15 @@
 export * from "./types.js"
 export * from "./projection.js"
 export * from "./mock-runtime.js"
-// RealPiSession class is heavy — load via loadRealPiSession() when PIUI_DRIVER=pi
-export type { PiSessionInfo, RealPiSession } from "./real-session.js"
+export * from "./runtime-contract.js"
+export * from "./worker-protocol.js"
+export type {
+  PiCommandInfo,
+  PiRuntimeUiState,
+  PiSessionInfo,
+  PiSkillInfo,
+  RealPiSession,
+} from "./real-session.js"
 
 export type DriverMode = "mock" | "pi"
 
@@ -12,7 +19,6 @@ export function getDriverMode(env: NodeJS.ProcessEnv = process.env): DriverMode 
   return "mock"
 }
 
-export async function loadRealPiSession() {
-  const mod = await import("./real-session.js")
-  return mod.RealPiSession
+export function getPiWorkerEntryUrl(): URL {
+  return new URL("./worker-entry.js", import.meta.url)
 }

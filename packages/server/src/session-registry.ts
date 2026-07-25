@@ -4,12 +4,11 @@ import {
   applyWorkerEvent,
   createProjectionState,
   getDriverMode,
-  loadRealPiSession,
   runMockTurn,
   type DriverMode,
   type PiSessionInfo,
+  type PiSessionRuntime,
   type ProjectionState,
-  type RealPiSession,
 } from "@piui/pi-worker"
 import type { WorkspaceStore } from "./workspace-store.ts"
 
@@ -25,17 +24,17 @@ export interface AppSession {
   projection: ProjectionState
   driver: DriverMode
   sessionFile?: string
-  real?: RealPiSession
+  real?: PiSessionRuntime
 }
 
 export interface PiSessionBackend {
   listAll(): Promise<PiSessionInfo[]>
-  open(cwd: string, sessionFile?: string): Promise<RealPiSession>
+  open(cwd: string, sessionFile?: string): Promise<PiSessionRuntime>
 }
 
 export class SessionRegistry {
   private readonly byId = new Map<string, AppSession>()
-  private readonly attaching = new Map<string, Promise<RealPiSession>>()
+  private readonly attaching = new Map<string, Promise<PiSessionRuntime>>()
   private readonly hiddenIds = new Set<string>()
   private readonly driver: DriverMode
 
@@ -91,7 +90,7 @@ export class SessionRegistry {
     const now = new Date().toISOString()
     let projection = createProjectionState()
     let sequence = 0
-    let real: RealPiSession | undefined
+    let real: PiSessionRuntime | undefined
     let driverSessionId = `mock-${randomUUID().slice(0, 8)}`
 
     if (this.driver === "pi") {
@@ -290,7 +289,7 @@ export class SessionRegistry {
     return session
   }
 
-  private async openRealSession(session: AppSession): Promise<RealPiSession> {
+  private async openRealSession(session: AppSession): Promise<PiSessionRuntime> {
     if (this.driver !== "pi") {
       throw Object.assign(new Error("Pi runtime is not enabled"), { code: "DRIVER_UNAVAILABLE" })
     }
@@ -311,10 +310,10 @@ export class SessionRegistry {
 
   private async getBackend(): Promise<PiSessionBackend> {
     if (this.injectedBackend) return this.injectedBackend
-    const RealPiSession = await loadRealPiSession()
+    const { PiWorkerSession } = await import("./pi-worker-client.ts")
     return {
-      listAll: () => RealPiSession.listAll(),
-      open: (cwd, sessionFile) => RealPiSession.open(cwd, sessionFile),
+      listAll: () => PiWorkerSession.listAll(),
+      open: (cwd, sessionFile) => PiWorkerSession.open(cwd, sessionFile),
     }
   }
 
@@ -339,6 +338,16 @@ export class SessionRegistry {
       driver: "pi",
       sessionFile: info.path,
     })
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all([...this.byId.values()].map(async session => {
+      try {
+        await session.real?.dispose()
+      } catch {
+        /* best effort while the HTTP server is closing */
+      }
+    }))
   }
 
   snapshot(session: AppSession): SessionSnapshotV1 {

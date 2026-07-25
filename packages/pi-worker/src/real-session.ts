@@ -7,6 +7,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
@@ -21,6 +22,7 @@ import {
   type ProjectionState,
 } from "./projection.js"
 import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
+import type { PiModelInfo } from "./worker-protocol.js"
 
 export interface PiRuntimeUiState {
   thinkingLevel: string
@@ -131,6 +133,23 @@ export class RealPiSession {
 
   static async listAll(): Promise<PiSessionInfo[]> {
     return (await SessionManager.listAll()).map(sessionInfo)
+  }
+
+  static async listModels(): Promise<PiModelInfo[]> {
+    const runtime = await ModelRuntime.create({ allowModelNetwork: false })
+    return (await runtime.getAvailable()).map(model => {
+      const input = (model as { input?: string[] }).input
+      return {
+        id: model.id,
+        name: model.name || model.id,
+        providerId: model.provider,
+        family: (model as { family?: string }).family || "",
+        contextLimit: model.contextWindow ?? 0,
+        outputLimit: model.maxTokens ?? 0,
+        supportsReasoning: Boolean((model as { reasoning?: boolean }).reasoning),
+        supportsImages: Array.isArray(input) && input.includes("image"),
+      }
+    })
   }
 
   onState(listener: (s: PiRuntimeUiState) => void): () => void {
