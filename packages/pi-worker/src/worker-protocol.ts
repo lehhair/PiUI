@@ -28,7 +28,8 @@ export interface PiModelInfo {
   supportsImages: boolean
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 2 as const
+export const PI_WORKER_PROTOCOL_VERSION = 3 as const
+export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
   | "catalog.sessions"
@@ -48,6 +49,7 @@ export interface WorkerHello {
   piSdkVersion: string
   generation: string
   processId: number
+  heartbeatIntervalMs: number
   capabilities: PiWorkerCapability[]
 }
 
@@ -68,6 +70,7 @@ export type WorkerCommand =
 export interface WorkerRequest {
   kind: "request"
   id: string
+  generation: string
   command: WorkerCommand
 }
 
@@ -80,11 +83,17 @@ export type WorkerResult =
   | { type: "ok" }
 
 export type WorkerResponse =
-  | { kind: "response"; id: string; ok: true; result: WorkerResult }
-  | { kind: "response"; id: string; ok: false; error: { code: string; message: string } }
+  | { kind: "response"; id: string; generation: string; ok: true; result: WorkerResult }
+  | { kind: "response"; id: string; generation: string; ok: false; error: { code: string; message: string } }
 
 export type WorkerIpcEvent =
-  | { kind: "event"; type: "projection"; projection: ProjectionWire }
-  | { kind: "event"; type: "state"; state: PiRuntimeUiState }
+  | { kind: "event"; generation: string; type: "projection"; projection: ProjectionWire }
+  | { kind: "event"; generation: string; type: "state"; state: PiRuntimeUiState }
 
-export type WorkerMessage = WorkerHello | WorkerResponse | WorkerIpcEvent
+export interface WorkerHeartbeat {
+  kind: "heartbeat"
+  generation: string
+  timestamp: number
+}
+
+export type WorkerMessage = WorkerHello | WorkerResponse | WorkerIpcEvent | WorkerHeartbeat

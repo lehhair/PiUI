@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { after, describe, it } from "node:test"
 import { createAppServer } from "./http.ts"
-import { attachEventWebSocket } from "./ws.ts"
+import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
 import { WebSocket } from "ws"
 import { EventHub } from "./event-hub.ts"
 import { EVENT_WS_SUBPROTOCOL_V2, eventStreamKeyV2 } from "@piui/protocol"
@@ -215,5 +215,24 @@ describe("event websocket", () => {
       if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
       else process.env.PIUI_AUTH_TOKEN = previous
     }
+  })
+
+  it("terminates connected clients during event server shutdown", async () => {
+    const server = createAppServer()
+    const eventServer = attachEventWebSocket(server)
+    const { port, close } = await listen(server)
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve)
+      ws.once("error", reject)
+    })
+    const clientClosed = new Promise<void>(resolve => ws.once("close", () => resolve()))
+    const eventsClosed = new Promise<void>((resolve, reject) => {
+      closeEventWebSocket(eventServer, error => (error ? reject(error) : resolve()))
+    })
+
+    await Promise.all([clientClosed, eventsClosed])
+    assert.equal(eventServer.clients.size, 0)
+    await close()
   })
 })

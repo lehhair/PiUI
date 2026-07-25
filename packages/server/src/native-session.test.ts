@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
+import { applyWorkerEvent, createProjectionState, runMockTurn, type PiSessionRuntime } from "@piui/pi-worker"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { EventHub } from "./event-hub.ts"
@@ -90,6 +90,50 @@ describe("native Pi session discovery", () => {
     assert.equal(b.real, runtime)
   })
 
+  it("disposes a runtime that finishes opening after its session was deleted", async () => {
+    const projection = createProjectionState()
+    let disposals = 0
+    const runtime = {
+      getSessionId: () => "pi-delete-during-open",
+      getSessionFile: () => path.join(root, "delete-during-open.jsonl"),
+      getSessionName: () => undefined,
+      getProjection: () => projection,
+      dispose: async () => { disposals += 1 },
+    } as unknown as PiSessionRuntime
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-delete-during-open",
+        path: path.join(root, "delete-during-open.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => {
+        await gate
+        return runtime
+      },
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+    const attaching = registry.attach("pi-delete-during-open")
+    void attaching.catch(() => undefined)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const deleting = registry.delete("pi-delete-during-open")
+    release()
+
+    assert.equal(await deleting, true)
+    await assert.rejects(attaching, error => {
+      assert.equal((error as { code?: string }).code, "SESSION_NOT_FOUND")
+      return true
+    })
+    assert.equal(disposals, 1)
+    assert.equal(registry.get("pi-delete-during-open"), undefined)
+  })
+
   it("deduplicates concurrent and recent discovery scans", async () => {
     let scans = 0
     let release!: () => void
@@ -133,7 +177,7 @@ describe("native Pi session discovery", () => {
   })
 
   it("records worker generation and publishes runtime replacement and crash", async () => {
-    const projection = createProjectionState()
+    const projection = { ...createProjectionState(), isStreaming: true }
     let crash: ((error: Error) => void) | undefined
     const runtime = {
       getWorkerGeneration: () => "worker-generation-1",
@@ -188,6 +232,7 @@ describe("native Pi session discovery", () => {
     crash(new Error("worker stopped"))
     assert.equal(registry.snapshot(attached).session.state, "crashed")
     assert.equal(registry.snapshot(attached).runtime.runtimeError, "worker stopped")
+    assert.equal(registry.snapshot(attached).runtime.isStreaming, false)
     assert.equal(attached.real, undefined)
     assert.deepEqual(eventTypes, [
       "session.runtime.replaced",
@@ -195,5 +240,108 @@ describe("native Pi session discovery", () => {
       "session.runtime.crashed",
       "session.snapshot.updated",
     ])
+  })
+
+  it("rejects delayed callbacks from a crashed worker generation", async () => {
+    const initialProjection = createProjectionState()
+    let staleProjection = initialProjection
+    for (const event of runMockTurn({ userText: "stale", assistantText: "stale reply" })) {
+      staleProjection = applyWorkerEvent(staleProjection, event)
+    }
+    let crashFirst!: (error: Error) => void
+    let staleTick: ((projection: typeof staleProjection) => void) | undefined
+    let releasePrompt!: () => void
+    const promptGate = new Promise<void>(resolve => { releasePrompt = resolve })
+    let secondState!: () => void
+    const runtimeState = {
+      thinkingLevel: "off",
+      availableThinkingLevels: ["off"],
+      isStreaming: false,
+      isCompacting: false,
+      retryAttempt: 0,
+      queue: { steering: [], followUp: [] },
+      activeTools: [],
+    }
+    const common = {
+      getSessionId: () => "pi-generation-id",
+      getSessionFile: () => path.join(root, "generation.jsonl"),
+      getSessionName: () => "Generation session",
+      getRuntimeUiState: () => runtimeState,
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => null,
+      getEntries: () => [],
+      getTree: () => [],
+      dispose: async () => {},
+    }
+    const first = {
+      ...common,
+      getWorkerGeneration: () => "generation-1",
+      getProjection: () => initialProjection,
+      onState: () => () => {},
+      onCrash: (listener: (error: Error) => void) => {
+        crashFirst = listener
+        return () => {}
+      },
+      prompt: async (_text: string, onTick?: (projection: typeof staleProjection) => void) => {
+        staleTick = onTick
+        await promptGate
+      },
+    } as unknown as PiSessionRuntime
+    const second = {
+      ...common,
+      getWorkerGeneration: () => "generation-2",
+      getProjection: () => initialProjection,
+      onState: (listener: () => void) => {
+        listener()
+        secondState = listener
+        return () => {}
+      },
+      onCrash: () => () => {},
+    } as unknown as PiSessionRuntime
+    let opens = 0
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-generation-id",
+        path: path.join(root, "generation.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => (++opens === 1 ? first : second),
+    }
+    const runtimeCrashes: string[] = []
+    const registry = new SessionRegistry(
+      new WorkspaceStore(),
+      "pi",
+      backend,
+      new EventHub(),
+      (_sessionId, generation) => runtimeCrashes.push(generation ?? ""),
+    )
+    await registry.list()
+    const running = registry.prompt("pi-generation-id", "hello")
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    crashFirst(new Error("generation 1 crashed"))
+    const replacement = await registry.attach("pi-generation-id")
+    assert.equal(replacement.workerGeneration, "generation-2")
+    const replacementSequence = replacement.sequence
+    staleTick?.(staleProjection)
+    releasePrompt()
+    await assert.rejects(running, error => {
+      assert.equal((error as { code?: string }).code, "SESSION_RUNTIME_CRASHED")
+      return true
+    })
+    assert.equal(replacement.real, second)
+    assert.equal(replacement.sequence, replacementSequence)
+    assert.equal(replacement.projection.timeline.length, 0)
+    assert.deepEqual(runtimeCrashes, ["generation-1"])
+
+    secondState()
+    assert.equal(replacement.sequence, replacementSequence + 1)
   })
 })

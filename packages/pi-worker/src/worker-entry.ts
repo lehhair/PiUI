@@ -4,6 +4,7 @@ import { RealPiSession } from "./real-session.js"
 import type { PiSessionRuntime } from "./runtime-contract.js"
 import {
   PI_WORKER_PROTOCOL_VERSION,
+  PI_WORKER_HEARTBEAT_INTERVAL_MS,
   type PiWorkerCapability,
   type ProjectionWire,
   type WorkerCommand,
@@ -16,6 +17,10 @@ import {
 let runtime: PiSessionRuntime | undefined
 let unsubscribeState: (() => void) | undefined
 const workerGeneration = randomUUID()
+const heartbeatTimer = setInterval(() => {
+  send({ kind: "heartbeat", generation: workerGeneration, timestamp: Date.now() })
+}, PI_WORKER_HEARTBEAT_INTERVAL_MS)
+heartbeatTimer.unref()
 const workerCapabilities: PiWorkerCapability[] = [
   "catalog.sessions",
   "catalog.models",
@@ -67,14 +72,24 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
     case "open": {
       if (runtime) throw Object.assign(new Error("Pi runtime is already open"), { code: "RUNTIME_ALREADY_OPEN" })
       runtime = await RealPiSession.open(command.cwd, command.sessionFile)
-      unsubscribeState = runtime.onState(state => send({ kind: "event", type: "state", state }))
+      unsubscribeState = runtime.onState(state => send({
+        kind: "event",
+        generation: workerGeneration,
+        type: "state",
+        state,
+      }))
       return { type: "session", session: sessionWire() }
     }
     case "prompt": {
       const current = requireRuntime()
       await current.prompt(
         command.text,
-        projection => send({ kind: "event", type: "projection", projection: projectionWire(projection) }),
+        projection => send({
+          kind: "event",
+          generation: workerGeneration,
+          type: "projection",
+          projection: projectionWire(projection),
+        }),
         { deliverAs: command.deliverAs },
       )
       return { type: "session", session: sessionWire() }
@@ -96,6 +111,7 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
     case "listCommands":
       return { type: "commands", commands: await requireRuntime().listCommands() }
     case "dispose":
+      clearInterval(heartbeatTimer)
       unsubscribeState?.()
       unsubscribeState = undefined
       await runtime?.dispose()
@@ -107,15 +123,26 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
 process.on("message", (value: unknown) => {
   const request = value as WorkerRequest
   if (!request || request.kind !== "request" || typeof request.id !== "string") return
+  if (request.generation !== workerGeneration) {
+    send({
+      kind: "response",
+      id: request.id,
+      generation: workerGeneration,
+      ok: false,
+      error: { code: "WORKER_GENERATION_MISMATCH", message: "Pi worker generation mismatch" },
+    })
+    return
+  }
   void execute(request.command).then(
     result => {
-      send({ kind: "response", id: request.id, ok: true, result })
+      send({ kind: "response", id: request.id, generation: workerGeneration, ok: true, result })
       if (request.command.type === "dispose") setImmediate(() => process.exit(0))
     },
     error => {
       send({
         kind: "response",
         id: request.id,
+        generation: workerGeneration,
         ok: false,
         error: {
           code: error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL",
@@ -132,9 +159,11 @@ send({
   piSdkVersion: PI_PARITY_SDK_VERSION,
   generation: workerGeneration,
   processId: process.pid,
+  heartbeatIntervalMs: PI_WORKER_HEARTBEAT_INTERVAL_MS,
   capabilities: workerCapabilities,
 })
 
 process.on("disconnect", () => {
+  clearInterval(heartbeatTimer)
   void (runtime?.dispose() ?? Promise.resolve()).finally(() => process.exit(0))
 })

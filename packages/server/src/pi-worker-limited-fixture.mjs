@@ -1,14 +1,22 @@
+const generation = "limited-generation"
+const heartbeatIntervalMs = 20
+const heartbeatTimer = setInterval(() => {
+  process.send?.({ kind: "heartbeat", generation, timestamp: Date.now() })
+}, heartbeatIntervalMs)
+
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 2,
+  workerProtocolVersion: 3,
   piSdkVersion: "0.81.1",
-  generation: "limited-generation",
+  generation,
   processId: process.pid,
+  heartbeatIntervalMs,
   capabilities: [],
 })
 
 process.on("message", request => {
   if (request.command?.type !== "dispose") return
-  process.send?.({ kind: "response", id: request.id, ok: true, result: { type: "ok" } })
+  process.send?.({ kind: "response", id: request.id, generation, ok: true, result: { type: "ok" } })
+  clearInterval(heartbeatTimer)
   setImmediate(() => process.exit(0))
 })

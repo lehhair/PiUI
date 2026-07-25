@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
+import { createConnection } from "node:net"
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -175,5 +176,60 @@ describe("http phase1", () => {
     } finally {
       await close()
     }
+  })
+
+  it("waits for backend cleanup before close completes", async () => {
+    let release!: () => void
+    const cleanup = new Promise<void>(resolve => { release = resolve })
+    let closed = false
+    const server = createAppServer({
+      driver: "pi",
+      piBackend: {
+        listAll: async () => [],
+        open: async () => { throw new Error("not used") },
+        dispose: async () => cleanup,
+      },
+    })
+    await listen(server)
+    const closing = new Promise<void>((resolve, reject) => {
+      server.close(error => {
+        closed = true
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(closed, false)
+    release()
+    await closing
+    assert.equal(closed, true)
+  })
+
+  it("starts backend cleanup while an HTTP request is still open", async () => {
+    let disposed = false
+    const server = createAppServer({
+      driver: "pi",
+      piBackend: {
+        listAll: async () => [],
+        open: async () => { throw new Error("not used") },
+        dispose: async () => { disposed = true },
+      },
+    })
+    const { port } = await listen(server)
+    const socket = createConnection({ host: "127.0.0.1", port })
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve)
+      socket.once("error", reject)
+    })
+    socket.write("POST /api/v1/workspaces HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\n{")
+
+    const closing = new Promise<void>((resolve, reject) => {
+      server.close(error => (error ? reject(error) : resolve()))
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(disposed, true)
+
+    socket.destroy()
+    await closing
   })
 })

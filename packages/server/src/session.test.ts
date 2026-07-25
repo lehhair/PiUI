@@ -4,8 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
+import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
 import { createAppServer } from "./http.ts"
 import { EventHub } from "./event-hub.ts"
+import type { PiSessionBackend } from "./session-registry.ts"
 
 async function listen(server: ReturnType<typeof createServer>) {
   await new Promise<void>((resolve, reject) => {
@@ -196,6 +198,82 @@ describe("session mock snapshot (no LLM)", () => {
       const command = await json(port, "GET", "/api/v1/commands/prompt-once")
       assert.equal(command.status, 200)
       assert.equal(command.data.command.status, "completed")
+    } finally {
+      await close()
+    }
+  })
+
+  it("marks a crashed prompt unknown and does not replay it", async () => {
+    const projection = createProjectionState()
+    let crash: ((error: Error) => void) | undefined
+    let opens = 0
+    const runtimeState = {
+      thinkingLevel: "off",
+      availableThinkingLevels: ["off"],
+      isStreaming: false,
+      isCompacting: false,
+      isIdle: true,
+      queue: { steering: [], followUp: [] },
+      retryAttempt: 0,
+      activeTools: [],
+      supportsThinking: false,
+    }
+    const runtime = {
+      getWorkerGeneration: () => "crash-generation",
+      onCrash: (listener: (error: Error) => void) => {
+        crash = listener
+        return () => { crash = undefined }
+      },
+      onState: (listener: (state: typeof runtimeState) => void) => {
+        listener(runtimeState)
+        return () => {}
+      },
+      getProjection: () => projection,
+      getSessionId: () => "crash-session",
+      getSessionFile: () => path.join(root, "crash-session.jsonl"),
+      getSessionName: () => "Crash session",
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => null,
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getRuntimeUiState: () => runtimeState,
+      prompt: async () => {
+        crash?.(new Error("fixture worker crashed"))
+        throw new Error("worker exited")
+      },
+      dispose: async () => {},
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "crash-session",
+        path: path.join(root, "crash-session.jsonl"),
+        cwd: root,
+        name: "Crash session",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => {
+        opens += 1
+        return runtime
+      },
+    }
+    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const { port, close } = await listen(server)
+    try {
+      const prompted = await json(port, "POST", "/api/v1/sessions/crash-session/commands/prompt", {
+        text: "do not replay",
+        commandId: "crash-command",
+      })
+      assert.equal(prompted.status, 503)
+      assert.equal(prompted.data.code, "SESSION_RUNTIME_CRASHED")
+      const command = await json(port, "GET", "/api/v1/commands/crash-command")
+      assert.equal(command.data.command.status, "unknown_after_crash")
+      assert.equal(opens, 1)
     } finally {
       await close()
     }

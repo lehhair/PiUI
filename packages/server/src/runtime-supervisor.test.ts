@@ -1,0 +1,226 @@
+import assert from "node:assert/strict"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { afterEach, describe, it } from "node:test"
+import { RuntimeSupervisor } from "./runtime-supervisor.ts"
+import { SessionLeaseManager } from "./session-lease.ts"
+
+const fixture = new URL("./pi-worker-fixture.mjs", import.meta.url)
+const crashingCatalogFixture = new URL("./pi-worker-catalog-crash-fixture.mjs", import.meta.url)
+
+describe("RuntimeSupervisor", () => {
+  const roots: string[] = []
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+
+  it("holds the single-writer lease for the worker lifecycle", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-test-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sessionFile = path.join(root, "session.jsonl")
+    const first = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    const second = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    try {
+      const runtime = await first.open(root, sessionFile)
+      await assert.rejects(second.open(root, sessionFile), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      await runtime.dispose()
+      const replacement = await second.open(root, sessionFile)
+      await replacement.dispose()
+    } finally {
+      await first.dispose()
+      await second.dispose()
+    }
+  })
+
+  it("releases the lease after a worker crash without replaying the prompt", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-crash-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sessionFile = path.join(root, "session.jsonl")
+    const first = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    const second = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    try {
+      const runtime = await first.open(root, sessionFile)
+      const closed = new Promise<void>(resolve => runtime.onClose(resolve))
+      await assert.rejects(runtime.prompt("crash"), /exited unexpectedly/)
+      await closed
+      const replacement = await second.open(root, sessionFile)
+      assert.equal(replacement.getProjection().timeline.length, 0)
+      await replacement.dispose()
+    } finally {
+      await first.dispose()
+      await second.dispose()
+    }
+  })
+
+  it("keeps the lease until an unhealthy worker process really closes", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-heartbeat-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sessionFile = path.join(root, "session.jsonl")
+    const first = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 60 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    const second = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    try {
+      const runtime = await first.open(root, sessionFile)
+      let duringCrash: Promise<unknown> | undefined
+      runtime.onCrash?.(() => {
+        duringCrash = second.open(root, sessionFile)
+        void duringCrash.catch(() => undefined)
+      })
+      const closed = new Promise<void>(resolve => runtime.onClose(resolve))
+      await assert.rejects(runtime.prompt("hang"), /heartbeat timeout/i)
+      assert.ok(duringCrash)
+      await assert.rejects(duringCrash, error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      await closed
+      const replacement = await second.open(root, sessionFile)
+      await replacement.dispose()
+    } finally {
+      await first.dispose()
+      await second.dispose()
+    }
+  })
+
+  it("cancels a worker that is still opening during supervisor disposal", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-opening-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sessionFile = path.join(root, "session.jsonl")
+    const first = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    const opening = first.open(`${root}/hang-open`, sessionFile)
+    void opening.catch(() => undefined)
+    await new Promise<void>(resolve => setTimeout(resolve, 30))
+    await first.dispose()
+    await assert.rejects(opening)
+
+    const second = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(lockRoot),
+    })
+    try {
+      const replacement = await second.open(root, sessionFile)
+      await replacement.dispose()
+    } finally {
+      await second.dispose()
+    }
+  })
+
+  it("does not create another standby while a lease acquisition is being disposed", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-lease-wait-"))
+    roots.push(root)
+    let continueAcquire!: () => void
+    let acquireStarted!: () => void
+    let leaseReleased = false
+    const acquireGate = new Promise<void>(resolve => { continueAcquire = resolve })
+    const started = new Promise<void>(resolve => { acquireStarted = resolve })
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: {
+        acquire: async sessionFile => {
+          acquireStarted()
+          await acquireGate
+          return { key: sessionFile, refresh: async () => undefined, release: () => { leaseReleased = true } }
+        },
+        dispose: () => undefined,
+      },
+    })
+    const opening = supervisor.open(root, path.join(root, "session.jsonl"))
+    void opening.catch(() => undefined)
+    await started
+    let disposed = false
+    const disposing = supervisor.dispose().then(() => { disposed = true })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(disposed, false)
+    continueAcquire()
+
+    await disposing
+    await assert.rejects(opening, /disposed/i)
+    assert.equal(leaseReleased, true)
+  })
+
+  it("waits for post-open lease refresh before disposal completes", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-refresh-wait-"))
+    roots.push(root)
+    let continueRefresh!: () => void
+    let refreshStarted!: () => void
+    const refreshGate = new Promise<void>(resolve => { continueRefresh = resolve })
+    const started = new Promise<void>(resolve => { refreshStarted = resolve })
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: {
+        acquire: async sessionFile => ({
+          key: sessionFile,
+          refresh: async () => {
+            refreshStarted()
+            await refreshGate
+          },
+          release: () => undefined,
+        }),
+        dispose: () => undefined,
+      },
+    })
+    const opening = supervisor.open(root, path.join(root, "session.jsonl"))
+    void opening.catch(() => undefined)
+    await started
+    let disposed = false
+    const disposing = supervisor.dispose().then(() => { disposed = true })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(disposed, false)
+    continueRefresh()
+
+    await disposing
+    await assert.rejects(opening, /disposed/i)
+  })
+
+  it("replaces a crashed catalog worker for later discovery", async () => {
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: crashingCatalogFixture,
+      worker: { heartbeatTimeoutMs: 500 },
+    })
+    try {
+      assert.equal((await supervisor.listAll())[0]?.id, "catalog-fixture")
+      await new Promise(resolve => setTimeout(resolve, 50))
+      assert.equal((await supervisor.listAll())[0]?.id, "catalog-fixture")
+    } finally {
+      await supervisor.dispose()
+    }
+  })
+})

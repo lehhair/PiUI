@@ -26,11 +26,17 @@ interface PendingRequest {
   reject: (error: Error) => void
 }
 
+export interface PiWorkerClientOptions {
+  handshakeTimeoutMs?: number
+  heartbeatTimeoutMs?: number
+}
+
 export interface PiWorkerCatalog {
   getHandshake(): Promise<WorkerHello>
   list(cwd: string): Promise<PiSessionInfo[]>
   listAll(): Promise<PiSessionInfo[]>
   listModels(): Promise<PiModelInfo[]>
+  onCrash(listener: (error: Error) => void): () => void
   dispose(): Promise<void>
 }
 
@@ -44,41 +50,64 @@ export class PiWorkerSession implements PiSessionRuntime {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly stateListeners = new Set<(state: PiRuntimeUiState) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
+  private readonly closeListeners = new Set<() => void>()
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
   private projection: ProjectionState = restoreProjection([])
   private projectionListener?: (projection: ProjectionState) => void
   private disposed = false
+  private disposing = false
+  private disposePromise?: Promise<void>
   private readonly ready: Promise<WorkerHello>
+  private readonly closed: Promise<void>
   private resolveReady!: (hello: WorkerHello) => void
   private rejectReady!: (error: Error) => void
+  private resolveClosed!: () => void
   private readySettled = false
   private exitHandled = false
   private workerHello?: WorkerHello
   private readonly readyTimer: NodeJS.Timeout
+  private heartbeatTimer?: NodeJS.Timeout
+  private exitError?: Error
+  private closeNotified = false
 
-  private constructor(child: ChildProcess) {
+  private constructor(
+    child: ChildProcess,
+    private readonly options: PiWorkerClientOptions = {},
+  ) {
     this.child = child
     this.ready = new Promise<WorkerHello>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
     })
+    this.closed = new Promise<void>(resolve => {
+      this.resolveClosed = resolve
+    })
     this.readyTimer = setTimeout(() => {
       this.rejectHandshake(new Error("Pi worker handshake timeout"))
       this.terminate()
-    }, 15_000)
+    }, options.handshakeTimeoutMs ?? 15_000)
     this.readyTimer.unref()
     child.on("message", message => this.handleMessage(message as WorkerMessage))
     child.on("error", error => this.handleExit(error))
     child.on("exit", (code, signal) => {
-      if (this.disposed) return
       this.handleExit(new Error(`Pi worker exited unexpectedly (${signal ?? code ?? "unknown"})`))
+      this.notifyClose()
+    })
+    child.on("close", (code, signal) => {
+      this.handleExit(new Error(`Pi worker closed unexpectedly (${signal ?? code ?? "unknown"})`))
+      this.notifyClose()
     })
   }
 
-  static async open(cwd: string, sessionFile?: string, workerEntry = getPiWorkerEntryUrl()): Promise<PiWorkerSession> {
-    return PiWorkerSession.createHost(workerEntry).open(cwd, sessionFile)
+  static async open(
+    cwd: string,
+    sessionFile?: string,
+    workerEntry = getPiWorkerEntryUrl(),
+    options?: PiWorkerClientOptions,
+  ): Promise<PiWorkerSession> {
+    return PiWorkerSession.createHost(workerEntry, options).open(cwd, sessionFile)
   }
 
   static async listAll(workerEntry = getPiWorkerEntryUrl()): Promise<PiSessionInfo[]> {
@@ -99,19 +128,20 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
   }
 
-  static createCatalog(workerEntry = getPiWorkerEntryUrl()): PiWorkerCatalog {
-    const client = new PiWorkerSession(spawnWorker(workerEntry))
+  static createCatalog(workerEntry = getPiWorkerEntryUrl(), options?: PiWorkerClientOptions): PiWorkerCatalog {
+    const client = new PiWorkerSession(spawnWorker(workerEntry), options)
     return {
       getHandshake: () => client.getWorkerHandshake(),
       list: cwd => client.listCatalogSessions({ type: "list", cwd }),
       listAll: () => client.listCatalogSessions({ type: "listAll" }),
       listModels: () => client.listCatalogModels(),
+      onCrash: listener => client.onCrash(listener),
       dispose: () => client.dispose(),
     }
   }
 
-  static createHost(workerEntry = getPiWorkerEntryUrl()): PiWorkerHost {
-    const client = new PiWorkerSession(spawnWorker(workerEntry))
+  static createHost(workerEntry = getPiWorkerEntryUrl(), options?: PiWorkerClientOptions): PiWorkerHost {
+    const client = new PiWorkerSession(spawnWorker(workerEntry), options)
     let opened = false
     return {
       getHandshake: () => client.getWorkerHandshake(),
@@ -141,7 +171,19 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   onCrash(listener: (error: Error) => void): () => void {
     this.crashListeners.add(listener)
+    if (this.exitError && !this.disposed && !this.disposing) {
+      const error = this.exitError
+      queueMicrotask(() => {
+        if (this.crashListeners.has(listener)) listener(error)
+      })
+    }
     return () => this.crashListeners.delete(listener)
+  }
+
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener)
+    if (this.closeNotified) queueMicrotask(listener)
+    return () => this.closeListeners.delete(listener)
   }
 
   private async listCatalogSessions(
@@ -220,8 +262,14 @@ export class PiWorkerSession implements PiSessionRuntime {
     return result.commands
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return
+  dispose(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    this.disposePromise ??= this.performDispose()
+    return this.disposePromise
+  }
+
+  private async performDispose(): Promise<void> {
+    this.disposing = true
     let timer: NodeJS.Timeout | undefined
     try {
       await Promise.race([
@@ -236,13 +284,18 @@ export class PiWorkerSession implements PiSessionRuntime {
     } finally {
       if (timer) clearTimeout(timer)
       this.disposed = true
+      if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer)
       this.terminate()
+      await this.closed
+      this.disposing = false
     }
   }
 
   private async request(command: WorkerCommand): Promise<WorkerResult> {
     const hello = await this.ready
-    if (this.disposed || !this.child.connected) return Promise.reject(new Error("Pi worker is not connected"))
+    if (this.disposed || (this.disposing && command.type !== "dispose") || !this.child.connected) {
+      return Promise.reject(new Error("Pi worker is not connected"))
+    }
     const requiredCapability = workerCapabilityFor(command)
     if (requiredCapability && !hello.capabilities.includes(requiredCapability)) {
       throw Object.assign(new Error(`Pi worker does not support ${requiredCapability}`), {
@@ -252,7 +305,7 @@ export class PiWorkerSession implements PiSessionRuntime {
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      this.child.send({ kind: "request", id, command }, error => {
+      this.child.send({ kind: "request", id, generation: hello.generation, command }, error => {
         if (!error) return
         this.pending.delete(id)
         reject(error)
@@ -262,6 +315,7 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   private handleMessage(message: WorkerMessage): void {
     if (message.kind === "hello") {
+      if (this.workerHello) return
       if (message.workerProtocolVersion !== PI_WORKER_PROTOCOL_VERSION) {
         this.rejectHandshake(
           Object.assign(
@@ -284,12 +338,23 @@ export class PiWorkerSession implements PiSessionRuntime {
         this.terminate()
         return
       }
+      if (!Number.isFinite(message.heartbeatIntervalMs) || message.heartbeatIntervalMs <= 0) {
+        this.rejectHandshake(Object.assign(new Error("Pi worker heartbeat interval is invalid"), {
+          code: "WORKER_PROTOCOL_MISMATCH",
+        }))
+        this.terminate()
+        return
+      }
       this.readySettled = true
       clearTimeout(this.readyTimer)
       this.workerHello = message
+      this.armHeartbeat(message.heartbeatIntervalMs)
       this.resolveReady(message)
       return
     }
+    if (!this.workerHello || message.generation !== this.workerHello.generation) return
+    this.armHeartbeat(this.workerHello.heartbeatIntervalMs)
+    if (message.kind === "heartbeat") return
     if (message.kind === "response") {
       const pending = this.pending.get(message.id)
       if (!pending) return
@@ -316,12 +381,32 @@ export class PiWorkerSession implements PiSessionRuntime {
   private handleExit(error: Error): void {
     if (this.exitHandled) return
     this.exitHandled = true
+    this.exitError = error
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer)
     this.rejectHandshake(error)
     for (const pending of this.pending.values()) pending.reject(error)
     this.pending.clear()
-    if (!this.disposed) {
+    if (!this.disposed && !this.disposing) {
       for (const listener of this.crashListeners) listener(error)
     }
+  }
+
+  private notifyClose(): void {
+    if (this.closeNotified) return
+    this.closeNotified = true
+    for (const listener of this.closeListeners) listener()
+    this.resolveClosed()
+  }
+
+  private armHeartbeat(workerIntervalMs: number): void {
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer)
+    const timeoutMs = this.options.heartbeatTimeoutMs ?? workerIntervalMs * 3
+    this.heartbeatTimer = setTimeout(() => {
+      const error = Object.assign(new Error("Pi worker heartbeat timeout"), { code: "WORKER_HEARTBEAT_TIMEOUT" })
+      this.handleExit(error)
+      this.terminate()
+    }, timeoutMs)
+    this.heartbeatTimer.unref()
   }
 
   private rejectHandshake(error: Error): void {
