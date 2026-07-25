@@ -11,8 +11,7 @@ import { RetryIcon, ChevronRightIcon, MaximizeIcon, ClockIcon, GitBranchIcon, Gi
 import { getMaterialIconUrl } from '../utils/materialIcons'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { ViewModeSwitch } from './FullscreenViewer'
-import { getCurrentProject, initGitProject } from '../api/client'
-import { getLastTurnDiff, getSessionDiff } from '../api/session'
+import { getCurrentProject } from '../api/client'
 import { getVcsDiff, getVcsInfo } from '../api/vcs'
 import type { ApiProject, FileDiff, VcsDiffMode, VcsInfo } from '../api/types'
 import { detectLanguage } from '../utils/languageUtils'
@@ -88,7 +87,6 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const [project, setProject] = useState<ApiProject | null>(null)
   const [vcsInfo, setVcsInfo] = useState<VcsInfo | null>(null)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [initializingGit, setInitializingGit] = useState(false)
   const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, session: false, turn: false })
   const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, session: false, turn: false })
   const [gitDiffs, setGitDiffs] = useState<FileDiff[]>([])
@@ -129,13 +127,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   )
   const changeOptions = useMemo<ChangeMode[]>(() => {
     const options: ChangeMode[] = []
-    if (project?.vcs) options.push('turn', 'git')
-    if (project?.vcs && vcsInfo?.branch && vcsInfo?.default_branch && vcsInfo.branch !== vcsInfo.default_branch) {
+    if (project?.vcs) options.push('git')
+    if (project?.vcs && vcsInfo?.branch) {
       options.push('branch')
     }
-    if (project?.vcs) options.push('session')
     return options
-  }, [project?.vcs, vcsInfo?.branch, vcsInfo?.default_branch])
+  }, [project?.vcs, vcsInfo?.branch])
   const preferredChangeMode = useMemo(() => getDefaultChangeMode(changeOptions), [changeOptions])
   const changeModeMeta = useMemo(
     () => ({
@@ -173,7 +170,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             : turnDiffs,
     [branchDiffs, changeMode, gitDiffs, sessionDiffs, turnDiffs],
   )
-  const loading = projectLoading || initializingGit || loadingModes[changeMode]
+  const loading = projectLoading || loadingModes[changeMode]
 
   const focusChangeMenuOption = useCallback((mode: ChangeMode) => {
     changeMenuOptionRefs.current[mode]?.focus()
@@ -354,6 +351,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     async (mode: ChangeMode, options?: { force?: boolean; project?: ApiProject | null }) => {
       const currentProject = options?.project ?? project
       if (!sessionId || !currentProject?.vcs) return
+      if (mode !== 'git' && mode !== 'branch') return
       if (!options?.force && loadedModes[mode]) return
 
       const requestId = ++diffRequestIdRef.current[mode]
@@ -362,13 +360,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
       try {
         let data: FileDiff[]
-        if (mode === 'git' || mode === 'branch') {
-          data = await getVcsDiff(mode as VcsDiffMode, directory)
-        } else if (mode === 'session') {
-          data = await getSessionDiff(sessionId, directory)
-        } else {
-          data = await getLastTurnDiff(sessionId, directory)
-        }
+        data = await getVcsDiff(mode as VcsDiffMode, directory)
 
         if (requestId !== diffRequestIdRef.current[mode]) return
 
@@ -457,30 +449,6 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   // 自动刷新：session idle / 窗口聚焦 / SSE 重连
   useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId)
-
-  const handleInitGit = useCallback(async () => {
-    setInitializingGit(true)
-    setError(null)
-
-    try {
-      const nextProject = await initGitProject(directory)
-      setProject(nextProject)
-      setVcsInfo(null)
-      setGitDiffs([])
-      setBranchDiffs([])
-      setSessionDiffs([])
-      setTurnDiffs([])
-      setLoadedModes({ git: false, branch: false, session: false, turn: false })
-      setLoadingModes({ git: false, branch: false, session: false, turn: false })
-      setChangeMenuOpen(false)
-      void loadProjectState()
-    } catch (err) {
-      sessionErrorHandler('init git project', err)
-      setError(t('sessionChanges.failedToInitGit'))
-    } finally {
-      setInitializingGit(false)
-    }
-  }, [directory, loadProjectState, t])
 
   // 选中文件
   const handleSelectFile = useCallback((file: string) => {
@@ -602,18 +570,11 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   if (!project?.vcs) {
     return (
       <div className="h-full flex items-center justify-center p-4">
-        <div className="max-w-xs text-center space-y-3">
+        <div className="max-w-xs text-center space-y-1">
           <div className="space-y-1">
             <div className="text-[length:var(--fs-base)] font-medium text-text-200">{t('sessionChanges.noGit')}</div>
             <div className="text-[length:var(--fs-sm)] text-text-400">{t('sessionChanges.noGitHint')}</div>
           </div>
-          <button
-            onClick={handleInitGit}
-            disabled={initializingGit}
-            className="inline-flex items-center justify-center rounded px-3 py-1.5 text-[length:var(--fs-sm)] font-medium bg-accent-main-100 text-white hover:bg-accent-main-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {initializingGit ? t('sessionChanges.initializingGit') : t('sessionChanges.initGit')}
-          </button>
           {error && <div className="text-[length:var(--fs-sm)] text-danger-100">{error}</div>}
         </div>
       </div>

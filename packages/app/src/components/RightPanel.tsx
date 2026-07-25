@@ -8,6 +8,7 @@ import { ResizablePanel } from './ui/ResizablePanel'
 import { logger } from '../utils/logger'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
+import { usePiCapabilities } from '../pi/capabilities'
 
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({ default: module.SessionChangesPanel })),
@@ -38,6 +39,7 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
+  const ptyEnabled = usePiCapabilities().pty
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
 
   // 追踪面板 resize 状态
@@ -56,17 +58,19 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
   // 关闭终端时清理 PTY 会话
   const handleCloseTerminal = useCallback(
     async (ptyId: string) => {
+      if (!ptyEnabled) return
       try {
         await removePtySession(ptyId, normalizedDirectory)
       } catch {
         // ignore cleanup errors
       }
     },
-    [normalizedDirectory],
+    [normalizedDirectory, ptyEnabled],
   )
 
   // 创建新终端
   const handleNewTerminal = useCallback(async () => {
+    if (!ptyEnabled) return
     try {
       logger.log('[RightPanel] Creating PTY session, directory:', normalizedDirectory)
       const pty = await createPtySession({ cwd: normalizedDirectory }, normalizedDirectory)
@@ -80,7 +84,7 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
     } catch (error) {
       uiErrorHandler('create terminal', error)
     }
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, ptyEnabled])
 
   // 渲染内容
   const renderContent = useCallback(
@@ -124,7 +128,7 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
             </div>
           ) : null}
 
-          {activeTab.type === 'terminal' ? (
+          {ptyEnabled && activeTab.type === 'terminal' ? (
             <Suspense fallback={<PanelFallback />}>
               <TerminalContent activeTab={activeTab} directory={normalizedDirectory} />
             </Suspense>
@@ -150,7 +154,7 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, t],
+    [normalizedDirectory, sessionId, isPanelResizing, ptyEnabled, t],
   )
 
   if (inline) {
@@ -160,8 +164,8 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
           <PanelContainer
             position="right"
             directory={normalizedDirectory}
-            onNewTerminal={handleNewTerminal}
-            onCloseTerminal={handleCloseTerminal}
+            onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
+            onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
             forceOpen
           >
             {renderContent}
@@ -185,8 +189,8 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
       <PanelContainer
         position="right"
         directory={normalizedDirectory}
-        onNewTerminal={handleNewTerminal}
-        onCloseTerminal={handleCloseTerminal}
+        onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
+        onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
       >
         {renderContent}
       </PanelContainer>

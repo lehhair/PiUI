@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { listDirectory, getFileContent, getFileStatus, getSessionDiff, getLastTurnDiff, getVcsDiff } from '../api'
+import { listDirectory, getFileContent, getFileStatus, getVcsDiff } from '../api'
 import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
@@ -131,12 +131,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
           statusMap.set(normalized, { ...item, path: normalized })
         })
       } else {
-        const diffs =
-          changeMode === 'git' || changeMode === 'branch'
-            ? await getVcsDiff(changeMode, directory)
-            : changeMode === 'turn'
-              ? await getLastTurnDiff(sessionId, directory)
-              : await getSessionDiff(sessionId, directory)
+        const diffs = await getVcsDiff(changeMode === 'branch' ? 'branch' : 'git', directory)
 
         if (loadId !== statusLoadIdRef.current) return
 

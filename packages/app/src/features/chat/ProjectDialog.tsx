@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, ArrowUpIcon, SpinnerIcon, PlusIcon } from '../../components/Icons'
-import { listDirectory, getPath } from '../../api'
+import { listDirectory } from '../../api'
 import { fileErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
@@ -42,6 +42,7 @@ function normalizePath(p: string): string {
 
 function getDirectoryPath(path: string): string {
   const normalized = normalizePath(path)
+  if (!normalized) return ''
   if (normalized.endsWith(PATH_SEP)) return normalized
   const lastSep = normalized.lastIndexOf(PATH_SEP)
   if (lastSep < 0) return '.' + PATH_SEP
@@ -100,19 +101,11 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '' }: P
 
       const initPath = async () => {
         let path = initialPath
-        if (!path) {
-          try {
-            const p = await getPath()
-            path = p.home
-          } catch {
-            /* ignore */
-          }
-        }
 
         if (cancelled) return
 
         path = normalizePath(path)
-        if (!path.endsWith(PATH_SEP)) path += PATH_SEP
+        if (path && !path.endsWith(PATH_SEP)) path += PATH_SEP
         setInputValue(path)
         setSelectedIndex(0)
         pendingSelectionRef.current = null

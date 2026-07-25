@@ -14,8 +14,8 @@ class ChangeScopeStore {
   }
 
   getMode(sessionId: string | null): ChangeScopeMode {
-    if (!sessionId) return 'turn'
-    return this.modes.get(sessionId) ?? 'turn'
+    if (!sessionId) return 'git'
+    return this.modes.get(sessionId) ?? 'git'
   }
 
   setMode(sessionId: string | null, mode: ChangeScopeMode) {

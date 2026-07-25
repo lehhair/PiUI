@@ -3,11 +3,9 @@
 // ============================================
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { getPath, type ApiPath } from '../api'
 import { useRouter } from '../hooks/useRouter'
-import { handleError, normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStorage } from '../utils'
+import { normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStorage } from '../utils'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
-import { serverStore } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 
@@ -58,25 +56,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   const [recentProjects, setRecentProjects] = useState<RecentProjects>(readRecentProjects)
 
-  const [pathInfo, setPathInfo] = useState<ApiPath | null>(null)
-
-  // 服务器 ID 切换时切换 per-server 目录；local runtime URL 变化时只刷新 path info。
-  useEffect(() => {
-    return serverStore.onServerChange((_, reason) => {
-      if (reason === 'server-switch') {
-        setSavedDirectories(readSavedDirectories())
-        setRecentProjects(readRecentProjects())
-        setUrlDirectory(undefined)
-      }
-      setPathInfo(null)
-      getPath().then(setPathInfo).catch(handleError('get path info', 'api'))
-    })
-  }, [setUrlDirectory])
-
-  // 加载路径信息
-  useEffect(() => {
-    getPath().then(setPathInfo).catch(handleError('get path info', 'api'))
-  }, [])
+  const pathInfo = null
 
   // 保存 savedDirectories 到 per-server storage
   useEffect(() => {
