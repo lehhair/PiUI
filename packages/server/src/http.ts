@@ -20,10 +20,11 @@ import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
 import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
 
-function sessionSummary(s: AppSession) {
+function sessionSummary(s: AppSession, store: WorkspaceStore) {
   return {
     id: s.id,
     workspaceId: s.workspaceId,
+    directory: store.get(s.workspaceId)?.canonicalRoot,
     title: s.title,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -111,7 +112,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       type: "session.updated",
       sessionId: session.id,
       workspaceId: session.workspaceId,
-      payload: sessionSummary(session),
+      payload: sessionSummary(session, store),
     })
   }
   let defaultWorkspaceId: string | null = null
@@ -215,7 +216,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const list = (await sessions.list(workspaceId))
           .slice()
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-          .map(sessionSummary)
+          .map(session => sessionSummary(session, store))
         return sendJson(res, 200, { sessions: list })
       }
 
@@ -235,7 +236,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           })
           publishSessionUpdated(s)
           return sendJson(res, 201, {
-            session: sessionSummary(s),
+            session: sessionSummary(s, store),
             snapshot: sessions.snapshot(s),
             driver: sessions.getDriver(),
           })

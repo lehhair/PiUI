@@ -93,7 +93,10 @@ export async function listPiSessions(workspaceId?: string): Promise<PiSessionSum
   const res = await fetch(`${getApiBase()}/api/v1/sessions${query}`)
   if (!res.ok) throw new Error(`listPiSessions ${res.status}`)
   const data = (await res.json()) as { sessions: PiSessionSummary[] }
-  for (const s of data.sessions) trackPiSession(s.id, s.workspaceId)
+  for (const s of data.sessions) {
+    trackPiSession(s.id, s.workspaceId)
+    if (s.directory) cacheWorkspace(s.directory, s.workspaceId)
+  }
   return data.sessions
 }
 
@@ -114,6 +117,7 @@ export async function createPiSession(opts?: {
   if (!res.ok) throw new Error(`createPiSession ${res.status}`)
   const data = (await res.json()) as { session: PiSessionSummary; snapshot: SessionSnapshotV1 }
   trackPiSession(data.session.id, data.session.workspaceId)
+  if (data.session.directory) cacheWorkspace(data.session.directory, data.session.workspaceId)
   return { summary: data.session, snapshot: data.snapshot }
 }
 

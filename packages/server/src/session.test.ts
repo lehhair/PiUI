@@ -90,7 +90,10 @@ describe("session mock snapshot (no LLM)", () => {
 
       const listed = await json(port, "GET", "/api/v1/sessions")
       assert.equal(listed.status, 200)
-      assert.ok((listed.data.sessions as { id: string }[]).some(s => s.id === id))
+      const listedSession = (listed.data.sessions as { id: string; directory?: string }[]).find(s => s.id === id)
+      assert.ok(listedSession)
+      assert.equal(typeof listedSession.directory, "string")
+      assert.equal(listedSession.directory?.startsWith("piws:"), false)
 
       const del = await json(port, "DELETE", `/api/v1/sessions/${id}`)
       assert.equal(del.status, 200)

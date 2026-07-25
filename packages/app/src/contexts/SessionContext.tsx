@@ -6,6 +6,7 @@ import {
   deletePiSession,
   isPiServerUp,
   listPiSessions,
+  resolveWorkspaceId,
 } from '../pi/sessionApi'
 import { toUiSession, snapshotToUiSession } from '../pi/sessionModel'
 import { applySnapshotToUi } from '../pi/applySnapshot'
@@ -49,12 +50,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         // PiUI never falls back to the legacy SDK when its server is unavailable.
         if (await isPiServerUp()) {
-          let list = await listPiSessions()
+          const directory = currentDirectory?.trim()
+          const workspaceId = directory ? await resolveWorkspaceId(directory) : null
+          let list = await listPiSessions(workspaceId ?? undefined)
+          if (workspaceId) list = list.filter(session => session.workspaceId === workspaceId)
           if (search) {
             const q = search.toLowerCase()
             list = list.filter(s => (s.title || '').toLowerCase().includes(q))
           }
-          const data = list.map(s => toUiSession(s))
+          const data = list.map(s => toUiSession(s, directory || undefined))
           if (requestId !== requestIdRef.current) return
           if (append) {
             setSessions(prev => {
@@ -75,7 +79,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
             retryTimerRef.current = window.setTimeout(() => {
               if (requestId !== requestIdRef.current) return
-              void fetchSessions({ ...queryParams, retryAttempt: retryAttempt + 1 })
+              void fetchSessionsRef.current({ ...queryParams, retryAttempt: retryAttempt + 1 })
             }, [500, 1500, 3000][retryAttempt])
           } else {
             setSessions([])
@@ -93,8 +97,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [currentDirectory, search],
   )
 
-  // Kept in a ref for Pi session-change notifications.
-  fetchSessionsRef.current = fetchSessions
+  // Kept in a ref for Pi session-change notifications and delayed retries.
+  useEffect(() => {
+    fetchSessionsRef.current = fetchSessions
+  }, [fetchSessions])
 
   // 监听 directory 和 search 变化
   useEffect(() => {

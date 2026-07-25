@@ -20,7 +20,7 @@ export function toUiSession(summary: PiSessionSummary, directory?: string): UiSe
   return {
     id: summary.id,
     workspaceId: summary.workspaceId,
-    directory: defaultDirectory(summary.workspaceId, directory),
+    directory: defaultDirectory(summary.workspaceId, directory ?? summary.directory),
     title: summary.title || "New chat",
     ...sessionTimestamps(summary),
   }
