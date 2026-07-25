@@ -397,7 +397,7 @@ export function SessionListItem({
   onToggleCheck,
 }: SessionListItemProps) {
   const { t } = useTranslation(['commands', 'common', 'chat'])
-  const canRename = usePiCapabilities().sessionRename
+  const { sessionRename: canRename, sessionDelete: canDelete } = usePiCapabilities()
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState(session.title || '')
   const [showActions, setShowActions] = useState(false)
@@ -433,6 +433,7 @@ export function SessionListItem({
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (!canDelete) return
     setShowActions(false)
     onDelete()
   }
@@ -717,15 +718,17 @@ export function SessionListItem({
                 <PencilIcon className="w-3 h-3" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="p-1 rounded hover:bg-danger-bg text-text-500 hover:text-danger-100 transition-colors focus-visible:ring-1 focus-visible:ring-danger-100/40 focus-visible:ring-inset"
-              title={t('common:delete')}
-              aria-label={t('common:delete')}
-            >
-              <TrashIcon className="w-3 h-3" />
-            </button>
+            {canDelete && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="p-1 rounded hover:bg-danger-bg text-text-500 hover:text-danger-100 transition-colors focus-visible:ring-1 focus-visible:ring-danger-100/40 focus-visible:ring-inset"
+                title={t('common:delete')}
+                aria-label={t('common:delete')}
+              >
+                <TrashIcon className="w-3 h-3" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -855,15 +858,17 @@ export function SessionListItem({
               <PencilIcon className="w-3.5 h-3.5" />
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="p-1.5 rounded-md hover:bg-danger-bg active:bg-danger-bg text-text-400 hover:text-danger-100 active:text-danger-100 transition-colors focus-visible:ring-1 focus-visible:ring-danger-100/40 focus-visible:ring-inset"
-            title={t('common:delete')}
-            aria-label={t('common:delete')}
-          >
-            <TrashIcon className="w-3.5 h-3.5" />
-          </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="p-1.5 rounded-md hover:bg-danger-bg active:bg-danger-bg text-text-400 hover:text-danger-100 active:text-danger-100 transition-colors focus-visible:ring-1 focus-visible:ring-danger-100/40 focus-visible:ring-inset"
+              title={t('common:delete')}
+              aria-label={t('common:delete')}
+            >
+              <TrashIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       )}
     </div>

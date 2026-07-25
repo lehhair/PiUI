@@ -85,6 +85,25 @@ describe('SessionListItem', () => {
     )
 
     expect(screen.queryByRole('button', { name: /rename/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
+  })
+
+  it('shows durable delete only when the Pi capability is enabled', () => {
+    const onDelete = vi.fn()
+    setPiCapabilities({ sessionDelete: true })
+    render(
+      <SessionListItem
+        session={session}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onDelete={onDelete}
+        onRename={vi.fn()}
+        preferTouchUi={false}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /delete/i }))
+    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the full session row clickable outside the inner content button', () => {

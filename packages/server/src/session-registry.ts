@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto"
-import type { SessionSnapshotV1, TimelineItemV1 } from "@piui/protocol"
+import { realpathSync, statSync } from "node:fs"
+import { unlink } from "node:fs/promises"
+import path from "node:path"
+import type {
+  PiSessionEntryV1,
+  PiSessionTreeNodeV1,
+  SessionReplacementResultV1,
+  SessionSnapshotV1,
+  TimelineItemV1,
+} from "@piui/protocol"
 import {
   applyWorkerEvent,
   createProjectionState,
@@ -29,6 +38,9 @@ export interface AppSession {
   real?: PiSessionRuntime
   workerGeneration?: string
   runtimeError?: string
+  nativeEntries?: PiSessionEntryV1[]
+  nativeTree?: PiSessionTreeNodeV1[]
+  nativeLeafId?: string | null
 }
 
 export interface PiSessionBackend {
@@ -104,12 +116,25 @@ export class SessionRegistry {
     this.byId.delete(id)
     this.unbindRuntime(s)
     const attached = s.real
+    s.real = undefined
+    s.workerGeneration = undefined
     const pending = this.attaching.get(id)
     try {
-      await Promise.allSettled([
+      await Promise.all([
         attached ? this.disposeRuntime(attached) : Promise.resolve(),
         pending?.then(runtime => this.disposeRuntime(runtime)) ?? Promise.resolve(),
       ])
+      if (s.driver === "pi" && s.sessionFile) {
+        try {
+          await unlink(s.sessionFile)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+        }
+      }
+    } catch (error) {
+      this.hiddenIds.delete(id)
+      this.byId.set(id, s)
+      throw error
     } finally {
       this.deleting.delete(id)
     }
@@ -303,6 +328,72 @@ export class SessionRegistry {
     return session
   }
 
+  async navigateTree(
+    sessionId: string,
+    entryId: string,
+    summarize = false,
+  ): Promise<{ session: AppSession; editorText?: string; cancelled: boolean; aborted?: boolean }> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("tree navigation")
+    const generation = session.workerGeneration
+    let result!: { editorText?: string; cancelled: boolean; aborted?: boolean }
+    await this.runBoundRuntimeCommand(session, runtime, generation, async () => {
+      result = await runtime.navigateTree(entryId, summarize)
+    })
+    session.projection = runtime.getProjection()
+    this.touch(session)
+    return { session, ...result }
+  }
+
+  async setLabel(sessionId: string, entryId: string, label?: string): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("entry labels")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.setLabel(entryId, label))
+    this.touch(session)
+    return session
+  }
+
+  async setSessionName(sessionId: string, name: string): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const normalized = name.replace(/[\r\n]+/g, " ").trim()
+    if (session.real) {
+      await this.runBoundRuntimeCommand(
+        session,
+        session.real,
+        session.workerGeneration,
+        () => session.real!.setSessionName(normalized),
+      )
+    }
+    session.title = normalized || "New chat"
+    this.touch(session)
+    return session
+  }
+
+  forkSession(
+    sessionId: string,
+    entryId: string,
+    position: "before" | "at",
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    return this.replaceSession(sessionId, runtime => runtime.fork(entryId, position))
+  }
+
+  cloneSession(
+    sessionId: string,
+    entryId?: string,
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    return this.replaceSession(sessionId, runtime => runtime.clone(entryId))
+  }
+
+  importSession(
+    sessionId: string,
+    inputPath: string,
+    cwdOverride?: string,
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    return this.replaceSession(sessionId, runtime => runtime.importSession(inputPath, cwdOverride))
+  }
+
   async listSkills(sessionId: string) {
     const session = await this.attach(sessionId)
     return session.real?.listSkills() ?? []
@@ -323,6 +414,95 @@ export class SessionRegistry {
       throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
     }
     return session
+  }
+
+  private touch(session: AppSession): void {
+    session.sequence += 1
+    session.updatedAt = new Date().toISOString()
+  }
+
+  private async replaceSession(
+    sessionId: string,
+    replace: (runtime: PiSessionRuntime) => Promise<SessionReplacementResultV1>,
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    const source = await this.attach(sessionId)
+    const runtime = source.real
+    if (!runtime) throw unsupportedRuntimeOperation("session replacement")
+    const sourceProjection = source.projection
+    const sourceGeneration = source.workerGeneration
+    source.nativeEntries = runtime.getEntries()
+    source.nativeTree = runtime.getTree()
+    source.nativeLeafId = runtime.getLeafId()
+    let replacement: SessionReplacementResultV1
+    try {
+      replacement = await replace(runtime)
+    } catch (error) {
+      if ((error as { code?: string }).code === "SESSION_REPLACEMENT_COMMIT_FAILED") {
+        this.unbindRuntime(source)
+        source.real = undefined
+        source.workerGeneration = undefined
+        this.touch(source)
+        await this.disposeRuntime(runtime)
+      }
+      throw error
+    }
+    if (replacement.cancelled) return { source, target: source, replacement }
+    if (!this.isCurrentRuntime(source, runtime, sourceGeneration)) throw runtimeReplacedError()
+
+    const targetId = replacement.targetSessionId
+    try {
+      if (!targetId || targetId === source.id) {
+        throw Object.assign(new Error("Pi session replacement did not produce a new session"), { code: "INTERNAL" })
+      }
+      const existingTarget = this.byId.get(targetId)
+      if (existingTarget) {
+        throw Object.assign(new Error("Replacement target already exists"), { code: "SESSION_BUSY" })
+      }
+      const targetSessionFile = replacement.targetSessionFile ?? runtime.getSessionFile()
+      if (sameSessionFile(source.sessionFile, targetSessionFile)) {
+        throw Object.assign(new Error("Replacement target reused the source session file"), {
+          code: "SESSION_REPLACEMENT_FILE_CONFLICT",
+        })
+      }
+
+      this.unbindRuntime(source)
+      source.real = undefined
+      source.workerGeneration = undefined
+      source.projection = sourceProjection
+      this.touch(source)
+
+      let workspaceId = source.workspaceId
+      if (replacement.targetCwd) workspaceId = this.workspaces.register(replacement.targetCwd).id
+      const now = new Date().toISOString()
+      const target: AppSession = {
+        id: targetId,
+        workspaceId,
+        driverSessionId: targetId,
+        title: runtime.getSessionName() ?? `${source.title} fork`,
+        createdAt: now,
+        updatedAt: now,
+        epoch: randomUUID(),
+        sequence: 0,
+        projection: runtime.getProjection(),
+        driver: "pi",
+        sessionFile: targetSessionFile,
+      }
+      target.workspaceId = workspaceId
+      target.sessionFile = targetSessionFile
+      target.projection = runtime.getProjection()
+      this.byId.set(target.id, target)
+      this.bindRuntime(target, runtime)
+      return { source, target, replacement }
+    } catch (error) {
+      if (targetId && this.byId.get(targetId)?.real === runtime) this.byId.delete(targetId)
+      this.unbindRuntime(source)
+      source.real = undefined
+      source.workerGeneration = undefined
+      source.projection = sourceProjection
+      this.touch(source)
+      await this.disposeRuntime(runtime)
+      throw error
+    }
   }
 
   async find(sessionId: string): Promise<AppSession | undefined> {
@@ -638,9 +818,9 @@ export class SessionRegistry {
       native: {
         namespace: "pi",
         schemaVersion: 1,
-        leafId: session.real?.getLeafId() ?? session.projection.timeline.at(-1)?.entryId ?? null,
-        entries: session.real?.getEntries() ?? [],
-        tree: session.real?.getTree() ?? [],
+        leafId: session.real?.getLeafId() ?? session.nativeLeafId ?? session.projection.timeline.at(-1)?.entryId ?? null,
+        entries: session.real?.getEntries() ?? session.nativeEntries ?? [],
+        tree: session.real?.getTree() ?? session.nativeTree ?? [],
       },
     }
   }
@@ -650,4 +830,24 @@ function runtimeReplacedError(): Error {
   return Object.assign(new Error("Pi runtime was replaced before the command completed"), {
     code: "SESSION_RUNTIME_CRASHED",
   })
+}
+
+function unsupportedRuntimeOperation(operation: string): Error {
+  return Object.assign(new Error(`Pi runtime does not support ${operation}`), { code: "CAPABILITY_DISABLED" })
+}
+
+function sameSessionFile(sourceFile?: string, targetFile?: string): boolean {
+  if (!sourceFile || !targetFile) return false
+  const sourcePath = path.resolve(sourceFile)
+  const targetPath = path.resolve(targetFile)
+  const normalize = (value: string) => process.platform === "win32" ? value.toLowerCase() : value
+  if (normalize(sourcePath) === normalize(targetPath)) return true
+  try {
+    if (normalize(realpathSync.native(sourcePath)) === normalize(realpathSync.native(targetPath))) return true
+    const sourceStats = statSync(sourcePath, { bigint: true })
+    const targetStats = statSync(targetPath, { bigint: true })
+    return sourceStats.ino !== 0n && sourceStats.dev === targetStats.dev && sourceStats.ino === targetStats.ino
+  } catch {
+    return false
+  }
 }

@@ -10,13 +10,25 @@ describe("Pi capability manifest", () => {
       revision: "test",
       capabilities: {
         "session.fork": { enabled: true, version: 1, scope: "session" },
+        "session.tree": { enabled: true, version: 1, scope: "session" },
+        "session.navigate": { enabled: true, version: 1, scope: "session" },
+        "session.clone": { enabled: true, version: 1, scope: "session" },
+        "session.import": { enabled: true, version: 1, scope: "session" },
         "files.write": { enabled: true, version: 1, scope: "workspace" },
         "git.diff": { enabled: true, version: 1, scope: "workspace" },
         "session.delete": { enabled: false, version: 1, scope: "session", reason: "not durable" },
       },
     })
 
-    expect(getPiCapabilities()).toMatchObject({ fork: true, fileWrite: true, gitDiff: true })
+    expect(getPiCapabilities()).toMatchObject({
+      fork: true,
+      sessionTree: true,
+      sessionNavigate: true,
+      sessionClone: true,
+      sessionImport: true,
+      fileWrite: true,
+      gitDiff: true,
+    })
     expect(getPiCapabilities().sessionRename).toBe(false)
   })
 })

@@ -26,14 +26,19 @@ export function createCapabilityManifestV2(): CapabilityManifestV2 {
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r0",
+    revision: "pi-0.81.1-r3",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
       "session.create": capability(true, "workspace"),
       "session.open": capability(true, "session"),
-      "session.delete": capability(false, "session", "Deletion is not durable yet"),
-      "session.tree": capability(false, "session", "Native tree is not exposed to the UI yet"),
+      "session.delete": capability(true, "session"),
+      "session.name": capability(true, "session"),
+      "session.tree": capability(true, "session"),
+      "session.navigate": capability(true, "session"),
+      "session.fork": capability(true, "session"),
+      "session.clone": capability(true, "session"),
+      "session.import": capability(true, "session"),
       "prompt.text": capability(true, "session"),
       "prompt.followUp": capability(false, "session", "Follow-up does not yet bypass the prompt executor"),
       "compaction.manage": capability(true, "session", undefined, {

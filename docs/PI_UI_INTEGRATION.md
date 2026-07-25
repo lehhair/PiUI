@@ -17,12 +17,12 @@
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
 | list/listAll/create/open/resume | 完整 | R12：升级 conformance |
-| 持久删除 JSONL | 缺失 | R3 |
-| session name | 缺失 | R3 |
-| entries/tree/leaf 读取 | 后端 | R3：类型化并进入 UI |
-| navigateTree/label | 缺失 | R3 |
-| fork/clone/import | 缺失 | R3 |
-| branch summary 与取消 | 缺失 | R3/R4 |
+| 持久删除 JSONL | 完整 | R12：故障注入扩展 |
+| session name | 完整 | R12：升级 conformance |
+| entries/tree/leaf 读取 | 完整 | R12：大型 tree fixture |
+| navigateTree/label | 完整 | R4：branch summary 交互 |
+| fork/clone/import | 完整 | R12：更多故障注入 |
+| branch summary 与取消 | 部分 | R4：UI 选择与取消反馈 |
 | stats/context usage | 缺失 | R11 |
 | HTML/JSONL export | 缺失 | R11 |
 | share | 缺失 | R11 |

@@ -67,6 +67,7 @@ function userToUi(
   return {
     info: {
       id: item.id,
+      entryId: item.entryId,
       sessionID,
       role: "user",
       time: { created: item.timestamp },
@@ -125,6 +126,7 @@ function assistantToUi(item: AssistantTimelineItemV1, sessionID: string, parentI
   return {
     info: {
       id: item.id,
+      entryId: item.entryId,
       sessionID,
       role: "assistant",
       parentID,

@@ -12,8 +12,17 @@ import {
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type SessionEntry,
+  type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent"
-import { existsSync } from "node:fs"
+import type {
+  PiSessionEntryV1,
+  PiSessionTreeNodeV1,
+  SessionReplacementResultV1,
+} from "@piui/protocol"
+import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { homedir } from "node:os"
+import { fileURLToPath } from "node:url"
 import path from "node:path"
 import {
   applyWorkerEvent,
@@ -87,6 +96,7 @@ export class RealPiSession {
   private runtime: AgentSessionRuntime
   private projection: ProjectionState = createProjectionState()
   private unsub: (() => void) | null = null
+  private stateUnsub: (() => void) | null = null
   private lastUserId: string | null = null
   private currentAsstId: string | null = null
   private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
@@ -96,8 +106,12 @@ export class RealPiSession {
 
   private constructor(runtime: AgentSessionRuntime) {
     this.runtime = runtime
-    // permanent light subscription for queue/compaction/retry flags
-    this.runtime.session.subscribe(event => {
+    this.bindStateEvents()
+  }
+
+  private bindStateEvents(): void {
+    this.stateUnsub?.()
+    this.stateUnsub = this.runtime.session.subscribe(event => {
       if (event.type === "compaction_start") this.isCompactingFlag = true
       if (event.type === "compaction_end") this.isCompactingFlag = false
       if (event.type === "auto_retry_start") {
@@ -108,6 +122,13 @@ export class RealPiSession {
         this.emitState()
       }
     })
+  }
+
+  private detachSessionSubscriptions(): void {
+    this.unsub?.()
+    this.unsub = null
+    this.stateUnsub?.()
+    this.stateUnsub = null
   }
 
   static async open(
@@ -134,6 +155,11 @@ export class RealPiSession {
 
     await runtime.session.bindExtensions({})
     const result = new RealPiSession(runtime)
+    runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
+    runtime.setRebindSession(async session => {
+      await session.bindExtensions({})
+      result.bindStateEvents()
+    })
     if (projection) result.projection = projection
     return result
   }
@@ -190,12 +216,12 @@ export class RealPiSession {
     return this.runtime.session.sessionManager.getSessionName()
   }
 
-  getEntries(): unknown[] {
-    return this.runtime.session.sessionManager.getEntries()
+  getEntries(): PiSessionEntryV1[] {
+    return this.runtime.session.sessionManager.getEntries().map(mapSessionEntry)
   }
 
-  getTree(): unknown[] {
-    return this.runtime.session.sessionManager.getTree()
+  getTree(): PiSessionTreeNodeV1[] {
+    return mapSessionTree(this.runtime.session.sessionManager.getTree())
   }
 
   getLeafId(): string | null {
@@ -262,6 +288,88 @@ export class RealPiSession {
   async compact(customInstructions?: string): Promise<void> {
     await this.runtime.session.compact(customInstructions)
     this.emitState()
+  }
+
+  async navigateTree(
+    entryId: string,
+    summarize = false,
+  ): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean }> {
+    await this.runtime.session.waitForIdle()
+    const result = await this.runtime.session.navigateTree(entryId, { summarize })
+    if (!result.cancelled) {
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitState()
+    }
+    return { editorText: result.editorText, cancelled: result.cancelled, aborted: result.aborted }
+  }
+
+  setLabel(entryId: string, label?: string): void {
+    this.runtime.session.sessionManager.appendLabelChange(entryId, label)
+    this.emitState()
+  }
+
+  setSessionName(name: string): void {
+    this.runtime.session.setSessionName(name)
+    this.emitState()
+  }
+
+  async fork(entryId: string, position: "before" | "at"): Promise<SessionReplacementResultV1> {
+    await this.runtime.session.waitForIdle()
+    const sourceSessionId = this.getSessionId()
+    const result = await this.runtime.fork(entryId, { position })
+    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    this.emitState()
+    return {
+      sourceSessionId,
+      targetSessionId: this.getSessionId(),
+      targetSessionFile: this.getSessionFile(),
+      targetCwd: this.runtime.cwd,
+      selectedText: result.selectedText,
+      cancelled: result.cancelled,
+    }
+  }
+
+  async clone(entryId = this.getLeafId() ?? ""): Promise<SessionReplacementResultV1> {
+    if (!entryId) throw Object.assign(new Error("Pi session has no entry to clone"), { code: "INVALID_REQUEST" })
+    return this.fork(entryId, "at")
+  }
+
+  async importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
+    await this.runtime.session.waitForIdle()
+    const sourceSessionId = this.getSessionId()
+    const sourcePath = resolveUserPath(inputPath)
+    if (!existsSync(sourcePath)) {
+      const error = new Error(`Import file not found: ${sourcePath}`)
+      error.name = "SessionImportFileNotFoundError"
+      throw error
+    }
+
+    const sessionDir = this.runtime.session.sessionManager.getSessionDir()
+    mkdirSync(sessionDir, { recursive: true })
+    const stagedPath = path.join(sessionDir, `piui-import-${randomUUID()}.jsonl`)
+    copyFileSync(sourcePath, stagedPath, constants.COPYFILE_EXCL)
+    let keepStagedFile = false
+    try {
+      const result = await this.runtime.importFromJsonl(stagedPath, cwdOverride)
+      keepStagedFile = !result.cancelled
+      if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitState()
+      return {
+        sourceSessionId,
+        targetSessionId: this.getSessionId(),
+        targetSessionFile: this.getSessionFile(),
+        targetCwd: this.runtime.cwd,
+        cancelled: result.cancelled,
+      }
+    } finally {
+      if (!keepStagedFile) {
+        try {
+          unlinkSync(stagedPath)
+        } catch {
+          /* best effort cleanup for a cancelled or failed import */
+        }
+      }
+    }
   }
 
   abortCompaction(): void {
@@ -384,8 +492,7 @@ export class RealPiSession {
   }
 
   async dispose(): Promise<void> {
-    this.unsub?.()
-    this.unsub = null
+    this.detachSessionSubscriptions()
     this.stateListeners.clear()
     await this.runtime.dispose()
   }
@@ -402,6 +509,95 @@ export class RealPiSession {
   _getAsst() {
     return this.currentAsstId
   }
+}
+
+function mapSessionEntry(entry: SessionEntry): PiSessionEntryV1 {
+  const base = { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp }
+  switch (entry.type) {
+    case "message": {
+      const message = entry.message as unknown as Record<string, unknown>
+      return {
+        ...base,
+        type: "message",
+        role: messageRole(message.role),
+        preview: previewText(extractText(message.content ?? message.result ?? message.summary)),
+      }
+    }
+    case "thinking_level_change":
+      return { ...base, type: entry.type, thinkingLevel: entry.thinkingLevel }
+    case "model_change":
+      return { ...base, type: entry.type, provider: entry.provider, modelId: entry.modelId }
+    case "compaction":
+      return {
+        ...base,
+        type: entry.type,
+        summary: entry.summary,
+        firstKeptEntryId: entry.firstKeptEntryId,
+        tokensBefore: entry.tokensBefore,
+      }
+    case "branch_summary":
+      return { ...base, type: entry.type, fromId: entry.fromId, summary: entry.summary }
+    case "custom":
+      return { ...base, type: entry.type, customType: entry.customType }
+    case "custom_message":
+      return {
+        ...base,
+        type: entry.type,
+        customType: entry.customType,
+        preview: previewText(extractText(entry.content)),
+        display: entry.display,
+      }
+    case "label":
+      return { ...base, type: entry.type, targetId: entry.targetId, label: entry.label }
+    case "session_info":
+      return { ...base, type: entry.type, name: entry.name }
+  }
+}
+
+function mapSessionTree(nodes: SessionTreeNode[]): PiSessionTreeNodeV1[] {
+  const roots: PiSessionTreeNodeV1[] = nodes.map(node => ({
+    entry: mapSessionEntry(node.entry),
+    children: [] as PiSessionTreeNodeV1[],
+    label: node.label,
+    labelTimestamp: node.labelTimestamp,
+  }))
+  const stack = nodes.map((source, index) => ({ source, target: roots[index] }))
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    current.target.children = current.source.children.map(child => ({
+      entry: mapSessionEntry(child.entry),
+      children: [],
+      label: child.label,
+      labelTimestamp: child.labelTimestamp,
+    }))
+    current.source.children.forEach((child, index) => {
+      stack.push({ source: child, target: current.target.children[index] })
+    })
+  }
+  return roots
+}
+
+function messageRole(value: unknown): Extract<PiSessionEntryV1, { type: "message" }>["role"] {
+  if (
+    value === "user" || value === "assistant" || value === "toolResult" || value === "bashExecution" ||
+    value === "branchSummary" || value === "compactionSummary" || value === "custom"
+  ) return value
+  return "custom"
+}
+
+function previewText(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized
+}
+
+function resolveUserPath(input: string): string {
+  const trimmed = input.trim()
+  if (/^file:\/\//i.test(trimmed)) return path.resolve(fileURLToPath(trimmed))
+  if (trimmed === "~") return homedir()
+  if (trimmed.startsWith("~/") || (process.platform === "win32" && trimmed.startsWith("~\\"))) {
+    return path.resolve(homedir(), trimmed.slice(2))
+  }
+  return path.resolve(trimmed)
 }
 
 function sessionInfo(info: {

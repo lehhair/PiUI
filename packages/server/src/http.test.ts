@@ -54,7 +54,9 @@ describe("http phase1", () => {
       assert.equal(data.protocolV2.piSdkVersion, "0.81.1")
       assert.equal(data.protocolV2.eventTransport.subprotocol, "piui.events.v2")
       assert.equal(data.protocolV2.capabilities.capabilities["session.open"].enabled, true)
-      assert.equal(data.protocolV2.capabilities.capabilities["session.delete"].enabled, false)
+      assert.equal(data.protocolV2.capabilities.capabilities["session.delete"].enabled, true)
+      assert.equal(data.protocolV2.capabilities.capabilities["session.tree"].enabled, true)
+      assert.equal(data.protocolV2.capabilities.capabilities["session.fork"].enabled, true)
     } finally {
       await close()
     }

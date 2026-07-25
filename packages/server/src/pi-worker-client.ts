@@ -2,6 +2,7 @@ import { fork, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
+import type { SessionReplacementResultV1 } from "@piui/protocol"
 import {
   getPiWorkerEntryUrl,
   PI_WORKER_PROTOCOL_VERSION,
@@ -56,6 +57,7 @@ export class PiWorkerSession implements PiSessionRuntime {
   private runtimeState!: PiRuntimeUiState
   private projection: ProjectionState = restoreProjection([])
   private projectionListener?: (projection: ProjectionState) => void
+  private replacementHandler?: (replacement: SessionReplacementResultV1) => void | Promise<void>
   private disposed = false
   private disposing = false
   private disposePromise?: Promise<void>
@@ -210,8 +212,8 @@ export class PiWorkerSession implements PiSessionRuntime {
   getSessionId(): string { return this.session.sessionId }
   getSessionFile(): string | undefined { return this.session.sessionFile }
   getSessionName(): string | undefined { return this.session.sessionName }
-  getEntries(): unknown[] { return this.session.entries }
-  getTree(): unknown[] { return this.session.tree }
+  getEntries() { return this.session.entries }
+  getTree() { return this.session.tree }
   getLeafId(): string | null { return this.session.leafId }
   getModel() { return this.runtimeState.model }
   getThinkingLevel(): string { return this.runtimeState.thinkingLevel }
@@ -229,6 +231,36 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   async compact(customInstructions?: string): Promise<void> {
     this.applySession(expectSession(await this.request({ type: "compact", instructions: customInstructions })))
+  }
+
+  async navigateTree(
+    entryId: string,
+    summarize = false,
+  ): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean }> {
+    const result = await this.request({ type: "navigateTree", entryId, summarize })
+    if (result.type !== "navigation") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return { editorText: result.editorText, cancelled: result.cancelled, aborted: result.aborted }
+  }
+
+  async setLabel(entryId: string, label?: string): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setLabel", entryId, label })))
+  }
+
+  async setSessionName(name: string): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setSessionName", name })))
+  }
+
+  async fork(entryId: string, position: "before" | "at"): Promise<SessionReplacementResultV1> {
+    return this.applyReplacement(await this.request({ type: "fork", entryId, position }))
+  }
+
+  async clone(entryId?: string): Promise<SessionReplacementResultV1> {
+    return this.applyReplacement(await this.request({ type: "clone", entryId }))
+  }
+
+  async importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
+    return this.applyReplacement(await this.request({ type: "importSession", inputPath, cwdOverride }))
   }
 
   async prompt(
@@ -260,6 +292,25 @@ export class PiWorkerSession implements PiSessionRuntime {
     const result = await this.request({ type: "listCommands" })
     if (result.type !== "commands") throw new Error(`unexpected Pi worker result: ${result.type}`)
     return result.commands
+  }
+
+  setReplacementHandler(handler: (replacement: SessionReplacementResultV1) => void | Promise<void>): void {
+    this.replacementHandler = handler
+  }
+
+  private async applyReplacement(result: WorkerResult): Promise<SessionReplacementResultV1> {
+    if (result.type !== "replacement") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    try {
+      await this.replacementHandler?.(result.replacement)
+    } catch (error) {
+      const failure = Object.assign(new Error("Pi session replacement lease transfer failed", { cause: error }), {
+        code: "SESSION_REPLACEMENT_COMMIT_FAILED",
+      })
+      await this.dispose()
+      throw failure
+    }
+    this.applySession(result.session)
+    return result.replacement
   }
 
   dispose(): Promise<void> {
@@ -441,6 +492,15 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
       return "runtime.thinking"
     case "compact":
       return "runtime.compact"
+    case "navigateTree":
+    case "setLabel":
+    case "setSessionName":
+      return "runtime.tree"
+    case "fork":
+    case "clone":
+      return "runtime.fork"
+    case "importSession":
+      return "runtime.import"
     case "listSkills":
       return "runtime.skills"
     case "listCommands":

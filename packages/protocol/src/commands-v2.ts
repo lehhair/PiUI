@@ -15,7 +15,10 @@ export interface CommandPayloadsV2 {
   "session.clearQueue": Record<string, never>
   "session.navigateTree": { entryId: string; summarizeAbandonedBranch?: boolean }
   "session.setLabel": { entryId: string; label?: string }
-  "session.fork": { entryId?: string; cwd?: string }
+  "session.setName": { name: string }
+  "session.fork": { entryId: string; position: "before" | "at" }
+  "session.clone": { entryId?: string }
+  "session.import": { inputPath: string; cwdOverride?: string }
   "session.delete": { durable: true }
   "extension.ui.respond": { requestId: string; value?: unknown; cancelled?: boolean }
   "resources.reload": { workspaceId?: string }

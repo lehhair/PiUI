@@ -950,6 +950,7 @@ function App() {
                     sessionId={paneLayout.focusedSessionId}
                     inline
                     renderPanelContent={rightPanelOpen || shouldRenderMobileRightPanel}
+                    onNavigateSession={handleSelectSession}
                   />
                 </section>
               </div>
@@ -988,7 +989,11 @@ function App() {
                   <BottomPanel directory={focusedDirectory} />
                 </div>
 
-                <RightPanel directory={focusedDirectory} sessionId={paneLayout.focusedSessionId} />
+                <RightPanel
+                  directory={focusedDirectory}
+                  sessionId={paneLayout.focusedSessionId}
+                  onNavigateSession={handleSelectSession}
+                />
               </div>
             </>
           )}

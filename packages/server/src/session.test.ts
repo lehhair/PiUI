@@ -8,6 +8,10 @@ import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
 import { createAppServer } from "./http.ts"
 import { EventHub } from "./event-hub.ts"
 import type { PiSessionBackend } from "./session-registry.ts"
+import { RuntimeSupervisor } from "./runtime-supervisor.ts"
+import { SessionLeaseManager } from "./session-lease.ts"
+
+const workerFixture = new URL("./pi-worker-fixture.mjs", import.meta.url)
 
 async function listen(server: ReturnType<typeof createServer>) {
   await new Promise<void>((resolve, reject) => {
@@ -309,6 +313,76 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(again.status, 200)
       assert.equal(again.data.session.id, sessionId)
       assert.equal(again.data.timeline.length, snap.timeline.length)
+    } finally {
+      await close()
+    }
+  })
+
+  it("routes native tree, metadata, and fork commands through HTTP", async () => {
+    const backend = new RuntimeSupervisor({
+      workerEntry: workerFixture,
+      leases: new SessionLeaseManager(path.join(root, "r3-http-leases")),
+    })
+    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const { port, close } = await listen(server)
+    try {
+      const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
+      const created = await json(port, "POST", "/api/v1/sessions", {
+        workspaceId: workspace.data.workspace.id,
+      })
+      assert.equal(created.status, 201)
+      const sourceId = created.data.snapshot.session.id as string
+      assert.equal(created.data.snapshot.native.entries[0]?.type, "message")
+      assert.equal(created.data.snapshot.native.tree[0]?.entry.id, "fixture-entry")
+
+      const navigated = await json(
+        port,
+        "POST",
+        `/api/v1/sessions/${sourceId}/commands/navigate-tree`,
+        { entryId: "fixture-entry" },
+      )
+      assert.equal(navigated.status, 200)
+      assert.equal(navigated.data.editorText, "fixture draft")
+
+      const labeled = await json(port, "POST", `/api/v1/sessions/${sourceId}/commands/set-label`, {
+        entryId: "fixture-entry",
+        label: "checkpoint",
+      })
+      assert.equal(labeled.data.snapshot.native.tree[0].label, "checkpoint")
+
+      const renamed = await json(port, "POST", `/api/v1/sessions/${sourceId}/commands/set-name`, {
+        name: "R3 session",
+      })
+      assert.equal(renamed.data.snapshot.session.title, "R3 session")
+
+      const forked = await json(port, "POST", `/api/v1/sessions/${sourceId}/commands/fork`, {
+        entryId: "fixture-entry",
+        position: "at",
+      })
+      assert.equal(forked.status, 200)
+      assert.equal(forked.data.sourceSnapshot.session.id, sourceId)
+      assert.notEqual(forked.data.targetSnapshot.session.id, sourceId)
+      assert.equal(forked.data.replacement.cancelled, false)
+      assert.equal(forked.data.command.status, "completed")
+
+      const forkTargetId = forked.data.targetSnapshot.session.id as string
+      const cloned = await json(port, "POST", `/api/v1/sessions/${forkTargetId}/commands/clone`, {
+        entryId: "fixture-entry",
+      })
+      assert.equal(cloned.status, 200)
+      assert.notEqual(cloned.data.targetSnapshot.session.id, forkTargetId)
+
+      const cloneTargetId = cloned.data.targetSnapshot.session.id as string
+      const imported = await json(port, "POST", `/api/v1/sessions/${cloneTargetId}/commands/import`, {
+        inputPath: path.join(root, "import.jsonl"),
+        cwdOverride: root,
+      })
+      assert.equal(imported.status, 200)
+      assert.notEqual(imported.data.targetSnapshot.session.id, cloneTargetId)
+
+      const deleted = await json(port, "DELETE", `/api/v1/sessions/${sourceId}`)
+      assert.equal(deleted.status, 200)
+      assert.equal(deleted.data.command.request.payload.durable, true)
     } finally {
       await close()
     }

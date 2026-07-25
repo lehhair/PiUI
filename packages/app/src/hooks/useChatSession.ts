@@ -38,9 +38,11 @@ import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
 import { isPiSession } from '../pi/isPiSession'
 import { promptSession } from '../pi/sessionApi'
+import { forkPiSession } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
 import { usePiCapabilities } from '../pi/capabilities'
+import { clearSessionEditorDraft, useSessionEditorDraft } from '../pi/sessionEditorDraftStore'
 
 const handleError = createErrorHandler('session')
 
@@ -142,6 +144,7 @@ export function useChatSession({
 
   const perSessionStateRaw = useSessionState(routeSessionId)
   const perSessionState = perSessionStateRaw ?? EMPTY_SESSION_STATE
+  const editorDraft = useSessionEditorDraft(routeSessionId)
 
   const messages = perSessionState.messages
   const messagesRef = useRef(messages)
@@ -627,7 +630,38 @@ export function useChatSession({
     async (message: UIMessage, forkMessageId?: string) => {
       const targetMessageId = forkMessageId || message.info.id
       if (isPiSession(message.info.sessionID)) {
-        handleError('fork session', new Error('PiUI does not support session forks yet'))
+        const targetMessage = messagesRef.current.find(item => item.info.id === targetMessageId)
+        const targetEntryId = targetMessage?.info.entryId ??
+          (targetMessageId === message.info.id ? message.info.entryId : undefined)
+        if (!capabilities.fork || !targetEntryId) return
+        try {
+          const position = message.info.role === 'user' ? 'before' : 'at'
+          const result = await forkPiSession(message.info.sessionID, targetEntryId, position)
+          applySnapshotToUi(result.sourceSnapshot, { activate: false })
+          applySnapshotToUi(result.targetSnapshot)
+          if (result.replacement.cancelled) return
+
+          if (message.info.role === 'user' && isUserMessage(message.info)) {
+            const content = extractUserMessageContent(message)
+            setRestoredContent({
+              sessionId: result.replacement.targetSessionId,
+              content: {
+                messageId: message.info.id,
+                text: result.replacement.selectedText ?? content.text,
+                attachments: content.attachments,
+                model: message.info.model,
+                variant: message.info.model.variant,
+                agent: message.info.agent,
+              },
+            })
+          } else {
+            setRestoredContent(null)
+          }
+          window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+          navigateToSession(result.replacement.targetSessionId, result.replacement.targetCwd ?? effectiveDirectory)
+        } catch (error) {
+          handleError('fork session', error)
+        }
         return
       }
 
@@ -679,7 +713,7 @@ export function useChatSession({
         handleError('fork session', error)
       }
     },
-    [effectiveDirectory, navigateToSession],
+    [capabilities.fork, effectiveDirectory, navigateToSession],
   )
 
   // Abort handler
@@ -869,13 +903,19 @@ export function useChatSession({
 
   const clearRestoredContent = useCallback(() => {
     setRestoredContent(null)
+    if (routeSessionId) clearSessionEditorDraft(routeSessionId)
     clearRevert()
-  }, [clearRevert])
+  }, [clearRevert, routeSessionId])
 
   const activeRestoredContent = useMemo(() => {
-    if (!restoredContent || restoredContent.sessionId !== routeSessionId) return null
-    return restoredContent.content
-  }, [restoredContent, routeSessionId])
+    if (restoredContent?.sessionId === routeSessionId) return restoredContent.content
+    if (!editorDraft) return null
+    return {
+      messageId: `tree-${editorDraft.revision}`,
+      text: editorDraft.text,
+      attachments: [],
+    }
+  }, [editorDraft, restoredContent, routeSessionId])
 
   return {
     // State

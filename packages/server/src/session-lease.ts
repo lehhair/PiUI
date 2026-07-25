@@ -10,6 +10,7 @@ const PORT_COUNT = 65_535 - PORT_BASE + 1
 export interface SessionLease {
   key: string
   refresh(sessionFile?: string, sessionId?: string): Promise<void>
+  replace(sessionFile?: string, sessionId?: string): Promise<void>
   release(): void
 }
 
@@ -23,10 +24,12 @@ export class SessionLeaseManager {
     if (this.disposed) throw new Error("Session lease manager is disposed")
     const keys = leaseKeys(sessionFile, sessionId)
     const servers = new Map<number, Server>()
+    let currentSessionFile: string | undefined = sessionFile
+    let currentSessionId: string | undefined = sessionId
     let released = false
     let refreshPromise: Promise<void> | undefined
 
-    const acquireKeys = async (nextSessionFile = sessionFile, nextSessionId = sessionId): Promise<void> => {
+    const acquireKeys = async (nextSessionFile = currentSessionFile, nextSessionId = currentSessionId): Promise<void> => {
       const added: number[] = []
       try {
         for (const port of leasePorts(this.namespace, leaseKeys(nextSessionFile, nextSessionId))) {
@@ -55,8 +58,23 @@ export class SessionLeaseManager {
       key: keys[0],
       refresh: (nextSessionFile, nextSessionId) => {
         if (released) return Promise.reject(new Error("Session lease is released"))
-        refreshPromise ??= acquireKeys(nextSessionFile, nextSessionId).finally(() => { refreshPromise = undefined })
+        refreshPromise ??= acquireKeys(nextSessionFile, nextSessionId).then(() => {
+          currentSessionFile = nextSessionFile ?? currentSessionFile
+          currentSessionId = nextSessionId ?? currentSessionId
+        }).finally(() => { refreshPromise = undefined })
         return refreshPromise
+      },
+      replace: async (nextSessionFile, nextSessionId) => {
+        if (released) throw new Error("Session lease is released")
+        await acquireKeys(nextSessionFile, nextSessionId)
+        const targetPorts = new Set(leasePorts(this.namespace, leaseKeys(nextSessionFile, nextSessionId)))
+        for (const [port, server] of servers) {
+          if (targetPorts.has(port)) continue
+          server.close()
+          servers.delete(port)
+        }
+        currentSessionFile = nextSessionFile
+        currentSessionId = nextSessionId
       },
       release: () => {
         if (released) return

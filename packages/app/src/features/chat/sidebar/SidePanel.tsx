@@ -42,6 +42,7 @@ import {
 import type { UiSession } from '../../../types/session'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
+import { usePiCapabilities } from '../../../pi/capabilities'
 
 // 侧边栏设计模式：
 // - 按钮结构统一，不因 expanded/collapsed 改变 DOM
@@ -115,6 +116,7 @@ export function SidePanel({
   onOpenSettings,
 }: SidePanelProps) {
   const { t } = useTranslation(['chat', 'common'])
+  const canDeleteSessions = usePiCapabilities().sessionDelete
   const {
     currentDirectory,
     savedDirectories,
@@ -892,7 +894,7 @@ export function SidePanel({
 
   // ---- 批量删除 session ----
   const handleBatchDeleteSessions = useCallback(async () => {
-    if (selectedSessionIds.size === 0) return
+    if (!canDeleteSessions || selectedSessionIds.size === 0) return
     setIsBatchDeleting(true)
 
     const needSwitchSession = selectedSessionId && selectedSessionIds.has(selectedSessionId)
@@ -925,7 +927,7 @@ export function SidePanel({
     if (needSwitchSession) {
       onNewSession()
     }
-  }, [selectedSessionIds, selectedSessionId, sessionLookup, currentDirectory, refresh, onNewSession])
+  }, [canDeleteSessions, selectedSessionIds, selectedSessionId, sessionLookup, currentDirectory, refresh, onNewSession])
 
   // ---- 批量移除项目 ----
   const handleBatchRemoveProjects = useCallback(() => {
@@ -1269,7 +1271,7 @@ export function SidePanel({
                         : t('sidebar.selectedProjects', { count: selectedProjectIds.size })}
                 </span>
                 <div className="ml-auto flex items-center gap-1.5">
-                  {selectedSessionIds.size > 0 && (
+                  {canDeleteSessions && selectedSessionIds.size > 0 && (
                     <button
                       type="button"
                       onClick={() => setBatchDeleteSessionConfirm(true)}

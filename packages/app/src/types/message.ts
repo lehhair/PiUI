@@ -87,6 +87,7 @@ export type MessageError = ProviderAuthError | UnknownError | MessageOutputLengt
 // User message info
 export interface UserMessageInfo {
   id: string
+  entryId?: string
   sessionID: string
   role: 'user'
   time: MessageTime
@@ -98,6 +99,7 @@ export interface UserMessageInfo {
 // Assistant message info
 export interface AssistantMessageInfo {
   id: string
+  entryId?: string
   sessionID: string
   role: 'assistant'
   time: MessageTime
