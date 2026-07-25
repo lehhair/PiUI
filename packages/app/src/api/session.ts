@@ -23,7 +23,7 @@ function unsupported(capability: string): never {
 
 export async function getSessionStatus(directory?: string): Promise<SessionStatusMap> {
   const workspaceId = directory ? await resolveWorkspaceId(directory) : null
-  const sessions = (await listPiSessions()).filter(session => !workspaceId || session.workspaceId === workspaceId)
+  const sessions = await listPiSessions(workspaceId ?? undefined)
   const snapshots = await Promise.all(sessions.map(session => fetchSnapshot(session.id)))
   return Object.fromEntries(
     snapshots.map(snapshot => [
@@ -47,7 +47,7 @@ export async function getLastTurnDiff(_sessionId: string, _directory?: string): 
 
 export async function getSessions(params: SessionListParams = {}): Promise<UiSession[]> {
   const workspaceId = params.directory ? await resolveWorkspaceId(params.directory) : null
-  let sessions = (await listPiSessions())
+  let sessions = (await listPiSessions(workspaceId ?? undefined))
     .filter(session => !workspaceId || session.workspaceId === workspaceId)
     .filter(session => !params.search || session.title.toLowerCase().includes(params.search.toLowerCase()))
 

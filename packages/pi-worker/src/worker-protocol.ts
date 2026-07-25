@@ -28,7 +28,31 @@ export interface PiModelInfo {
   supportsImages: boolean
 }
 
+export const PI_WORKER_PROTOCOL_VERSION = 2 as const
+
+export type PiWorkerCapability =
+  | "catalog.sessions"
+  | "catalog.models"
+  | "runtime.open"
+  | "runtime.prompt"
+  | "runtime.abort"
+  | "runtime.model"
+  | "runtime.thinking"
+  | "runtime.compact"
+  | "runtime.skills"
+  | "runtime.commands"
+
+export interface WorkerHello {
+  kind: "hello"
+  workerProtocolVersion: number
+  piSdkVersion: string
+  generation: string
+  processId: number
+  capabilities: PiWorkerCapability[]
+}
+
 export type WorkerCommand =
+  | { type: "list"; cwd: string }
   | { type: "listAll" }
   | { type: "listModels" }
   | { type: "open"; cwd: string; sessionFile?: string }
@@ -63,4 +87,4 @@ export type WorkerIpcEvent =
   | { kind: "event"; type: "projection"; projection: ProjectionWire }
   | { kind: "event"; type: "state"; state: PiRuntimeUiState }
 
-export type WorkerMessage = WorkerResponse | WorkerIpcEvent
+export type WorkerMessage = WorkerHello | WorkerResponse | WorkerIpcEvent

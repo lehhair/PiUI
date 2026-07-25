@@ -1,5 +1,7 @@
 /** PiUI browser ↔ server protocol v1 */
 
+import type { ProtocolHandshakeV2 } from "./handshake-v2.js"
+
 export const PROTOCOL_VERSION = 1 as const
 export type ProtocolVersion = typeof PROTOCOL_VERSION
 
@@ -12,10 +14,15 @@ export * from "./events.js"
 export * from "./session.js"
 export * from "./git.js"
 export * from "./command.js"
+export * from "./capabilities-v2.js"
+export * from "./events-v2.js"
+export * from "./handshake-v2.js"
+export * from "./commands-v2.js"
 
 export interface HealthResponseV1 {
   ok: true
   protocolVersion: ProtocolVersion
   service: "piui-server"
   phase: number
+  protocolV2?: ProtocolHandshakeV2
 }

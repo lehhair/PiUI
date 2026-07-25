@@ -2,13 +2,15 @@
 
 ## 目标
 
-**看上去和 OpenCodeUI 完全一样，底下是 Pi。**
+**保留 OpenCodeUI 成熟视觉结构，实现 Pi 0.81.1 原生全功能客户端。**
 
 - 视觉壳：fork `_archive/opencodeui-baseline`（GPL-3.0）
 - 运行时：自有 protocol + server + pi-worker，**不**接 OpenCode SDK / 兼容层
 - 不调用真实模型做开发验收（用 mock / 无网络 unit 测试）
 
 主计划：`docs/PIUI_MASTER_PLAN.md`
+
+能力矩阵：`docs/PI_UI_INTEGRATION.md`
 
 基线设计：`docs/universal-agent-pi-technical-design.md`
 
@@ -35,7 +37,7 @@ _archive/opencodeui-baseline  只读参考
 _archive/wip-phase0-*         清理前半成品
 ```
 
-## 阶段
+## 历史启动阶段
 
 | Phase | 内容 | 验收 |
 |------|------|------|
@@ -44,7 +46,9 @@ _archive/wip-phase0-*         清理前半成品
 | 2 | pi-worker 生命周期（无真实 prompt） | worker 单测 |
 | 3 | app 去 SDK 依赖，壳可 dev | 无 `@opencode-ai/sdk` 生产 import |
 | 4 | Chat 接 mock/host timeline | 投影/reducer 测试 |
-| 5+ | 文件/Git/PTY/桌面 | 见设计文档 |
+| 5+ | 文件/Git/PTY/桌面 | 已由 R0-R12 parity 路线取代 |
+
+当前实施使用主计划中的 R0-R12；上表只记录仓库从 OpenCodeUI 迁出的启动历史
 
 ## 本地跑
 
@@ -75,7 +79,9 @@ npm run dev:app      # vite
 - [x] 真实 Pi runtime 与模型枚举运行在独立 worker 子进程，server 仅通过私有 IPC 调用
 - [x] 前端 snapshot 按 Pi session ID 隔离，WS 支持 epoch/sequence 去重、有限重放和 resync
 - [x] 会话加载、发送、abort、slash command 和侧栏 CRUD 只使用 Pi API，不再 fallback 到旧 SDK
-- [x] Pi 能力对齐 UI（有壳才接）：模型/thinking level/compact/skills·commands/steer·followUp/runtime 状态
+- [x] Pi 基础能力：模型/thinking level/compact/skills·commands/runtime 状态
+- [x] R0：Pi 0.81.1 精确版本、完整 parity matrix、真实 session 性能基线
+- [~] R1：Protocol v2 类型、版本化 capability、作用域事件、worker handshake
 - [x] 阶段 0/1：完整 mock 根测试、全 workspace typecheck/build、render 前 Pi health、旧 SSE 删除、真实 Pi 不再启动即建会话
 - [~] 阶段 6：OpenCode SDK 包、shim、alias、类型 import 和网络 client 已删除；旧 facade 函数继续迁往 Pi API
 - [ ] fork/undo 映射 Pi tree；终端 PTY

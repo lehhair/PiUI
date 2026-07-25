@@ -71,6 +71,7 @@ describe('Pi session facade', () => {
     await expect(getSessions({ directory: '/workspace', search: 'review' })).resolves.toEqual([
       expect.objectContaining({ id: 'one', directory: '/workspace' }),
     ])
+    expect(mocks.listPiSessions).toHaveBeenCalledWith('workspace-1')
   })
 
   it('creates, applies, and maps a Pi session snapshot', async () => {
