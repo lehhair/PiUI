@@ -25,9 +25,10 @@ describe("phase3 no opencode npm sdk", () => {
       .filter(entry => entry.isFile() && /\.(ts|tsx)$/.test(entry.name))
       .map(entry => join(entry.parentPath, entry.name))
     for (const file of files) {
-      assert.doesNotMatch(readFileSync(file, "utf8"), /@opencode-ai\/sdk|createOpencodeClient/)
+      assert.doesNotMatch(readFileSync(file, "utf8"), /@opencode-ai\/sdk|createOpencodeClient|getSDKClient/)
     }
     assert.equal(existsSync(join(sourceRoot, "shims/opencode-sdk/v2/client.ts")), false)
+    assert.equal(existsSync(join(sourceRoot, "api/sdk.ts")), false)
   })
 
   it("build config has no SDK alias", () => {

@@ -24,6 +24,7 @@ import { uiErrorHandler } from '../utils'
 import { getInternalDragSnapshot, startInternalDrag, subscribeInternalDrag, subscribeInternalDrop } from '../lib/internalDragCore'
 import { useDragEdgeAutoScroll } from '../hooks/useDragEdgeAutoScroll'
 import { IconButton } from './ui/IconButton'
+import { usePiCapabilities } from '../pi/capabilities'
 
 // ============================================
 // Types
@@ -91,10 +92,17 @@ export const PanelContainer = memo(function PanelContainer({
 }: PanelContainerProps) {
   const { t } = useTranslation(['components', 'common'])
   const { manualTerminalTitles } = useTheme()
+  const capabilities = usePiCapabilities()
   const layout = useLayoutStore()
 
   const isOpen = forceOpen || (position === 'bottom' ? layout.bottomPanelOpen : layout.rightPanelOpen)
-  const tabs = layout.panelTabs.filter(t => t.position === position)
+  const tabs = layout.panelTabs.filter(tab => {
+    if (tab.position !== position) return false
+    if (tab.type === 'terminal') return capabilities.pty
+    if (tab.type === 'mcp') return capabilities.mcp
+    if (tab.type === 'worktree') return capabilities.worktree
+    return true
+  })
   const activeTabId = layout.activeTabId[position]
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0] ?? null
 
@@ -422,18 +430,20 @@ export const PanelContainer = memo(function PanelContainer({
               right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined,
             }}
           >
-            <button
-              onClick={() => {
-                onNewTerminal?.()
-                setAddMenuPos(null)
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              <span className="opacity-60 shrink-0">
-                <TerminalIcon size={12} />
-              </span>
-              {t('terminal.terminal')}
-            </button>
+            {capabilities.pty && (
+              <button
+                onClick={() => {
+                  onNewTerminal?.()
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <TerminalIcon size={12} />
+                </span>
+                {t('terminal.terminal')}
+              </button>
+            )}
             <button
               onClick={() => {
                 layoutStore.addFilesTab(position)
@@ -458,18 +468,20 @@ export const PanelContainer = memo(function PanelContainer({
               </span>
               {t('panelContainer.changes')}
             </button>
-            <button
-              onClick={() => {
-                layoutStore.addMcpTab(position)
-                setAddMenuPos(null)
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              <span className="opacity-60 shrink-0">
-                <PlugIcon size={12} />
-              </span>
-              {t('panelContainer.mcpServers')}
-            </button>
+            {capabilities.mcp && (
+              <button
+                onClick={() => {
+                  layoutStore.addMcpTab(position)
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <PlugIcon size={12} />
+                </span>
+                {t('panelContainer.mcpServers')}
+              </button>
+            )}
             <button
               onClick={() => {
                 layoutStore.addSkillTab(position)
@@ -482,18 +494,20 @@ export const PanelContainer = memo(function PanelContainer({
               </span>
               {t('panelContainer.skills')}
             </button>
-            <button
-              onClick={() => {
-                layoutStore.addWorktreeTab(position)
-                setAddMenuPos(null)
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              <span className="opacity-60 shrink-0">
-                <GitWorktreeIcon size={12} />
-              </span>
-              {t('panelContainer.worktrees')}
-            </button>
+            {capabilities.worktree && (
+              <button
+                onClick={() => {
+                  layoutStore.addWorktreeTab(position)
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <GitWorktreeIcon size={12} />
+                </span>
+                {t('panelContainer.worktrees')}
+              </button>
+            )}
           </div>,
           document.body,
         )}

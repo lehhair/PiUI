@@ -7,6 +7,9 @@ export interface PiCapabilities {
   gitDiff: boolean
   sessionRename: boolean
   sessionArchive: boolean
+  mcp: boolean
+  worktree: boolean
+  config: boolean
 }
 
 const unavailable: PiCapabilities = {
@@ -18,6 +21,9 @@ const unavailable: PiCapabilities = {
   gitDiff: false,
   sessionRename: false,
   sessionArchive: false,
+  mcp: false,
+  worktree: false,
+  config: false,
 }
 
 let current = unavailable

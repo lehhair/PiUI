@@ -2,7 +2,7 @@
 // Message API Functions
 // ============================================
 
-import { UnsupportedPiCapabilityError } from './sdk'
+import { UnsupportedPiCapabilityError } from './errors'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { fetchSnapshot, promptSession } from '../pi/sessionApi'
 import { snapshotToApiMessages } from '../pi/timelineToMessages'

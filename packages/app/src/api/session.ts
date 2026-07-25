@@ -2,7 +2,7 @@
 // Pi-native Session API Functions
 // ============================================
 
-import { UnsupportedPiCapabilityError } from './sdk'
+import { UnsupportedPiCapabilityError } from './errors'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import {
   abortSessionCommand,
