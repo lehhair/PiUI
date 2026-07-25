@@ -20,11 +20,16 @@ import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
 import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
 
-function sessionSummary(s: AppSession, store: WorkspaceStore) {
+function sessionSummary(
+  s: AppSession,
+  store: WorkspaceStore,
+  state?: ReturnType<SessionRegistry["snapshot"]>["session"]["state"],
+) {
   return {
     id: s.id,
     workspaceId: s.workspaceId,
     directory: store.get(s.workspaceId)?.canonicalRoot,
+    state,
     title: s.title,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -109,7 +114,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       type: "session.updated",
       sessionId: session.id,
       workspaceId: session.workspaceId,
-      payload: sessionSummary(session, store),
+      payload: sessionSummary(session, store, sessions.snapshot(session).session.state),
     })
   }
   let defaultWorkspaceId: string | null = null
@@ -213,7 +218,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const list = (await sessions.list(workspaceId))
           .slice()
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-          .map(session => sessionSummary(session, store))
+          .map(session => sessionSummary(session, store, sessions.snapshot(session).session.state))
         return sendJson(res, 200, { sessions: list })
       }
 
@@ -233,7 +238,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           })
           publishSessionUpdated(s)
           return sendJson(res, 201, {
-            session: sessionSummary(s, store),
+            session: sessionSummary(s, store, sessions.snapshot(s).session.state),
             snapshot: sessions.snapshot(s),
             driver: sessions.getDriver(),
           })

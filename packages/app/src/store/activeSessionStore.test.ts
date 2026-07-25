@@ -1,5 +1,49 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { SessionSnapshotV1 } from '@piui/protocol'
 import { activeSessionStore } from './activeSessionStore'
+
+function snapshot(state: SessionSnapshotV1['session']['state']): SessionSnapshotV1 {
+  return {
+    protocolVersion: 1,
+    epoch: 'epoch-1',
+    sequence: 1,
+    session: {
+      id: 'pi-session',
+      workspaceId: 'workspace-1',
+      directory: '/workspace/project',
+      driverId: 'pi',
+      driverSessionId: 'pi-session',
+      title: 'Active Pi session',
+      state,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    runtime: {
+      attached: true,
+      thinkingLevel: 'off',
+      availableThinkingLevels: ['off'],
+      isStreaming: state === 'running',
+      isCompacting: state === 'compacting',
+      queue: { steering: [], followUp: [], steeringMode: 'one-at-a-time', followUpMode: 'one-at-a-time' },
+      retry: state === 'retrying'
+        ? {
+            phase: 'waiting',
+            autoEnabled: true,
+            attempt: 2,
+            maxAttempts: 3,
+            delayMs: 1000,
+            nextAttemptAt: '2026-01-01T00:00:01.000Z',
+            errorMessage: 'overloaded',
+          }
+        : { phase: 'idle', autoEnabled: true },
+      compaction: { autoEnabled: true, operation: { type: 'none' } },
+      tools: [],
+      activeTools: [],
+    },
+    timeline: [],
+    native: { namespace: 'pi', schemaVersion: 1, leafId: null, entries: [], tree: [] },
+  }
+}
 
 describe('activeSessionStore scoped refresh handling', () => {
   beforeEach(() => {
@@ -90,5 +134,28 @@ describe('activeSessionStore scoped refresh handling', () => {
       message: 'retrying',
       next: 1000,
     })
+  })
+
+  it('tracks Pi running, retrying, and idle snapshots', () => {
+    activeSessionStore.syncPiSnapshot(snapshot('running'))
+    expect(activeSessionStore.getBusySessions()).toEqual([
+      expect.objectContaining({
+        sessionId: 'pi-session',
+        title: 'Active Pi session',
+        directory: '/workspace/project',
+        status: { type: 'busy' },
+      }),
+    ])
+
+    activeSessionStore.syncPiSnapshot(snapshot('retrying'))
+    expect(activeSessionStore.getBusySessions()[0]?.status).toEqual({
+      type: 'retry',
+      attempt: 2,
+      message: 'overloaded',
+      next: Date.parse('2026-01-01T00:00:01.000Z'),
+    })
+
+    activeSessionStore.syncPiSnapshot(snapshot('idle'))
+    expect(activeSessionStore.getBusySessions()).toEqual([])
   })
 })
