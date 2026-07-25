@@ -9,7 +9,7 @@
 // 4. RAF 批量通知 React 组件更新
 
 import type { Message, MessageError, Part, FilePart, AgentPart } from '../types/message'
-import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
+import type { ApiMessageWithParts, ApiMessage, ApiPart, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
 import type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
@@ -431,7 +431,21 @@ class MessageStore {
       directory?: string
       title?: string
       hasMoreHistory?: boolean
-      revertState?: ApiSession['revert'] | null
+      revertState?: { messageID?: string } | null
+      shareUrl?: string
+    },
+  ) {
+    this.setUiMessages(sessionId, apiMessages.map(toUIMessage), options)
+  }
+
+  setUiMessages(
+    sessionId: string,
+    messages: Message[],
+    options?: {
+      directory?: string
+      title?: string
+      hasMoreHistory?: boolean
+      revertState?: { messageID?: string } | null
       shareUrl?: string
     },
   ) {
@@ -439,8 +453,7 @@ class MessageStore {
     const previousMessages = state.messages
     const previousById = new Map(previousMessages.map(message => [message.info.id, message]))
 
-    state.messages = apiMessages.map(apiMessage => {
-      const next = toUIMessage(apiMessage)
+    state.messages = messages.map(next => {
       const previous = previousById.get(next.info.id)
       // 定稿（completed）强制采用服务端；仅流式/未完成时不回退更长 live
       if (!previous || !shouldPreserveLiveParts(previous, next)) return next

@@ -2,53 +2,26 @@
 // Message API Functions
 // ============================================
 
-import { UnsupportedPiCapabilityError } from './errors'
-import { applySnapshotToUi } from '../pi/applySnapshot'
-import { fetchSnapshot, promptSession } from '../pi/sessionApi'
-import { snapshotToApiMessages } from '../pi/timelineToMessages'
-import type {
-  ApiAgentPart,
-  ApiFilePart,
-  ApiMessageWithParts,
-  ApiTextPart,
-  Attachment,
-  RevertedMessage,
-  SendMessageParams,
-  SendMessageResponse,
-} from './types'
+import type { Attachment, RevertedMessage } from './types'
+import type { AgentPart, FilePart, Message, TextPart } from '../types/message'
 
-type UserContentSource = {
-  parts: Array<ApiTextPart | ApiFilePart | ApiAgentPart | { type: string }>
-}
+type UserContentSource = Pick<Message, 'parts'>
 
-function isTextUserContentPart(part: UserContentSource['parts'][number]): part is ApiTextPart {
+function isTextUserContentPart(part: UserContentSource['parts'][number]): part is TextPart {
   return part.type === 'text' && 'text' in part
 }
 
-function isFileUserContentPart(part: UserContentSource['parts'][number]): part is ApiFilePart {
+function isFileUserContentPart(part: UserContentSource['parts'][number]): part is FilePart {
   return part.type === 'file' && 'mime' in part && 'url' in part
 }
 
-function isAgentUserContentPart(part: UserContentSource['parts'][number]): part is ApiAgentPart {
+function isAgentUserContentPart(part: UserContentSource['parts'][number]): part is AgentPart {
   return part.type === 'agent' && 'name' in part
-}
-
-export async function getSessionMessages(
-  sessionId: string,
-  limit?: number,
-  _directory?: string,
-): Promise<ApiMessageWithParts[]> {
-  const messages = snapshotToApiMessages(await fetchSnapshot(sessionId))
-  return limit == null ? messages : messages.slice(-Math.max(0, limit))
-}
-
-export async function getSessionMessageCount(sessionId: string): Promise<number> {
-  return (await getSessionMessages(sessionId)).length
 }
 
 export function extractUserMessageContent(message: UserContentSource): RevertedMessage {
   const text = message.parts
-    .filter((part): part is ApiTextPart => isTextUserContentPart(part) && !part.synthetic)
+    .filter((part): part is TextPart => isTextUserContentPart(part) && !part.synthetic)
     .map(part => part.text)
     .join('\n')
   const attachments: Attachment[] = []
@@ -81,30 +54,4 @@ export function extractUserMessageContent(message: UserContentSource): RevertedM
   }
 
   return { text, attachments }
-}
-
-function assertSupportedPrompt(params: SendMessageParams): void {
-  if (params.attachments.length > 0) throw new UnsupportedPiCapabilityError('message attachments')
-  if (params.agent) throw new UnsupportedPiCapabilityError('agent selection')
-  if (params.variant) throw new UnsupportedPiCapabilityError('model variants')
-}
-
-export async function sendMessage(params: SendMessageParams): Promise<SendMessageResponse> {
-  assertSupportedPrompt(params)
-  const snapshot = await promptSession(params.sessionId, params.text, {
-    model: params.model,
-  })
-  applySnapshotToUi(snapshot)
-  const response = snapshotToApiMessages(snapshot).findLast(message => message.info.role === 'assistant')
-  if (!response || response.info.role !== 'assistant') throw new Error('Pi session returned no assistant message')
-  return { info: response.info, parts: response.parts }
-}
-
-export async function sendMessageAsync(params: SendMessageParams): Promise<void> {
-  assertSupportedPrompt(params)
-  const snapshot = await promptSession(params.sessionId, params.text, {
-    stream: true,
-    model: params.model,
-  })
-  applySnapshotToUi(snapshot)
 }

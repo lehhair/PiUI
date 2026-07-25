@@ -5,7 +5,7 @@ import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../compon
 import { useDisclosureScrollLock, useResponsiveMaxHeight } from '../../../../hooks'
 import { useSessionState, messageStore, childSessionStore } from '../../../../store'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
-import { abortSession, getSessionMessages } from '../../../../api'
+import { abortSession } from '../../../../api'
 import { sessionErrorHandler } from '../../../../utils'
 import { formatToolName } from '../../../../utils/formatUtils'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
@@ -13,6 +13,8 @@ import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 import type { Message, TextPart, ToolPart } from '../../../../types/message'
 import { isVisibleTextPart } from '../../../../types/message'
+import { fetchSnapshot } from '../../../../pi/sessionApi'
+import { snapshotToUiMessages } from '../../../../pi/timelineToMessages'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -317,16 +319,21 @@ const SubSessionView = memo(function SubSessionView({ sessionId }: SubSessionVie
     loadedRef.current = true
     messageStore.setLoadState(sessionId, 'loading')
 
-    getSessionMessages(sessionId, 20)
-      .then(apiMessages => {
+    fetchSnapshot(sessionId)
+      .then(snapshot => {
+        const allMessages = snapshotToUiMessages(snapshot)
+        const messages = allMessages.slice(-20)
+        return { messages, hasMoreHistory: allMessages.length > messages.length }
+      })
+      .then(({ messages, hasMoreHistory }) => {
         const currentState = messageStore.getSessionState(sessionId)
-        if (currentState && currentState.messages.length > apiMessages.length) {
+        if (currentState && currentState.messages.length > messages.length) {
           messageStore.setLoadState(sessionId, 'loaded')
           return
         }
-        messageStore.setMessages(sessionId, apiMessages, {
+        messageStore.setUiMessages(sessionId, messages, {
           directory: '',
-          hasMoreHistory: apiMessages.length >= 20,
+          hasMoreHistory,
         })
       })
       .catch(err => {

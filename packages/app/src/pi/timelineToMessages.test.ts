@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { SessionSnapshotV1 } from "@piui/protocol"
-import { snapshotToApiMessages, timelineToApiMessages } from "./timelineToMessages"
+import { snapshotToUiMessages, timelineToUiMessages } from "./timelineToMessages"
 import { messageStore } from "../store/messageStore"
 
 function sampleSnapshot(): SessionSnapshotV1 {
@@ -20,6 +20,7 @@ function sampleSnapshot(): SessionSnapshotV1 {
     },
     runtime: {
       attached: true,
+      model: { provider: "provider-1", id: "model-1", displayName: "Model One" },
       thinkingLevel: "off",
       availableThinkingLevels: ["off"],
       isStreaming: false,
@@ -55,11 +56,15 @@ function sampleSnapshot(): SessionSnapshotV1 {
   }
 }
 
-describe("timelineToApiMessages", () => {
-  it("maps user + assistant + tool into ApiMessageWithParts", () => {
-    const msgs = snapshotToApiMessages(sampleSnapshot())
+describe("timelineToUiMessages", () => {
+  it("maps user + assistant + tool into UI messages", () => {
+    const msgs = snapshotToUiMessages(sampleSnapshot())
     expect(msgs).toHaveLength(2)
     expect(msgs[0]?.info.role).toBe("user")
+    expect(msgs[0]?.info.role === "user" ? msgs[0].info.model : null).toEqual({
+      providerID: "provider-1",
+      modelID: "model-1",
+    })
     expect(msgs[1]?.info.role).toBe("assistant")
     const parts = msgs[1]!.parts
     expect(parts.some(p => p.type === "reasoning")).toBe(true)
@@ -73,8 +78,8 @@ describe("timelineToApiMessages", () => {
   it("loads into messageStore for ChatArea pipeline", () => {
     messageStore.clearAll()
     const snap = sampleSnapshot()
-    const msgs = timelineToApiMessages(snap.timeline, snap.session.id)
-    messageStore.setMessages(snap.session.id, msgs, { title: snap.session.title })
+    const msgs = timelineToUiMessages(snap.timeline, snap.session.id)
+    messageStore.setUiMessages(snap.session.id, msgs, { title: snap.session.title })
     const visible = messageStore.getVisibleMessages(snap.session.id)
     expect(visible).toHaveLength(2)
     expect(visible[0]?.info.role).toBe("user")

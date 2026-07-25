@@ -137,8 +137,6 @@ vi.mock('../store/notificationEventSettingsStore', () => ({
 }))
 
 vi.mock('../api', () => ({
-  sendMessageAsync: vi.fn(),
-  getSessionMessages: vi.fn(),
   abortSession: vi.fn(),
   getSelectableAgents: (...args: unknown[]) => getSelectableAgentsMock(...args),
   getPendingPermissions: vi.fn(() => Promise.resolve([])),
