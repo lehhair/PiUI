@@ -25,7 +25,10 @@ function sampleSnapshot(): SessionSnapshotV1 {
       availableThinkingLevels: ["off"],
       isStreaming: false,
       isCompacting: false,
-      queue: { steering: [], followUp: [] },
+      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      retry: { phase: "idle", autoEnabled: false },
+      compaction: { autoEnabled: false, operation: { type: "none" } },
+      tools: [],
       activeTools: [],
     },
     timeline: [

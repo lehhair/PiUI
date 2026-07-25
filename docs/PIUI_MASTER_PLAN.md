@@ -49,7 +49,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R1 | Protocol v2、类型化 command/event/capability、worker handshake | 已完成 |
 | R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 已完成 |
 | R3 | session tree、navigate、label、fork、clone、import、持久删除 | 已完成 |
-| R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 未开始 |
+| R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 已完成 |
 | R5 | 多模态 prompt 与完整工具结果 | 未开始 |
 | R6 | Pi user bash 与流式执行控制 | 未开始 |
 | R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
@@ -61,7 +61,8 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 
 每项能力的实时状态、来源和完成条件见 `docs/PI_UI_INTEGRATION.md`
 
-R2 已实现 worker IPC v3、全消息 generation 校验、5 秒心跳与连续 3 次缺失判定、由 OS socket
+R2 已实现的 supervisor 语义继续保留；worker IPC 在 R4 扩展为 v4，以承载 control、queue、retry、
+compaction、tools 和 bounded timeline delta。全消息 generation 校验、5 秒心跳与连续 3 次缺失判定、由 OS socket
 持有的跨进程 session lease、物理文件身份刷新、catalog worker 自动替换、崩溃命令
 `unknown_after_crash`、排队命令取消、懒重新 attach、限时服务退出，以及真实 Pi SDK + faux provider
 无网络验收。外部 Pi CLI 改写 JSONL 的 fingerprint 冲突检测和 idle suspension 不属于本轮完成范围，
@@ -70,8 +71,13 @@ R2 已实现 worker IPC v3、全消息 generation 校验、5 秒心跳与连续 
 R3 已实现类型化 Pi entries/tree/leaf、tree navigation 与编辑器文本恢复、entry label、session name、
 fork/clone/import runtime replacement、target-before-source lease 转移、持久 JSONL 删除，以及右侧会话树 UI。
 fork 后仅发起操作的 pane 切换到 target，其他 source viewer 保留原分支快照；lease commit 失败时关闭已替换
-worker 并让 source 回到可重新 attach 状态。branch summary 的交互选择、外部 JSONL 冲突检测和 leaf checkpoint
-持久恢复继续分别在 R4 和后续持久会话阶段完成。
+worker 并让 source 回到可重新 attach 状态。branch summary 交互已在 R4 完成；外部 JSONL 冲突检测和
+leaf checkpoint 持久恢复留到后续阶段。
+
+R4 已实现独立 steer/follow-up control lane、原生 queue 内容与投递模式、abort 前清空并恢复队列文本、
+auto retry 与 summarization retry 状态、手动/自动 compaction、branch summary 与取消，以及 active tools 查询和切换。
+prompt、steer、follow-up 和 compact 使用 `202 Accepted`，最终状态由 command/session event 发布；浏览器和 worker IPC
+流式路径均使用最多两个 timeline item 的 bounded delta，完整历史只在本地 projection 和 snapshot/resync 中保留。
 
 ## 3. 非目标
 
@@ -191,7 +197,7 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 - 真实 Pi SDK + faux provider 无网络集成测试通过
 - worker crash、心跳超时、generation 隔离、跨进程 lease 和服务退出故障测试通过
 
-当前结果覆盖 R0-R3 完成条件，但 R4-R12 尚未完成，产品仍未达到发布标准。
+当前结果覆盖 R0-R4 完成条件，但 R5-R12 尚未完成，产品仍未达到发布标准。
 
 ## 6. 目标架构
 

@@ -14,6 +14,12 @@ export interface ProjectionState {
   isStreaming: boolean
 }
 
+export interface ProjectionDelta {
+  timeline: TimelineItemV1[]
+  isStreaming: boolean
+  removedItemIds?: string[]
+}
+
 export function createProjectionState(): ProjectionState {
   return {
     timeline: [],

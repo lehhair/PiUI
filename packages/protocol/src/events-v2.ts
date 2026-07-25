@@ -1,4 +1,4 @@
-import type { CommandStatusV2 } from "./commands-v2.js"
+import type { CommandStatusV2, CommandTypeV2 } from "./commands-v2.js"
 import type { SessionSnapshotV1 } from "./session.js"
 
 export type EventStreamKindV2 = "server" | "workspace" | "session" | "provider" | "resources"
@@ -27,10 +27,25 @@ export interface EventPayloadsV2 {
     reason: "command" | "runtime" | "resync"
     snapshot: SessionSnapshotV1
   }
+  "session.timeline.delta": {
+    sessionId: string
+    epoch: string
+    sequence: number
+    items: SessionSnapshotV1["timeline"]
+    removedItemIds?: string[]
+    isStreaming: boolean
+  }
   "session.runtime.replaced": { sessionId: string; workerGeneration: string }
   "session.runtime.crashed": { sessionId: string; workerGeneration?: string; message: string }
   "workspace.sessions.updated": { workspaceId?: string; sessionId?: string }
-  "command.updated": { commandId: string; sessionId?: string; status: CommandStatusV2 }
+  "command.updated": {
+    commandId: string
+    sessionId?: string
+    status: CommandStatusV2
+    error?: { code: string; message: string; retryable?: boolean }
+    commandType?: CommandTypeV2
+    inputText?: string
+  }
   "extension.ui.requested": { requestId: string; sessionId: string; kind: string }
   "extension.ui.cancelled": { requestId: string; reason: string }
   "provider.auth.updated": { providerId: string; authenticated: boolean }

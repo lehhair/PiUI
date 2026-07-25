@@ -33,6 +33,7 @@ import { useChatViewport } from './chatViewport'
 import type { ApiAgent } from '../../api/client'
 import type { ModelInfo, FileCapabilities } from '../../hooks/useModels'
 import type { Command } from '../../api/command'
+import { usePiCapabilities } from '../../pi/capabilities'
 import {
   getDroppedPathsInfo,
   isTauriDropPointInsideElement,
@@ -120,7 +121,7 @@ export interface InputBoxProps {
   onSend: (
     text: string,
     attachments: Attachment[],
-    options?: { agent?: string; variant?: string },
+    options?: { agent?: string; variant?: string; delivery?: 'steer' | 'followUp' },
   ) => Promise<boolean> | boolean
   onAbort?: () => void
   onCommand?: (command: string) => Promise<boolean> | boolean // 斜杠命令回调，接收完整命令字符串如 "/help"
@@ -146,6 +147,7 @@ export interface InputBoxProps {
   // Undo/Redo
   revertedText?: string
   revertedAttachments?: Attachment[]
+  restoreMode?: 'replace' | 'append'
   canRedo?: boolean
   revertSteps?: number
   onRedo?: () => void
@@ -190,6 +192,7 @@ function InputBoxComponent({
   sessionId,
   revertedText,
   revertedAttachments,
+  restoreMode = 'replace',
   canRedo = false,
   revertSteps = 0,
   onRedo,
@@ -224,6 +227,8 @@ function InputBoxComponent({
   // 附件状态（图片、文件、文件夹、agent）
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [deliveryMode, setDeliveryMode] = useState<'steer' | 'followUp'>('followUp')
+  const piCapabilities = usePiCapabilities()
 
   // @ Mention 状态
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -254,6 +259,7 @@ function InputBoxComponent({
   const slashMenuRef = useRef<SlashCommandMenuHandle>(null)
   const prevRevertedTextRef = useRef<string | undefined>(undefined)
   const latestDraftRef = useRef<HistoryEntry>({ text: '', attachments: [] })
+  const appendedRestoreRef = useRef<string | undefined>(undefined)
   const contentWrapRef = useRef<HTMLDivElement>(null)
   const footerRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
@@ -304,15 +310,25 @@ function InputBoxComponent({
 
     if (revertedText !== undefined) {
       frameId = requestAnimationFrame(() => {
-        setText(revertedText)
-        setAttachments(revertedAttachments || [])
+        if (restoreMode === 'append' && appendedRestoreRef.current === revertedText) return
+        const current = latestDraftRef.current
+        const nextText = restoreMode === 'append' && current.text.trim()
+          ? `${current.text}\n\n${revertedText}`
+          : revertedText
+        const nextAttachments = restoreMode === 'append'
+          ? [...current.attachments, ...(revertedAttachments || [])]
+          : (revertedAttachments || [])
+        setText(nextText)
+        setAttachments(nextAttachments)
+        appendedRestoreRef.current = restoreMode === 'append' ? revertedText : undefined
         // 聚焦并移动光标到末尾
         if (textareaRef.current) {
           textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(revertedText.length, revertedText.length)
+          textareaRef.current.setSelectionRange(nextText.length, nextText.length)
         }
       })
     } else if (prevRevertedTextRef.current !== undefined && revertedText === undefined && !isSubmitting) {
+      appendedRestoreRef.current = undefined
       frameId = requestAnimationFrame(() => {
         setText('')
         setAttachments([])
@@ -326,7 +342,7 @@ function InputBoxComponent({
         cancelAnimationFrame(frameId)
       }
     }
-  }, [revertedText, revertedAttachments, isSubmitting])
+  }, [revertedText, revertedAttachments, restoreMode, isSubmitting])
 
   useEffect(
     () => () => {
@@ -527,6 +543,7 @@ function InputBoxComponent({
         onSend(text, attachments, {
           agent: mentionedAgent || selectedAgent,
           variant: selectedVariant,
+          ...(isStreaming ? { delivery: deliveryMode } : {}),
         }),
       () => {
         resetDraft()
@@ -544,6 +561,8 @@ function InputBoxComponent({
     runSubmit,
     selectedAgent,
     selectedVariant,
+    isStreaming,
+    deliveryMode,
     submitCommandOptimistically,
     text,
   ])
@@ -1392,6 +1411,10 @@ function InputBoxComponent({
                       isStreaming={isStreaming}
                       isSending={isSubmitting}
                       onAbort={onAbort}
+                      deliveryMode={deliveryMode}
+                      onDeliveryModeChange={setDeliveryMode}
+                      canSteer={piCapabilities.promptSteer}
+                      canFollowUp={piCapabilities.promptFollowUp}
                       canSend={canSend || false}
                       onSend={handleSend}
                       models={models}

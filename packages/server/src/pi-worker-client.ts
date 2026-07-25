@@ -1,8 +1,13 @@
 import { fork, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
-import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
-import type { SessionReplacementResultV1 } from "@piui/protocol"
+import { isRuntimeControlStateV1, PI_PARITY_SDK_VERSION } from "@piui/protocol"
+import type {
+  CompactionCommandResultV1,
+  PiNavigationResultV1,
+  QueueDeliveryModeV1,
+  SessionReplacementResultV1,
+} from "@piui/protocol"
 import {
   getPiWorkerEntryUrl,
   PI_WORKER_PROTOCOL_VERSION,
@@ -14,6 +19,7 @@ import {
   type PiSessionRuntime,
   type PiSkillInfo,
   type PiWorkerCapability,
+  type ProjectionDelta,
   type ProjectionState,
   type WorkerCommand,
   type WorkerHello,
@@ -50,13 +56,14 @@ export interface PiWorkerHost {
 export class PiWorkerSession implements PiSessionRuntime {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly stateListeners = new Set<(state: PiRuntimeUiState) => void>()
+  private readonly projectionListeners = new Set<(projection: ProjectionState) => void>()
+  private readonly projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
   private readonly closeListeners = new Set<() => void>()
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
   private projection: ProjectionState = restoreProjection([])
-  private projectionListener?: (projection: ProjectionState) => void
   private replacementHandler?: (replacement: SessionReplacementResultV1) => void | Promise<void>
   private disposed = false
   private disposing = false
@@ -208,6 +215,17 @@ export class PiWorkerSession implements PiSessionRuntime {
     return () => this.stateListeners.delete(listener)
   }
 
+  onProjection(listener: (projection: ProjectionState) => void): () => void {
+    this.projectionListeners.add(listener)
+    listener(this.projection)
+    return () => this.projectionListeners.delete(listener)
+  }
+
+  onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
+    this.projectionDeltaListeners.add(listener)
+    return () => this.projectionDeltaListeners.delete(listener)
+  }
+
   getProjection(): ProjectionState { return this.projection }
   getSessionId(): string { return this.session.sessionId }
   getSessionFile(): string | undefined { return this.session.sessionFile }
@@ -229,18 +247,69 @@ export class PiWorkerSession implements PiSessionRuntime {
     this.applySession(expectSession(await this.request({ type: "setThinkingLevel", level })))
   }
 
-  async compact(customInstructions?: string): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "compact", instructions: customInstructions })))
+  async compact(customInstructions?: string): Promise<CompactionCommandResultV1> {
+    const result = await this.request({ type: "compact", instructions: customInstructions })
+    if (result.type !== "compaction") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return result.compaction
+  }
+
+  async abortCompaction(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "abortCompaction" })))
+  }
+
+  async abortBranchSummary(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "abortBranchSummary" })))
+  }
+
+  async abortRetry(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "abortRetry" })))
+  }
+
+  async setAutoCompaction(enabled: boolean): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setAutoCompaction", enabled })))
+  }
+
+  async setAutoRetry(enabled: boolean): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setAutoRetry", enabled })))
+  }
+
+  async setQueueModes(modes: {
+    steeringMode?: QueueDeliveryModeV1
+    followUpMode?: QueueDeliveryModeV1
+  }): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setQueueModes", ...modes })))
+  }
+
+  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    const result = await this.request({ type: "clearQueue" })
+    if (result.type !== "queue") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return { steering: result.steering, followUp: result.followUp }
+  }
+
+  async setActiveTools(toolNames: string[]): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "setActiveTools", toolNames })))
   }
 
   async navigateTree(
     entryId: string,
-    summarize = false,
-  ): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean }> {
-    const result = await this.request({ type: "navigateTree", entryId, summarize })
+    options: {
+      summarize?: boolean
+      customInstructions?: string
+      replaceInstructions?: boolean
+      label?: string
+    } = {},
+  ): Promise<PiNavigationResultV1> {
+    const result = await this.request({ type: "navigateTree", entryId, ...options })
     if (result.type !== "navigation") throw new Error(`unexpected Pi worker result: ${result.type}`)
     this.applySession(result.session)
-    return { editorText: result.editorText, cancelled: result.cancelled, aborted: result.aborted }
+    return {
+      editorText: result.editorText,
+      cancelled: result.cancelled,
+      aborted: result.aborted,
+      summaryEntry: result.summaryEntry,
+    }
   }
 
   async setLabel(entryId: string, label?: string): Promise<void> {
@@ -263,23 +332,23 @@ export class PiWorkerSession implements PiSessionRuntime {
     return this.applyReplacement(await this.request({ type: "importSession", inputPath, cwdOverride }))
   }
 
-  async prompt(
-    text: string,
-    onTick?: (projection: ProjectionState) => void,
-    opts?: { deliverAs?: "steer" | "followUp" },
-  ): Promise<void> {
-    this.projectionListener = onTick
-    try {
-      const result = await this.request({ type: "prompt", text, deliverAs: opts?.deliverAs })
-      this.applySession(expectSession(result))
-      onTick?.(this.projection)
-    } finally {
-      this.projectionListener = undefined
-    }
+  async prompt(text: string): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "prompt", text })))
   }
 
-  async abort(): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "abort" })))
+  async steer(text: string): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "steer", text })))
+  }
+
+  async followUp(text: string): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "followUp", text })))
+  }
+
+  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
+    const result = await this.request({ type: "abort" })
+    if (result.type !== "queue") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return { steering: result.steering, followUp: result.followUp }
   }
 
   async listSkills(): Promise<PiSkillInfo[]> {
@@ -416,7 +485,38 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
     if (message.type === "projection") {
       this.projection = restoreProjection(message.projection.timeline, message.projection.isStreaming)
-      this.projectionListener?.(this.projection)
+      for (const listener of this.projectionListeners) listener(this.projection)
+      return
+    }
+    if (message.type === "projectionDelta") {
+      const delta = restoreProjection(message.projection.timeline, message.projection.isStreaming)
+      const removed = new Set(message.projection.removedItemIds ?? [])
+      const timeline = this.projection.timeline.filter(item => !removed.has(item.id))
+      const byId = new Map(timeline.map((item, index) => [item.id, index]))
+      for (const item of delta.timeline) {
+        const index = byId.get(item.id)
+        if (index === undefined) {
+          byId.set(item.id, timeline.length)
+          timeline.push(item)
+        } else {
+          timeline[index] = item
+        }
+      }
+      this.projection = restoreProjection(timeline, delta.isStreaming)
+      for (const listener of this.projectionListeners) listener(this.projection)
+      for (const listener of this.projectionDeltaListeners) listener({
+        timeline: delta.timeline,
+        isStreaming: delta.isStreaming,
+        removedItemIds: message.projection.removedItemIds,
+      })
+      return
+    }
+    if (!isRuntimeControlStateV1(message.state)) {
+      const error = Object.assign(new Error("Pi worker sent an invalid runtime control state"), {
+        code: "WORKER_PROTOCOL_MISMATCH",
+      })
+      this.handleExit(error)
+      this.terminate()
       return
     }
     this.runtimeState = message.state
@@ -424,6 +524,11 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   private applySession(session: WorkerSessionWire): void {
+    if (!isRuntimeControlStateV1(session.state)) {
+      throw Object.assign(new Error("Pi worker sent an invalid runtime control state"), {
+        code: "WORKER_PROTOCOL_MISMATCH",
+      })
+    }
     this.session = session
     this.runtimeState = session.state
     this.projection = restoreProjection(session.projection.timeline, session.projection.isStreaming)
@@ -484,6 +589,11 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
       return "runtime.open"
     case "prompt":
       return "runtime.prompt"
+    case "steer":
+    case "followUp":
+    case "setQueueModes":
+    case "clearQueue":
+      return "runtime.control"
     case "abort":
       return "runtime.abort"
     case "setModel":
@@ -491,7 +601,16 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
     case "setThinkingLevel":
       return "runtime.thinking"
     case "compact":
+    case "abortCompaction":
+    case "setAutoCompaction":
       return "runtime.compact"
+    case "abortBranchSummary":
+      return "runtime.tree"
+    case "abortRetry":
+    case "setAutoRetry":
+      return "runtime.retry"
+    case "setActiveTools":
+      return "runtime.tools"
     case "navigateTree":
     case "setLabel":
     case "setSessionName":

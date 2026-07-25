@@ -6,6 +6,10 @@ import {
   PROTOCOL_V2,
   SUPPORTED_PROTOCOL_VERSIONS,
   eventStreamKeyV2,
+  isCompactionStateV1,
+  isQueueStateV1,
+  isRetryStateV1,
+  isRuntimeControlStateV1,
   parseEventStreamKeyV2,
   type EventEnvelopeV2,
   type CommandRequestV2,
@@ -77,5 +81,59 @@ describe("protocol v2 foundation", () => {
     }
     assert.equal(native.entries[0]?.type, "message")
     assert.equal(fork.payload.position, "before")
+  })
+
+  it("validates concrete R4 runtime state and rejects malformed variants", () => {
+    const runtimeState = {
+      queue: {
+        steering: ["correct this"],
+        followUp: ["then test"],
+        steeringMode: "all",
+        followUpMode: "one-at-a-time",
+      },
+      retry: {
+        phase: "waiting",
+        autoEnabled: true,
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+        nextAttemptAt: "2026-01-01T00:00:01.000Z",
+        errorMessage: "503 overloaded",
+      },
+      compaction: {
+        autoEnabled: true,
+        operation: { type: "branchSummary", phase: "running", targetEntryId: "entry-1" },
+      },
+      tools: [{ name: "read", description: "Read files", source: "builtin" }],
+      activeTools: ["read"],
+    }
+    assert.equal(isRuntimeControlStateV1(runtimeState), true)
+    assert.equal(isQueueStateV1({ ...runtimeState.queue, steering: [42] }), false)
+    assert.equal(isRetryStateV1({ ...runtimeState.retry, delayMs: -1 }), false)
+    assert.equal(isCompactionStateV1({
+      autoEnabled: true,
+      operation: { type: "branchSummary", phase: "running" },
+    }), false)
+  })
+
+  it("declares independent R4 control commands", () => {
+    const steer: CommandRequestV2<"session.steer"> = {
+      protocolVersion: 2,
+      commandId: "steer-1",
+      type: "session.steer",
+      concurrency: "run-control",
+      sessionId: "session-1",
+      payload: { text: "change direction" },
+    }
+    const tools: CommandRequestV2<"session.setActiveTools"> = {
+      protocolVersion: 2,
+      commandId: "tools-1",
+      type: "session.setActiveTools",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: { toolNames: ["read", "bash"] },
+    }
+    assert.equal(steer.payload.text, "change direction")
+    assert.deepEqual(tools.payload.toolNames, ["read", "bash"])
   })
 })

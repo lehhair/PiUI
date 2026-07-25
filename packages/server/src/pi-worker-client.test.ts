@@ -18,7 +18,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 3)
+      assert.equal(hello.workerProtocolVersion, 4)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -49,8 +49,14 @@ describe("PiWorkerSession IPC", () => {
       assert.equal((await runtime.listSkills())[0]?.name, "fixture-skill")
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
       let ticks = 0
-      await runtime.prompt("hello", () => { ticks += 1 })
-      assert.equal(ticks > 0, true)
+      let deltas = 0
+      const unsubscribe = runtime.onProjection(() => { ticks += 1 })
+      const unsubscribeDelta = runtime.onProjectionDelta(() => { deltas += 1 })
+      await runtime.prompt("hello")
+      unsubscribe()
+      unsubscribeDelta()
+      assert.equal(ticks > 1, true)
+      assert.equal(deltas, 1)
       assert.equal(runtime.getProjection().timeline[0]?.entryId, "fixture-entry")
       assert.equal(runtime.getEntries()[0]?.type, "message")
       assert.equal(runtime.getTree()[0]?.entry.id, "fixture-entry")
@@ -70,6 +76,24 @@ describe("PiWorkerSession IPC", () => {
     try {
       assert.equal(runtime.getSessionId(), "fixture-session")
       await assert.rejects(host.open("/fixture"), /already in use/)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("removes synthetic timeline ids when a bounded delta reconciles native entries", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
+    try {
+      const ids: string[][] = []
+      const unsubscribe = runtime.onProjection(projection => {
+        ids.push(projection.timeline.map(item => item.id))
+      })
+      await runtime.prompt("reconcile")
+      unsubscribe()
+      assert.equal(ids.some(value => value.length === 1 && value[0] === "synthetic-entry"), true)
+      assert.equal(ids.some(value => value.length === 1 && value[0] === "native-entry"), true)
+      assert.equal(ids.some(value => value.includes("synthetic-entry") && value.includes("native-entry")), false)
+      assert.deepEqual(runtime.getProjection().timeline.map(item => item.id), ["native-entry"])
     } finally {
       await runtime.dispose()
     }
@@ -110,7 +134,9 @@ describe("PiWorkerSession IPC", () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     try {
       let ticks = 0
-      await runtime.prompt("stale", () => { ticks += 1 })
+      const unsubscribe = runtime.onProjection(() => { ticks += 1 })
+      await runtime.prompt("stale")
+      unsubscribe()
       assert.equal(ticks, 1)
       assert.equal(runtime.getProjection().timeline.length, 0)
     } finally {

@@ -366,6 +366,13 @@ interface SessionCommandResult<T extends keyof import("@piui/protocol").CommandP
   command: CommandRecordV2<T>
 }
 
+export interface AcceptedSessionCommand<T extends keyof import("@piui/protocol").CommandPayloadsV2>
+  extends SessionCommandResult<T> {
+  accepted: true
+  reused: boolean
+  snapshot: SessionSnapshotV1
+}
+
 export interface SessionReplacementResponse<T extends "session.fork" | "session.clone" | "session.import">
   extends SessionCommandResult<T> {
   replacement: SessionReplacementResultV1
@@ -456,37 +463,78 @@ export function importPiSession(
   })
 }
 
-export async function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {
-  const res = await fetch(
-    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/compact`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ instructions, commandId }),
-    },
+export function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {
+  return postSessionCommand<AcceptedSessionCommand<"session.compact">>(sessionId, "compact", {
+    instructions,
+    commandId,
+  })
+}
+
+export function abortPiCompaction(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.abortCompaction"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "abort-compaction",
+    { commandId },
   )
-  if (!res.ok) {
-    let detail = String(res.status)
-    try {
-      const err = (await res.json()) as { message?: string; code?: string }
-      detail = err.message || err.code || detail
-    } catch {
-      /* */
-    }
-    if (res.status === 404) {
-      throw new Error(
-        "会话在服务端不存在（可能重启过 server）。请点「新建会话」后再 /compact",
-      )
-    }
-    // Pi: empty/small session is not a hard failure
-    if (/nothing to compact/i.test(detail)) {
-      console.info("[PiUI] compact skipped:", detail)
-      return fetchSnapshot(sessionId)
-    }
-    throw new Error(`compactSession failed: ${detail}`)
-  }
-  const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
-  return data.snapshot
+}
+
+export function abortPiBranchSummary(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.abortBranchSummary"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "abort-branch-summary",
+    { commandId },
+  )
+}
+
+export function abortPiRetry(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.abortRetry"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "abort-retry",
+    { commandId },
+  )
+}
+
+export function clearPiQueue(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.clearQueue"> & {
+    cleared: { steering: string[]; followUp: string[] }
+    snapshot: SessionSnapshotV1
+  }>(sessionId, "clear-queue", { commandId })
+}
+
+export function setPiAutoCompaction(sessionId: string, enabled: boolean, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.setAutoCompaction"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-auto-compaction",
+    { enabled, commandId },
+  )
+}
+
+export function setPiAutoRetry(sessionId: string, enabled: boolean, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.setAutoRetry"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-auto-retry",
+    { enabled, commandId },
+  )
+}
+
+export function setPiQueueModes(
+  sessionId: string,
+  modes: { steeringMode?: "all" | "one-at-a-time"; followUpMode?: "all" | "one-at-a-time" },
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.setQueueModes"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-queue-modes",
+    { ...modes, commandId },
+  )
+}
+
+export function setPiActiveTools(sessionId: string, toolNames: string[], commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.setActiveTools"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "set-tools",
+    { toolNames, commandId },
+  )
 }
 
 export async function listSessionCommands(sessionId: string) {
@@ -509,7 +557,10 @@ export async function listSessionSkills(sessionId: string) {
   }
 }
 
-export async function abortSessionCommand(sessionId: string, commandId = newCommandId()): Promise<SessionSnapshotV1 | null> {
+export async function abortSessionCommand(sessionId: string, commandId = newCommandId()): Promise<{
+  snapshot: SessionSnapshotV1
+  cleared: { steering: string[]; followUp: string[] }
+}> {
   const res = await fetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/abort`,
     {
@@ -518,9 +569,22 @@ export async function abortSessionCommand(sessionId: string, commandId = newComm
       body: JSON.stringify({ commandId }),
     },
   )
-  if (!res.ok) return null
-  const data = (await res.json()) as { snapshot?: SessionSnapshotV1 }
-  return data.snapshot ?? null
+  if (!res.ok) {
+    let detail = String(res.status)
+    try {
+      const error = (await res.json()) as { message?: string; code?: string }
+      detail = error.message || error.code || detail
+    } catch {
+      /* no structured error body */
+    }
+    throw new Error(`abortSessionCommand failed: ${detail}`)
+  }
+  const data = (await res.json()) as {
+    snapshot?: SessionSnapshotV1
+    cleared?: { steering: string[]; followUp: string[] }
+  }
+  if (!data.snapshot) throw new Error("abortSessionCommand failed: missing snapshot")
+  return { snapshot: data.snapshot, cleared: data.cleared ?? { steering: [], followUp: [] } }
 }
 
 export async function createMockSession(workspaceId: string, title?: string) {
@@ -549,9 +613,14 @@ export async function promptSession(
     deliverAs?: "steer" | "followUp"
     commandId?: string
   },
-): Promise<SessionSnapshotV1> {
+): Promise<AcceptedSessionCommand<"session.prompt" | "session.steer" | "session.followUp">> {
+  const command = opts?.deliverAs === "steer"
+    ? "steer"
+    : opts?.deliverAs === "followUp"
+      ? "follow-up"
+      : "prompt"
   const res = await fetch(
-    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/prompt`,
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/${command}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -559,7 +628,6 @@ export async function promptSession(
         text,
         commandId: opts?.commandId ?? newCommandId(),
         stream: opts?.stream === true,
-        deliverAs: opts?.deliverAs,
         model: opts?.model
           ? { provider: opts.model.providerID, id: opts.model.modelID }
           : undefined,
@@ -576,6 +644,5 @@ export async function promptSession(
     }
     throw new Error(`promptSession failed: ${detail}`)
   }
-  const data = (await res.json()) as { snapshot: SessionSnapshotV1 }
-  return data.snapshot
+  return (await res.json()) as AcceptedSessionCommand<"session.prompt" | "session.steer" | "session.followUp">
 }

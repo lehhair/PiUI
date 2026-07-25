@@ -11,6 +11,12 @@ export interface PiCapabilities {
   sessionDelete: boolean
   sessionClone: boolean
   sessionImport: boolean
+  promptSteer: boolean
+  promptFollowUp: boolean
+  queueManage: boolean
+  retryManage: boolean
+  compactionManage: boolean
+  toolsManage: boolean
   fileWrite: boolean
   gitDiff: boolean
   sessionRename: boolean
@@ -30,6 +36,12 @@ const unavailable: PiCapabilities = {
   sessionDelete: false,
   sessionClone: false,
   sessionImport: false,
+  promptSteer: false,
+  promptFollowUp: false,
+  queueManage: false,
+  retryManage: false,
+  compactionManage: false,
+  toolsManage: false,
   fileWrite: false,
   gitDiff: false,
   sessionRename: false,
@@ -59,6 +71,12 @@ export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
     sessionDelete: enabled("session.delete"),
     sessionClone: enabled("session.clone"),
     sessionImport: enabled("session.import"),
+    promptSteer: enabled("prompt.steer"),
+    promptFollowUp: enabled("prompt.followUp"),
+    queueManage: enabled("queue.manage"),
+    retryManage: enabled("retry.manage"),
+    compactionManage: enabled("compaction.manage"),
+    toolsManage: enabled("tools.manage"),
     fileWrite: enabled("files.write"),
     gitDiff: enabled("git.diff"),
     sessionRename: enabled("session.name"),

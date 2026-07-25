@@ -94,7 +94,10 @@
     "attachFile": "Attach file",
     "stopGeneration": "Stop generation",
     "sendingMessage": "Sending message",
-    "sendMessage": "Send message"
+    "sendMessage": "Send message",
+    "deliveryMode": "Running message delivery",
+    "steer": "Steer",
+    "followUp": "Follow-up"
   },
   "inputFooter": {
     "autoApproveOff": "Auto-approve: off",

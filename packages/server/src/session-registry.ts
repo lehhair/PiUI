@@ -3,8 +3,11 @@ import { realpathSync, statSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import path from "node:path"
 import type {
+  CompactionCommandResultV1,
+  PiNavigationResultV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
+  QueueDeliveryModeV1,
   SessionReplacementResultV1,
   SessionSnapshotV1,
   TimelineItemV1,
@@ -205,7 +208,6 @@ export class SessionRegistry {
       onTick?: (session: AppSession) => void
       delayMs?: number
       model?: { provider?: string; id?: string }
-      deliverAs?: "steer" | "followUp"
     },
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
@@ -221,17 +223,7 @@ export class SessionRegistry {
         if (opts?.model?.provider && opts.model.id) {
           await runtime.setModel(opts.model.provider, opts.model.id)
         }
-        await runtime.prompt(
-          trimmed,
-          projection => {
-            if (!this.isCurrentRuntime(session, runtime, generation)) return
-            session.projection = projection
-            session.sequence += 1
-            session.updatedAt = new Date().toISOString()
-            opts?.onTick?.(session)
-          },
-          { deliverAs: opts?.deliverAs },
-        )
+        await runtime.prompt(trimmed)
       } catch (e) {
         if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
         const msg = e instanceof Error ? e.message : String(e)
@@ -276,19 +268,39 @@ export class SessionRegistry {
     return session
   }
 
-  async abort(sessionId: string): Promise<AppSession | undefined> {
+  async deliverControl(sessionId: string, text: string, delivery: "steer" | "followUp"): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const trimmed = text.trim()
+    if (!trimmed) throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation(delivery)
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => delivery === "steer" ? runtime.steer(trimmed) : runtime.followUp(trimmed),
+    )
+    this.touch(session)
+    return session
+  }
+
+  async abort(sessionId: string): Promise<{
+    session: AppSession
+    cleared: { steering: string[]; followUp: string[] }
+  } | undefined> {
     const session = await this.find(sessionId)
     if (!session) return undefined
     await this.attach(sessionId)
     const runtime = session.real
     const generation = session.workerGeneration
+    let cleared = { steering: [] as string[], followUp: [] as string[] }
     if (runtime) {
-      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.abort())
+      cleared = await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.abort())
       session.projection = runtime.getProjection()
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
-    return session
+    return { session, cleared }
   }
 
   async setModel(sessionId: string, provider: string, modelId: string): Promise<AppSession> {
@@ -315,31 +327,91 @@ export class SessionRegistry {
     return session
   }
 
-  async compact(sessionId: string, instructions?: string): Promise<AppSession> {
+  async compact(
+    sessionId: string,
+    instructions?: string,
+  ): Promise<{ session: AppSession; result: CompactionCommandResultV1 }> {
     const session = await this.attach(sessionId)
     const runtime = session.real
     const generation = session.workerGeneration
+    let result: CompactionCommandResultV1 = {
+      status: "skipped",
+      reason: "session_too_small",
+      message: "Mock sessions do not compact",
+    }
     if (runtime) {
-      await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.compact(instructions))
+      result = await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.compact(instructions))
       session.projection = runtime.getProjection()
     }
-    session.sequence += 1
-    session.updatedAt = new Date().toISOString()
-    return session
+    this.touch(session)
+    return { session, result }
+  }
+
+  async abortCompaction(sessionId: string): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.abortCompaction())
+  }
+
+  async abortBranchSummary(sessionId: string): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.abortBranchSummary())
+  }
+
+  async abortRetry(sessionId: string): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.abortRetry())
+  }
+
+  async setAutoCompaction(sessionId: string, enabled: boolean): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.setAutoCompaction(enabled))
+  }
+
+  async setAutoRetry(sessionId: string, enabled: boolean): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.setAutoRetry(enabled))
+  }
+
+  async setQueueModes(
+    sessionId: string,
+    modes: { steeringMode?: QueueDeliveryModeV1; followUpMode?: QueueDeliveryModeV1 },
+  ): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.setQueueModes(modes))
+  }
+
+  async clearQueue(sessionId: string): Promise<{
+    session: AppSession
+    cleared: { steering: string[]; followUp: string[] }
+  }> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("queue")
+    const cleared = await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.clearQueue(),
+    )
+    this.touch(session)
+    return { session, cleared }
+  }
+
+  async setActiveTools(sessionId: string, toolNames: string[]): Promise<AppSession> {
+    return this.runControl(sessionId, runtime => runtime.setActiveTools(toolNames))
   }
 
   async navigateTree(
     sessionId: string,
     entryId: string,
-    summarize = false,
-  ): Promise<{ session: AppSession; editorText?: string; cancelled: boolean; aborted?: boolean }> {
+    options: {
+      summarize?: boolean
+      customInstructions?: string
+      replaceInstructions?: boolean
+      label?: string
+    } = {},
+  ): Promise<{ session: AppSession } & PiNavigationResultV1> {
     const session = await this.attach(sessionId)
     const runtime = session.real
     if (!runtime) throw unsupportedRuntimeOperation("tree navigation")
     const generation = session.workerGeneration
-    let result!: { editorText?: string; cancelled: boolean; aborted?: boolean }
+    let result!: PiNavigationResultV1
     await this.runBoundRuntimeCommand(session, runtime, generation, async () => {
-      result = await runtime.navigateTree(entryId, summarize)
+      result = await runtime.navigateTree(entryId, options)
     })
     session.projection = runtime.getProjection()
     this.touch(session)
@@ -419,6 +491,18 @@ export class SessionRegistry {
   private touch(session: AppSession): void {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
+  }
+
+  private async runControl(
+    sessionId: string,
+    control: (runtime: PiSessionRuntime) => void | Promise<void>,
+  ): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("session control")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => control(runtime))
+    this.touch(session)
+    return session
   }
 
   private async replaceSession(
@@ -595,6 +679,31 @@ export class SessionRegistry {
         { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
       )
     })
+    let initialProjection = true
+    const unsubscribeProjection = runtime.onProjection?.(projection => {
+      if (initialProjection) {
+        initialProjection = false
+        return
+      }
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      session.projection = projection
+    })
+    const unsubscribeProjectionDelta = runtime.onProjectionDelta?.(projection => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.touch(session)
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.timeline.delta",
+        {
+          sessionId: session.id,
+          epoch: session.epoch,
+          sequence: session.sequence,
+          items: projection.timeline,
+          removedItemIds: projection.removedItemIds,
+          isStreaming: projection.isStreaming,
+        },
+      )
+    })
     const unsubscribeCrash = runtime.onCrash?.(error => {
       if (!this.isCurrentRuntime(session, runtime, generation)) return
       this.runtimeBindings.delete(session.id)
@@ -626,6 +735,8 @@ export class SessionRegistry {
     })
     binding.unsubscribe = () => {
       unsubscribeState?.()
+      unsubscribeProjection?.()
+      unsubscribeProjectionDelta?.()
       unsubscribeCrash?.()
     }
   }
@@ -639,19 +750,21 @@ export class SessionRegistry {
       this.runtimeBindings.get(session.id)?.runtime === runtime
   }
 
-  private async runBoundRuntimeCommand(
+  private async runBoundRuntimeCommand<T>(
     session: AppSession,
     runtime: PiSessionRuntime,
     generation: string | undefined,
-    run: () => void | Promise<void>,
-  ): Promise<void> {
+    run: () => T | Promise<T>,
+  ): Promise<T> {
+    let result: T
     try {
-      await run()
+      result = await run()
     } catch (error) {
       if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
       throw error
     }
     if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+    return result
   }
 
   private unbindRuntime(session: AppSession): void {
@@ -775,7 +888,7 @@ export class SessionRegistry {
     let state: SessionSnapshotV1["session"]["state"] = "idle"
     if (session.runtimeError) state = "crashed"
     else if (isCompacting) state = "compacting"
-    else if (ui?.retryAttempt) state = "retrying"
+    else if (ui?.retry?.phase === "waiting" || ui?.retry?.phase === "running") state = "retrying"
     else if (isStreaming) state = "running"
 
     return {
@@ -807,10 +920,19 @@ export class SessionRegistry {
             : ["off", "minimal", "low", "medium", "high"]),
         isStreaming,
         isCompacting,
-        queue: ui?.queue ?? { steering: [], followUp: [] },
-        activeTools: ui?.activeTools?.length
-          ? ui.activeTools
-          : ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        queue: ui?.queue ?? {
+          steering: [],
+          followUp: [],
+          steeringMode: "one-at-a-time",
+          followUpMode: "one-at-a-time",
+        },
+        retry: ui?.retry ?? { phase: "idle", autoEnabled: false },
+        compaction: ui?.compaction ?? {
+          autoEnabled: false,
+          operation: { type: "none" },
+        },
+        tools: ui?.tools ?? [],
+        activeTools: ui?.activeTools ?? [],
         workerGeneration: session.workerGeneration,
         runtimeError: session.runtimeError,
       },

@@ -90,7 +90,10 @@ describe('Pi session facade', () => {
   it('maps snapshot states and routes delete and abort through Pi', async () => {
     mocks.listPiSessions.mockResolvedValue([{ id: 'idle' }, { id: 'busy' }])
     mocks.fetchSnapshot.mockImplementation(async (id: string) => snapshot(id, id === 'idle' ? 'idle' : 'running'))
-    mocks.abortSessionCommand.mockResolvedValue(snapshot('busy'))
+    mocks.abortSessionCommand.mockResolvedValue({
+      snapshot: snapshot('busy'),
+      cleared: { steering: [], followUp: [] },
+    })
 
     await expect(getSessionStatus()).resolves.toEqual({ idle: { type: 'idle' }, busy: { type: 'busy' } })
     await expect(deleteSession('idle')).resolves.toBe(true)

@@ -159,6 +159,27 @@ describe('InputBox slash command selection', () => {
     expect(textarea.value).toBe('hello world')
   })
 
+  it('appends async recovery text once without overwriting a newer draft', async () => {
+    const onSend = vi.fn(() => new Promise<boolean>(() => {}))
+    const { rerender } = render(<InputBox paneId="pane-test" onSend={onSend} restoreMode="append" />)
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'new draft' } })
+
+    rerender(
+      <InputBox
+        paneId="pane-test"
+        onSend={onSend}
+        restoreMode="append"
+        revertedText="failed prompt"
+      />,
+    )
+    await waitFor(() => expect(textarea.value).toBe('new draft\n\nfailed prompt'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+    await act(async () => {})
+    expect(textarea.value).toBe('new draft\n\nfailed prompt')
+  })
+
   it('waits for send acknowledgement before clearing the draft', async () => {
     let resolveSend: ((value: boolean) => void) | null = null
     const onSend = vi.fn(

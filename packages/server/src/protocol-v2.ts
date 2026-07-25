@@ -19,14 +19,15 @@ function capability(
   return { enabled, version: 1, scope, reason, limits }
 }
 
-export function createCapabilityManifestV2(): CapabilityManifestV2 {
+export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): CapabilityManifestV2 {
+  const nativePi = driver === "pi"
   const unavailable = Object.fromEntries(
     PI_CAPABILITY_IDS.map(id => [id, capability(false, "server", "Not implemented in PiUI yet")]),
   ) as Record<PiCapabilityId, CapabilityDescriptorV2>
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r3",
+    revision: "pi-0.81.1-r4",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -35,16 +36,29 @@ export function createCapabilityManifestV2(): CapabilityManifestV2 {
       "session.delete": capability(true, "session"),
       "session.name": capability(true, "session"),
       "session.tree": capability(true, "session"),
-      "session.navigate": capability(true, "session"),
+      "session.navigate": capability(true, "session", undefined, { branchSummary: nativePi }),
       "session.fork": capability(true, "session"),
       "session.clone": capability(true, "session"),
       "session.import": capability(true, "session"),
       "prompt.text": capability(true, "session"),
-      "prompt.followUp": capability(false, "session", "Follow-up does not yet bypass the prompt executor"),
-      "compaction.manage": capability(true, "session", undefined, {
-        customInstructions: false,
-        abort: false,
+      "prompt.steer": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "prompt.followUp": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "queue.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        modes: true,
+        clear: true,
+        removeSingle: false,
       }),
+      "retry.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        auto: true,
+        abort: true,
+      }),
+      "compaction.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        customInstructions: true,
+        abort: true,
+        auto: true,
+        branchSummary: true,
+      }),
+      "tools.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "models.manage": capability(true, "server", undefined, {
         authentication: false,
         extensionProviders: false,
@@ -57,13 +71,13 @@ export function createCapabilityManifestV2(): CapabilityManifestV2 {
   }
 }
 
-export function createProtocolHandshakeV2(): ProtocolHandshakeV2 {
+export function createProtocolHandshakeV2(driver: "mock" | "pi" = "pi"): ProtocolHandshakeV2 {
   return {
     service: "piui-server",
     preferredProtocolVersion: PROTOCOL_V2,
     supportedProtocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
     piSdkVersion: PI_PARITY_SDK_VERSION,
-    capabilities: createCapabilityManifestV2(),
+    capabilities: createCapabilityManifestV2(driver),
     eventTransport: {
       webSocketPath: "/api/v1/events",
       subprotocol: EVENT_WS_SUBPROTOCOL_V2,

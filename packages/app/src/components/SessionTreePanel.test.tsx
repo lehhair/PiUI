@@ -16,6 +16,15 @@ const mocks = vi.hoisted(() => ({
   fork: vi.fn(),
   clone: vi.fn(),
   importSession: vi.fn(),
+  compact: vi.fn(),
+  abortCompaction: vi.fn(),
+  abortBranchSummary: vi.fn(),
+  abortRetry: vi.fn(),
+  clearQueue: vi.fn(),
+  setAutoCompaction: vi.fn(),
+  setAutoRetry: vi.fn(),
+  setQueueModes: vi.fn(),
+  setActiveTools: vi.fn(),
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
@@ -25,6 +34,15 @@ vi.mock('../pi/sessionApi', () => ({
   forkPiSession: mocks.fork,
   clonePiSession: mocks.clone,
   importPiSession: mocks.importSession,
+  compactSession: mocks.compact,
+  abortPiCompaction: mocks.abortCompaction,
+  abortPiBranchSummary: mocks.abortBranchSummary,
+  abortPiRetry: mocks.abortRetry,
+  clearPiQueue: mocks.clearQueue,
+  setPiAutoCompaction: mocks.setAutoCompaction,
+  setPiAutoRetry: mocks.setAutoRetry,
+  setPiQueueModes: mocks.setQueueModes,
+  setPiActiveTools: mocks.setActiveTools,
 }))
 
 function snapshot(id = 'session-1'): SessionSnapshotV1 {
@@ -47,7 +65,10 @@ function snapshot(id = 'session-1'): SessionSnapshotV1 {
       availableThinkingLevels: ['off'],
       isStreaming: false,
       isCompacting: false,
-      queue: { steering: [], followUp: [] },
+      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      retry: { phase: "idle", autoEnabled: false },
+      compaction: { autoEnabled: false, operation: { type: "none" } },
+      tools: [],
       activeTools: [],
     },
     timeline: [],
@@ -216,5 +237,74 @@ describe('SessionTreePanel', () => {
         'C:\\work\\project',
       ),
     )
+  })
+
+  it('controls native queue, retry, compaction, tools, and branch summaries', async () => {
+    const runtimeSnapshot: SessionSnapshotV1 = {
+      ...snapshot(),
+      sequence: 2,
+      runtime: {
+        ...snapshot().runtime,
+        queue: {
+          steering: ['Correct the parser'],
+          followUp: ['Run the tests'],
+          steeringMode: 'one-at-a-time',
+          followUpMode: 'all',
+        },
+        retry: {
+          phase: 'waiting',
+          autoEnabled: true,
+          attempt: 2,
+          maxAttempts: 3,
+          delayMs: 1000,
+          nextAttemptAt: '2026-01-01T00:00:01.000Z',
+          errorMessage: '503 overloaded',
+        },
+        compaction: { autoEnabled: true, operation: { type: 'none' } },
+        tools: [
+          { name: 'read', description: 'Read files', source: 'builtin' },
+          { name: 'bash', description: 'Run commands', source: 'builtin' },
+        ],
+        activeTools: ['read'],
+      },
+    }
+    sessionProjectionStore.replace(runtimeSnapshot)
+    setPiCapabilities({
+      sessionTree: true,
+      sessionNavigate: true,
+      queueManage: true,
+      retryManage: true,
+      compactionManage: true,
+      toolsManage: true,
+    })
+    mocks.clearQueue.mockResolvedValue({ snapshot: runtimeSnapshot, cleared: { steering: [], followUp: [] } })
+    mocks.abortRetry.mockResolvedValue({ snapshot: runtimeSnapshot })
+    mocks.setActiveTools.mockResolvedValue({ snapshot: runtimeSnapshot })
+    mocks.compact.mockResolvedValue({ accepted: true, snapshot: runtimeSnapshot })
+    mocks.navigate.mockResolvedValue({ snapshot: runtimeSnapshot, cancelled: false })
+
+    render(<SessionTreePanel sessionId="session-1" />)
+
+    expect(screen.getByText('Correct the parser')).toBeInTheDocument()
+    expect(screen.getByText('Run the tests')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Clear queued messages'))
+    await waitFor(() => expect(mocks.clearQueue).toHaveBeenCalledWith('session-1'))
+
+    fireEvent.click(screen.getByText('Stop retry 2/3'))
+    await waitFor(() => expect(mocks.abortRetry).toHaveBeenCalledWith('session-1'))
+
+    fireEvent.click(screen.getByText('Tools (1/2 active)'))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'bash' }))
+    await waitFor(() => expect(mocks.setActiveTools).toHaveBeenCalledWith('session-1', ['read', 'bash']))
+
+    fireEvent.change(screen.getByPlaceholderText('Compaction instructions (optional)'), {
+      target: { value: 'Keep API decisions' },
+    })
+    fireEvent.click(screen.getByTitle('Compact context'))
+    await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith('session-1', 'Keep API decisions'))
+
+    fireEvent.click(screen.getByLabelText('Summarize the abandoned branch when navigating'))
+    fireEvent.click(screen.getByTitle('Return here'))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry', true))
   })
 })

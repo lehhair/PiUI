@@ -20,9 +20,9 @@
 | 持久删除 JSONL | 完整 | R12：故障注入扩展 |
 | session name | 完整 | R12：升级 conformance |
 | entries/tree/leaf 读取 | 完整 | R12：大型 tree fixture |
-| navigateTree/label | 完整 | R4：branch summary 交互 |
+| navigateTree/label | 完整 | R12：大型 tree fixture |
 | fork/clone/import | 完整 | R12：更多故障注入 |
-| branch summary 与取消 | 部分 | R4：UI 选择与取消反馈 |
+| branch summary 与取消 | 完整 | R12：升级 conformance |
 | stats/context usage | 缺失 | R11 |
 | HTML/JSONL export | 缺失 | R11 |
 | share | 缺失 | R11 |
@@ -31,17 +31,17 @@
 
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
-| text prompt/stream/abort | 部分 | R4：faux provider 与稳定 delta |
-| steer/followUp | 部分 | R4：独立 control lane |
-| queue 内容与模式 | 后端 | R4 |
-| clear queue | 缺失 | R4 |
+| text prompt/stream/abort | 完整 | R12：故障注入扩展 |
+| steer/followUp | 完整 | R12：升级 conformance |
+| queue 内容与模式 | 完整 | R12：升级 conformance |
+| clear queue | 完整 | R12：升级 conformance |
 | model select | 部分 | R10：失败回滚与认证状态 |
 | thinking level | 部分 | R10：cycle/scoped model |
-| compact | 部分 | R4：instructions/result/abort |
-| auto compaction/retry | 部分 | R4：配置与完整状态 |
-| abort retry | 缺失 | R4 |
+| compact | 完整 | R12：大型会话 fixture |
+| auto compaction/retry | 完整 | R12：故障注入扩展 |
+| abort retry | 完整 | R12：故障注入扩展 |
 | user bash `!`/`!!` | 缺失 | R6 |
-| active tools 查询/切换 | 缺失 | R4 |
+| active tools 查询/切换 | 完整 | R7：dynamic tools 联动 |
 
 ## Multimodal And Tools
 

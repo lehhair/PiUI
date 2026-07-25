@@ -237,4 +237,27 @@ describe('InputToolbar file selection', () => {
 
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Chat input' })).toHaveFocus())
   })
+
+  it('requires an explicit delivery mode while streaming', () => {
+    const onDeliveryModeChange = vi.fn()
+    render(
+      <InputToolbar
+        agents={[]}
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        isStreaming
+        deliveryMode="followUp"
+        onDeliveryModeChange={onDeliveryModeChange}
+        canSteer
+        canFollowUp
+        canSend
+        onSend={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('group', { name: 'Running message delivery' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Follow-up' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Steer' }))
+    expect(onDeliveryModeChange).toHaveBeenCalledWith('steer')
+  })
 })
