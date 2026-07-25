@@ -2,14 +2,14 @@ import type { SessionSnapshotV1 } from "@piui/protocol"
 import { messageStore } from "../store/messageStore"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 import { trackPiSession } from "./piSessionIndex"
-import { snapshotToApiMessages } from "./timelineToMessages"
+import { snapshotToUiMessages } from "./timelineToMessages"
 
-/** Push Pi snapshot into legacy messageStore so ChatArea can render. */
+/** Push a Pi snapshot into the UI stores consumed by ChatArea. */
 export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activate?: boolean }) {
   trackPiSession(snapshot.session.id)
   if (!sessionProjectionStore.replace(snapshot, options)) return snapshot.session.id
-  const apiMessages = snapshotToApiMessages(snapshot)
-  messageStore.setMessages(snapshot.session.id, apiMessages, {
+  const messages = snapshotToUiMessages(snapshot)
+  messageStore.setUiMessages(snapshot.session.id, messages, {
     title: snapshot.session.title,
     hasMoreHistory: false,
   })

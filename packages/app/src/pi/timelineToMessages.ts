@@ -1,7 +1,6 @@
 /**
- * TimelineItemV1 → ApiMessageWithParts
- * 过渡层：让现有 MessageRenderer / messageStore 能渲染 Pi timeline。
- * Phase 后续应让 ChatArea 直接吃 TimelineItem，本文件可删。
+ * TimelineItemV1 -> UI Message
+ * Keeps the current renderer shape while avoiding the legacy API envelope.
  */
 import type {
   AssistantTimelineItemV1,
@@ -10,7 +9,7 @@ import type {
   ToolPresentationV1,
   UserTimelineItemV1,
 } from "@piui/protocol"
-import type { ApiMessageWithParts, ApiPart } from "../api/types"
+import type { Message, Part } from "../types/message"
 
 function toolState(tool: ToolPresentationV1) {
   const input =
@@ -59,7 +58,11 @@ function toolState(tool: ToolPresentationV1) {
   }
 }
 
-function userToApi(item: UserTimelineItemV1, sessionID: string): ApiMessageWithParts {
+function userToUi(
+  item: UserTimelineItemV1,
+  sessionID: string,
+  model = { providerID: "pi", modelID: "pi" },
+): Message {
   const partId = `${item.id}-text`
   return {
     info: {
@@ -68,7 +71,7 @@ function userToApi(item: UserTimelineItemV1, sessionID: string): ApiMessageWithP
       role: "user",
       time: { created: item.timestamp },
       agent: "build",
-      model: { providerID: "mock", modelID: "mock" },
+      model,
     },
     parts: [
       {
@@ -77,13 +80,13 @@ function userToApi(item: UserTimelineItemV1, sessionID: string): ApiMessageWithP
         messageID: item.id,
         type: "text",
         text: item.text,
-      } as ApiPart,
+      },
     ],
   }
 }
 
-function assistantToApi(item: AssistantTimelineItemV1, sessionID: string, parentID: string): ApiMessageWithParts {
-  const parts: ApiPart[] = []
+function assistantToUi(item: AssistantTimelineItemV1, sessionID: string, parentID: string): Message {
+  const parts: Part[] = []
   let i = 0
   for (const block of item.content) {
     i++
@@ -95,7 +98,7 @@ function assistantToApi(item: AssistantTimelineItemV1, sessionID: string, parent
         messageID: item.id,
         type: "text",
         text: block.text,
-      } as ApiPart)
+      })
     } else if (block.type === "thinking") {
       parts.push({
         id: partId,
@@ -104,7 +107,7 @@ function assistantToApi(item: AssistantTimelineItemV1, sessionID: string, parent
         type: "reasoning",
         text: block.text,
         time: { start: item.timestamp, end: item.timestamp },
-      } as ApiPart)
+      })
     } else if (block.type === "tool") {
       parts.push({
         id: partId,
@@ -114,7 +117,7 @@ function assistantToApi(item: AssistantTimelineItemV1, sessionID: string, parent
         callID: block.callId,
         tool: block.name,
         state: toolState(block),
-      } as ApiPart)
+      })
     }
   }
 
@@ -139,26 +142,31 @@ function assistantToApi(item: AssistantTimelineItemV1, sessionID: string, parent
       finish: item.status === "aborted" ? "aborted" : item.status === "error" ? "error" : "stop",
     },
     parts,
+    isStreaming: !completed,
   }
 }
 
-export function timelineToApiMessages(
+export function timelineToUiMessages(
   timeline: TimelineItemV1[],
   sessionID: string,
-): ApiMessageWithParts[] {
-  const out: ApiMessageWithParts[] = []
+  model?: { providerID: string; modelID: string },
+): Message[] {
+  const out: Message[] = []
   let lastUserId = "root"
   for (const item of timeline) {
     if (item.type === "user") {
-      out.push(userToApi(item, sessionID))
+      out.push(userToUi(item, sessionID, model))
       lastUserId = item.id
     } else if (item.type === "assistant") {
-      out.push(assistantToApi(item, sessionID, item.parentEntryId ?? lastUserId))
+      out.push(assistantToUi(item, sessionID, item.parentEntryId ?? lastUserId))
     }
   }
   return out
 }
 
-export function snapshotToApiMessages(snapshot: SessionSnapshotV1): ApiMessageWithParts[] {
-  return timelineToApiMessages(snapshot.timeline, snapshot.session.id)
+export function snapshotToUiMessages(snapshot: SessionSnapshotV1): Message[] {
+  const model = snapshot.runtime.model
+    ? { providerID: snapshot.runtime.model.provider, modelID: snapshot.runtime.model.id }
+    : undefined
+  return timelineToUiMessages(snapshot.timeline, snapshot.session.id, model)
 }
