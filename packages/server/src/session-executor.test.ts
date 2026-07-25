@@ -54,7 +54,7 @@ test("SessionExecutor runs control commands without waiting for idle work", asyn
   )
   let controlled = false
   const control = executor.submit(
-    request("follow-up", "a", "session.prompt", "run-control", { text: "next", delivery: "followUp" }),
+    request("follow-up", "a", "session.followUp", "run-control", { text: "next" }),
     async () => { controlled = true },
   )
 

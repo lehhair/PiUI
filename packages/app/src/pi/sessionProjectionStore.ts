@@ -27,6 +27,45 @@ class SessionProjectionStore {
     return this.activeSessionId
   }
 
+  buildTimelineDelta(
+    sessionId: string,
+    epoch: string,
+    sequence: number,
+    items: TimelineItemV1[],
+    removedItemIds: string[] | undefined,
+    isStreaming: boolean,
+  ): SessionSnapshotV1 | null {
+    const current = this.snapshots.get(sessionId)
+    if (!current || current.epoch !== epoch) return null
+    if (sequence <= current.sequence) return current
+    const removed = new Set(removedItemIds ?? [])
+    const timeline = current.timeline.filter(item => !removed.has(item.id))
+    const byId = new Map(timeline.map((item, index) => [item.id, index]))
+    for (const item of items) {
+      const index = byId.get(item.id)
+      if (index === undefined) {
+        byId.set(item.id, timeline.length)
+        timeline.push(item)
+      } else {
+        timeline[index] = item
+      }
+    }
+    const state = current.runtime.isCompacting
+      ? "compacting"
+      : current.runtime.retry.phase === "waiting" || current.runtime.retry.phase === "running"
+        ? "retrying"
+        : isStreaming
+          ? "running"
+          : "idle"
+    return {
+      ...current,
+      sequence,
+      session: { ...current.session, state },
+      runtime: { ...current.runtime, isStreaming },
+      timeline,
+    }
+  }
+
   replace(snapshot: SessionSnapshotV1, options?: { activate?: boolean }): boolean {
     const existing = this.snapshots.get(snapshot.session.id)
     if (existing?.epoch === snapshot.epoch && existing.sequence >= snapshot.sequence) return false

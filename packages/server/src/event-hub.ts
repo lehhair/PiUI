@@ -193,10 +193,14 @@ export class EventHub {
     }
     if (partial.type === "command.updated") {
       const record = partial.payload as CommandRecordV2
+      const requestPayload = record.request.payload as { text?: unknown }
       const payload: EventPayloadsV2["command.updated"] = {
         commandId: record.request.commandId,
         sessionId: record.request.sessionId,
         status: record.status,
+        error: record.error,
+        commandType: record.request.type,
+        inputText: typeof requestPayload.text === "string" ? requestPayload.text : undefined,
       }
       this.publishV2(
         payload.sessionId ? { kind: "session", id: payload.sessionId } : { kind: "server", id: "server" },

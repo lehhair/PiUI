@@ -22,7 +22,10 @@ function sample(id = "s1", sequence = 2, text = "hi"): SessionSnapshotV1 {
       availableThinkingLevels: ["off"],
       isStreaming: false,
       isCompacting: false,
-      queue: { steering: [], followUp: [] },
+      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      retry: { phase: "idle", autoEnabled: false },
+      compaction: { autoEnabled: false, operation: { type: "none" } },
+      tools: [],
       activeTools: [],
     },
     timeline: [
@@ -66,5 +69,55 @@ describe("sessionProjectionStore", () => {
     expect(sessionProjectionStore.replace(sample("s1", 3, "new"))).toBe(true)
     expect(sessionProjectionStore.replace(sample("s1", 2, "old"))).toBe(false)
     expect(sessionProjectionStore.getTimeline("s1")[0]).toMatchObject({ text: "new" })
+  })
+
+  it("merges bounded timeline deltas without replacing unrelated history", () => {
+    sessionProjectionStore.clear()
+    sessionProjectionStore.replace(sample("s1", 2, "original"))
+    const next = sessionProjectionStore.buildTimelineDelta("s1", "e1", 3, [
+      {
+        type: "assistant",
+        id: "a1",
+        timestamp: 2,
+        status: "streaming",
+        provider: "mock",
+        model: "mock",
+        content: [{ type: "text", text: "partial" }],
+      },
+    ], undefined, true)
+
+    expect(next?.timeline).toHaveLength(2)
+    expect(next?.timeline[0]).toMatchObject({ type: "user", text: "original" })
+    expect(next?.timeline[1]).toMatchObject({ type: "assistant", status: "streaming" })
+    expect(next?.runtime.isStreaming).toBe(true)
+    expect(next?.session.state).toBe("running")
+    expect(sessionProjectionStore.buildTimelineDelta("s1", "other-epoch", 4, [], undefined, false)).toBeNull()
+  })
+
+  it("reconciles synthetic timeline ids with persisted native ids", () => {
+    sessionProjectionStore.clear()
+    const base = sample("s1", 2, "original")
+    base.timeline.push({
+      type: "assistant",
+      id: "synthetic-assistant",
+      timestamp: 2,
+      status: "streaming",
+      provider: "mock",
+      model: "mock",
+      content: [{ type: "text", text: "partial" }],
+    })
+    sessionProjectionStore.replace(base)
+    const next = sessionProjectionStore.buildTimelineDelta("s1", "e1", 3, [{
+      type: "assistant",
+      id: "native-assistant",
+      entryId: "native-assistant",
+      timestamp: 2,
+      status: "completed",
+      provider: "mock",
+      model: "mock",
+      content: [{ type: "text", text: "complete" }],
+    }], ["synthetic-assistant"], false)
+
+    expect(next?.timeline.map(item => item.id)).toEqual(["u-s1", "a1", "native-assistant"])
   })
 })

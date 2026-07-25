@@ -4,16 +4,32 @@ export interface CommandPayloadsV2 {
   "session.prompt": {
     text: string
     attachments?: Array<{ type: "image"; mimeType: string; data: string }>
-    delivery?: "prompt" | "steer" | "followUp"
     model?: { provider: string; modelId: string }
   }
+  "session.steer": { text: string }
+  "session.followUp": { text: string }
   "session.abort": Record<string, never>
   "session.setModel": { provider: string; modelId: string }
   "session.setThinkingLevel": { level: string }
   "session.compact": { instructions?: string }
   "session.abortCompaction": Record<string, never>
+  "session.setAutoCompaction": { enabled: boolean }
+  "session.setAutoRetry": { enabled: boolean }
+  "session.abortRetry": Record<string, never>
+  "session.abortBranchSummary": Record<string, never>
+  "session.setQueueModes": {
+    steeringMode?: "all" | "one-at-a-time"
+    followUpMode?: "all" | "one-at-a-time"
+  }
   "session.clearQueue": Record<string, never>
-  "session.navigateTree": { entryId: string; summarizeAbandonedBranch?: boolean }
+  "session.setActiveTools": { toolNames: string[] }
+  "session.navigateTree": {
+    entryId: string
+    summarizeAbandonedBranch?: boolean
+    customInstructions?: string
+    replaceInstructions?: boolean
+    label?: string
+  }
   "session.setLabel": { entryId: string; label?: string }
   "session.setName": { name: string }
   "session.fork": { entryId: string; position: "before" | "at" }

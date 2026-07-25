@@ -15,8 +15,14 @@ import {
   type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent"
 import type {
+  CompactionCommandResultV1,
+  CompactionResultV1,
+  CompactionStateV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
+  PiToolInfoV1,
+  QueueDeliveryModeV1,
+  RetryStateV1,
   SessionReplacementResultV1,
 } from "@piui/protocol"
 import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs"
@@ -28,6 +34,7 @@ import {
   applyWorkerEvent,
   createProjectionState,
   projectEntries,
+  type ProjectionDelta,
   type ProjectionState,
 } from "./projection.js"
 import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
@@ -39,8 +46,15 @@ export interface PiRuntimeUiState {
   isStreaming: boolean
   isCompacting: boolean
   isIdle: boolean
-  queue: { steering: string[]; followUp: string[] }
-  retryAttempt: number
+  queue: {
+    steering: string[]
+    followUp: string[]
+    steeringMode: QueueDeliveryModeV1
+    followUpMode: QueueDeliveryModeV1
+  }
+  retry: RetryStateV1
+  compaction: CompactionStateV1
+  tools: PiToolInfoV1[]
   activeTools: string[]
   model?: { provider: string; id: string; displayName: string }
   supportsThinking: boolean
@@ -95,14 +109,19 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
 export class RealPiSession {
   private runtime: AgentSessionRuntime
   private projection: ProjectionState = createProjectionState()
-  private unsub: (() => void) | null = null
   private stateUnsub: (() => void) | null = null
   private lastUserId: string | null = null
   private currentAsstId: string | null = null
   private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
+  private projectionListeners = new Set<(projection: ProjectionState) => void>()
+  private projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
   /** last known runtime flags from events */
   private isCompactingFlag = false
-  private retryAttempt = 0
+  private retryState: RetryStateV1 = { phase: "idle", autoEnabled: true }
+  private compactionState: CompactionStateV1 = {
+    autoEnabled: true,
+    operation: { type: "none" },
+  }
 
   private constructor(runtime: AgentSessionRuntime) {
     this.runtime = runtime
@@ -112,21 +131,97 @@ export class RealPiSession {
   private bindStateEvents(): void {
     this.stateUnsub?.()
     this.stateUnsub = this.runtime.session.subscribe(event => {
-      if (event.type === "compaction_start") this.isCompactingFlag = true
-      if (event.type === "compaction_end") this.isCompactingFlag = false
-      if (event.type === "auto_retry_start") {
-        this.retryAttempt = Number((event as { attempt?: number }).attempt ?? 1)
+      let projectionChanged = false
+      for (const workerEvent of mapPiEventToWorker(event, this)) {
+        this.projection = applyWorkerEvent(this.projection, workerEvent)
+        projectionChanged = true
       }
-      if (event.type === "auto_retry_end") this.retryAttempt = 0
-      if (event.type === "queue_update" || event.type === "thinking_level_changed") {
-        this.emitState()
+      if (projectionChanged) {
+        this.emitProjection()
+        this.emitProjectionDelta()
+      }
+
+      if (event.type === "compaction_start") {
+        this.isCompactingFlag = true
+        this.compactionState = {
+          ...this.compactionState,
+          operation: { type: "compaction", phase: "running", reason: event.reason },
+          lastAborted: undefined,
+          lastError: undefined,
+          lastNotice: undefined,
+        }
+      } else if (event.type === "compaction_end") {
+        this.isCompactingFlag = false
+        this.compactionState = {
+          ...this.compactionState,
+          operation: { type: "none" },
+          lastResult: event.result ? mapCompactionResult(event.result) : this.compactionState.lastResult,
+          lastAborted: event.aborted,
+          lastError: event.errorMessage,
+        }
+      } else if (event.type === "auto_retry_start") {
+        this.retryState = {
+          phase: "waiting",
+          autoEnabled: this.runtime.session.autoRetryEnabled,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          nextAttemptAt: new Date(Date.now() + event.delayMs).toISOString(),
+          errorMessage: event.errorMessage,
+        }
+      } else if (event.type === "agent_start" && this.retryState.phase === "waiting") {
+        this.retryState = {
+          phase: "running",
+          autoEnabled: this.runtime.session.autoRetryEnabled,
+          attempt: this.retryState.attempt,
+          maxAttempts: this.retryState.maxAttempts,
+        }
+      } else if (event.type === "agent_start" && this.retryState.phase === "finished") {
+        this.retryState = { phase: "idle", autoEnabled: this.runtime.session.autoRetryEnabled }
+      } else if (event.type === "auto_retry_end") {
+        this.retryState = {
+          phase: "finished",
+          autoEnabled: this.runtime.session.autoRetryEnabled,
+          success: event.success,
+          attempt: event.attempt,
+          finalError: event.finalError,
+        }
+      } else if (event.type === "summarization_retry_scheduled") {
+        const operation = this.compactionState.operation
+        if (operation.type !== "none") {
+          this.compactionState = {
+            ...this.compactionState,
+            operation: {
+              ...operation,
+              phase: "retrying",
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              errorMessage: event.errorMessage,
+            },
+          }
+        }
+      } else if (event.type === "summarization_retry_attempt_start") {
+        const operation = this.compactionState.operation
+        if (operation.type !== "none") {
+          this.compactionState = { ...this.compactionState, operation: { ...operation, phase: "running" } }
+        }
+      }
+
+      if (isRuntimeStateEvent(event.type)) this.emitState()
+      if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
+        queueMicrotask(() => {
+          const previous = this.projection
+          this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+          this.emitProjection()
+          this.emitProjectionReconciliation(previous)
+          this.emitState()
+        })
       }
     })
   }
 
   private detachSessionSubscriptions(): void {
-    this.unsub?.()
-    this.unsub = null
     this.stateUnsub?.()
     this.stateUnsub = null
   }
@@ -195,9 +290,48 @@ export class RealPiSession {
     return () => this.stateListeners.delete(listener)
   }
 
+  onProjection(listener: (projection: ProjectionState) => void): () => void {
+    this.projectionListeners.add(listener)
+    listener(this.projection)
+    return () => this.projectionListeners.delete(listener)
+  }
+
+  onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
+    this.projectionDeltaListeners.add(listener)
+    return () => this.projectionDeltaListeners.delete(listener)
+  }
+
   private emitState() {
     const s = this.getRuntimeUiState()
     for (const l of this.stateListeners) l(s)
+  }
+
+  private emitProjection(): void {
+    for (const listener of this.projectionListeners) listener(this.projection)
+  }
+
+  private emitProjectionDelta(): void {
+    const delta = { ...this.projection, timeline: this.projection.timeline.slice(-1) }
+    for (const listener of this.projectionDeltaListeners) listener(delta)
+  }
+
+  private emitProjectionReconciliation(previous: ProjectionState): void {
+    const nextById = new Map(this.projection.timeline.map(item => [item.id, item]))
+    const previousById = new Map(previous.timeline.map(item => [item.id, item]))
+    const removedItemIds = previous.timeline
+      .filter(item => !nextById.has(item.id))
+      .map(item => item.id)
+    const changed = this.projection.timeline.filter(item => {
+      const old = previousById.get(item.id)
+      return !old || JSON.stringify(old) !== JSON.stringify(item)
+    }).slice(-2)
+    if (removedItemIds.length === 0 && changed.length === 0) return
+    const delta: ProjectionDelta = {
+      timeline: changed,
+      isStreaming: this.projection.isStreaming,
+      removedItemIds,
+    }
+    for (const listener of this.projectionDeltaListeners) listener(delta)
   }
 
   getProjection(): ProjectionState {
@@ -261,8 +395,19 @@ export class RealPiSession {
       isStreaming: session.isStreaming,
       isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
       isIdle: Boolean(session.isIdle ?? !session.isStreaming),
-      queue: { steering, followUp },
-      retryAttempt: this.retryAttempt || session.retryAttempt || 0,
+      queue: {
+        steering,
+        followUp,
+        steeringMode: session.steeringMode,
+        followUpMode: session.followUpMode,
+      },
+      retry: { ...this.retryState, autoEnabled: session.autoRetryEnabled },
+      compaction: { ...this.compactionState, autoEnabled: session.autoCompactionEnabled },
+      tools: session.getAllTools().map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        source: toolSource(tool.sourceInfo),
+      })),
       activeTools: session.getActiveToolNames?.() ?? [],
       model: this.getModel(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
@@ -285,22 +430,79 @@ export class RealPiSession {
     this.emitState()
   }
 
-  async compact(customInstructions?: string): Promise<void> {
-    await this.runtime.session.compact(customInstructions)
-    this.emitState()
+  async compact(customInstructions?: string): Promise<CompactionCommandResultV1> {
+    try {
+      const result = await this.runtime.session.compact(customInstructions)
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitProjection()
+      this.emitState()
+      return { status: "completed", result: mapCompactionResult(result) }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/nothing to compact/i.test(message)) {
+        this.compactionState = { ...this.compactionState, lastNotice: message, lastError: undefined }
+        this.emitState()
+        return { status: "skipped", reason: "session_too_small", message }
+      }
+      if (/already compacted/i.test(message)) {
+        this.compactionState = { ...this.compactionState, lastNotice: message, lastError: undefined }
+        this.emitState()
+        return { status: "skipped", reason: "already_compacted", message }
+      }
+      if (/compaction cancelled/i.test(message)) return { status: "aborted" }
+      throw error
+    }
   }
 
   async navigateTree(
     entryId: string,
-    summarize = false,
-  ): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean }> {
+    options: {
+      summarize?: boolean
+      customInstructions?: string
+      replaceInstructions?: boolean
+      label?: string
+    } = {},
+  ): Promise<{
+    editorText?: string
+    cancelled: boolean
+    aborted?: boolean
+    summaryEntry?: PiSessionEntryV1
+  }> {
     await this.runtime.session.waitForIdle()
-    const result = await this.runtime.session.navigateTree(entryId, { summarize })
-    if (!result.cancelled) {
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    if (options.summarize) {
+      this.isCompactingFlag = true
+      this.compactionState = {
+        ...this.compactionState,
+        operation: { type: "branchSummary", phase: "running", targetEntryId: entryId },
+        lastAborted: undefined,
+        lastError: undefined,
+      }
       this.emitState()
     }
-    return { editorText: result.editorText, cancelled: result.cancelled, aborted: result.aborted }
+    let result: Awaited<ReturnType<AgentSessionRuntime["session"]["navigateTree"]>>
+    try {
+      result = await this.runtime.session.navigateTree(entryId, options)
+    } finally {
+      if (options.summarize) {
+        this.isCompactingFlag = false
+        this.compactionState = { ...this.compactionState, operation: { type: "none" } }
+        this.emitState()
+      }
+    }
+    if (options.summarize) {
+      this.compactionState = { ...this.compactionState, lastAborted: Boolean(result.aborted) }
+    }
+    if (!result.cancelled) {
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitProjection()
+      this.emitState()
+    }
+    return {
+      editorText: result.editorText,
+      cancelled: result.cancelled,
+      aborted: result.aborted,
+      summaryEntry: result.summaryEntry ? mapSessionEntry(result.summaryEntry) : undefined,
+    }
   }
 
   setLabel(entryId: string, label?: string): void {
@@ -374,70 +576,86 @@ export class RealPiSession {
 
   abortCompaction(): void {
     this.runtime.session.abortCompaction?.()
-    this.isCompactingFlag = false
     this.emitState()
   }
 
-  async prompt(
-    text: string,
-    onTick?: (p: ProjectionState) => void,
-    opts?: { deliverAs?: "steer" | "followUp" },
-  ): Promise<void> {
-    const apply = (ev: WorkerEvent) => {
-      this.projection = applyWorkerEvent(this.projection, ev)
-      onTick?.(this.projection)
-      this.emitState()
+  abortBranchSummary(): void {
+    this.runtime.session.abortBranchSummary()
+    this.emitState()
+  }
+
+  abortRetry(): void {
+    this.runtime.session.abortRetry()
+    this.emitState()
+  }
+
+  setAutoCompaction(enabled: boolean): void {
+    this.runtime.session.setAutoCompactionEnabled(enabled)
+    this.emitState()
+  }
+
+  setAutoRetry(enabled: boolean): void {
+    this.runtime.session.setAutoRetryEnabled(enabled)
+    this.emitState()
+  }
+
+  setQueueModes(modes: {
+    steeringMode?: QueueDeliveryModeV1
+    followUpMode?: QueueDeliveryModeV1
+  }): void {
+    if (modes.steeringMode) this.runtime.session.setSteeringMode(modes.steeringMode)
+    if (modes.followUpMode) this.runtime.session.setFollowUpMode(modes.followUpMode)
+    this.emitState()
+  }
+
+  clearQueue(): { steering: string[]; followUp: string[] } {
+    const cleared = this.runtime.session.clearQueue()
+    this.emitState()
+    return cleared
+  }
+
+  setActiveTools(toolNames: string[]): void {
+    const available = new Set(this.runtime.session.getAllTools().map(tool => tool.name))
+    const normalized = [...new Set(toolNames)]
+    const unknown = normalized.filter(name => !available.has(name))
+    if (unknown.length > 0) {
+      throw Object.assign(new Error(`Unknown Pi tools: ${unknown.join(", ")}`), { code: "INVALID_REQUEST" })
     }
+    this.runtime.session.setActiveToolsByName(normalized)
+    this.emitState()
+  }
 
-    this.unsub?.()
-    this.unsub = this.runtime.session.subscribe(event => {
-      for (const wev of mapPiEventToWorker(event, this)) {
-        apply(wev)
-      }
-      // state-only events
-      if (
-        event.type === "queue_update" ||
-        event.type === "compaction_start" ||
-        event.type === "compaction_end" ||
-        event.type === "auto_retry_start" ||
-        event.type === "auto_retry_end" ||
-        event.type === "thinking_level_changed"
-      ) {
-        if (event.type === "compaction_start") this.isCompactingFlag = true
-        if (event.type === "compaction_end") this.isCompactingFlag = false
-        if (event.type === "auto_retry_start") {
-          this.retryAttempt = Number((event as { attempt?: number }).attempt ?? 1)
-        }
-        if (event.type === "auto_retry_end") this.retryAttempt = 0
-        this.emitState()
-      }
-    })
+  async steer(text: string): Promise<void> {
+    if (!this.runtime.session.isStreaming) {
+      throw Object.assign(new Error("Cannot steer an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
+    }
+    await this.runtime.session.steer(text)
+    this.emitState()
+  }
 
+  async followUp(text: string): Promise<void> {
+    if (!this.runtime.session.isStreaming) {
+      throw Object.assign(new Error("Cannot queue a follow-up on an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
+    }
+    await this.runtime.session.followUp(text)
+    this.emitState()
+  }
+
+  async prompt(text: string): Promise<void> {
     try {
-      if (opts?.deliverAs && this.runtime.session.isStreaming) {
-        if (opts.deliverAs === "steer") {
-          await this.runtime.session.steer(text)
-        } else {
-          await this.runtime.session.followUp(text)
-        }
-        // wait until idle if possible
-        await this.runtime.session.waitForIdle?.()
-      } else {
-        await this.runtime.session.prompt(text)
-      }
+      await this.runtime.session.prompt(text)
     } finally {
-      apply({ type: "agent_end" })
-      this.unsub?.()
-      this.unsub = null
       this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      onTick?.(this.projection)
+      this.emitProjection()
       this.emitState()
     }
   }
 
-  async abort(): Promise<void> {
+  async abort(): Promise<{ steering: string[]; followUp: string[] }> {
+    const cleared = this.runtime.session.clearQueue()
     await this.runtime.session.abort()
     this.emitState()
+    return cleared
   }
 
   listSkills(): PiSkillInfo[] {
@@ -494,6 +712,8 @@ export class RealPiSession {
   async dispose(): Promise<void> {
     this.detachSessionSubscriptions()
     this.stateListeners.clear()
+    this.projectionListeners.clear()
+    this.projectionDeltaListeners.clear()
     await this.runtime.dispose()
   }
 
@@ -625,6 +845,45 @@ function sessionInfo(info: {
 function pathKey(value: string): string {
   const resolved = path.resolve(value)
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+function mapCompactionResult(result: {
+  summary: string
+  firstKeptEntryId: string
+  tokensBefore: number
+  estimatedTokensAfter?: number
+}): CompactionResultV1 {
+  return {
+    summary: result.summary,
+    firstKeptEntryId: result.firstKeptEntryId,
+    tokensBefore: result.tokensBefore,
+    estimatedTokensAfter: result.estimatedTokensAfter,
+  }
+}
+
+function isRuntimeStateEvent(type: string): boolean {
+  return type === "agent_start" ||
+    type === "agent_end" ||
+    type === "agent_settled" ||
+    type === "queue_update" ||
+    type === "thinking_level_changed" ||
+    type === "session_info_changed" ||
+    type === "compaction_start" ||
+    type === "compaction_end" ||
+    type === "auto_retry_start" ||
+    type === "auto_retry_end" ||
+    type === "summarization_retry_scheduled" ||
+    type === "summarization_retry_attempt_start" ||
+    type === "summarization_retry_finished"
+}
+
+function toolSource(sourceInfo: unknown): string | undefined {
+  if (typeof sourceInfo === "string") return sourceInfo
+  if (!sourceInfo || typeof sourceInfo !== "object") return undefined
+  const source = sourceInfo as Record<string, unknown>
+  if (typeof source.type === "string") return source.type
+  if (typeof source.path === "string") return source.path
+  return undefined
 }
 
 function projectNativeBranch(entries: SessionEntry[]): ProjectionState {

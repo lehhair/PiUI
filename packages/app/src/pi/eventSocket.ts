@@ -151,12 +151,41 @@ export class PiEventSocket {
       if (snapshot.session.id !== event.payload.sessionId || snapshot.session.id !== event.stream.id) return
       trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
       applySnapshotToUi(snapshot, { activate: false })
+    } else if (event.type === "session.timeline.delta") {
+      if (event.payload.sessionId !== event.stream.id) return
+      const snapshot = sessionProjectionStore.buildTimelineDelta(
+        event.payload.sessionId,
+        event.payload.epoch,
+        event.payload.sequence,
+        event.payload.items,
+        event.payload.removedItemIds,
+        event.payload.isStreaming,
+      )
+      if (!snapshot) {
+        this.blockedStreamsV2.add(key)
+        void this.resyncStreamV2(key, event.cursor)
+        return
+      }
+      applySnapshotToUi(snapshot, { activate: false })
     } else if (event.type === "session.runtime.replaced" || event.type === "session.runtime.crashed") {
       this.blockedStreamsV2.add(key)
       void this.resyncStreamV2(key, event.cursor)
       return
     } else if (event.type === "workspace.sessions.updated") {
       window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
+    } else if (
+      event.type === "command.updated" &&
+      event.payload.sessionId &&
+      (event.payload.status === "failed" ||
+        event.payload.status === "cancelled" ||
+        event.payload.status === "unknown_after_crash")
+    ) {
+      window.dispatchEvent(new CustomEvent("piui:command-updated", { detail: event.payload }))
+      void fetchSnapshot(event.payload.sessionId)
+        .then(snapshot => applySnapshotToUi(snapshot, { activate: false }))
+        .catch(() => undefined)
+    } else if (event.type === "command.updated") {
+      window.dispatchEvent(new CustomEvent("piui:command-updated", { detail: event.payload }))
     }
     this.cursorsV2[key] = event.cursor
   }

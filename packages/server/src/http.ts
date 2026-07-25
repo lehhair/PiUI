@@ -164,7 +164,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           service: "piui-server" as const,
           phase: 1,
           driver: sessions.getDriver(),
-          protocolV2: createProtocolHandshakeV2(),
+          protocolV2: createProtocolHandshakeV2(sessions.getDriver()),
         }
         return sendJson(res, 200, {
           ...body,
@@ -279,15 +279,15 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         return sendJson(res, 200, { ok: true, id, commandId, command: submitted.record })
       }
 
-      const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/prompt$/)
+      const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/(prompt|steer|follow-up)$/)
       if (method === "POST" && sessionPrompt) {
         const id = decodeURIComponent(sessionPrompt[1])
+        const operation = sessionPrompt[2] as "prompt" | "steer" | "follow-up"
         const raw = await readBody(req)
         let body: {
           text?: string
           stream?: boolean
           model?: { provider?: string; id?: string }
-          deliverAs?: "steer" | "followUp"
           commandId?: string
         }
         try {
@@ -295,46 +295,71 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             text?: string
             stream?: boolean
             model?: { provider?: string; id?: string }
-            deliverAs?: "steer" | "followUp"
             commandId?: string
           }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
         try {
+          const knownSession = await sessions.find(id)
+          if (!knownSession) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
           // stream defaults off for tests/speed; client passes stream:true for UI
           const stream = body.stream === true
           const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
-          const request: CommandRequestV2<"session.prompt"> = {
-            protocolVersion: 2,
-            commandId,
-            type: "session.prompt",
-            concurrency: body.deliverAs ? "run-control" : "idle-only",
-            sessionId: id,
-            payload: {
-              text: body.text ?? "",
-              delivery: body.deliverAs ?? "prompt",
-              model: body.model?.provider && body.model.id
-                ? { provider: body.model.provider, modelId: body.model.id }
-                : undefined,
-            },
-          }
-          const submitted = sessionExecutor.submit(request, () => sessions.prompt(id, body.text ?? "", {
-            stream,
-            model: body.model,
-            deliverAs: body.deliverAs,
-            onTick: sess => {
-              publishSessionSnapshot(sess)
-            },
-          }))
-          const s = await submitted.promise
-          publishSessionUpdated(s)
-          return sendJson(res, 200, {
+          const submitted = operation === "prompt"
+            ? sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.prompt",
+                  concurrency: "idle-only",
+                  sessionId: id,
+                  payload: {
+                    text: body.text ?? "",
+                    model: body.model?.provider && body.model.id
+                      ? { provider: body.model.provider, modelId: body.model.id }
+                      : undefined,
+                  },
+                },
+                () => sessions.prompt(id, body.text ?? "", {
+                  stream,
+                  model: body.model,
+                  onTick: publishSessionSnapshot,
+                }),
+              )
+            : operation === "steer"
+              ? sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.steer",
+                    concurrency: "run-control",
+                    sessionId: id,
+                    payload: { text: body.text ?? "" },
+                  },
+                  () => sessions.deliverControl(id, body.text ?? "", "steer"),
+                )
+              : sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.followUp",
+                    concurrency: "run-control",
+                    sessionId: id,
+                    payload: { text: body.text ?? "" },
+                  },
+                  () => sessions.deliverControl(id, body.text ?? "", "followUp"),
+                )
+          void submitted.promise.then(session => {
+            publishSessionSnapshot(session)
+            publishSessionUpdated(session)
+          }).catch(() => undefined)
+          return sendJson(res, 202, {
             commandId,
             accepted: true,
             reused: submitted.reused,
             command: submitted.record,
-            snapshot: sessions.snapshot(s),
+            snapshot: sessions.snapshot(knownSession),
           })
         } catch (e) {
           return handleSessionCmdError(res, e)
@@ -359,16 +384,17 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           },
           () => sessions.abort(id),
         )
-        const s = await submitted.promise
-        if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        publishSessionSnapshot(s)
-        publishSessionUpdated(s)
+        const result = await submitted.promise
+        if (!result) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        publishSessionSnapshot(result.session)
+        publishSessionUpdated(result.session)
         return sendJson(res, 200, {
           commandId,
           accepted: true,
           reused: submitted.reused,
           command: submitted.record,
-          snapshot: sessions.snapshot(s),
+          cleared: result.cleared,
+          snapshot: sessions.snapshot(result.session),
         })
       }
 
@@ -451,6 +477,8 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           /* empty ok */
         }
         try {
+          const knownSession = await sessions.find(id)
+          if (!knownSession) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
           const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
           const submitted = sessionExecutor.submit(
             {
@@ -463,17 +491,194 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             },
             () => sessions.compact(id, body.instructions),
           )
-          const s = await submitted.promise
-          publishSessionSnapshot(s)
-          publishSessionUpdated(s)
-          return sendJson(res, 200, {
+          void submitted.promise.then(({ session }) => {
+            publishSessionSnapshot(session)
+            publishSessionUpdated(session)
+          }).catch(() => undefined)
+          return sendJson(res, 202, {
             commandId,
+            accepted: true,
             reused: submitted.reused,
             command: submitted.record,
-            snapshot: sessions.snapshot(s),
+            snapshot: sessions.snapshot(knownSession),
           })
         } catch (e) {
           return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionRuntimeControl = p.match(
+        /^\/api\/v1\/sessions\/([^/]+)\/commands\/(abort-compaction|abort-branch-summary|abort-retry|clear-queue)$/,
+      )
+      if (method === "POST" && sessionRuntimeControl) {
+        const id = decodeURIComponent(sessionRuntimeControl[1])
+        const operation = sessionRuntimeControl[2]
+        const raw = await readBody(req)
+        let body: { commandId?: string } = {}
+        try { body = JSON.parse(raw || "{}") as typeof body } catch { /* empty ok */ }
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = operation === "abort-compaction"
+            ? sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.abortCompaction",
+                  concurrency: "run-control",
+                  sessionId: id,
+                  payload: {},
+                },
+                () => sessions.abortCompaction(id),
+              )
+            : operation === "abort-branch-summary"
+              ? sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.abortBranchSummary",
+                    concurrency: "run-control",
+                    sessionId: id,
+                    payload: {},
+                  },
+                  () => sessions.abortBranchSummary(id),
+                )
+              : operation === "abort-retry"
+                ? sessionExecutor.submit(
+                    {
+                      protocolVersion: 2,
+                      commandId,
+                      type: "session.abortRetry",
+                      concurrency: "run-control",
+                      sessionId: id,
+                      payload: {},
+                    },
+                    () => sessions.abortRetry(id),
+                  )
+                : sessionExecutor.submit(
+                    {
+                      protocolVersion: 2,
+                      commandId,
+                      type: "session.clearQueue",
+                      concurrency: "run-control",
+                      sessionId: id,
+                      payload: {},
+                    },
+                    () => sessions.clearQueue(id),
+                  )
+          const result = await submitted.promise
+          const session = "session" in result ? result.session : result
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            cleared: "cleared" in result ? result.cleared : undefined,
+            snapshot: sessions.snapshot(session),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionRuntimeSetting = p.match(
+        /^\/api\/v1\/sessions\/([^/]+)\/commands\/(set-auto-compaction|set-auto-retry|set-queue-modes|set-tools)$/,
+      )
+      if (method === "POST" && sessionRuntimeSetting) {
+        const id = decodeURIComponent(sessionRuntimeSetting[1])
+        const operation = sessionRuntimeSetting[2]
+        const raw = await readBody(req)
+        let body: {
+          enabled?: boolean
+          steeringMode?: "all" | "one-at-a-time"
+          followUpMode?: "all" | "one-at-a-time"
+          toolNames?: string[]
+          commandId?: string
+        }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          if ((operation === "set-auto-compaction" || operation === "set-auto-retry") && typeof body.enabled !== "boolean") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "enabled must be boolean")
+          }
+          if (operation === "set-queue-modes" &&
+            body.steeringMode === undefined && body.followUpMode === undefined) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "at least one queue mode is required")
+          }
+          if (
+            (body.steeringMode !== undefined && body.steeringMode !== "all" && body.steeringMode !== "one-at-a-time") ||
+            (body.followUpMode !== undefined && body.followUpMode !== "all" && body.followUpMode !== "one-at-a-time")
+          ) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid queue mode")
+          }
+          if (operation === "set-tools" && !Array.isArray(body.toolNames)) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "toolNames must be an array")
+          }
+          if (operation === "set-tools" && body.toolNames!.some(name => typeof name !== "string" || !name)) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "toolNames must contain non-empty strings")
+          }
+          const submitted = operation === "set-auto-compaction"
+            ? sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.setAutoCompaction",
+                  concurrency: "idle-only",
+                  sessionId: id,
+                  payload: { enabled: body.enabled! },
+                },
+                () => sessions.setAutoCompaction(id, body.enabled!),
+              )
+            : operation === "set-auto-retry"
+              ? sessionExecutor.submit(
+                  {
+                    protocolVersion: 2,
+                    commandId,
+                    type: "session.setAutoRetry",
+                    concurrency: "idle-only",
+                    sessionId: id,
+                    payload: { enabled: body.enabled! },
+                  },
+                  () => sessions.setAutoRetry(id, body.enabled!),
+                )
+              : operation === "set-queue-modes"
+                ? sessionExecutor.submit(
+                    {
+                      protocolVersion: 2,
+                      commandId,
+                      type: "session.setQueueModes",
+                      concurrency: "idle-only",
+                      sessionId: id,
+                      payload: {
+                        steeringMode: body.steeringMode,
+                        followUpMode: body.followUpMode,
+                      },
+                    },
+                    () => sessions.setQueueModes(id, {
+                      steeringMode: body.steeringMode,
+                      followUpMode: body.followUpMode,
+                    }),
+                  )
+                : sessionExecutor.submit(
+                    {
+                      protocolVersion: 2,
+                      commandId,
+                      type: "session.setActiveTools",
+                      concurrency: "idle-only",
+                      sessionId: id,
+                      payload: { toolNames: body.toolNames! },
+                    },
+                    () => sessions.setActiveTools(id, body.toolNames!),
+                  )
+          const session = await submitted.promise
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            snapshot: sessions.snapshot(session),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
         }
       }
 
@@ -481,7 +686,14 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionNavigate) {
         const id = decodeURIComponent(sessionNavigate[1])
         const raw = await readBody(req)
-        let body: { entryId?: string; summarize?: boolean; commandId?: string }
+        let body: {
+          entryId?: string
+          summarize?: boolean
+          customInstructions?: string
+          replaceInstructions?: boolean
+          label?: string
+          commandId?: string
+        }
         try { body = JSON.parse(raw || "{}") as typeof body } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
@@ -495,9 +707,20 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               type: "session.navigateTree",
               concurrency: "idle-only",
               sessionId: id,
-              payload: { entryId: body.entryId, summarizeAbandonedBranch: body.summarize === true },
+              payload: {
+                entryId: body.entryId,
+                summarizeAbandonedBranch: body.summarize === true,
+                customInstructions: body.customInstructions,
+                replaceInstructions: body.replaceInstructions,
+                label: body.label,
+              },
             },
-            () => sessions.navigateTree(id, body.entryId!, body.summarize),
+            () => sessions.navigateTree(id, body.entryId!, {
+              summarize: body.summarize,
+              customInstructions: body.customInstructions,
+              replaceInstructions: body.replaceInstructions,
+              label: body.label,
+            }),
           )
           const result = await submitted.promise
           publishSessionSnapshot(result.session)
@@ -507,6 +730,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             editorText: result.editorText,
             cancelled: result.cancelled,
             aborted: result.aborted,
+            summaryEntry: result.summaryEntry,
             snapshot: sessions.snapshot(result.session),
           })
         } catch (error) {

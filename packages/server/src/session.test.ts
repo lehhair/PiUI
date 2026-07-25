@@ -37,6 +37,24 @@ async function json(port: number, method: string, urlPath: string, body?: unknow
   return { status: res.status, data: await res.json() }
 }
 
+async function waitForCommand(port: number, commandId: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await json(port, "GET", `/api/v1/commands/${commandId}`)
+    const status = response.data.command?.status as string | undefined
+    if (status && status !== "accepted" && status !== "running") return response
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  throw new Error(`command ${commandId} did not finish`)
+}
+
+async function waitFor(check: () => Promise<boolean>): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await check()) return true
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return false
+}
+
 describe("session mock snapshot (no LLM)", () => {
   const root = mkdtempSync(path.join(tmpdir(), "piui-sess-"))
   after(() => rmSync(root, { recursive: true, force: true }))
@@ -121,16 +139,18 @@ describe("session mock snapshot (no LLM)", () => {
       const prompted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
         text: "second turn",
       })
-      assert.equal(prompted.status, 200)
+      assert.equal(prompted.status, 202)
       assert.equal(prompted.data.accepted, true)
-      const after = prompted.data.snapshot.timeline as { type: string; text?: string }[]
+      await waitForCommand(port, prompted.data.commandId)
+      const completed = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+      const after = completed.data.timeline as { type: string; text?: string }[]
       assert.ok(after.length > before)
       const lastUser = [...after].reverse().find(t => t.type === "user")
       assert.equal(lastUser?.text, "second turn")
       const lastAsst = [...after].reverse().find(t => t.type === "assistant")
       assert.ok(lastAsst)
       assert.equal(snapshots.at(-1)?.reason, "command")
-      assert.equal(snapshots.at(-1)?.snapshot.sequence, prompted.data.snapshot.sequence)
+      assert.equal(snapshots.at(-1)?.snapshot.sequence, completed.data.sequence)
       assert.equal(snapshots.at(-1)?.snapshot.session.title, "second turn")
     } finally {
       await close()
@@ -192,10 +212,12 @@ describe("session mock snapshot (no LLM)", () => {
 
       const first = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, body)
       const second = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, body)
-      assert.equal(first.status, 200)
-      assert.equal(second.status, 200)
+      assert.equal(first.status, 202)
+      assert.equal(second.status, 202)
       assert.equal(second.data.reused, true)
-      const users = (second.data.snapshot.timeline as Array<{ type: string; text?: string }>)
+      await waitForCommand(port, "prompt-once")
+      const snapshot = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+      const users = (snapshot.data.timeline as Array<{ type: string; text?: string }>)
         .filter(item => item.type === "user" && item.text === "only once")
       assert.equal(users.length, 1)
 
@@ -273,9 +295,8 @@ describe("session mock snapshot (no LLM)", () => {
         text: "do not replay",
         commandId: "crash-command",
       })
-      assert.equal(prompted.status, 503)
-      assert.equal(prompted.data.code, "SESSION_RUNTIME_CRASHED")
-      const command = await json(port, "GET", "/api/v1/commands/crash-command")
+      assert.equal(prompted.status, 202)
+      const command = await waitForCommand(port, "crash-command")
       assert.equal(command.data.command.status, "unknown_after_crash")
       assert.equal(opens, 1)
     } finally {
@@ -383,6 +404,104 @@ describe("session mock snapshot (no LLM)", () => {
       const deleted = await json(port, "DELETE", `/api/v1/sessions/${sourceId}`)
       assert.equal(deleted.status, 200)
       assert.equal(deleted.data.command.request.payload.durable, true)
+    } finally {
+      await close()
+    }
+  })
+
+  it("routes R4 control, queue, retry, compaction, and tool commands", async () => {
+    const backend = new RuntimeSupervisor({
+      workerEntry: workerFixture,
+      leases: new SessionLeaseManager(path.join(root, "r4-http-leases")),
+    })
+    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const { port, close } = await listen(server)
+    try {
+      const health = await json(port, "GET", "/api/v1/health")
+      assert.equal(health.data.protocolV2.capabilities.capabilities["prompt.steer"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["tools.manage"].enabled, true)
+
+      const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
+      const created = await json(port, "POST", "/api/v1/sessions", {
+        workspaceId: workspace.data.workspace.id,
+      })
+      const sessionId = created.data.snapshot.session.id as string
+
+      const steered = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/steer`, {
+        text: "Correct the parser",
+        commandId: "r4-steer",
+      })
+      assert.equal(steered.status, 202)
+      assert.equal((await waitForCommand(port, "r4-steer")).data.command.status, "completed")
+
+      const followed = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/follow-up`, {
+        text: "Run the tests",
+        commandId: "r4-follow-up",
+      })
+      assert.equal(followed.status, 202)
+      await waitForCommand(port, "r4-follow-up")
+
+      const modes = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/set-queue-modes`, {
+        steeringMode: "all",
+        followUpMode: "all",
+      })
+      assert.equal(modes.status, 200)
+      assert.deepEqual(modes.data.snapshot.runtime.queue, {
+        steering: ["Correct the parser"],
+        followUp: ["Run the tests"],
+        steeringMode: "all",
+        followUpMode: "all",
+      })
+
+      const tools = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/set-tools`, {
+        toolNames: ["read", "bash"],
+      })
+      assert.deepEqual(tools.data.snapshot.runtime.activeTools, ["read", "bash"])
+
+      const retry = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/set-auto-retry`, {
+        enabled: false,
+      })
+      assert.equal(retry.data.snapshot.runtime.retry.autoEnabled, false)
+
+      const aborted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/abort`, {})
+      assert.deepEqual(aborted.data.cleared, {
+        steering: ["Correct the parser"],
+        followUp: ["Run the tests"],
+      })
+      assert.deepEqual(aborted.data.snapshot.runtime.queue.followUp, [])
+
+      await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/follow-up`, {
+        text: "After abort",
+        commandId: "r4-follow-up-after-abort",
+      })
+      await waitForCommand(port, "r4-follow-up-after-abort")
+      const cleared = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/clear-queue`, {})
+      assert.deepEqual(cleared.data.cleared, {
+        steering: [],
+        followUp: ["After abort"],
+      })
+      assert.deepEqual(cleared.data.snapshot.runtime.queue.steering, [])
+
+      const compacted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/compact`, {
+        instructions: "wait-for-abort",
+        commandId: "r4-compact",
+      })
+      assert.equal(compacted.status, 202)
+      assert.equal(compacted.data.command.request.concurrency, "idle-only")
+      const compactStarted = await waitFor(async () => {
+        const current = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+        assert.equal(current.status, 200, JSON.stringify(current.data))
+        return current.data.runtime.compaction.operation.type === "compaction"
+      })
+      assert.equal(compactStarted, true)
+      const stoppedCompaction = await json(
+        port,
+        "POST",
+        `/api/v1/sessions/${sessionId}/commands/abort-compaction`,
+        {},
+      )
+      assert.equal(stoppedCompaction.status, 200)
+      assert.equal((await waitForCommand(port, "r4-compact")).data.command.status, "completed")
     } finally {
       await close()
     }

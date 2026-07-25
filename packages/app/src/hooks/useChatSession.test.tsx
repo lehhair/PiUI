@@ -360,6 +360,45 @@ describe('useChatSession handleCommand', () => {
     untrackPiSession('session-1')
   })
 
+  it('restores text in the submitting pane when an accepted Pi command fails asynchronously', async () => {
+    trackPiSession('session-1', 'workspace-1')
+    promptSessionMock.mockResolvedValue({ accepted: true })
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleSend('keep this correction', [], {})
+    })
+    const commandId = promptSessionMock.mock.calls[0]?.[2]?.commandId
+    expect(commandId).toBeTruthy()
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('piui:command-updated', {
+        detail: {
+          commandId,
+          sessionId: 'session-1',
+          commandType: 'session.prompt',
+          inputText: 'keep this correction',
+          status: 'failed',
+          error: { message: 'session stopped' },
+        },
+      }))
+    })
+
+    expect(result.current.restoredContent?.text).toBe('keep this correction')
+    expect(errorHandlerMock).toHaveBeenCalled()
+    untrackPiSession('session-1')
+  })
+
   it('forks a merged assistant turn at its final native entry', async () => {
     const firstAssistant = {
       info: {

@@ -96,9 +96,9 @@ export async function deleteSession(sessionId: string, _directory?: string): Pro
 }
 
 export async function abortSession(sessionId: string, _directory?: string): Promise<boolean> {
-  const snapshot = await abortSessionCommand(sessionId)
-  if (snapshot) applySnapshotToUi(snapshot)
-  return snapshot != null
+  const result = await abortSessionCommand(sessionId)
+  if (result) applySnapshotToUi(result.snapshot)
+  return result != null
 }
 
 export async function revertMessage(

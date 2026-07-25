@@ -56,7 +56,7 @@ describe("event websocket", () => {
           body: JSON.stringify({ text: "stream me", stream: true }),
         },
       )
-      assert.equal(prompt.status, 200)
+      assert.equal(prompt.status, 202)
 
       // allow last events to flush
       await new Promise(r => setTimeout(r, 50))

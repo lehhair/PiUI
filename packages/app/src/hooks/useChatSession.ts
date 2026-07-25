@@ -43,6 +43,7 @@ import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
 import { usePiCapabilities } from '../pi/capabilities'
 import { clearSessionEditorDraft, useSessionEditorDraft } from '../pi/sessionEditorDraftStore'
+import { sessionProjectionStore } from '../pi/sessionProjectionStore'
 
 const handleError = createErrorHandler('session')
 
@@ -105,6 +106,37 @@ export function useChatSession({
     () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
   )
   const [restoredContent, setRestoredContent] = useState<{ sessionId: string; content: RevertHistoryItem } | null>(null)
+  const pendingPiCommandIds = useRef(new Set<string>())
+
+  useEffect(() => {
+    const handleCommandUpdate = (rawEvent: Event) => {
+      const detail = (rawEvent as CustomEvent<{
+        commandId?: string
+        sessionId?: string
+        status?: string
+        error?: { message?: string }
+        commandType?: string
+        inputText?: string
+      }>).detail
+      if (!routeSessionId || detail?.sessionId !== routeSessionId) return
+      if (!detail.commandId || !pendingPiCommandIds.current.has(detail.commandId)) return
+      if (detail.status !== 'completed' && detail.status !== 'failed' && detail.status !== 'cancelled' &&
+        detail.status !== 'unknown_after_crash') return
+      pendingPiCommandIds.current.delete(detail.commandId)
+      if (detail.status === 'completed') return
+      const type = detail.commandType
+      const text = detail.inputText
+      if ((type === 'session.prompt' || type === 'session.steer' || type === 'session.followUp') && text) {
+        setRestoredContent({
+          sessionId: routeSessionId,
+          content: { messageId: detail.commandId ?? `failed-${Date.now()}`, text, attachments: [] },
+        })
+      }
+      if (detail.error?.message) handleError('execute command', new Error(detail.error.message))
+    }
+    window.addEventListener('piui:command-updated', handleCommandUpdate)
+    return () => window.removeEventListener('piui:command-updated', handleCommandUpdate)
+  }, [routeSessionId])
 
   const setSelectedAgent = useCallback(
     (agentName: string) => {
@@ -454,7 +486,7 @@ export function useChatSession({
       attachments: Attachment[]
       directory: string
       model?: { providerID: string; modelID: string }
-      options?: { agent?: string; variant?: string }
+      options?: { agent?: string; variant?: string; delivery?: 'steer' | 'followUp' }
       allowCreateSession?: boolean
     }) => {
       let sessionId = input.sessionId ?? routeSessionId
@@ -481,20 +513,25 @@ export function useChatSession({
           throw new Error('PiUI attachments are not supported yet')
         }
         const busy = messageStore.getSessionState(sessionId)?.isStreaming === true
+        const delivery = busy ? input.options?.delivery : undefined
+        if (busy && !delivery) throw new Error('Choose steer or follow-up while the session is running')
         messageStore.setStreaming(sessionId, true)
+        let commandId: string | undefined
         try {
           const { ensurePiEventSocket } = await import('../pi/eventSocket')
           ensurePiEventSocket()
-          const snap = await promptSession(sessionId, input.content, {
+          commandId = globalThis.crypto?.randomUUID?.() ?? `cmd-${Date.now()}-${Math.random().toString(36).slice(2)}`
+          pendingPiCommandIds.current.add(commandId)
+          await promptSession(sessionId, input.content, {
             stream: true,
             model: input.model,
-            deliverAs: busy ? 'followUp' : undefined,
+            deliverAs: delivery,
+            commandId,
           })
-          applySnapshotToUi(snap)
-          messageStore.setStreaming(sessionId, false)
           return true
         } catch (error) {
-          messageStore.setStreaming(sessionId, false)
+          if (commandId) pendingPiCommandIds.current.delete(commandId)
+          if (!busy) messageStore.setStreaming(sessionId, false)
           throw error
         }
       } catch (error) {
@@ -516,7 +553,11 @@ export function useChatSession({
 
   // Send message handler
   const handleSend = useCallback(
-    async (content: string, attachments: Attachment[], options?: { agent?: string; variant?: string }) => {
+    async (
+      content: string,
+      attachments: Attachment[],
+      options?: { agent?: string; variant?: string; delivery?: 'steer' | 'followUp' },
+    ) => {
       // 如果队列头有失败项，用户重新发送时先清掉失败项（内容已恢复到输入框）
       if (routeSessionId && queuedFollowupFailedId) {
         followupQueueStore.remove(routeSessionId, queuedFollowupFailedId)
@@ -719,13 +760,30 @@ export function useChatSession({
   // Abort handler
   const handleAbort = useCallback(async () => {
     if (!routeSessionId) return
+    const queuedBeforeAbort = sessionProjectionStore.getSnapshot(routeSessionId)?.runtime.queue
     try {
       const { abortSessionCommand } = await import('../pi/sessionApi')
-      const snap = await abortSessionCommand(routeSessionId)
-      if (snap) applySnapshotToUi(snap)
+      const result = await abortSessionCommand(routeSessionId)
+      applySnapshotToUi(result.snapshot)
+      const queuedText = [...result.cleared.steering, ...result.cleared.followUp].join('\n\n')
+      if (queuedText) {
+        setRestoredContent({
+          sessionId: routeSessionId,
+          content: { messageId: `abort-${Date.now()}`, text: queuedText, attachments: [] },
+        })
+      }
       messageStore.setStreaming(routeSessionId, false)
       messageStore.handleSessionIdle(routeSessionId)
     } catch (error) {
+      const queuedText = queuedBeforeAbort
+        ? [...queuedBeforeAbort.steering, ...queuedBeforeAbort.followUp].join('\n\n')
+        : ''
+      if (queuedText) {
+        setRestoredContent({
+          sessionId: routeSessionId,
+          content: { messageId: `abort-failed-${Date.now()}`, text: queuedText, attachments: [] },
+        })
+      }
       handleError('abort session', error)
     }
   }, [routeSessionId])
@@ -768,8 +826,9 @@ export function useChatSession({
 
         if (command === 'compact') {
           void import('../pi/sessionApi')
-            .then(({ compactSession }) => compactSession(sessionId!))
-            .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
+            .then(({ compactSession }) => args
+              ? compactSession(sessionId!, args)
+              : compactSession(sessionId!))
             .catch(err => handleError('execute command', err))
           return true
         }

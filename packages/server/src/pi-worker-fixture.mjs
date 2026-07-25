@@ -4,6 +4,15 @@ let session
 let listCount = 0
 let replacementCount = 0
 let runtimeCwd = "/fixture"
+let steering = []
+let followUp = []
+let steeringMode = "one-at-a-time"
+let followUpMode = "one-at-a-time"
+let autoCompaction = true
+let autoRetry = true
+let activeTools = ["read"]
+let isCompacting = false
+let pendingCompaction
 const generation = "fixture-generation"
 const heartbeatIntervalMs = 20
 const heartbeatTimer = setInterval(() => {
@@ -12,7 +21,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 3,
+  workerProtocolVersion: 4,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -22,10 +31,13 @@ process.send?.({
     "catalog.models",
     "runtime.open",
     "runtime.prompt",
+    "runtime.control",
     "runtime.abort",
     "runtime.model",
     "runtime.thinking",
     "runtime.compact",
+    "runtime.retry",
+    "runtime.tools",
     "runtime.tree",
     "runtime.fork",
     "runtime.import",
@@ -39,10 +51,26 @@ function state() {
     thinkingLevel: "medium",
     availableThinkingLevels: ["off", "medium"],
     isStreaming: false,
-    isCompacting: false,
-    queue: { steering: [], followUp: [] },
-    activeTools: ["read"],
-    retryAttempt: 0,
+    isCompacting,
+    isIdle: !isCompacting,
+    queue: {
+      steering,
+      followUp,
+      steeringMode,
+      followUpMode,
+    },
+    retry: { phase: "idle", autoEnabled: autoRetry },
+    compaction: {
+      autoEnabled: autoCompaction,
+      operation: isCompacting ? { type: "compaction", phase: "running", reason: "manual" } : { type: "none" },
+    },
+    tools: [
+      { name: "read", description: "Read files", source: "builtin" },
+      { name: "bash", description: "Run commands", source: "builtin" },
+    ],
+    activeTools,
+    model: undefined,
+    supportsThinking: true,
   }
 }
 
@@ -131,13 +159,93 @@ process.on("message", request => {
       process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
       return
     }
+    if (command.text === "reconcile") {
+      const synthetic = {
+        timeline: [{ type: "user", id: "synthetic-entry", entryId: "synthetic-entry", timestamp: 1, text: command.text }],
+        isStreaming: true,
+      }
+      const projection = {
+        timeline: [{ type: "user", id: "native-entry", entryId: "native-entry", timestamp: 1, text: command.text }],
+        removedItemIds: ["synthetic-entry"],
+        isStreaming: false,
+      }
+      process.send?.({ kind: "event", generation, type: "projectionDelta", projection: synthetic })
+      process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
+      session = { ...(session ?? snapshot()), projection: { timeline: projection.timeline, isStreaming: false } }
+      result = { type: "session", session }
+      process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
+      return
+    }
     const projection = {
       timeline: [{ type: "user", id: "fixture-entry", entryId: "fixture-entry", timestamp: 1, text: command.text }],
       isStreaming: false,
     }
     session = { ...(session ?? snapshot()), projection }
-    process.send?.({ kind: "event", generation, type: "projection", projection })
+    process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
     result = { type: "session", session }
+  } else if (command.type === "compact") {
+    if (command.instructions === "wait-for-abort") {
+      isCompacting = true
+      session = { ...(session ?? snapshot()), state: state() }
+      pendingCompaction = request
+      process.send?.({ kind: "event", generation, type: "state", state: session.state })
+      return
+    }
+    result = {
+      type: "compaction",
+      compaction: { status: "skipped", reason: "session_too_small", message: "fixture is small" },
+      session: session ?? snapshot(),
+    }
+  } else if (command.type === "abortCompaction") {
+    if (pendingCompaction) {
+      isCompacting = false
+      session = { ...(session ?? snapshot()), state: state() }
+      process.send?.({
+        kind: "response",
+        id: pendingCompaction.id,
+        generation,
+        ok: true,
+        result: { type: "compaction", compaction: { status: "aborted" }, session },
+      })
+      pendingCompaction = undefined
+      process.send?.({ kind: "event", generation, type: "state", state: session.state })
+    }
+    result = { type: "session", session: session ?? snapshot() }
+  } else if (command.type === "steer" || command.type === "followUp") {
+    if (command.type === "steer") steering = [...steering, command.text]
+    else followUp = [...followUp, command.text]
+    session = { ...(session ?? snapshot()), state: state() }
+    process.send?.({ kind: "event", generation, type: "state", state: session.state })
+    result = { type: "session", session }
+  } else if (command.type === "setQueueModes") {
+    steeringMode = command.steeringMode ?? steeringMode
+    followUpMode = command.followUpMode ?? followUpMode
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "setAutoCompaction") {
+    autoCompaction = command.enabled
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "setAutoRetry") {
+    autoRetry = command.enabled
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "setActiveTools") {
+    activeTools = command.toolNames
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "clearQueue") {
+    const cleared = { steering, followUp }
+    steering = []
+    followUp = []
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "queue", ...cleared, session }
+  } else if (command.type === "abort") {
+    const cleared = { steering, followUp }
+    steering = []
+    followUp = []
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "queue", ...cleared, session }
   } else if (command.type === "listSkills") {
     result = { type: "skills", skills: [{ name: "fixture-skill", source: "fixture" }] }
   } else if (command.type === "listCommands") {

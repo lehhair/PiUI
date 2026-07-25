@@ -23,6 +23,10 @@ interface InputToolbarProps {
   isStreaming?: boolean
   isSending?: boolean
   onAbort?: () => void
+  deliveryMode?: 'steer' | 'followUp'
+  onDeliveryModeChange?: (mode: 'steer' | 'followUp') => void
+  canSteer?: boolean
+  canFollowUp?: boolean
 
   canSend: boolean
   onSend: () => void
@@ -49,6 +53,10 @@ export function InputToolbar({
   isStreaming,
   isSending = false,
   onAbort,
+  deliveryMode = 'followUp',
+  onDeliveryModeChange,
+  canSteer = false,
+  canFollowUp = false,
   canSend,
   onSend,
   models = [],
@@ -493,6 +501,38 @@ export function InputToolbar({
 
       {/* Action Buttons */}
       <div className="flex items-center gap-1">
+        {isStreaming && (canSteer || canFollowUp) ? (
+          <div
+            role="group"
+            aria-label={t('inputToolbar.deliveryMode')}
+            className="flex h-7 items-center rounded border border-border-200 bg-bg-100 p-0.5"
+          >
+            {canSteer ? (
+              <button
+                type="button"
+                className={`h-6 px-2 text-[length:var(--fs-xs)] ${
+                  deliveryMode === 'steer' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
+                }`}
+                aria-pressed={deliveryMode === 'steer'}
+                onClick={() => onDeliveryModeChange?.('steer')}
+              >
+                {t('inputToolbar.steer')}
+              </button>
+            ) : null}
+            {canFollowUp ? (
+              <button
+                type="button"
+                className={`h-6 px-2 text-[length:var(--fs-xs)] ${
+                  deliveryMode === 'followUp' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
+                }`}
+                aria-pressed={deliveryMode === 'followUp'}
+                onClick={() => onDeliveryModeChange?.('followUp')}
+              >
+                {t('inputToolbar.followUp')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <AnimatedPresence show={supportsAnyFile}>
           <>
             {/* 浏览器模式下的隐藏文件输入 */}

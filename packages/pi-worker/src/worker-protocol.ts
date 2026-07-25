@@ -1,6 +1,9 @@
 import type {
+  CompactionCommandResultV1,
+  PiNavigationResultV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
+  QueueDeliveryModeV1,
   SessionReplacementResultV1,
   TimelineItemV1,
 } from "@piui/protocol"
@@ -9,6 +12,7 @@ import type { PiCommandInfo, PiRuntimeUiState, PiSessionInfo, PiSkillInfo } from
 export interface ProjectionWire {
   timeline: TimelineItemV1[]
   isStreaming: boolean
+  removedItemIds?: string[]
 }
 
 export interface WorkerSessionWire {
@@ -33,7 +37,7 @@ export interface PiModelInfo {
   supportsImages: boolean
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 3 as const
+export const PI_WORKER_PROTOCOL_VERSION = 4 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -41,10 +45,13 @@ export type PiWorkerCapability =
   | "catalog.models"
   | "runtime.open"
   | "runtime.prompt"
+  | "runtime.control"
   | "runtime.abort"
   | "runtime.model"
   | "runtime.thinking"
   | "runtime.compact"
+  | "runtime.retry"
+  | "runtime.tools"
   | "runtime.tree"
   | "runtime.fork"
   | "runtime.import"
@@ -66,12 +73,33 @@ export type WorkerCommand =
   | { type: "listAll" }
   | { type: "listModels" }
   | { type: "open"; cwd: string; sessionFile?: string }
-  | { type: "prompt"; text: string; deliverAs?: "steer" | "followUp" }
+  | { type: "prompt"; text: string }
+  | { type: "steer"; text: string }
+  | { type: "followUp"; text: string }
   | { type: "abort" }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinkingLevel"; level: string }
   | { type: "compact"; instructions?: string }
-  | { type: "navigateTree"; entryId: string; summarize?: boolean }
+  | { type: "abortCompaction" }
+  | { type: "abortBranchSummary" }
+  | { type: "abortRetry" }
+  | { type: "setAutoCompaction"; enabled: boolean }
+  | { type: "setAutoRetry"; enabled: boolean }
+  | {
+      type: "setQueueModes"
+      steeringMode?: QueueDeliveryModeV1
+      followUpMode?: QueueDeliveryModeV1
+    }
+  | { type: "clearQueue" }
+  | { type: "setActiveTools"; toolNames: string[] }
+  | {
+      type: "navigateTree"
+      entryId: string
+      summarize?: boolean
+      customInstructions?: string
+      replaceInstructions?: boolean
+      label?: string
+    }
   | { type: "setLabel"; entryId: string; label?: string }
   | { type: "setSessionName"; name: string }
   | { type: "fork"; entryId: string; position: "before" | "at" }
@@ -94,7 +122,9 @@ export type WorkerResult =
   | { type: "session"; session: WorkerSessionWire }
   | { type: "skills"; skills: PiSkillInfo[] }
   | { type: "commands"; commands: PiCommandInfo[] }
-  | { type: "navigation"; editorText?: string; cancelled: boolean; aborted?: boolean; session: WorkerSessionWire }
+  | ({ type: "navigation"; session: WorkerSessionWire } & PiNavigationResultV1)
+  | { type: "compaction"; compaction: CompactionCommandResultV1; session: WorkerSessionWire }
+  | { type: "queue"; steering: string[]; followUp: string[]; session: WorkerSessionWire }
   | { type: "replacement"; replacement: SessionReplacementResultV1; session: WorkerSessionWire }
   | { type: "ok" }
 
@@ -104,6 +134,7 @@ export type WorkerResponse =
 
 export type WorkerIpcEvent =
   | { kind: "event"; generation: string; type: "projection"; projection: ProjectionWire }
+  | { kind: "event"; generation: string; type: "projectionDelta"; projection: ProjectionWire }
   | { kind: "event"; generation: string; type: "state"; state: PiRuntimeUiState }
 
 export interface WorkerHeartbeat {

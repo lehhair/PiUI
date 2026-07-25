@@ -13,5 +13,9 @@ export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activ
     title: snapshot.session.title,
     hasMoreHistory: false,
   })
+  messageStore.setStreaming(
+    snapshot.session.id,
+    snapshot.runtime.isStreaming,
+  )
   return snapshot.session.id
 }
