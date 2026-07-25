@@ -2,13 +2,9 @@
 // PTY API - 终端管理
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
-import { getApiBaseUrl, buildQueryString } from './http'
-import { formatPathForApi } from '../utils/directoryUtils'
-import { serverStore } from '../store/serverStore'
+import { UnsupportedPiCapabilityError } from './errors'
 import type { Pty, PtyCreateParams, PtyUpdateParams } from '../types/api/pty'
 
-type LegacyPty = Pty & { running?: boolean; status?: Pty['status'] }
 export interface ShellInfo {
   path: string
   name: string
@@ -24,115 +20,49 @@ interface PtyConnectUrlOptions {
   cursor?: number
 }
 
-function normalizePty(pty: LegacyPty): Pty {
-  if (pty.status) return pty as Pty
-  return {
-    ...pty,
-    status: pty.running ? 'running' : 'exited',
-  } as Pty
-}
-
 /**
  * 获取所有 PTY 会话列表
  */
-export async function listPtySessions(directory?: string): Promise<Pty[]> {
-  const sdk = getSDKClient()
-  return unwrap<LegacyPty[]>(await sdk.pty.list({ directory: formatPathForApi(directory) })).map(pty =>
-    normalizePty(pty as LegacyPty),
-  )
+export async function listPtySessions(_directory?: string): Promise<Pty[]> {
+  return []
 }
 
-/**
- * 获取当前机器可用 shell 列表，用于 opencode config.shell 的候选项。
- */
-export async function listAvailableShells(directory?: string): Promise<ShellInfo[]> {
-  const sdk = getSDKClient()
-  return unwrap<ShellInfo[]>(await sdk.pty.shells({ directory: formatPathForApi(directory) }))
+export async function listAvailableShells(_directory?: string): Promise<ShellInfo[]> {
+  return []
 }
 
 /**
  * 创建新的 PTY 会话
  */
-export async function createPtySession(params: PtyCreateParams, directory?: string): Promise<Pty> {
-  const sdk = getSDKClient()
-  return normalizePty(unwrap(await sdk.pty.create({ directory: formatPathForApi(directory), ...params })) as LegacyPty)
+export async function createPtySession(_params: PtyCreateParams, _directory?: string): Promise<Pty> {
+  throw new UnsupportedPiCapabilityError('PTY sessions')
 }
 
 /**
  * 获取单个 PTY 会话信息
  */
-export async function getPtySession(ptyId: string, directory?: string): Promise<Pty> {
-  const sdk = getSDKClient()
-  return normalizePty(unwrap(await sdk.pty.get({ ptyID: ptyId, directory: formatPathForApi(directory) })) as LegacyPty)
+export async function getPtySession(_ptyId: string, _directory?: string): Promise<Pty> {
+  throw new UnsupportedPiCapabilityError('PTY sessions')
 }
 
 /**
  * 更新 PTY 会话
  */
-export async function updatePtySession(ptyId: string, params: PtyUpdateParams, directory?: string): Promise<Pty> {
-  const sdk = getSDKClient()
-  return normalizePty(
-    unwrap(await sdk.pty.update({ ptyID: ptyId, directory: formatPathForApi(directory), ...params })) as LegacyPty,
-  )
+export async function updatePtySession(_ptyId: string, _params: PtyUpdateParams, _directory?: string): Promise<Pty> {
+  throw new UnsupportedPiCapabilityError('PTY sessions')
 }
 
 /**
  * 删除 PTY 会话
  */
-export async function removePtySession(ptyId: string, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(await sdk.pty.remove({ ptyID: ptyId, directory: formatPathForApi(directory) }))
-  return true
+export async function removePtySession(_ptyId: string, _directory?: string): Promise<boolean> {
+  throw new UnsupportedPiCapabilityError('PTY sessions')
 }
 
-/**
- * 获取 PTY 连接 WebSocket URL
- *
- * 浏览器 WebSocket 不支持自定义 header，认证方式：
- * - 跨域：auth_token query parameter（与官方 opencode app 一致）
- * - 同源：浏览器会复用页面的 Basic auth 凭据
- * - Tauri bridge：不走这里，通过 Rust 的 HTTP header 传认证
- */
-export function getPtyConnectUrl(ptyId: string, directory?: string, options?: PtyConnectUrlOptions): string {
-  const httpBase = getApiBaseUrl()
-  const wsBase = httpBase.replace(/^http/, 'ws')
-  const includeAuthInUrl = options?.includeAuthInUrl ?? true
-  const cursor =
-    typeof options?.cursor === 'number' && Number.isSafeInteger(options.cursor) && options.cursor >= 0
-      ? options.cursor
-      : undefined
-
-  const auth = serverStore.getActiveAuth()
-  const formatted = formatPathForApi(directory)
-
-  // Tauri bridge 不需要在 URL 里放认证
-  if (!includeAuthInUrl) {
-    return `${wsBase}/pty/${ptyId}/connect${buildQueryString({ directory: formatted, cursor })}`
-  }
-
-  // 浏览器原生 WebSocket：
-  // 跨域时用 auth_token query parameter + userinfo fallback
-  // 同源时浏览器会自动复用 Basic auth
-  const isCrossOrigin = (() => {
-    try {
-      return new URL(httpBase).origin !== location.origin
-    } catch {
-      return true
-    }
-  })()
-
-  const queryParams: Record<string, string | number | undefined> = { directory: formatted, cursor }
-
-  let wsUrl = wsBase
-  if (auth?.password) {
-    if (isCrossOrigin) {
-      // auth_token = base64(username:password)，与官方 opencode app 一致
-      queryParams.auth_token = btoa(`${auth.username}:${auth.password}`)
-    }
-    // 同时设 userinfo 作为 fallback（部分浏览器直连时能用）
-    const creds = `${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password)}@`
-    wsUrl = wsBase.replace('://', `://${creds}`)
-  }
-
-  return `${wsUrl}/pty/${ptyId}/connect${buildQueryString(queryParams)}`
+export function getPtyConnectUrl(
+  _ptyId: string,
+  _directory?: string,
+  _options?: PtyConnectUrlOptions,
+): string {
+  throw new UnsupportedPiCapabilityError('PTY sessions')
 }

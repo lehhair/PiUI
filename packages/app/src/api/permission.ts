@@ -1,6 +1,6 @@
 // Permission and question transport is not part of PiUI protocol v1.
 
-import { UnsupportedPiCapabilityError } from './sdk'
+import { UnsupportedPiCapabilityError } from './errors'
 import type { ApiPermissionRequest, PermissionReply, ApiQuestionRequest, QuestionAnswer } from './types'
 
 export async function getPendingPermissions(

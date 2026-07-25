@@ -30,6 +30,7 @@ import { WorkspaceSettings } from './components/WorkspaceSettings'
 import { ConfigSettings } from './components/ConfigSettings'
 import { SettingsSearch } from './SettingsSearch'
 import { SETTINGS_SEARCH_DEFINITIONS, type SettingsSearchItem } from './settingsSearchCatalog'
+import { usePiCapabilities } from '../../pi/capabilities'
 
 // ============================================
 // Types
@@ -145,6 +146,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
 export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: SettingsDialogProps) {
   const { t } = useTranslation(['settings', 'commands'])
   const isMobile = useIsMobile()
+  const capabilities = usePiCapabilities()
   const isTauriDesktop = isTauri() && !isMobile
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightFrameRef = useRef<number | null>(null)
@@ -156,8 +158,8 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
   const [tab, setTab] = useState<SettingsTab>(normalizeTab(initialTab))
 
   const visibleTabIds = useMemo(
-    () => (isTauriDesktop ? TAB_IDS : TAB_IDS.filter(id => id !== 'service')),
-    [isTauriDesktop],
+    () => TAB_IDS.filter(id => (isTauriDesktop || id !== 'service') && (capabilities.config || id !== 'config')),
+    [capabilities.config, isTauriDesktop],
   )
 
   const visibleTabs = useMemo(

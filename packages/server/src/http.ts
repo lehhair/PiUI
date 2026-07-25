@@ -148,6 +148,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             gitDiff: true,
             sessionRename: false,
             sessionArchive: false,
+            mcp: false,
+            worktree: false,
+            config: false,
           },
         })
       }
