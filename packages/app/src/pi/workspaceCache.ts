@@ -4,7 +4,11 @@ const pathToId = new Map<string, string>()
 const idToPath = new Map<string, string>()
 
 function norm(p: string): string {
-  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+  const slashed = p.replace(/\\/g, "/")
+  const normalized = slashed === "/" ? "/" : slashed.replace(/\/+$/, "")
+  return /^[a-zA-Z]:(?:\/|$)/.test(normalized) || normalized.startsWith("//")
+    ? normalized.toLowerCase()
+    : normalized
 }
 
 export function cacheWorkspace(rootPath: string, workspaceId: string) {

@@ -453,7 +453,7 @@ function App() {
     layoutStore.openRightPanel()
   }, [ensureMobileRightPanelRendered, isMobilePanelLayout, rightPanelOpen, scrollMobilePagerTo, setSidebarExpanded, sidebarExpanded])
 
-  // Pi 全局模式：无 currentDirectory 时用 pane 有效目录（可能是 piws:id）
+  // Pi 全局模式：无 currentDirectory 时使用 pane 对应 session 的真实目录
   // 空目录时 resolveWorkspaceId 会落到 server 默认 workspace，FileExplorer 仍可 list
   const focusedDirectory = focusedRouteDirectory || focusedController?.effectiveDirectory || ''
 

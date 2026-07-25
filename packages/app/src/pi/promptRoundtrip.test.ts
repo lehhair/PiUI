@@ -26,6 +26,7 @@ function snap(id: string, n: number): SessionSnapshotV1 {
     session: {
       id,
       workspaceId: "w",
+      directory: "/workspace",
       driverId: "pi",
       driverSessionId: "d",
       title: "t",

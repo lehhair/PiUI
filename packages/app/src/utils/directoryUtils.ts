@@ -228,17 +228,18 @@ export function normalizeToForwardSlash(dir: string | undefined | null): string 
  * 规范化目录路径用于比较
  * - 统一使用正斜杠
  * - 移除末尾斜杠
- * - 转小写（Windows 路径不区分大小写）
+ * - Windows 盘符和 UNC 路径转小写，POSIX 路径保留大小写
  *
  * @example
  * normalizeForComparison('E:\\Dev\\Project') // 'e:/dev/project'
  */
 export function normalizeForComparison(dir: string | undefined | null): string {
   if (!dir) return ''
-  return dir
-    .replace(/\\/g, '/') // 反斜杠 → 正斜杠
-    .replace(/\/+$/, '') // 移除末尾斜杠
-    .toLowerCase() // Windows 路径不区分大小写
+  const slashed = dir.replace(/\\/g, '/') // 反斜杠 → 正斜杠
+  const normalized = slashed === '/' ? '/' : slashed.replace(/\/+$/, '') // 保留 POSIX 根目录
+  return /^[a-zA-Z]:(?:\/|$)/.test(normalized) || normalized.startsWith('//')
+    ? normalized.toLowerCase()
+    : normalized
 }
 
 /**

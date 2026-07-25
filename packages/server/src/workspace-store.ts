@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, statSync } from "node:fs"
+import { existsSync, realpathSync, statSync } from "node:fs"
 import path from "node:path"
 import type { WorkspaceDtoV1 } from "@piui/protocol"
 
@@ -25,19 +25,20 @@ export class WorkspaceStore {
   }
 
   register(rootPath: string, displayName?: string): WorkspaceRecord {
-    const abs = path.resolve(rootPath)
-    if (!existsSync(abs)) {
-      throw Object.assign(new Error(`workspace root not found: ${abs}`), {
+    const resolved = path.resolve(rootPath)
+    if (!existsSync(resolved)) {
+      throw Object.assign(new Error(`workspace root not found: ${resolved}`), {
         code: "INVALID_REQUEST" as const,
       })
     }
-    const st = statSync(abs)
+    const st = statSync(resolved)
     if (!st.isDirectory()) {
       throw Object.assign(new Error("workspace root must be a directory"), {
         code: "INVALID_REQUEST" as const,
       })
     }
-    const key = abs.toLowerCase()
+    const abs = realpathSync.native(resolved)
+    const key = workspacePathKey(abs)
     const existingId = this.byRoot.get(key)
     if (existingId) {
       const rec = this.byId.get(existingId)!
@@ -56,6 +57,10 @@ export class WorkspaceStore {
     this.byRoot.set(key, rec.id)
     return rec
   }
+}
+
+export function workspacePathKey(rootPath: string, platform = process.platform): string {
+  return platform === "win32" ? rootPath.toLowerCase() : rootPath
 }
 
 function toDto(r: WorkspaceRecord): WorkspaceDtoV1 {

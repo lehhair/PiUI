@@ -85,10 +85,6 @@ export class SessionRegistry {
     return this.driver
   }
 
-  async warmup(): Promise<void> {
-    await this.discover()
-  }
-
   async list(workspaceId?: string): Promise<AppSession[]> {
     if (workspaceId) {
       const workspace = this.workspaces.get(workspaceId)
@@ -898,6 +894,7 @@ export class SessionRegistry {
       session: {
         id: session.id,
         workspaceId: session.workspaceId,
+        directory: this.workspaces.get(session.workspaceId)?.canonicalRoot ?? "",
         driverId: "pi",
         driverSessionId: session.driverSessionId,
         title: session.title,
