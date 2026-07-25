@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EventCallbacks } from '../types/api/event'
 import { useSessions } from './useSessions'
 
 function createDeferred<T>() {
@@ -14,38 +13,33 @@ function createDeferred<T>() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFn = (...args: any[]) => any
 const {
-  getSessionsMock,
-  createSessionMock,
-  deleteSessionMock,
-  subscribeToEventsMock,
-  onServerChangeMock,
+  listPiSessionsMock,
+  createPiSessionMock,
+  deletePiSessionMock,
+  resolveWorkspaceIdMock,
 } = vi.hoisted(() => ({
-  getSessionsMock: vi.fn<AnyFn>(),
-  createSessionMock: vi.fn<AnyFn>(),
-  deleteSessionMock: vi.fn<AnyFn>(),
-  subscribeToEventsMock: vi.fn<AnyFn>(),
-  onServerChangeMock: vi.fn<AnyFn>(() => () => {}),
-}))
-let latestEventCallbacks: Partial<EventCallbacks> = {}
-let latestServerChange: (() => void) | undefined
-
-vi.mock('../api', () => ({
-  getSessions: (...args: unknown[]) => getSessionsMock(...args),
-  createSession: (...args: unknown[]) => createSessionMock(...args),
-  deleteSession: (...args: unknown[]) => deleteSessionMock(...args),
-  subscribeToEvents: (...args: unknown[]) => subscribeToEventsMock(...args),
+  listPiSessionsMock: vi.fn<AnyFn>(),
+  createPiSessionMock: vi.fn<AnyFn>(),
+  deletePiSessionMock: vi.fn<AnyFn>(),
+  resolveWorkspaceIdMock: vi.fn<AnyFn>(),
 }))
 
-vi.mock('../store/serverStore', () => ({
-  serverStore: {
-    onServerChange: (...args: unknown[]) => onServerChangeMock(...args),
-  },
+vi.mock('../pi/sessionApi', () => ({
+  listPiSessions: (...args: unknown[]) => listPiSessionsMock(...args),
+  createPiSession: (...args: unknown[]) => createPiSessionMock(...args),
+  deletePiSession: (...args: unknown[]) => deletePiSessionMock(...args),
+  resolveWorkspaceId: (...args: unknown[]) => resolveWorkspaceIdMock(...args),
+}))
+
+vi.mock('../pi/toApiSession', () => ({
+  toApiSession: (session: unknown) => session,
 }))
 
 function makeSession(id: string, directory = '/workspace/demo') {
   return {
     id,
     slug: id,
+    workspaceId: 'project-1',
     projectID: 'project-1',
     directory,
     title: `Session ${id}`,
@@ -60,24 +54,14 @@ function makeSession(id: string, directory = '/workspace/demo') {
 describe('useSessions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    getSessionsMock.mockReset()
-    createSessionMock.mockReset()
-    deleteSessionMock.mockReset()
-    subscribeToEventsMock.mockReset()
-    onServerChangeMock.mockReset()
-    getSessionsMock.mockResolvedValue([])
-    createSessionMock.mockResolvedValue(makeSession('new'))
-    deleteSessionMock.mockResolvedValue(true)
-    latestEventCallbacks = {}
-    latestServerChange = undefined
-    subscribeToEventsMock.mockImplementation((callbacks: EventCallbacks) => {
-      latestEventCallbacks = callbacks
-      return vi.fn()
-    })
-    onServerChangeMock.mockImplementation((listener: () => void) => {
-      latestServerChange = listener
-      return vi.fn()
-    })
+    listPiSessionsMock.mockReset()
+    createPiSessionMock.mockReset()
+    deletePiSessionMock.mockReset()
+    resolveWorkspaceIdMock.mockReset()
+    listPiSessionsMock.mockResolvedValue([])
+    createPiSessionMock.mockResolvedValue({ summary: makeSession('new') })
+    deletePiSessionMock.mockResolvedValue(undefined)
+    resolveWorkspaceIdMock.mockResolvedValue('project-1')
   })
 
   afterEach(() => {
@@ -89,7 +73,7 @@ describe('useSessions', () => {
       initialProps: { enabled: false },
     })
 
-    expect(getSessionsMock).not.toHaveBeenCalled()
+    expect(listPiSessionsMock).not.toHaveBeenCalled()
 
     rerender({ enabled: true })
 
@@ -98,15 +82,11 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledWith({
-      roots: true,
-      limit: 20,
-      directory: '/workspace/demo',
-    })
+    expect(listPiSessionsMock).toHaveBeenCalledWith()
   })
 
   it('passes the scoped directory when removing a session', async () => {
-    getSessionsMock.mockResolvedValue([makeSession('session-1')])
+    listPiSessionsMock.mockResolvedValue([makeSession('session-1')])
 
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
 
@@ -121,10 +101,15 @@ describe('useSessions', () => {
       await result.current.remove('session-1')
     })
 
-    expect(deleteSessionMock).toHaveBeenCalledWith('session-1', '/workspace/demo')
+    expect(deletePiSessionMock).toHaveBeenCalledWith('session-1')
   })
 
-  it('adds matching sessions from realtime events immediately', async () => {
+  it('filters sessions by the resolved Pi workspace', async () => {
+    listPiSessionsMock.mockResolvedValue([
+      makeSession('session-1'),
+      { ...makeSession('session-2'), workspaceId: 'project-2', projectID: 'project-2' },
+    ])
+
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
 
     await act(async () => {
@@ -132,10 +117,23 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
+    expect(resolveWorkspaceIdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
+  })
+
+  it('refreshes sessions from Pi events', async () => {
+    const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
+
     await act(async () => {
-      latestEventCallbacks.onSessionCreated?.(makeSession('session-1'))
-      latestEventCallbacks.onSessionCreated?.(makeSession('session-ignored', '/workspace/other'))
-      latestEventCallbacks.onSessionCreated?.({ ...makeSession('session-child'), parentID: 'parent-1' })
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+
+    listPiSessionsMock.mockResolvedValue([makeSession('session-1')])
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+      await Promise.resolve()
+      await Promise.resolve()
     })
 
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
@@ -146,7 +144,7 @@ describe('useSessions', () => {
     const secondRequest = createDeferred<ReturnType<typeof makeSession>[]>()
     const thirdRequest = createDeferred<ReturnType<typeof makeSession>[]>()
 
-    getSessionsMock
+    listPiSessionsMock
       .mockImplementationOnce(() => firstRequest.promise)
       .mockImplementationOnce(() => secondRequest.promise)
       .mockImplementationOnce(() => thirdRequest.promise)
@@ -174,11 +172,11 @@ describe('useSessions', () => {
     })
 
     await act(async () => {
-      latestEventCallbacks.onReconnected?.('network')
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(2)
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       secondRequest.resolve([makeSession('session-2')])
@@ -186,10 +184,10 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(3)
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(3)
 
     await act(async () => {
-      thirdRequest.resolve([makeSession('session-3')])
+      thirdRequest.resolve([{ ...makeSession('session-3'), title: 'Branch session' }])
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -198,7 +196,7 @@ describe('useSessions', () => {
   })
 
   it('retries the initial fetch after a startup failure', async () => {
-    getSessionsMock
+    listPiSessionsMock
       .mockRejectedValueOnce(new Error('service not ready'))
       .mockResolvedValueOnce([makeSession('session-1')])
 
@@ -210,7 +208,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(1)
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       vi.advanceTimersByTime(500)
@@ -218,15 +216,15 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(2)
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(2)
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
   })
 
-  it('refetches on server endpoint changes even while the old request is in flight', async () => {
+  it('refetches on Pi session changes even while the old request is in flight', async () => {
     const staleRequest = createDeferred<ReturnType<typeof makeSession>[]>()
     const freshRequest = createDeferred<ReturnType<typeof makeSession>[]>()
 
-    getSessionsMock
+    listPiSessionsMock
       .mockImplementationOnce(() => staleRequest.promise)
       .mockImplementationOnce(() => freshRequest.promise)
 
@@ -237,25 +235,25 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(1)
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
-      latestServerChange?.()
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
       await Promise.resolve()
     })
 
-    expect(getSessionsMock).toHaveBeenCalledTimes(2)
-
-    await act(async () => {
-      freshRequest.resolve([makeSession('fresh')])
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    expect(result.current.sessions.map(session => session.id)).toEqual(['fresh'])
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       staleRequest.resolve([makeSession('stale')])
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(listPiSessionsMock).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      freshRequest.resolve([makeSession('fresh')])
       await Promise.resolve()
       await Promise.resolve()
     })

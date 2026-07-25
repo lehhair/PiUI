@@ -2,10 +2,9 @@
 // Command API - 命令列表和执行
 // ============================================
 
-import { getSDKClient, unwrap } from './sdk'
-import { formatPathForApi } from '../utils/directoryUtils'
-import { serverStore } from '../store/serverStore'
 import i18n from '../i18n'
+import { isPiServerUp, listSessionCommands } from '../pi/sessionApi'
+import { sessionProjectionStore } from '../pi/sessionProjectionStore'
 
 export interface Command {
   name: string
@@ -13,8 +12,6 @@ export interface Command {
   keybind?: string
   source: 'frontend' | 'api'
 }
-
-type ApiCommand = Omit<Command, 'source'>
 
 // Frontend-added slash commands that do not come from GET /command.
 // These are executed locally or via dedicated session actions.
@@ -31,14 +28,12 @@ const commandCache = new Map<string, { data: Command[]; expiresAt: number }>()
 const commandInflight = new Map<string, Promise<Command[]>>()
 
 function getCommandCacheKey(directory?: string): string {
-  return `${serverStore.getActiveServerId()}::${i18n.resolvedLanguage || i18n.language}::${formatPathForApi(directory) ?? ''}`
+  return `${sessionProjectionStore.getActiveSessionId() ?? 'none'}::${i18n.resolvedLanguage || i18n.language}::${directory ?? ''}`
 }
 
-async function fetchCommands(directory?: string): Promise<Command[]> {
+async function fetchCommands(_directory?: string): Promise<Command[]> {
   // Pi session commands first
   try {
-    const { isPiServerUp, listSessionCommands } = await import('../pi/sessionApi')
-    const { sessionProjectionStore } = await import('../pi/sessionProjectionStore')
     if (await isPiServerUp()) {
       const sid = sessionProjectionStore.getActiveSessionId()
       if (sid) {
@@ -57,17 +52,7 @@ async function fetchCommands(directory?: string): Promise<Command[]> {
     /* fall through */
   }
 
-  let apiCommands: ApiCommand[] = []
-  try {
-    const sdk = getSDKClient()
-    apiCommands = unwrap(await sdk.command.list({ directory: formatPathForApi(directory) })) ?? []
-  } catch {
-    // Backend unreachable — frontend commands still available
-  }
-  const frontendCommands = getFrontendCommands()
-  const commandsFromApi: Command[] = apiCommands.map(command => ({ ...command, source: 'api' }))
-  const apiNames = new Set(commandsFromApi.map(c => c.name))
-  return [...commandsFromApi, ...frontendCommands.filter(c => !apiNames.has(c.name))]
+  return getFrontendCommands()
 }
 
 export async function getCommands(directory?: string): Promise<Command[]> {
@@ -98,21 +83,4 @@ export async function getCommands(directory?: string): Promise<Command[]> {
 
 export async function prefetchCommands(directory?: string): Promise<void> {
   await getCommands(directory)
-}
-
-export async function executeCommand(
-  sessionId: string,
-  command: string,
-  args: string = '',
-  directory?: string,
-): Promise<unknown> {
-  const sdk = getSDKClient()
-  return unwrap(
-    await sdk.session.command({
-      sessionID: sessionId,
-      directory: formatPathForApi(directory),
-      command,
-      arguments: args,
-    }),
-  )
 }

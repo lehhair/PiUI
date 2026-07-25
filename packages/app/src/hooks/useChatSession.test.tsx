@@ -4,8 +4,8 @@ import { useChatSession } from './useChatSession'
 
 const {
   createSessionMock,
-  summarizeSessionMock,
-  executeCommandMock,
+  compactSessionMock,
+  promptSessionMock,
   getSelectableAgentsMock,
   registerSessionConsumerMock,
   updateConsumerSessionIdMock,
@@ -26,8 +26,8 @@ const {
   activeSessionStatusMap,
 } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
-  summarizeSessionMock: vi.fn(),
-  executeCommandMock: vi.fn(),
+  compactSessionMock: vi.fn(),
+  promptSessionMock: vi.fn(),
   getSelectableAgentsMock: vi.fn(),
   registerSessionConsumerMock: vi.fn(),
   updateConsumerSessionIdMock: vi.fn(),
@@ -146,12 +146,20 @@ vi.mock('../api', () => ({
   prefetchCommands: vi.fn(() => Promise.resolve()),
   prefetchRootDirectory: vi.fn(() => Promise.resolve()),
   getSessionChildren: vi.fn(() => Promise.resolve([])),
-  executeCommand: (...args: unknown[]) => executeCommandMock(...args),
-  summarizeSession: (...args: unknown[]) => summarizeSessionMock(...args),
   updateSession: vi.fn(),
   forkSession: vi.fn(),
   extractUserMessageContent: vi.fn(),
 }))
+
+vi.mock('../pi/sessionApi', () => ({
+  promptSession: (...args: unknown[]) => promptSessionMock(...args),
+  compactSession: (...args: unknown[]) => compactSessionMock(...args),
+  abortSessionCommand: vi.fn(),
+}))
+
+vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: vi.fn() }))
+
+vi.mock('../pi/eventSocket', () => ({ ensurePiEventSocket: vi.fn() }))
 
 vi.mock('../utils', () => ({
   clipboardErrorHandler: vi.fn(),
@@ -169,8 +177,8 @@ vi.mock('../utils/perServerStorage', () => ({
 describe('useChatSession handleCommand', () => {
   beforeEach(() => {
     createSessionMock.mockReset()
-    summarizeSessionMock.mockReset()
-    executeCommandMock.mockReset()
+    compactSessionMock.mockReset()
+    promptSessionMock.mockReset()
     getSelectableAgentsMock.mockReset()
     registerSessionConsumerMock.mockReset()
     updateConsumerSessionIdMock.mockReset()
@@ -216,8 +224,8 @@ describe('useChatSession handleCommand', () => {
     vi.restoreAllMocks()
   })
 
-  it('treats compact as sent before summarize finishes', async () => {
-    summarizeSessionMock.mockReturnValue(new Promise<boolean>(() => {}))
+  it('dispatches compact through Pi before it finishes', async () => {
+    compactSessionMock.mockReturnValue(new Promise(() => {}))
 
     const { result } = renderHook(() =>
       useChatSession({
@@ -243,17 +251,13 @@ describe('useChatSession handleCommand', () => {
       await Promise.resolve()
     })
 
-    expect(summarizeSessionMock).toHaveBeenCalledWith(
-      'session-1',
-      { providerID: 'provider-1', modelID: 'model-1' },
-      '/workspace/demo',
-    )
+    expect(compactSessionMock).toHaveBeenCalledWith('session-1')
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
   })
 
-  it('treats api commands as sent before execution finishes', async () => {
-    executeCommandMock.mockReturnValue(new Promise(() => {}))
+  it('dispatches native slash commands through Pi prompt', async () => {
+    promptSessionMock.mockReturnValue(new Promise(() => {}))
 
     const { result } = renderHook(() =>
       useChatSession({
@@ -279,7 +283,11 @@ describe('useChatSession handleCommand', () => {
       await Promise.resolve()
     })
 
-    expect(executeCommandMock).toHaveBeenCalledWith('session-1', 'review', 'src/App.tsx', '/workspace/demo')
+    expect(promptSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      '/review src/App.tsx',
+      expect.objectContaining({ stream: true }),
+    )
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
   })
@@ -393,8 +401,8 @@ describe('useChatSession handleCommand', () => {
 describe('useChatSession busy UI signal', () => {
   beforeEach(() => {
     createSessionMock.mockReset()
-    summarizeSessionMock.mockReset()
-    executeCommandMock.mockReset()
+    compactSessionMock.mockReset()
+    promptSessionMock.mockReset()
     getSelectableAgentsMock.mockReset()
     registerSessionConsumerMock.mockReset()
     updateConsumerSessionIdMock.mockReset()

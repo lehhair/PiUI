@@ -8,7 +8,6 @@ import {
   useSessionFamily,
   useSessionState,
   autoApproveStore,
-  childSessionStore,
   useActiveSessionStore,
   type RevertHistoryItem,
 } from '../store'
@@ -22,17 +21,7 @@ import { usePermissions, usePermissionHandler, useMessageAnimation, useDirectory
 import { useNotification } from './useNotification'
 import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
 import {
-  sendMessageAsync,
-  getSessionMessages,
-  abortSession,
-  getSelectableAgents,
-  getPendingPermissions,
-  getPendingQuestions,
   prefetchCommands,
-  prefetchRootDirectory,
-  getSessionChildren,
-  executeCommand,
-  summarizeSession,
   updateSession,
   forkSession,
   extractUserMessageContent,
@@ -48,11 +37,10 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
-import { isPiSession, shouldUsePiChat } from '../pi/isPiSession'
+import { isPiSession } from '../pi/isPiSession'
 import { promptSession } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
-import { themeStore } from '../store/themeStore'
 
 const handleError = createErrorHandler('session')
 
@@ -107,10 +95,9 @@ export function useChatSession({
   navigateHome,
 }: UseChatSessionOptions) {
   const { statusMap } = useActiveSessionStore()
-  const { queueFollowupMessages } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
 
   // Agents
-  const [agents, setAgents] = useState<ApiAgent[]>([])
+  const agents: ApiAgent[] = []
   const [selectedAgent, setSelectedAgentRaw] = useState<string>(
     () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
   )
@@ -287,86 +274,6 @@ export function useChatSession({
     }
   }, [approvePendingOnFullAuto, fullAutoMode, pendingPermissionRequests, replyPermissionOnceAutomatically])
 
-  const buildLocalQueuedMessage = useCallback(
-    (input: {
-      sessionId: string
-      messageId: string
-      text: string
-      attachments: Attachment[]
-      agent?: string
-      model: { providerID: string; modelID: string; variant?: string }
-      createdAt: number
-    }): UIMessage => {
-      const parts: UIMessage['parts'] = [
-        {
-          id: `${input.messageId}:text`,
-          type: 'text',
-          text: input.text,
-          synthetic: false,
-          sessionID: input.sessionId,
-          messageID: input.messageId,
-        },
-      ]
-
-      for (const attachment of input.attachments) {
-        if (attachment.type === 'agent') {
-          parts.push({
-            id: attachment.id || `${input.messageId}:agent:${parts.length}`,
-            type: 'agent',
-            name: attachment.agentName || attachment.displayName,
-            source: attachment.textRange
-              ? {
-                  value: attachment.textRange.value,
-                  start: attachment.textRange.start,
-                  end: attachment.textRange.end,
-                }
-              : undefined,
-            sessionID: input.sessionId,
-            messageID: input.messageId,
-          })
-          continue
-        }
-
-        if (attachment.type !== 'file' && attachment.type !== 'folder') continue
-
-        parts.push({
-          id: attachment.id || `${input.messageId}:file:${parts.length}`,
-          type: 'file',
-          mime: attachment.mime || (attachment.type === 'folder' ? 'application/x-directory' : 'text/plain'),
-          filename: attachment.displayName,
-          url: attachment.url || '',
-          source: attachment.textRange
-            ? {
-                type: 'file',
-                path: attachment.relativePath || attachment.displayName,
-                text: {
-                  value: attachment.textRange.value,
-                  start: attachment.textRange.start,
-                  end: attachment.textRange.end,
-                },
-              }
-            : undefined,
-          sessionID: input.sessionId,
-          messageID: input.messageId,
-        })
-      }
-
-      return {
-        info: {
-          id: input.messageId,
-          sessionID: input.sessionId,
-          role: 'user',
-          time: { created: input.createdAt },
-          agent: input.agent || '',
-          model: input.model,
-        },
-        parts,
-        isStreaming: false,
-      }
-    },
-    [],
-  )
-
   // ============================================
   // SSE 事件回调（permission / question / scroll / idle / error / reconnect）
   // 每个 pane 都注册自己的 consumer，由 App 顶层统一建立 SSE 连接
@@ -471,10 +378,6 @@ export function useChatSession({
           refreshPendingRequests(sessionFamily, effectiveDirectory)
         }
         refetchModels().catch(() => {})
-        // 重新获取 agents 列表（切换后端时 currentDirectory 可能没变，useEffect 不会触发）
-        getSelectableAgents(currentDirectory)
-          .then(setAgents)
-          .catch(() => {})
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable functions
@@ -483,7 +386,6 @@ export function useChatSession({
       effectiveDirectory,
       routeSessionId,
       sessionFamily,
-      currentDirectory,
       replyPermissionOnceAutomatically,
       setPendingPermissionRequests,
       setPendingQuestionRequests,
@@ -527,18 +429,10 @@ export function useChatSession({
     // No-op: parts are always in memory now
   }, [])
 
-  // Load agents
-  useEffect(() => {
-    getSelectableAgents(currentDirectory)
-      .then(setAgents)
-      .catch(err => handleError('fetch agents', err))
-  }, [currentDirectory])
-
   // Preload @ root directory and / commands for current session directory
   useEffect(() => {
     if (!routeSessionId || !effectiveDirectory) return
 
-    prefetchRootDirectory(effectiveDirectory).catch(() => {})
     prefetchCommands(effectiveDirectory).catch(() => {})
   }, [routeSessionId, effectiveDirectory])
 
@@ -559,74 +453,15 @@ export function useChatSession({
     return () => cancelAnimationFrame(frameId)
   }, [agents, selectedAgent, setSelectedAgent])
 
-  // Load child sessions and pending permissions on session change
-  // 页面刷新时 childSessionStore 是空的，需要先从 API 恢复子 session 关系
-  // 然后再加载权限请求（包括子 session 的权限）
+  // Pi v1 has no child-session or permission polling endpoint yet
   useEffect(() => {
     if (!routeSessionId) {
       resetPendingRequests()
       return
     }
-
-    let cancelled = false
-
-    async function loadChildSessionsAndPermissions() {
-      // Step 1: 恢复子 session 关系（如果 store 中还没有）
-      const existingChildren = childSessionStore.getChildSessionIds(routeSessionId!)
-      if (existingChildren.length === 0) {
-        try {
-          const children = await getSessionChildren(routeSessionId!, effectiveDirectory)
-          if (cancelled) return
-          // 注册所有子 session 到 store
-          for (const child of children) {
-            childSessionStore.registerChildSession(child)
-          }
-        } catch {
-          // 获取子 session 失败不影响主流程
-        }
-      }
-
-      if (cancelled) return
-
-      // Step 2: 获取完整的 session family（主 session + 所有子孙）
-      const family = new Set(childSessionStore.getSessionAndDescendants(routeSessionId!))
-
-      // Step 3: 获取所有待处理请求，然后用 family 过滤
-      // GET /permission 和 GET /question 返回全量数据，不传 sessionId 避免 N 次重复请求
-      const [allPerms, allQuestions] = await Promise.all([
-        getPendingPermissions(undefined, effectiveDirectory).catch(() => []),
-        getPendingQuestions(undefined, effectiveDirectory).catch(() => []),
-      ])
-
-      if (cancelled) return
-
-      // 只保留属于当前 session family 的请求。
-      // OMO background subagents may publish permission.asked over SSE before
-      // /permission can list it for this routed instance, so do not drop
-      // SSE-known requests just because the snapshot is missing them.
-      const nextPerms = allPerms.filter(p => family.has(p.sessionID))
-      setPendingPermissionRequests(prev => {
-        const merged = new Map(nextPerms.map(p => [p.id, p]))
-        for (const request of prev) {
-          if (family.has(request.sessionID) && !merged.has(request.id)) merged.set(request.id, request)
-        }
-        return Array.from(merged.values())
-      })
-      setPendingQuestionRequests(allQuestions.filter(q => family.has(q.sessionID)))
-    }
-
-    loadChildSessionsAndPermissions()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    routeSessionId,
-    effectiveDirectory,
-    resetPendingRequests,
-    setPendingPermissionRequests,
-    setPendingQuestionRequests,
-  ])
+    setPendingPermissionRequests([])
+    setPendingQuestionRequests([])
+  }, [routeSessionId, resetPendingRequests, setPendingPermissionRequests, setPendingQuestionRequests])
 
   const sendMessageNow = useCallback(
     async (input: {
@@ -634,7 +469,7 @@ export function useChatSession({
       content: string
       attachments: Attachment[]
       directory: string
-      model: { providerID: string; modelID: string }
+      model?: { providerID: string; modelID: string }
       options?: { agent?: string; variant?: string }
       allowCreateSession?: boolean
     }) => {
@@ -658,87 +493,26 @@ export function useChatSession({
           navigateToSession(sessionId, newSession.directory)
         }
 
-        // Pi path whenever piui-server is up (mock or real driver)
-        if (shouldUsePiChat(sessionId) || isPiSession(sessionId)) {
-          if (!sessionId) {
-            if (!input.allowCreateSession) return false
-            const newSession = await createSession()
-            sessionId = newSession.id
-            navigateToSession(sessionId, newSession.directory)
-          }
-          messageStore.setStreaming(sessionId, true)
-          try {
-            const { ensurePiEventSocket } = await import('../pi/eventSocket')
-            ensurePiEventSocket()
-            const busy = messageStore.getSessionState(sessionId)?.isStreaming
-            // pass selected model for real pi (server may ignore in mock)
-            const snap = await promptSession(sessionId, input.content, {
-              stream: true,
-              model: input.model,
-              deliverAs: busy ? 'followUp' : undefined,
-            })
-            applySnapshotToUi(snap)
-            messageStore.setStreaming(sessionId, false)
-            return true
-          } catch (error) {
-            messageStore.setStreaming(sessionId, false)
-            throw error
-          }
+        if (input.attachments.length > 0) {
+          throw new Error('PiUI attachments are not supported yet')
         }
-
-        if (rollbackSnapshot) {
-          messageStore.truncateAfterRevert(sessionId)
-        }
-
-        // 记录发送前的消息数量，作为判断 SSE 是否推送新消息的基线
-        const msgCountBeforeSend = messageStore.getSessionState(sessionId)?.messages.length ?? 0
-
-        // 不要在 send 前 setStreaming：新 user 往往还没入列，过程折叠会把
-        // 「上一轮已收工」误判成最新 Working 再展开，造成一闪。
-        // streaming 在 send 成功后、或 SSE 推到 assistant 时再打开。
-        await sendMessageAsync({
-          sessionId,
-          text: input.content,
-          attachments: input.attachments,
-          model: input.model,
-          agent: input.options?.agent,
-          variant: input.options?.variant,
-          directory: input.directory,
-        })
-
+        const busy = messageStore.getSessionState(sessionId)?.isStreaming === true
         messageStore.setStreaming(sessionId, true)
-
-        // 兜底：等待短暂时间后检查 SSE 是否已推送用户消息，
-        // 若未收到则主动拉取补齐，避免 SSE 断流导致用户消息不显示
-        const pullSessionId = sessionId
-        const pullDir = input.directory
-        setTimeout(() => {
-          const state = messageStore.getSessionState(pullSessionId)
-          if (!state) return
-          // 消息数量增加了，说明 SSE 已正常推送
-          if (state.messages.length > msgCountBeforeSend) return
-
-          getSessionMessages(pullSessionId, 5, pullDir)
-            .then(apiMessages => {
-              for (const msg of apiMessages) {
-                messageStore.handleMessageUpdated(msg.info)
-                if (msg.parts) {
-                  for (const part of msg.parts) {
-                    messageStore.handlePartUpdated({
-                      ...part,
-                      sessionID: pullSessionId,
-                      messageID: msg.info.id,
-                    })
-                  }
-                }
-              }
-            })
-            .catch(() => {
-              // 拉取失败不影响主流程，SSE 重连后仍可补齐
-            })
-        }, 1500)
-
-        return true
+        try {
+          const { ensurePiEventSocket } = await import('../pi/eventSocket')
+          ensurePiEventSocket()
+          const snap = await promptSession(sessionId, input.content, {
+            stream: true,
+            model: input.model,
+            deliverAs: busy ? 'followUp' : undefined,
+          })
+          applySnapshotToUi(snap)
+          messageStore.setStreaming(sessionId, false)
+          return true
+        } catch (error) {
+          messageStore.setStreaming(sessionId, false)
+          throw error
+        }
       } catch (error) {
         handleError('send message', error)
         if (sessionId) {
@@ -759,72 +533,16 @@ export function useChatSession({
   // Send message handler
   const handleSend = useCallback(
     async (content: string, attachments: Attachment[], options?: { agent?: string; variant?: string }) => {
-      const piMode = shouldUsePiChat(routeSessionId) || isPiSession(routeSessionId)
-      if (!currentModel && !piMode) {
-        handleError('send message', new Error('No model selected'))
-        return false
-      }
-
       // 如果队列头有失败项，用户重新发送时先清掉失败项（内容已恢复到输入框）
       if (routeSessionId && queuedFollowupFailedId) {
         followupQueueStore.remove(routeSessionId, queuedFollowupFailedId)
-      }
-
-      // Pi server up: always send via Pi (create session if needed)
-      if (piMode) {
-        return sendMessageNow({
-          sessionId: routeSessionId,
-          content,
-          attachments,
-          model: {
-            providerID: currentModel?.providerId ?? 'mock',
-            modelID: currentModel?.id ?? 'mock',
-          },
-          options,
-          directory: effectiveDirectory || '',
-          allowCreateSession: true,
-        })
-      }
-
-      const shouldQueueFollowup =
-        !!routeSessionId && (queuedFollowups.length > 0 || (queueFollowupMessages && isSessionBusy))
-
-      if (shouldQueueFollowup) {
-        const queued = followupQueueStore.enqueue({
-          sessionId: routeSessionId,
-          directory: effectiveDirectory || '',
-          text: content,
-          attachments,
-          model: {
-            providerID: currentModel!.providerId,
-            modelID: currentModel!.id,
-            variant: options?.variant,
-          },
-          variant: options?.variant,
-          agent: options?.agent,
-        })
-        messageStore.upsertLocalMessage(
-          buildLocalQueuedMessage({
-            sessionId: queued.sessionId,
-            messageId: queued.id,
-            text: queued.text,
-            attachments: queued.attachments,
-            agent: queued.agent,
-            model: queued.model,
-            createdAt: queued.createdAt,
-          }),
-        )
-        return true
       }
 
       return sendMessageNow({
         sessionId: routeSessionId,
         content,
         attachments,
-        model: {
-          providerID: currentModel!.providerId,
-          modelID: currentModel!.id,
-        },
+        model: currentModel ? { providerID: currentModel.providerId, modelID: currentModel.id } : undefined,
         options,
         directory: effectiveDirectory || '',
         allowCreateSession: true,
@@ -833,12 +551,8 @@ export function useChatSession({
     [
       currentModel,
       routeSessionId,
-      queuedFollowups.length,
       queuedFollowupFailedId,
-      queueFollowupMessages,
-      isSessionBusy,
       effectiveDirectory,
-      buildLocalQueuedMessage,
       sendMessageNow,
     ],
   )
@@ -991,21 +705,15 @@ export function useChatSession({
   const handleAbort = useCallback(async () => {
     if (!routeSessionId) return
     try {
-      if (isPiSession(routeSessionId)) {
-        const { abortSessionCommand } = await import('../pi/sessionApi')
-        const snap = await abortSessionCommand(routeSessionId)
-        if (snap) applySnapshotToUi(snap)
-        messageStore.setStreaming(routeSessionId, false)
-        messageStore.handleSessionIdle(routeSessionId)
-        return
-      }
-      const directory = sessionDirectory || currentDirectory
-      await abortSession(routeSessionId, directory)
+      const { abortSessionCommand } = await import('../pi/sessionApi')
+      const snap = await abortSessionCommand(routeSessionId)
+      if (snap) applySnapshotToUi(snap)
+      messageStore.setStreaming(routeSessionId, false)
       messageStore.handleSessionIdle(routeSessionId)
     } catch (error) {
       handleError('abort session', error)
     }
-  }, [routeSessionId, sessionDirectory, currentDirectory])
+  }, [routeSessionId])
 
   // Command handler (slash commands)
   const handleCommand = useCallback(
@@ -1044,51 +752,21 @@ export function useChatSession({
         }
 
         if (command === 'compact') {
-          if (shouldUsePiChat(sessionId) || isPiSession(sessionId)) {
-            void import('../pi/sessionApi')
-              .then(({ compactSession }) => compactSession(sessionId!))
-              .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
-              .catch(err => handleError('execute command', err))
-            return true
-          }
-
-          if (!currentModel) {
-            handleError('execute command', new Error('No model selected'))
-            return false
-          }
-
-          // Commands should count as sent once they are accepted for execution.
-          // Do not keep the draft alive until the long-running compaction finishes.
-          void summarizeSession(
-            sessionId,
-            { providerID: currentModel.providerId, modelID: currentModel.id },
-            effectiveDirectory,
-          ).catch(err => {
-            handleError('execute command', err)
-          })
-
+          void import('../pi/sessionApi')
+            .then(({ compactSession }) => compactSession(sessionId!))
+            .then(snap => import('../pi/applySnapshot').then(m => m.applySnapshotToUi(snap)))
+            .catch(err => handleError('execute command', err))
           return true
         }
 
-        // Pi skill:name or other pi slash → prompt as text so Pi expands templates
-        if ((shouldUsePiChat(sessionId) || isPiSession(sessionId)) && command.startsWith('skill:')) {
-          void sendMessageNow({
-            sessionId,
-            content: `/${command}${args ? ` ${args}` : ''}`,
-            attachments: [],
-            model: {
-              providerID: currentModel?.providerId ?? 'mock',
-              modelID: currentModel?.id ?? 'mock',
-            },
-            directory: effectiveDirectory || '',
-            allowCreateSession: false,
-          })
-          return true
-        }
-
-        // Keep command submission semantics aligned with normal messages:
-        // once the command is dispatched, clear the draft immediately.
-        void executeCommand(sessionId, command, args, effectiveDirectory).catch(err => {
+        void sendMessageNow({
+          sessionId,
+          content: `/${command}${args ? ` ${args}` : ''}`,
+          attachments: [],
+          model: currentModel ? { providerID: currentModel.providerId, modelID: currentModel.id } : undefined,
+          directory: effectiveDirectory || '',
+          allowCreateSession: false,
+        }).catch(err => {
           handleError('execute command', err)
         })
 
