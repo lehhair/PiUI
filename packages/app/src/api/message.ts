@@ -1,6 +1,6 @@
 // ============================================
 // Message API Functions
-// 基于 @opencode-ai/sdk: /session/{sessionID}/message 相关接口
+// Transitional message facade; Pi prompt paths are handled by useChatSession.
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
@@ -166,7 +166,7 @@ function toFileUrl(path: string): string {
 function buildPromptParams(params: SendMessageParams): PromptParams {
   const { sessionId, text, attachments, model, agent, variant, directory } = params
 
-  const parts: NonNullable<PromptParams['parts']> = []
+  const parts: Array<TextPartInput | FilePartInput | AgentPartInput> = []
 
   // 文本 part
   const textPart: TextPartInput = {

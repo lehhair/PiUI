@@ -1,22 +1,14 @@
 import type {
-  ApiError as SDKApiError,
-  MessageAbortedError as SDKMessageAbortedError,
-  MessageOutputLengthError as SDKMessageOutputLengthError,
-  ProviderAuthError as SDKProviderAuthError,
-  UnknownError as SDKUnknownError,
-} from '@opencode-ai/sdk/v2/client'
+  APIError,
+  MessageAbortedError,
+  MessageOutputLengthError,
+  ProviderAuthError,
+  UnknownError,
+} from '../message'
 
 export interface ErrorInfo {
   name: string
   data: unknown
 }
 
-export type ProviderAuthError = SDKProviderAuthError
-
-export type UnknownError = SDKUnknownError
-
-export type MessageOutputLengthError = SDKMessageOutputLengthError
-
-export type MessageAbortedError = SDKMessageAbortedError
-
-export type APIError = SDKApiError
+export type { ProviderAuthError, UnknownError, MessageOutputLengthError, MessageAbortedError, APIError }

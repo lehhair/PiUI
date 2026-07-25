@@ -1,39 +1,13 @@
-import type {
-  McpLocalConfig as SDKMcpLocalConfig,
-  McpOAuthConfig as SDKMcpOAuthConfig,
-  McpResource as SDKMcpResource,
-  McpRemoteConfig as SDKMcpRemoteConfig,
-  McpStatusResponse as SDKMcpStatusResponse,
-  McpStatus as SDKMcpStatus,
-  McpStatusConnected as SDKMcpStatusConnected,
-  McpStatusDisabled as SDKMcpStatusDisabled,
-  McpStatusFailed as SDKMcpStatusFailed,
-  McpStatusNeedsAuth as SDKMcpStatusNeedsAuth,
-  McpStatusNeedsClientRegistration as SDKMcpStatusNeedsClientRegistration,
-} from '@opencode-ai/sdk/v2/client'
+import type { McpLocalConfig, McpOAuthConfig, McpRemoteConfig } from './config'
 
-export type MCPStatusConnected = SDKMcpStatusConnected
-
-export type MCPStatusDisabled = SDKMcpStatusDisabled
-
-export type MCPStatusFailed = SDKMcpStatusFailed
-
-export type MCPStatusNeedsAuth = SDKMcpStatusNeedsAuth
-
-export type MCPStatusNeedsClientRegistration = SDKMcpStatusNeedsClientRegistration
-
-export type MCPStatus = SDKMcpStatus
-
-export type MCPResource = SDKMcpResource
-
+export interface MCPStatusConnected { status: 'connected'; tools?: number }
+export interface MCPStatusDisabled { status: 'disabled' }
+export interface MCPStatusFailed { status: 'failed'; error: string }
+export interface MCPStatusNeedsAuth { status: 'needs_auth'; url?: string }
+export interface MCPStatusNeedsClientRegistration { status: 'needs_client_registration'; url?: string; error?: string }
+export type MCPStatus = MCPStatusConnected | MCPStatusDisabled | MCPStatusFailed | MCPStatusNeedsAuth | MCPStatusNeedsClientRegistration
+export interface MCPResource { uri: string; name: string; client: string; description?: string; mimeType?: string }
 export type MCPResourceMap = Record<string, MCPResource>
-
-export type MCPStatusResponse = SDKMcpStatusResponse
-
-export type McpLocalConfig = SDKMcpLocalConfig
-
-export type McpOAuthConfig = SDKMcpOAuthConfig
-
-export type McpRemoteConfig = SDKMcpRemoteConfig
-
+export type MCPStatusResponse = Record<string, MCPStatus>
+export type { McpLocalConfig, McpOAuthConfig, McpRemoteConfig }
 export type McpServerConfig = McpLocalConfig | McpRemoteConfig

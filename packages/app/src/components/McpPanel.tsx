@@ -488,10 +488,10 @@ const ServerItem = memo(function ServerItem({ server, isLoading, onConnect, onDi
   // 获取错误信息（如果有）
   const getErrorMessage = (): string | null => {
     if (status.status === 'failed') {
-      return status.error
+      return status.error ?? null
     }
     if (status.status === 'needs_client_registration') {
-      return status.error
+      return status.error ?? null
     }
     return null
   }

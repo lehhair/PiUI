@@ -1,40 +1,37 @@
-import type {
-  File as SDKFile,
-  FileContent as SDKFileContent,
-  FileNode as SDKFileNode,
-  SnapshotFileDiff as SDKSnapshotFileDiff,
-  Symbol as SDKSymbol,
-  FindTextResponse as SDKFindTextResponse,
-} from '@opencode-ai/sdk/v2/client'
-
-export type FileNodeType = SDKFileNode['type']
-
-export type FileNode = SDKFileNode
-
-export type FilePatch = NonNullable<SDKFileContent['patch']>
-
-export type PatchHunk = FilePatch['hunks'][number]
-
-export type FileContent = SDKFileContent
-
-export type FileStatusItem = SDKFile
-
-export type FileDiff = Omit<SDKSnapshotFileDiff, 'file'> & {
+export type FileNodeType = 'file' | 'directory'
+export interface FileNode { name: string; path: string; absolute: string; type: FileNodeType; ignored?: boolean }
+export interface PatchHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }
+export interface FilePatch { hunks: PatchHunk[] }
+export interface FileContent { type: 'text' | 'binary'; content: string; encoding?: string; patch?: FilePatch; mimeType?: string }
+export interface FileStatusItem { path: string; status: string; added?: number; removed?: number }
+export interface FileDiff {
   file: string
   before?: string
   after?: string
+  additions: number
+  deletions: number
+  diff?: string
+  patch?: string
+  status?: string
 }
 
-export function normalizeFileDiffs(diffs: SDKSnapshotFileDiff[] | undefined): FileDiff[] {
-  return (diffs ?? []).filter(
-    (diff): diff is FileDiff => typeof diff.file === 'string' && diff.file.length > 0,
-  )
+export function normalizeFileDiffs(
+  diffs: Array<Partial<FileDiff> & { path?: string }> | undefined,
+): FileDiff[] {
+  return (diffs ?? []).flatMap(diff => {
+    const file = diff.file ?? diff.path
+    return file ? [{ ...diff, file, additions: diff.additions ?? 0, deletions: diff.deletions ?? 0 }] : []
+  })
 }
 
-export type SymbolRange = SDKSymbol['location']['range']
-
-export type SymbolLocation = SDKSymbol['location']
-
-export type Symbol = SDKSymbol
-
-export type TextSearchMatch = SDKFindTextResponse[number]
+export interface SymbolPosition { line: number; character: number }
+export interface SymbolRange { start: SymbolPosition; end: SymbolPosition }
+export interface SymbolLocation { uri?: string; path?: string; range: SymbolRange }
+export interface Symbol { name: string; kind: number; location: SymbolLocation }
+export interface TextSearchMatch {
+  path: { text: string }
+  lines: { text: string }
+  line_number: number
+  absolute_offset: number
+  submatches: Array<{ start: number; end: number; match?: { text: string } }>
+}

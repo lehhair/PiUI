@@ -1,5 +1,2 @@
-import type { AppSkillsResponse } from '@opencode-ai/sdk/v2/client'
-
-export type Skill = AppSkillsResponse[number]
-
-export type SkillList = AppSkillsResponse
+export interface Skill { name: string; description?: string; path?: string; location?: string; content?: string }
+export type SkillList = Skill[]

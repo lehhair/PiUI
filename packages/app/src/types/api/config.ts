@@ -1,41 +1,59 @@
-import type {
-  AgentConfig as SDKAgentConfig,
-  Config as SDKConfig,
-  LayoutConfig as SDKLayoutConfig,
-  LogLevel as SDKLogLevel,
-  McpLocalConfig as SDKMcpLocalConfig,
-  McpOAuthConfig as SDKMcpOAuthConfig,
-  McpRemoteConfig as SDKMcpRemoteConfig,
-  PermissionActionConfig as SDKPermissionActionConfig,
-  PermissionConfig as SDKPermissionConfig,
-  PermissionObjectConfig as SDKPermissionObjectConfig,
-  PermissionRuleConfig as SDKPermissionRuleConfig,
-  ProviderConfig as SDKProviderConfig,
-  ServerConfig as SDKServerConfig,
-} from '@opencode-ai/sdk/v2/client'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-export type LogLevel = SDKLogLevel
+export interface ServerConfig {
+  hostname?: string
+  port?: number
+}
 
-export type ServerConfig = SDKServerConfig
+export type PermissionActionConfig = 'allow' | 'deny' | 'ask'
+export type PermissionObjectConfig = PermissionActionConfig | Record<string, PermissionActionConfig>
+export interface PermissionRuleConfig {
+  pattern: string
+  action: PermissionActionConfig
+}
+export type PermissionConfig = Record<string, PermissionObjectConfig | PermissionRuleConfig[]>
 
-export type PermissionActionConfig = SDKPermissionActionConfig
+export interface AgentConfig {
+  description?: string
+  model?: string
+  prompt?: string
+  tools?: Record<string, boolean>
+}
 
-export type PermissionObjectConfig = SDKPermissionObjectConfig
+export interface ProviderConfig {
+  options?: Record<string, unknown>
+  models?: Record<string, Record<string, unknown>>
+}
 
-export type PermissionRuleConfig = SDKPermissionRuleConfig
+export interface McpLocalConfig {
+  type: 'local'
+  command: string[]
+  env?: Record<string, string>
+}
 
-export type PermissionConfig = SDKPermissionConfig
+export interface McpOAuthConfig {
+  clientId?: string
+  scopes?: string[]
+}
 
-export type AgentConfig = SDKAgentConfig
+export interface McpRemoteConfig {
+  type: 'remote'
+  url: string
+  headers?: Record<string, string>
+  oauth?: McpOAuthConfig
+}
 
-export type ProviderConfig = SDKProviderConfig
+export interface LayoutConfig {
+  sidebar?: { width?: number }
+  bottomPanel?: { height?: number }
+}
 
-export type McpLocalConfig = SDKMcpLocalConfig
-
-export type McpOAuthConfig = SDKMcpOAuthConfig
-
-export type McpRemoteConfig = SDKMcpRemoteConfig
-
-export type LayoutConfig = SDKLayoutConfig
-
-export type Config = SDKConfig
+export interface Config {
+  server?: ServerConfig
+  logLevel?: LogLevel
+  permission?: PermissionConfig
+  agent?: Record<string, AgentConfig>
+  provider?: Record<string, ProviderConfig>
+  mcp?: Record<string, McpLocalConfig | McpRemoteConfig>
+  layout?: LayoutConfig
+}

@@ -1,5 +1,2 @@
-import type { VcsDiffData as SDKVcsDiffData, VcsInfo as SDKVcsInfo } from '@opencode-ai/sdk/v2/client'
-
-export type VcsInfo = SDKVcsInfo
-
-export type VcsDiffMode = SDKVcsDiffData['query']['mode']
+export interface VcsInfo { branch?: string; default_branch?: string; root?: string; upstream?: string; ahead?: number; behind?: number }
+export type VcsDiffMode = 'staged' | 'unstaged' | 'all' | 'git' | 'branch'

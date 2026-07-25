@@ -54,7 +54,7 @@ export const InlinePermission = memo(function InlinePermission({
 
   const isFileEdit = request.permission === 'edit' || request.permission === 'write'
   const hasPatterns = request.patterns && request.patterns.length > 0
-  const patternsText = hasPatterns ? request.patterns.map(p => p.replace(/\\n/g, '\n')).join('\n\n') : ''
+  const patternsText = hasPatterns ? (request.patterns ?? []).map(p => p.replace(/\\n/g, '\n')).join('\n\n') : ''
 
   const handleAlways = () => {
     if (autoApproveStore.enabled) {

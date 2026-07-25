@@ -1,7 +1,12 @@
-import type { Agent as SDKAgent } from '@opencode-ai/sdk/v2/client'
-
-export type AgentMode = SDKAgent['mode']
-
-export type AgentPermission = SDKAgent['permission'][number]
-
-export type Agent = SDKAgent
+export type AgentMode = 'primary' | 'subagent' | 'all'
+export interface AgentPermission { permission: string; pattern?: string; action: 'allow' | 'deny' | 'ask' }
+export interface Agent {
+  name: string
+  description?: string
+  mode?: AgentMode
+  model?: { providerID: string; modelID: string }
+  permission?: AgentPermission[]
+  hidden?: boolean
+  color?: string
+  options?: Record<string, unknown>
+}

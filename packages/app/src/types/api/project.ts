@@ -1,15 +1,13 @@
-import type {
-  Path as SDKPath,
-  Project as SDKProject,
-  ProjectUpdateData as SDKProjectUpdateData,
-} from '@opencode-ai/sdk/v2/client'
-
-export type Project = SDKProject
-
-export type ProjectIcon = NonNullable<Project['icon']>
-
-export type ProjectCommands = NonNullable<Project['commands']>
-
-export type ProjectUpdateParams = NonNullable<SDKProjectUpdateData['body']>
-
-export type PathResponse = SDKPath
+export interface ProjectIcon { url?: string; color?: string }
+export type ProjectCommands = Record<string, string>
+export interface Project {
+  id: string
+  worktree: string
+  name?: string
+  icon?: ProjectIcon
+  commands?: ProjectCommands
+  time?: { created?: number; updated?: number }
+  vcs?: 'git' | string
+}
+export interface ProjectUpdateParams { name?: string; icon?: ProjectIcon; commands?: ProjectCommands }
+export interface PathResponse { home: string; state: string; config: string; worktree: string; directory: string }

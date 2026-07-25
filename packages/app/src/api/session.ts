@@ -1,6 +1,6 @@
 // ============================================
 // Session API Functions
-// 基于 @opencode-ai/sdk: /session 相关接口
+// Transitional session facade; Pi paths are handled before unsupported calls.
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'
@@ -256,6 +256,8 @@ export type ApiTodo = TodoItem
  */
 export async function getSessionTodos(sessionId: string, directory?: string): Promise<ApiTodo[]> {
   const sdk = getSDKClient()
-  const todos = unwrap(await sdk.session.todo({ sessionID: sessionId, directory: formatPathForApi(directory) }))
+  const todos = unwrap<Array<{ content: string; status: string; priority?: string }>>(
+    await sdk.session.todo({ sessionID: sessionId, directory: formatPathForApi(directory) }),
+  )
   return normalizeTodoItems(todos)
 }

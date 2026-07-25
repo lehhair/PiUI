@@ -197,7 +197,17 @@ async function highlight(request: Extract<WorkerRequest, { type: 'highlight' }>)
     const previous = streams.get(request.key)
     const reset = !previous || previous.language !== language || previous.theme !== request.theme || !request.text.startsWith(previous.source)
     const stream = reset
-      ? { language, theme: request.theme, source: '', tokenizer: new ShikiStreamTokenizer({ highlighter: instance, lang: language, theme: request.theme }) }
+      ? {
+          language,
+          theme: request.theme,
+          source: '',
+          tokenizer: new ShikiStreamTokenizer({
+            // shiki-stream currently bundles a second @shikijs/types instance.
+            highlighter: instance as ConstructorParameters<typeof ShikiStreamTokenizer>[0]['highlighter'],
+            lang: language,
+            theme: request.theme,
+          }),
+        }
       : previous
     const chunk = request.text.slice(stream.source.length)
     if (chunk) await stream.tokenizer.enqueue(chunk)

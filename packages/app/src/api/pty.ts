@@ -37,7 +37,7 @@ function normalizePty(pty: LegacyPty): Pty {
  */
 export async function listPtySessions(directory?: string): Promise<Pty[]> {
   const sdk = getSDKClient()
-  return unwrap(await sdk.pty.list({ directory: formatPathForApi(directory) })).map(pty =>
+  return unwrap<LegacyPty[]>(await sdk.pty.list({ directory: formatPathForApi(directory) })).map(pty =>
     normalizePty(pty as LegacyPty),
   )
 }
@@ -47,7 +47,7 @@ export async function listPtySessions(directory?: string): Promise<Pty[]> {
  */
 export async function listAvailableShells(directory?: string): Promise<ShellInfo[]> {
   const sdk = getSDKClient()
-  return unwrap(await sdk.pty.shells({ directory: formatPathForApi(directory) }))
+  return unwrap<ShellInfo[]>(await sdk.pty.shells({ directory: formatPathForApi(directory) }))
 }
 
 /**

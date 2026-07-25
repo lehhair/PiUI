@@ -1,6 +1,6 @@
 // ============================================
 // API Client for OpenCode Backend
-// 基于 @opencode-ai/sdk: /config, /project, /provider 相关接口
+// Transitional project facade for UI surfaces not yet backed by PiUI protocol.
 // ============================================
 
 import { getSDKClient, unwrap } from './sdk'

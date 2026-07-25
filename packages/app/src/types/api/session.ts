@@ -1,28 +1,35 @@
-import type {
-  Session as SDKSession,
-  SessionCreateData as SDKSessionCreateData,
-  SessionForkData as SDKSessionForkData,
-  SessionListData as SDKSessionListData,
-  SessionStatus as SDKSessionStatus,
-  SessionUpdateData as SDKSessionUpdateData,
-} from '@opencode-ai/sdk/v2/client'
-
-export type SessionStatus = SDKSessionStatus
+export type SessionStatus =
+  | { type: 'idle' }
+  | { type: 'busy' }
+  | { type: 'retry'; attempt: number; message: string; next: number }
 
 export type SessionStatusMap = Record<string, SessionStatus>
 
-export type SessionSummary = NonNullable<SDKSession['summary']>
+export interface SessionSummary { additions: number; deletions: number; files: number }
+export interface SessionShare { url: string }
+export interface SessionRevert { messageID: string; partID?: string; snapshot?: string; diff?: string }
 
-export type SessionShare = NonNullable<SDKSession['share']>
+export interface Session {
+  id: string
+  projectID?: string
+  directory: string
+  parentID?: string
+  title: string
+  version?: string
+  time: { created: number; updated?: number; compacting?: number; archived?: number }
+  summary?: SessionSummary
+  share?: SessionShare
+  revert?: SessionRevert
+}
 
-export type SessionRevert = NonNullable<SDKSession['revert']>
+export interface SessionListParams {
+  directory?: string
+  roots?: boolean
+  limit?: number
+  start?: number
+  search?: string
+}
 
-export type Session = SDKSession
-
-export type SessionListParams = NonNullable<SDKSessionListData['query']>
-
-export type SessionCreateParams = NonNullable<SDKSessionCreateData['query']> & NonNullable<SDKSessionCreateData['body']>
-
-export type SessionUpdateParams = NonNullable<SDKSessionUpdateData['body']>
-
-export type SessionForkParams = NonNullable<SDKSessionForkData['query']> & NonNullable<SDKSessionForkData['body']>
+export interface SessionCreateParams { directory?: string; title?: string; parentID?: string }
+export interface SessionUpdateParams { title?: string; archived?: number | null }
+export interface SessionForkParams { directory?: string; messageID?: string }
