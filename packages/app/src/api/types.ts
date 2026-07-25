@@ -12,24 +12,6 @@ export type {
   SessionRevert as SessionRevertState,
 } from '../types/api/session'
 export type {
-  Message as ApiMessage,
-  UserMessage as ApiUserMessage,
-  AssistantMessage as ApiAssistantMessage,
-  Part as ApiPart,
-  TextPart as ApiTextPart,
-  ReasoningPart as ApiReasoningPart,
-  ToolPart as ApiToolPart,
-  FilePart as ApiFilePart,
-  AgentPart as ApiAgentPart,
-  StepStartPart as ApiStepStartPart,
-  StepFinishPart as ApiStepFinishPart,
-  SnapshotPart as ApiSnapshotPart,
-  PatchPart as ApiPatchPart,
-  RetryPart as ApiRetryPart,
-  CompactionPart as ApiCompactionPart,
-  SubtaskPart as ApiSubtaskPart,
-} from '../types/api/message'
-export type {
   PermissionRequest as ApiPermissionRequest,
   PermissionReply,
   QuestionOption as ApiQuestionOption,

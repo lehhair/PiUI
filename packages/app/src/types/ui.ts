@@ -2,24 +2,6 @@
 // UI Types - UI 层专用类型
 // ============================================
 //
-// 这些类型扩展了 API 类型，添加了 UI 层特有的状态
-//
-
-import type { Message as ApiMessage, Part as ApiPart } from './api'
-
-/**
- * UI 层消息类型
- * 扩展 API 消息，添加 UI 状态
- */
-export interface UIMessage {
-  /** API 消息信息 */
-  info: ApiMessage
-  /** 消息内容部分 */
-  parts: ApiPart[]
-  /** 是否正在流式传输 */
-  isStreaming?: boolean
-}
-
 // ============================================
 // Attachment Types - 从现有组件导出
 // ============================================
