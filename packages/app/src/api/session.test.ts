@@ -1,0 +1,104 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  abortSession,
+  createSession,
+  deleteSession,
+  getSessionDiff,
+  getSessions,
+  getSessionStatus,
+  getSessionTodos,
+  updateSession,
+} from './session'
+
+const mocks = vi.hoisted(() => ({
+  abortSessionCommand: vi.fn(),
+  createPiSession: vi.fn(),
+  deletePiSession: vi.fn(),
+  fetchSnapshot: vi.fn(),
+  listPiSessions: vi.fn(),
+  resolveWorkspaceId: vi.fn(),
+  applySnapshotToUi: vi.fn(),
+}))
+
+vi.mock('../pi/sessionApi', () => ({
+  abortSessionCommand: mocks.abortSessionCommand,
+  createPiSession: mocks.createPiSession,
+  deletePiSession: mocks.deletePiSession,
+  fetchSnapshot: mocks.fetchSnapshot,
+  listPiSessions: mocks.listPiSessions,
+  resolveWorkspaceId: mocks.resolveWorkspaceId,
+}))
+
+vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
+
+function snapshot(id: string, state: 'idle' | 'running' = 'idle') {
+  return {
+    session: {
+      id,
+      workspaceId: 'workspace-1',
+      title: `Session ${id}`,
+      state,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    },
+  } as never
+}
+
+describe('Pi session facade', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.resolveWorkspaceId.mockResolvedValue('workspace-1')
+  })
+
+  it('filters Pi session summaries by workspace and search', async () => {
+    mocks.listPiSessions.mockResolvedValue([
+      {
+        id: 'one',
+        workspaceId: 'workspace-1',
+        title: 'Review changes',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      },
+      {
+        id: 'two',
+        workspaceId: 'workspace-2',
+        title: 'Review elsewhere',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+    ])
+
+    await expect(getSessions({ directory: '/workspace', search: 'review' })).resolves.toEqual([
+      expect.objectContaining({ id: 'one', directory: '/workspace' }),
+    ])
+  })
+
+  it('creates, applies, and maps a Pi session snapshot', async () => {
+    const created = snapshot('created')
+    mocks.createPiSession.mockResolvedValue({ snapshot: created })
+
+    await expect(createSession({ directory: '/workspace', title: 'Test' })).resolves.toEqual(
+      expect.objectContaining({ id: 'created', title: 'Session created' }),
+    )
+    expect(mocks.createPiSession).toHaveBeenCalledWith({ workspaceId: 'workspace-1', title: 'Test' })
+    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(created)
+  })
+
+  it('maps snapshot states and routes delete and abort through Pi', async () => {
+    mocks.listPiSessions.mockResolvedValue([{ id: 'idle' }, { id: 'busy' }])
+    mocks.fetchSnapshot.mockImplementation(async (id: string) => snapshot(id, id === 'idle' ? 'idle' : 'running'))
+    mocks.abortSessionCommand.mockResolvedValue(snapshot('busy'))
+
+    await expect(getSessionStatus()).resolves.toEqual({ idle: { type: 'idle' }, busy: { type: 'busy' } })
+    await expect(deleteSession('idle')).resolves.toBe(true)
+    await expect(abortSession('busy')).resolves.toBe(true)
+    expect(mocks.deletePiSession).toHaveBeenCalledWith('idle')
+    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(snapshot('busy'))
+  })
+
+  it('reports unsupported legacy-only session operations explicitly', async () => {
+    await expect(getSessionDiff('session-1')).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
+    await expect(updateSession('session-1', { title: 'Renamed' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
+    await expect(getSessionTodos('session-1')).rejects.toMatchObject({ code: 'NOT_SUPPORTED' })
+  })
+})

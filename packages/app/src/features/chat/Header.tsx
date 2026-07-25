@@ -45,6 +45,7 @@ interface SessionTitleControlProps {
   setIsEditingTitle: (value: boolean) => void
   handleRename: () => void
   handleStartEdit: () => void
+  canRename: boolean
   onShare?: () => void
   clickToRenameTitle: string
   shareTitle: string
@@ -60,6 +61,7 @@ function SessionTitleControl({
   setIsEditingTitle,
   handleRename,
   handleStartEdit,
+  canRename,
   onShare,
   clickToRenameTitle,
   shareTitle,
@@ -95,9 +97,13 @@ function SessionTitleControl({
           className={inputClass}
         />
       ) : (
+        canRename ? (
           <button type="button" onClick={handleStartEdit} className={buttonClass} title={clickToRenameTitle}>
             {sessionTitle}
           </button>
+        ) : (
+          <span className={buttonClass.replace('cursor-text', 'cursor-default')}>{sessionTitle}</span>
+        )
       )}
 
       {!isEditingTitle && onShare && (
@@ -159,7 +165,7 @@ export function Header({
   }, [isEditingTitle])
 
   const handleStartEdit = () => {
-    if (!sessionId) return
+    if (!sessionId || !capabilities.sessionRename) return
     setEditTitle(sessionTitle)
     setIsEditingTitle(true)
   }
@@ -191,6 +197,7 @@ export function Header({
       setIsEditingTitle={setIsEditingTitle}
       handleRename={handleRename}
       handleStartEdit={handleStartEdit}
+      canRename={capabilities.sessionRename}
       onShare={capabilities.share ? () => setShareDialogOpen(true) : undefined}
       clickToRenameTitle={t('header.clickToRename')}
       shareTitle={t('header.shareSession')}

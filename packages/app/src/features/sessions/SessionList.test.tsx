@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiSession } from '../../api'
 import { pinnedSessionsStore } from '../../store/pinnedSessionsStore'
 import { SessionListItem } from './SessionList'
+import { setPiCapabilities } from '../../pi/capabilities'
 
 const { useSessionActiveEntryMock, useHasUnreadCompletedNotificationMock, markSessionNotificationsReadMock } = vi.hoisted(() => ({
   useSessionActiveEntryMock: vi.fn(),
@@ -46,6 +47,7 @@ describe('SessionListItem', () => {
     useHasUnreadCompletedNotificationMock.mockReturnValue(false)
     markSessionNotificationsReadMock.mockReset()
     pinnedSessionsStore.unpin('session-1')
+    setPiCapabilities({ sessionRename: false })
   })
 
   it('renders the session row as a semantic button and selects it', () => {
@@ -66,6 +68,21 @@ describe('SessionListItem', () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(markSessionNotificationsReadMock).toHaveBeenCalledWith('session-1', 'completed')
+  })
+
+  it('hides rename when the Pi backend does not support session metadata updates', () => {
+    render(
+      <SessionListItem
+        session={session}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        preferTouchUi={false}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /rename/i })).not.toBeInTheDocument()
   })
 
   it('keeps the full session row clickable outside the inner content button', () => {

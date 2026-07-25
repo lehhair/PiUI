@@ -292,7 +292,7 @@ describe('useChatSession handleCommand', () => {
     expect(commandResult).toBe(true)
   })
 
-  it('refreshes pending permissions when session full auto pending sweep is enabled', async () => {
+  it('does not poll permissions when session full auto pending sweep is enabled', async () => {
     getPaneFullAutoModeMock.mockReturnValue('session')
     autoApproveState.approvePendingOnFullAuto = true
     useSessionFamilyMock.mockReturnValue(['session-1', 'child-session'])
@@ -309,9 +309,8 @@ describe('useChatSession handleCommand', () => {
       }),
     )
 
-    await waitFor(() => {
-      expect(refreshPendingRequestsMock).toHaveBeenCalledWith(['session-1', 'child-session'], '/workspace/demo')
-    })
+    await Promise.resolve()
+    expect(refreshPendingRequestsMock).not.toHaveBeenCalled()
   })
 
   it('approves already pending permissions when session full auto pending sweep is enabled', async () => {

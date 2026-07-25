@@ -142,7 +142,7 @@ export const RightPanel = memo(function RightPanel({ directory, sessionId, inlin
 
           {activeTab.type === 'skill' ? (
             <Suspense fallback={<PanelFallback />}>
-              <SkillPanel isResizing={isPanelResizing} />
+              <SkillPanel isResizing={isPanelResizing} sessionId={sessionId} />
             </Suspense>
           ) : null}
 

@@ -1,102 +1,40 @@
-// ============================================
-// Permission & Question API Functions
-// Permission/question are disabled until PiUI protocol support lands.
-// ============================================
+// Permission and question transport is not part of PiUI protocol v1.
 
-import { getSDKClient, unwrap } from './sdk'
-import { formatPathForApi } from '../utils/directoryUtils'
+import { UnsupportedPiCapabilityError } from './sdk'
 import type { ApiPermissionRequest, PermissionReply, ApiQuestionRequest, QuestionAnswer } from './types'
 
-// ============================================
-// Permission API
-// ============================================
-
-/**
- * 获取待处理的权限请求列表
- */
-export async function getPendingPermissions(sessionId?: string, directory?: string): Promise<ApiPermissionRequest[]> {
-  const sdk = getSDKClient()
-  const permissions = unwrap<ApiPermissionRequest[]>(await sdk.permission.list({ directory: formatPathForApi(directory) }))
-  return sessionId ? permissions.filter((p: ApiPermissionRequest) => p.sessionID === sessionId) : permissions
+export async function getPendingPermissions(
+  _sessionId?: string,
+  _directory?: string,
+): Promise<ApiPermissionRequest[]> {
+  return []
 }
 
-/**
- * 回复权限请求
- */
 export async function replyPermission(
-  requestId: string,
-  reply: PermissionReply,
-  message?: string,
-  directory?: string,
-  sessionId?: string,
+  _requestId: string,
+  _reply: PermissionReply,
+  _message?: string,
+  _directory?: string,
+  _sessionId?: string,
 ): Promise<boolean> {
-  const sdk = getSDKClient()
-
-  if (sessionId) {
-    unwrap(
-      await sdk.permission.respond({
-        sessionID: sessionId,
-        permissionID: requestId,
-        directory: formatPathForApi(directory),
-        response: reply,
-      }),
-    )
-    return true
-  }
-
-  unwrap(
-    await sdk.permission.reply({
-      requestID: requestId,
-      directory: formatPathForApi(directory),
-      reply,
-      message,
-    }),
-  )
-  return true
+  throw new UnsupportedPiCapabilityError('permission replies')
 }
 
-// ============================================
-// Question API
-// ============================================
-
-/**
- * 获取待处理的问题请求列表
- */
-export async function getPendingQuestions(sessionId?: string, directory?: string): Promise<ApiQuestionRequest[]> {
-  const sdk = getSDKClient()
-  const questions = unwrap<ApiQuestionRequest[]>(await sdk.question.list({ directory: formatPathForApi(directory) }))
-  return sessionId ? questions.filter((q: ApiQuestionRequest) => q.sessionID === sessionId) : questions
+export async function getPendingQuestions(
+  _sessionId?: string,
+  _directory?: string,
+): Promise<ApiQuestionRequest[]> {
+  return []
 }
 
-/**
- * 回复问题请求
- */
 export async function replyQuestion(
-  requestId: string,
-  answers: QuestionAnswer[],
-  directory?: string,
+  _requestId: string,
+  _answers: QuestionAnswer[],
+  _directory?: string,
 ): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(
-    await sdk.question.reply({
-      requestID: requestId,
-      directory: formatPathForApi(directory),
-      answers,
-    }),
-  )
-  return true
+  throw new UnsupportedPiCapabilityError('question replies')
 }
 
-/**
- * 拒绝问题请求
- */
-export async function rejectQuestion(requestId: string, directory?: string): Promise<boolean> {
-  const sdk = getSDKClient()
-  unwrap(
-    await sdk.question.reject({
-      requestID: requestId,
-      directory: formatPathForApi(directory),
-    }),
-  )
-  return true
+export async function rejectQuestion(_requestId: string, _directory?: string): Promise<boolean> {
+  throw new UnsupportedPiCapabilityError('question replies')
 }

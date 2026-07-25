@@ -137,7 +137,19 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           phase: 1,
           driver: sessions.getDriver(),
         }
-        return sendJson(res, 200, { ...body, capabilities: { pty: false, share: false, fork: false, undo: false, fileWrite: true, gitDiff: true } })
+        return sendJson(res, 200, {
+          ...body,
+          capabilities: {
+            pty: false,
+            share: false,
+            fork: false,
+            undo: false,
+            fileWrite: true,
+            gitDiff: true,
+            sessionRename: false,
+            sessionArchive: false,
+          },
+        })
       }
 
       // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.

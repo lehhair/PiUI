@@ -554,7 +554,7 @@ function App() {
         input?.focus()
       },
       newSession: () => focusedController?.newSession(),
-      archiveSession: () => focusedController?.archiveSession(),
+      archiveSession: capabilities.sessionArchive ? () => focusedController?.archiveSession() : undefined,
       previousSession: () => focusedController?.previousSession(),
       nextSession: () => focusedController?.nextSession(),
       toggleTerminal: () => {
@@ -611,6 +611,7 @@ function App() {
       handleToggleRightPanel,
       handleNewTerminal,
       capabilities.pty,
+      capabilities.sessionArchive,
       paneLayout.focusedPaneId,
       paneLayout.isSplit,
       splitPaneEnabled,
@@ -685,14 +686,14 @@ function App() {
         shortcut: getShortcut('newSession'),
         action: () => focusedController?.newSession(),
       },
-      {
+      ...(capabilities.sessionArchive ? [{
         id: 'archiveSession',
         label: t('commands:archiveSession'),
         description: t('commands:archiveSessionDesc'),
         category: t('commands:categories.session'),
         shortcut: getShortcut('archiveSession'),
         action: () => focusedController?.archiveSession(),
-      },
+      }] : []),
       {
         id: 'previousSession',
         label: t('commands:previousSession'),

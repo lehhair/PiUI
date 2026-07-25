@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getSessionChildren, updateSession, deleteSession as apiDeleteSession, type ApiSession } from '../../../api'
+import { updateSession, deleteSession as apiDeleteSession, type ApiSession } from '../../../api'
 import { SpinnerIcon } from '../../../components/Icons'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
@@ -52,23 +52,11 @@ export function SessionChildrenSlot({
       return () => cancelAnimationFrame(frameId)
     }
 
-    let cancelled = false
-    const loadingFrameId = requestAnimationFrame(() => {
-      if (!cancelled) setLoading(true)
+    const frameId = requestAnimationFrame(() => {
+      setFetched([])
+      setLoading(false)
     })
-
-    getSessionChildren(parentSession.id, parentSession.directory)
-      .then(data => {
-        if (!cancelled) setFetched(data)
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-      cancelAnimationFrame(loadingFrameId)
-    }
+    return () => cancelAnimationFrame(frameId)
   }, [fetchAll, parentSession.id, parentSession.directory])
 
   const handleRename = useCallback(async (childId: string, newTitle: string) => {
