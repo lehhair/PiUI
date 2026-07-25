@@ -5,9 +5,9 @@ import { trackPiSession } from "./piSessionIndex"
 import { snapshotToApiMessages } from "./timelineToMessages"
 
 /** Push Pi snapshot into legacy messageStore so ChatArea can render. */
-export function applySnapshotToUi(snapshot: SessionSnapshotV1) {
+export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activate?: boolean }) {
   trackPiSession(snapshot.session.id)
-  sessionProjectionStore.replace(snapshot)
+  if (!sessionProjectionStore.replace(snapshot, options)) return snapshot.session.id
   const apiMessages = snapshotToApiMessages(snapshot)
   messageStore.setMessages(snapshot.session.id, apiMessages, {
     title: snapshot.session.title,

@@ -143,9 +143,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const hasLoadedBaseline = existingState?.loadState === 'loaded' && !existingState?.isStale
 
       // Pi sessions: load snapshot from piui-server (never OpenCode)
-      if (isTrackedPiSession(sid) || sessionProjectionStore.getSnapshot()?.session.id === sid) {
-        const piSnap = sessionProjectionStore.getSnapshot()
-        if (piSnap?.session.id === sid && hasExistingMessages && !force) {
+      if (isTrackedPiSession(sid) || sessionProjectionStore.getSnapshot(sid)) {
+        sessionProjectionStore.activate(sid)
+        const piSnap = sessionProjectionStore.getSnapshot(sid)
+        if (piSnap && hasExistingMessages && !force) {
           messageStore.updateSessionMetadata(sid, {
             loadState: 'loaded',
             title: piSnap.session.title ?? existingState?.title,

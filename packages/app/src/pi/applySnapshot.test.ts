@@ -57,4 +57,15 @@ describe("applySnapshotToUi", () => {
       text: "pong",
     })
   })
+
+  it("updates a background session without changing the active session", () => {
+    applySnapshotToUi(snap)
+    const background = {
+      ...snap,
+      session: { ...snap.session, id: "s-background", driverSessionId: "s-background" },
+    }
+    applySnapshotToUi(background, { activate: false })
+    expect(sessionProjectionStore.getActiveSessionId()).toBe("s-apply")
+    expect(sessionProjectionStore.getSnapshot("s-background")?.session.id).toBe("s-background")
+  })
 })

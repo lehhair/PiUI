@@ -206,6 +206,7 @@ export class SessionRegistry {
       await session.real.abort()
       session.projection = session.real.getProjection()
     }
+    session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
   }
@@ -215,6 +216,7 @@ export class SessionRegistry {
     if (session.real) {
       await session.real.setModel(provider, modelId)
     }
+    session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
   }
@@ -222,8 +224,9 @@ export class SessionRegistry {
   async setThinkingLevel(sessionId: string, level: string): Promise<AppSession> {
     const session = await this.attach(sessionId)
     if (session.real) {
-      session.real.setThinkingLevel(level)
+      await session.real.setThinkingLevel(level)
     }
+    session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
   }
@@ -234,6 +237,7 @@ export class SessionRegistry {
       await session.real.compact(instructions)
       session.projection = session.real.getProjection()
     }
+    session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
   }
@@ -281,11 +285,15 @@ export class SessionRegistry {
         if (this.attaching.get(sessionId) === pending) this.attaching.delete(sessionId)
       })
     }
-    session.real = await pending
-    session.projection = session.real.getProjection()
-    session.driverSessionId = session.real.getSessionId()
-    session.sessionFile = session.real.getSessionFile() ?? session.sessionFile
-    session.title = session.real.getSessionName() ?? session.title
+    const runtime = await pending
+    if (!session.real) {
+      session.real = runtime
+      session.projection = runtime.getProjection()
+      session.driverSessionId = runtime.getSessionId()
+      session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
+      session.title = runtime.getSessionName() ?? session.title
+      session.sequence += 1
+    }
     return session
   }
 

@@ -1,12 +1,15 @@
-import type { EventEnvelopeV1 } from "@piui/protocol"
+import type { EventCursorV1, EventEnvelopeV1 } from "@piui/protocol"
 import { randomUUID } from "node:crypto"
 
 type Listener = (event: EventEnvelopeV1) => void
 
 export class EventHub {
   private readonly listeners = new Set<Listener>()
+  private readonly history: EventEnvelopeV1[] = []
   private epoch = randomUUID()
   private sequence = 0
+
+  constructor(private readonly historyLimit = 1000) {}
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener)
@@ -38,12 +41,28 @@ export class EventHub {
         /* ignore subscriber errors */
       }
     }
+    this.history.push(event)
+    if (this.history.length > this.historyLimit) this.history.splice(0, this.history.length - this.historyLimit)
     return event
+  }
+
+  getCursor(): EventCursorV1 {
+    return { epoch: this.epoch, sequence: this.sequence }
+  }
+
+  replaySince(cursor?: EventCursorV1): { events: EventEnvelopeV1[]; resyncRequired: boolean } {
+    if (!cursor || cursor.epoch !== this.epoch || cursor.sequence > this.sequence) {
+      return { events: [], resyncRequired: true }
+    }
+    const oldest = this.history[0]?.sequence ?? this.sequence + 1
+    if (cursor.sequence < oldest - 1) return { events: [], resyncRequired: true }
+    return { events: this.history.filter(event => event.sequence > cursor.sequence), resyncRequired: false }
   }
 
   resetEpoch() {
     this.epoch = randomUUID()
     this.sequence = 0
+    this.history.length = 0
   }
 }
 

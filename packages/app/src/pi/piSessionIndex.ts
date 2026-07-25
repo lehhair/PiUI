@@ -25,6 +25,12 @@ export function listTrackedPiSessions(): string[] {
   return [...ids]
 }
 
+export function clearPiSessionIndex(): void {
+  if (ids.size === 0) return
+  ids.clear()
+  emit()
+}
+
 export function subscribePiSessionIndex(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)

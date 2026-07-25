@@ -40,7 +40,7 @@ async function fetchCommands(directory?: string): Promise<Command[]> {
     const { isPiServerUp, listSessionCommands } = await import('../pi/sessionApi')
     const { sessionProjectionStore } = await import('../pi/sessionProjectionStore')
     if (await isPiServerUp()) {
-      const sid = sessionProjectionStore.getSnapshot()?.session.id
+      const sid = sessionProjectionStore.getActiveSessionId()
       if (sid) {
         const { commands } = await listSessionCommands(sid)
         const fromPi: Command[] = commands.map(c => ({
