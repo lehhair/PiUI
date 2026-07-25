@@ -20,7 +20,7 @@ import { updateSession } from '../../api'
 import { useDirectory } from '../../contexts/useDirectory'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport } from './chatViewport'
-import type { ModelInfo } from '../../api'
+import type { ModelInfo } from '../../hooks/useModels'
 
 interface HeaderProps {
   models: ModelInfo[]

@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, us
 import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, SearchIcon, ThinkingIcon, EyeIcon, CheckIcon, PinIcon } from '../../components/Icons'
 import { DropdownMenu } from '../../components/ui'
-import type { ModelInfo } from '../../api'
+import type { ModelInfo } from '../../hooks/useModels'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import {
   getModelKey,

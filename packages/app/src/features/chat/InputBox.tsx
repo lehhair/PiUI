@@ -31,7 +31,7 @@ import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
 import { useChatViewport } from './chatViewport'
 import type { ApiAgent } from '../../api/client'
-import type { ModelInfo, FileCapabilities } from '../../api'
+import type { ModelInfo, FileCapabilities } from '../../hooks/useModels'
 import type { Command } from '../../api/command'
 import {
   getDroppedPathsInfo,

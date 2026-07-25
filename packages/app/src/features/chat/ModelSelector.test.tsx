@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ModelSelector } from './ModelSelector'
-import type { ModelInfo } from '../../api'
+import type { ModelInfo } from '../../hooks/useModels'
 
 vi.mock('../../components/ui', () => ({
   DropdownMenu: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) =>

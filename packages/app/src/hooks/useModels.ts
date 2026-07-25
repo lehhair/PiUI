@@ -18,6 +18,13 @@ export interface ModelInfo {
   variants: string[]
 }
 
+export interface FileCapabilities {
+  image: boolean
+  pdf: boolean
+  audio: boolean
+  video: boolean
+}
+
 // ============================================
 // Global singleton so every ChatPane shares one models array.
 // Prevents duplicate API requests and the race condition where a
