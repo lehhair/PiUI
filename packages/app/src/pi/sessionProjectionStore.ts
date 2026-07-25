@@ -7,24 +7,49 @@ import type { SessionSnapshotV1, TimelineItemV1 } from "@piui/protocol"
 type Listener = () => void
 
 class SessionProjectionStore {
-  private snapshot: SessionSnapshotV1 | null = null
+  private snapshots = new Map<string, SessionSnapshotV1>()
+  private activeSessionId: string | null = null
   private listeners = new Set<Listener>()
 
-  getSnapshot(): SessionSnapshotV1 | null {
-    return this.snapshot
+  getSnapshot(sessionId = this.activeSessionId): SessionSnapshotV1 | null {
+    return sessionId ? this.snapshots.get(sessionId) ?? null : null
   }
 
-  getTimeline(): TimelineItemV1[] {
-    return this.snapshot?.timeline ?? []
+  getTimeline(sessionId = this.activeSessionId): TimelineItemV1[] {
+    return this.getSnapshot(sessionId)?.timeline ?? []
   }
 
-  replace(snapshot: SessionSnapshotV1) {
-    this.snapshot = snapshot
+  getSessionIds(): string[] {
+    return [...this.snapshots.keys()]
+  }
+
+  getActiveSessionId(): string | null {
+    return this.activeSessionId
+  }
+
+  replace(snapshot: SessionSnapshotV1, options?: { activate?: boolean }): boolean {
+    const existing = this.snapshots.get(snapshot.session.id)
+    if (existing?.epoch === snapshot.epoch && existing.sequence >= snapshot.sequence) return false
+    this.snapshots.set(snapshot.session.id, snapshot)
+    if (options?.activate !== false) this.activeSessionId = snapshot.session.id
+    for (const l of this.listeners) l()
+    return true
+  }
+
+  activate(sessionId: string): void {
+    if (this.activeSessionId === sessionId) return
+    this.activeSessionId = sessionId
     for (const l of this.listeners) l()
   }
 
-  clear() {
-    this.snapshot = null
+  clear(sessionId?: string) {
+    if (sessionId) {
+      this.snapshots.delete(sessionId)
+      if (this.activeSessionId === sessionId) this.activeSessionId = null
+    } else {
+      this.snapshots.clear()
+      this.activeSessionId = null
+    }
     for (const l of this.listeners) l()
   }
 

@@ -8,6 +8,7 @@ import type { PiSessionSummary } from "./toApiSession"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
 import { parsePiWorkspaceId } from "./workspaceRef"
+import { sessionProjectionStore } from "./sessionProjectionStore"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 const rawFetch = globalThis.fetch.bind(globalThis)
@@ -117,6 +118,7 @@ export async function deletePiSession(sessionId: string): Promise<void> {
   })
   if (!res.ok) throw new Error(`deletePiSession ${res.status}`)
   untrackPiSession(sessionId)
+  sessionProjectionStore.clear(sessionId)
 }
 
 export async function createWorkspace(rootPath: string, displayName?: string) {

@@ -132,6 +132,26 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
+  it("increments snapshot sequence for runtime state changes", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "sequence" })
+      const sessionId = created.data.session.id as string
+      const before = created.data.snapshot.sequence as number
+      const changed = await json(
+        port,
+        "POST",
+        `/api/v1/sessions/${sessionId}/commands/set-thinking-level`,
+        { level: "high" },
+      )
+      assert.equal(changed.status, 200)
+      assert.equal(changed.data.snapshot.sequence, before + 1)
+    } finally {
+      await close()
+    }
+  })
+
   it("reuses a prompt commandId without executing the turn twice", async () => {
     const server = createAppServer()
     const { port, close } = await listen(server)

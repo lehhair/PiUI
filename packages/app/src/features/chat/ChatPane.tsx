@@ -166,7 +166,7 @@ export const ChatPane = memo(function ChatPane({
   // Pi thinking levels surface as "variants" when model has none
   const piRuntime = useSyncExternalStore(
     cb => sessionProjectionStore.subscribe(cb),
-    () => sessionProjectionStore.getSnapshot()?.runtime ?? null,
+    () => sessionProjectionStore.getSnapshot(sessionId)?.runtime ?? null,
   )
   const visibleModels = useMemo(() => {
     const base = models.filter(model => !hiddenModelKeys.includes(getModelKey(model)))

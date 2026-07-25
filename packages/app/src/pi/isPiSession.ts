@@ -8,7 +8,7 @@ export { isPiServerReachable, setPiServerReachable }
 export function isPiSession(sessionId: string | null | undefined): boolean {
   if (!sessionId) return false
   if (isTrackedPiSession(sessionId)) return true
-  return sessionProjectionStore.getSnapshot()?.session.id === sessionId
+  return sessionProjectionStore.getSnapshot(sessionId) !== null
 }
 
 /** Prefer Pi chat path whenever server is up (even before a session exists). */

@@ -3,6 +3,7 @@ import { after, describe, it } from "node:test"
 import { createAppServer } from "./http.ts"
 import { attachEventWebSocket } from "./ws.ts"
 import { WebSocket } from "ws"
+import { EventHub } from "./event-hub.ts"
 
 async function listen(server: ReturnType<typeof createAppServer>) {
   await new Promise<void>((resolve, reject) => {
@@ -62,6 +63,40 @@ describe("event websocket", () => {
       assert.ok(events.includes("session.updated"))
     } finally {
       ws?.close()
+      await close()
+    }
+  })
+
+  it("replays events after a retained cursor", async () => {
+    const eventHub = new EventHub(10)
+    eventHub.publish({ type: "before-cursor", payload: 1 })
+    const cursor = eventHub.getCursor()
+    eventHub.publish({ type: "replay-two", payload: 2 })
+    eventHub.publish({ type: "replay-three", payload: 3 })
+    const server = createAppServer({ eventHub })
+    attachEventWebSocket(server)
+    const { port, close } = await listen(server)
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${port}/api/v1/events?cursorEpoch=${encodeURIComponent(cursor.epoch)}&cursorSequence=${cursor.sequence}`,
+    )
+    try {
+      const replayed = await new Promise<string[]>((resolve, reject) => {
+        const types: string[] = []
+        const timer = setTimeout(() => reject(new Error(`replay timeout: ${types.join(",")}`)), 2000)
+        ws.on("message", data => {
+          const msg = JSON.parse(String(data)) as { channel?: string; event?: { type: string } }
+          if (msg.channel !== "event" || !msg.event) return
+          types.push(msg.event.type)
+          if (types.length === 2) {
+            clearTimeout(timer)
+            resolve(types)
+          }
+        })
+        ws.on("error", reject)
+      })
+      assert.deepEqual(replayed, ["replay-two", "replay-three"])
+    } finally {
+      ws.close()
       await close()
     }
   })

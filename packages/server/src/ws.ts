@@ -24,14 +24,28 @@ export function attachEventWebSocket(server: HttpServer) {
     })
   })
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1")
+    const cursorEpoch = url.searchParams.get("cursorEpoch")
+    const cursorSequence = Number(url.searchParams.get("cursorSequence"))
+    const replay = eventHub.replaySince(cursorEpoch && Number.isSafeInteger(cursorSequence) && cursorSequence >= 0
+      ? { epoch: cursorEpoch, sequence: cursorSequence }
+      : undefined)
+    const cursor = eventHub.getCursor()
     ws.send(
       JSON.stringify({
         type: "hello",
         protocolVersion: 1,
         service: "piui-server",
+        cursor,
       }),
     )
+
+    if (replay.resyncRequired) {
+      ws.send(JSON.stringify({ channel: "control", type: "resync_required", cursor }))
+    } else {
+      for (const event of replay.events) ws.send(JSON.stringify({ channel: "event", event }))
+    }
 
     const unsub = eventHub.subscribe((event: EventEnvelopeV1) => {
       if (ws.readyState === WebSocket.OPEN) {
