@@ -1,12 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
-import {
-  getSessions,
-  createSession as apiCreateSession,
-  deleteSession as apiDeleteSession,
-  subscribeToEvents,
-  type ApiSession,
-  type SessionListParams,
-} from '../api'
+import type { ApiSession, SessionListParams } from '../api'
 import {
   createPiSession,
   createWorkspace,
@@ -17,11 +10,9 @@ import {
 import { toApiSession, snapshotToApiSession } from '../pi/toApiSession'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { isTrackedPiSession } from '../pi/piSessionIndex'
-import { todoStore } from '../store/todoStore'
-import { serverStore } from '../store/serverStore'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { useDirectory } from './useDirectory'
-import { sessionErrorHandler, normalizeToForwardSlash, isSameDirectory, autoDetectPathStyle } from '../utils'
+import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
 
@@ -36,35 +27,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const requestIdRef = useRef(0)
   const searchTimerRef = useRef<number | null>(null)
-  const currentDirectoryRef = useRef(currentDirectory)
-  const searchRef = useRef(search)
   const isLoadingMoreRef = useRef(false) // 防止并发 loadMore
-  const isFetchingRef = useRef(false) // 防止 onReconnected 密集触发时重复请求
-  const queuedReconnectRefreshRef = useRef(false)
   const retryTimerRef = useRef<number | null>(null)
   const fetchSessionsRef = useRef<
     (params?: SessionListParams & { append?: boolean; retryAttempt?: number }) => Promise<void>
   >(() => Promise.resolve())
   const currentLimitRef = useRef(30) // 当前 limit，loadMore 时递增
 
-  // 保持 ref 同步
-  useEffect(() => {
-    currentDirectoryRef.current = currentDirectory
-  }, [currentDirectory])
-
-  useEffect(() => {
-    searchRef.current = search
-  }, [search])
-
-  // 核心获取逻辑
-  // 注意：directory 传给 getSessions 时使用正斜杠格式
-  // http 层的 fetchWithBothSlashesAndMerge 会处理两种斜杠格式的兼容
+  // PiUI session list always comes from the PiUI server.
   const fetchSessions = useCallback(
     async (params: SessionListParams & { append?: boolean; retryAttempt?: number } = {}) => {
       const { append = false, retryAttempt = 0, ...queryParams } = params
       const requestId = ++requestIdRef.current
-      isFetchingRef.current = true
-
       if (append) {
         setIsLoadingMore(true)
       } else {
@@ -72,14 +46,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        // Pi server first (MVP). OpenCode list only if Pi is down.
+        // PiUI never falls back to the legacy SDK when its server is unavailable.
         if (await isPiServerUp()) {
           let list = await listPiSessions()
           if (search) {
             const q = search.toLowerCase()
             list = list.filter(s => (s.title || '').toLowerCase().includes(q))
           }
-          const data = list.map(s => toApiSession(s, 'piui'))
+          const data = list.map(s => toApiSession(s))
           if (requestId !== requestIdRef.current) return
           if (append) {
             setSessions(prev => {
@@ -93,35 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // 使用正斜杠格式传给 API（http 层会处理兼容）
-        const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
-
-        const data = await getSessions({
-          roots: true,
-          limit: currentLimitRef.current,
-          directory: targetDir,
-          search: search || undefined,
-          ...queryParams,
-        })
-
-        if (requestId !== requestIdRef.current) return
-
-        // 自动检测路径风格（从后端返回的 directory 字段）
-        if (data.length > 0 && data[0].directory) {
-          autoDetectPathStyle(data[0].directory)
-        }
-
-        if (append) {
-          // 去重：过滤掉已存在的 session
-          setSessions(prev => {
-            const existingIds = new Set(prev.map(s => s.id))
-            const newSessions = data.filter(s => !existingIds.has(s.id))
-            return [...prev, ...newSessions]
-          })
-        } else {
-          setSessions(data)
-        }
-        setHasMore(data.length >= currentLimitRef.current)
+        throw new Error('PiUI server unavailable')
       } catch (e) {
         if (requestId === requestIdRef.current && !append) {
           if (retryAttempt < 3) {
@@ -138,26 +84,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionErrorHandler('fetch sessions', e)
       } finally {
         if (requestId === requestIdRef.current) {
-          isFetchingRef.current = false
           setIsLoading(false)
           setIsLoadingMore(false)
-          if (queuedReconnectRefreshRef.current) {
-            queuedReconnectRefreshRef.current = false
-            setSessions([])
-            void fetchSessionsRef.current({ search: searchRef.current || undefined })
-          }
         }
       }
     },
     [currentDirectory, search],
   )
 
-  // 保持 fetchSessions ref 同步（用于 SSE onReconnected 回调）
+  // Kept in a ref for Pi session-change notifications.
   fetchSessionsRef.current = fetchSessions
-
-  const matchesCurrentDirectory = useCallback((session: ApiSession) => {
-    return !currentDirectoryRef.current || isSameDirectory(currentDirectoryRef.current, session.directory)
-  }, [])
 
   // 监听 directory 和 search 变化
   useEffect(() => {
@@ -179,84 +115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchSessions, search, currentDirectory])
 
-  // 订阅 SSE 事件，实时更新 session 列表
-  useEffect(() => {
-    const unsubscribe = subscribeToEvents({
-      onSessionCreated: session => {
-        // 忽略子 session（有 parentID 的是子 agent 创建的）
-        if (session.parentID) return
-
-        if (!matchesCurrentDirectory(session)) return
-
-        // 搜索态下交给服务端重新给出结果，避免本地过滤和服务端逻辑不一致
-        if (searchRef.current) {
-          fetchSessionsRef.current()
-          return
-        }
-
-        setSessions(prev => {
-          if (prev.some(s => s.id === session.id)) return prev
-          return [session, ...prev]
-        })
-      },
-      onSessionUpdated: session => {
-        if (session.parentID) return
-
-        if (searchRef.current) {
-          if (matchesCurrentDirectory(session)) {
-            fetchSessionsRef.current()
-          } else {
-            setSessions(prev => prev.filter(s => s.id !== session.id))
-          }
-          return
-        }
-
-        setSessions(prev => {
-          const index = prev.findIndex(s => s.id === session.id)
-
-          if (!matchesCurrentDirectory(session)) {
-            return index === -1 ? prev : prev.filter(s => s.id !== session.id)
-          }
-
-          if (index === -1) {
-            return [session, ...prev]
-          }
-
-          const updated = prev.filter(s => s.id !== session.id)
-          return [session, ...updated]
-        })
-      },
-      onTodoUpdated: data => {
-        // 更新 todoStore
-        todoStore.setTodos(data.sessionID, data.todos)
-      },
-      onSessionDeleted: sessionId => {
-        clearSessionRuntimeState(sessionId)
-        setSessions(prev => prev.filter(s => s.id !== sessionId))
-      },
-      onReconnected: reason => {
-        if (reason === 'server-switch') return
-        if (isFetchingRef.current) {
-          queuedReconnectRefreshRef.current = true
-          return
-        }
-        setSessions([])
-        fetchSessionsRef.current()
-      },
-    })
-
-    return unsubscribe
-  }, [matchesCurrentDirectory])
-
-  useEffect(() => {
-    return serverStore.onServerChange(() => {
-      currentLimitRef.current = 30
-      setSessions([])
-      void fetchSessionsRef.current()
-    })
-  }, [])
-
-  // Pi bootstrap / create/delete notify
+  // Pi bootstrap/create/delete and Pi WS session updates notify this provider.
   useEffect(() => {
     const onPi = () => {
       void fetchSessionsRef.current()
@@ -305,14 +164,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return apiSession
       }
 
-      // 使用正斜杠格式传给后端
-      const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
-
-      const newSession = await apiCreateSession({
-        title,
-        directory: targetDir,
-      })
-      return newSession
+      throw new Error('PiUI server unavailable')
     },
     [currentDirectory],
   )
@@ -323,18 +175,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         try {
           await deletePiSession(id)
         } catch {
-          // fall through if not on pi server
+          // Session may already be gone after a server restart.
         }
         pinnedSessionsStore.unpin(id)
         clearSessionRuntimeState(id)
         setSessions(prev => prev.filter(s => s.id !== id))
         return
       }
-      const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
-      await apiDeleteSession(id, targetDir)
-      pinnedSessionsStore.unpin(id)
-      clearSessionRuntimeState(id)
-      setSessions(prev => prev.filter(s => s.id !== id))
+      throw new Error('PiUI server unavailable')
     },
     [currentDirectory],
   )

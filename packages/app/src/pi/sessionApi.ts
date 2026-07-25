@@ -10,6 +10,7 @@ import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
 import { parsePiWorkspaceId } from "./workspaceRef"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
+const rawFetch = globalThis.fetch.bind(globalThis)
 
 /**
  * Browser dev uses same-origin + Vite proxy (`/api` → :8787) to avoid CORS.
@@ -22,10 +23,30 @@ export function getApiBase(): string {
   return DEFAULT_BASE
 }
 
+function piHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init)
+  const token = (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
+  if (token) headers.set("authorization", `Bearer ${token}`)
+  return headers
+}
+
+export function getPiAuthToken(): string | undefined {
+  return (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
+}
+
+export function piFetch(input: string, init?: RequestInit): Promise<Response> {
+  return rawFetch(input, { ...init, headers: piHeaders(init?.headers) })
+}
+
+// Keep the rest of this transitional client on one authenticated transport.
+const fetch = piFetch
+
 export async function isPiServerUp(): Promise<boolean> {
   try {
-    const res = await fetch(`${getApiBase()}/api/v1/health`, { signal: AbortSignal.timeout(1500) })
-    return res.ok
+    const res = await piFetch(`${getApiBase()}/api/v1/health`, { signal: AbortSignal.timeout(1500) })
+    if (!res.ok) return false
+    const body = (await res.json()) as { service?: string; protocolVersion?: number }
+    return body.service === "piui-server" && body.protocolVersion === 1
   } catch {
     return false
   }

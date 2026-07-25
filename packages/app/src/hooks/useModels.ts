@@ -1,7 +1,22 @@
 import { useSyncExternalStore, useCallback } from 'react'
-import { getActiveModels, type ModelInfo } from '../api'
-import { getSDKClientAsync } from '../api/sdk'
-import { serverStore } from '../store/serverStore'
+import { listPiModels } from '../pi/sessionApi'
+
+export interface ModelInfo {
+  id: string
+  name: string
+  providerId: string
+  providerName: string
+  family: string
+  contextLimit: number
+  outputLimit: number
+  supportsReasoning: boolean
+  supportsImages: boolean
+  supportsPdf: boolean
+  supportsAudio: boolean
+  supportsVideo: boolean
+  supportsToolcall: boolean
+  variants: string[]
+}
 
 // ============================================
 // Global singleton so every ChatPane shares one models array.
@@ -40,8 +55,23 @@ async function _fetchModels(force = false) {
   _fetchPromise = (async () => {
     _setState({ isLoading: true, error: null })
     try {
-      await getSDKClientAsync()
-      const data = await getActiveModels()
+      const { models } = await listPiModels()
+      const data: ModelInfo[] = models.map(model => ({
+        id: model.id,
+        name: model.name,
+        providerId: model.providerId,
+        providerName: model.providerName,
+        family: model.family,
+        contextLimit: model.contextLimit,
+        outputLimit: model.outputLimit,
+        supportsReasoning: model.supportsReasoning,
+        supportsImages: model.supportsImages,
+        supportsPdf: model.supportsPdf,
+        supportsAudio: model.supportsAudio,
+        supportsVideo: model.supportsVideo,
+        supportsToolcall: model.supportsToolcall,
+        variants: model.variants,
+      }))
       if (generation === _fetchGeneration) {
         _setState({ models: data, isLoading: false })
       }
@@ -62,13 +92,6 @@ async function _fetchModels(force = false) {
 export function refreshModels() {
   return _fetchModels(true)
 }
-
-// First fetch on module load — models are ready before any component mounts.
-_fetchModels()
-
-serverStore.onServerChange(() => {
-  void refreshModels()
-})
 
 function _subscribe(listener: Listener) {
   _listeners.add(listener)

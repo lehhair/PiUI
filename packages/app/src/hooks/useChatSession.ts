@@ -931,6 +931,10 @@ export function useChatSession({
   const handleForkMessage = useCallback(
     async (message: UIMessage, forkMessageId?: string) => {
       const targetMessageId = forkMessageId || message.info.id
+      if (isPiSession(message.info.sessionID)) {
+        handleError('fork session', new Error('PiUI does not support session forks yet'))
+        return
+      }
 
       try {
         if (message.info.role === 'assistant') {

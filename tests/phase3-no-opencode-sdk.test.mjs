@@ -1,8 +1,9 @@
 /**
- * Phase 3 gate: no npm @opencode-ai/sdk dependency; production imports resolve to local shim.
+ * Temporary migration gate: registry SDK is absent and browser event routing
+ * does not use CommonJS mode detection.
  */
 import assert from "node:assert/strict"
-import { existsSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
@@ -18,14 +19,16 @@ describe("phase3 no opencode npm sdk", () => {
     assert.equal(dev, undefined)
   })
 
-  it("local shim exists", () => {
-    assert.ok(existsSync(join(root, "packages/app/src/shims/opencode-sdk/v2/client.ts")))
+  it("does not use CommonJS require to decide the event transport", () => {
+    const events = readFileSync(join(root, "packages/app/src/api/events.ts"), "utf8")
+    assert.doesNotMatch(events, /require\(['"]\.\.\/pi\/serverMode/)
+    assert.match(events, /if \(isPiUiBackendMode\(\)\) return \(\) => \{\}/)
   })
 
-  it("vite aliases sdk to local shim", () => {
-    const vite = readFileSync(join(root, "packages/app/vite.config.ts"), "utf8")
-    assert.match(vite, /@opencode-ai\/sdk\/v2\/client/)
-    assert.match(vite, /shims\/opencode-sdk/)
+  it("does not create a real Pi session during application bootstrap", () => {
+    const bootstrap = readFileSync(join(root, "packages/app/src/pi/bootstrapMockChat.ts"), "utf8")
+    assert.doesNotMatch(bootstrap, /createPiSession/)
+    assert.match(bootstrap, /seedMockChatIfEnabled/)
   })
 
   it("main does not auto-start opencode serve", () => {

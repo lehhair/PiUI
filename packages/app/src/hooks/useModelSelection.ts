@@ -3,7 +3,7 @@
 // ============================================
 
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
-import type { ModelInfo } from '../api'
+import type { ModelInfo } from './useModels'
 import {
   getModelKey,
   findModelByKey,

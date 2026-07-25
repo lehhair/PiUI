@@ -14,6 +14,7 @@ import { eventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
+import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
 
 const store = new WorkspaceStore()
 const sessions = new SessionRegistry(store)
@@ -41,7 +42,6 @@ function sessionSummary(s: ReturnType<SessionRegistry["list"]>[number]) {
 }
 
 const CORS_HEADERS: Record<string, string> = {
-  "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,authorization",
 }
@@ -67,7 +67,13 @@ function sendProblem(
 
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = []
-  for await (const c of req) chunks.push(c as Buffer)
+  let size = 0
+  for await (const c of req) {
+    const chunk = c as Buffer
+    size += chunk.length
+    if (size > MAX_JSON_BODY_BYTES) throw Object.assign(new Error("request body too large"), { code: "BODY_TOO_LARGE" })
+    chunks.push(chunk)
+  }
   return Buffer.concat(chunks).toString("utf8")
 }
 
@@ -77,16 +83,28 @@ function parseUrl(req: IncomingMessage) {
 }
 
 export function createAppServer() {
+  const authToken = process.env.PIUI_AUTH_TOKEN
   return createServer(async (req, res) => {
     try {
       const url = parseUrl(req)
       const method = req.method ?? "GET"
       const p = url.pathname
 
+      if (!requestHasAllowedOrigin(req)) {
+        return sendProblem(res, 403, "INVALID_REQUEST", "origin not allowed")
+      }
+      if (typeof req.headers.origin === "string") {
+        res.setHeader("access-control-allow-origin", req.headers.origin)
+        res.setHeader("vary", "Origin")
+      }
+
       if (method === "OPTIONS") {
         res.writeHead(204, CORS_HEADERS)
         res.end()
         return
+      }
+      if (!requestHasValidToken(req, authToken)) {
+        return sendProblem(res, 401, "INVALID_REQUEST", "missing or invalid authorization token")
       }
 
       if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
@@ -97,7 +115,7 @@ export function createAppServer() {
           phase: 1,
           driver: sessions.getDriver(),
         }
-        return sendJson(res, 200, body)
+        return sendJson(res, 200, { ...body, capabilities: { pty: false, share: false, fork: false, undo: false, fileWrite: true, gitDiff: true } })
       }
 
       // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.
@@ -428,7 +446,7 @@ export function createAppServer() {
             return sendJson(res, 200, writeFileText(ws, rel, body.content, { ifMatch }))
           } catch (e) {
             if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "STALE_REVISION") {
-              return sendProblem(res, 409, "STALE_REVISION", (e as Error).message)
+              return sendProblem(res, 409, "STALE_REVISION", e instanceof Error ? e.message : String(e))
             }
             return handlePathError(res, e)
           }
@@ -480,6 +498,9 @@ export function createAppServer() {
 
       return sendProblem(res, 404, "NOT_FOUND", "not found")
     } catch (e) {
+      if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "BODY_TOO_LARGE") {
+        return sendProblem(res, 413, "INVALID_REQUEST", "request body too large")
+      }
       const msg = e instanceof Error ? e.message : String(e)
       return sendProblem(res, 500, "INTERNAL", msg)
     }
@@ -503,7 +524,7 @@ function handlePathError(res: ServerResponse, e: unknown) {
   if (e && typeof e === "object" && "code" in e) {
     const code = String((e as { code: string }).code)
     if (code === "FILE_TOO_LARGE") {
-      return sendProblem(res, 413, "FILE_TOO_LARGE", (e as Error).message)
+      return sendProblem(res, 413, "FILE_TOO_LARGE", e instanceof Error ? e.message : String(e))
     }
   }
   const msg = e instanceof Error ? e.message : String(e)

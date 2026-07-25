@@ -7,18 +7,8 @@ import { initOverlayScrollbars } from './lib/overlayScrollbar'
 import App from './App.tsx'
 import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contexts'
 import { themeStore } from './store/themeStore'
-import { serverStore } from './store/serverStore'
-import { messageStore } from './store/messageStore'
-import { childSessionStore } from './store/childSessionStore'
-import { todoStore } from './store/todoStore'
-import { autoApproveStore } from './store/autoApproveStore'
-import { serviceStore } from './store/serviceStore'
-import { reconnectSSE } from './api/events'
-import { abortInFlightApiRequests, getSDKClientAsync, invalidateSDKClient } from './api/sdk'
-import { resetPathModeCache } from './utils/directoryUtils'
-import { isTauri, isTauriMobile } from './utils/tauri'
-import { apiErrorHandler, globalErrorHandler } from './utils/errorHandling'
-import { applyLocalServiceUrl } from './utils/localServiceUrl'
+import { isTauri } from './utils/tauri'
+import { globalErrorHandler } from './utils/errorHandling'
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
 // 统一补齐，避免业务层 scattered fallback。
@@ -58,37 +48,7 @@ if (document.readyState === 'loading') {
   requestAnimationFrame(initOverlayScrollbars)
 }
 
-// 注册 active server 入口变化 → 清理 server-specific 状态 + 重建 SDK/SSE
-serverStore.onServerChange(() => {
-  abortInFlightApiRequests()
-  invalidateSDKClient()
-  if (isTauri()) {
-    void getSDKClientAsync().catch(err => apiErrorHandler('reinitialize sdk client after server endpoint change', err))
-  }
-
-  // 1. 清空内存中的 session/消息数据
-  messageStore.clearAll()
-  childSessionStore.clearAll()
-  todoStore.clearAll()
-
-  // 2. 重置路径模式缓存（不同服务器可能是不同操作系统）
-  resetPathModeCache()
-
-  // 4. 重新加载 auto-approve 开关状态（从新服务器的 storage key 读取）
-  autoApproveStore.reloadFromStorage()
-
-  // 5. 重连 SSE（会自动连到新的 server endpoint）
-  reconnectSSE()
-})
-
 const isNativeTauri = isTauri()
-const isNativeTauriMobile = isNativeTauri && isTauriMobile()
-
-interface StartOpencodeServiceResult {
-  started: boolean
-  startedByUs: boolean
-  url?: string | null
-}
 
 function configureNativeShell() {
   if (!isNativeTauri) return
@@ -103,43 +63,6 @@ function configureNativeShell() {
   const content = viewportMeta.getAttribute('content') || ''
   if (!content.includes('viewport-fit=cover')) {
     viewportMeta.setAttribute('content', content + ', viewport-fit=cover')
-  }
-}
-
-async function initializeNativeDesktopService() {
-  if (!isNativeTauri || isNativeTauriMobile || !serviceStore.autoStart) return
-
-  const serverUrl = serverStore.getLocalServerUrl()
-  serviceStore.setStarting(true)
-
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-
-    try {
-      const path = await invoke<string | null>('detect_opencode_binary', { envVars: serviceStore.envVarsRecord })
-      serviceStore.setDetectedBinaryPath(path)
-    } catch {
-      // Starting with PATH fallback is still useful if detection fails.
-    }
-
-    const result = await invoke<StartOpencodeServiceResult>('start_opencode_service', {
-      url: serverUrl,
-      binaryPath: serviceStore.effectiveBinaryPath,
-      envVars: serviceStore.envVarsRecord,
-    })
-
-    applyLocalServiceUrl(result.url)
-    serviceStore.setStartedByUs(result.startedByUs)
-    serviceStore.setRunning(true)
-    if (result.started) {
-      console.info('[Service] opencode serve started by app')
-    } else {
-      console.info('[Service] opencode serve already running')
-    }
-  } catch (err) {
-    apiErrorHandler('auto-start opencode serve', err)
-  } finally {
-    serviceStore.setStarting(false)
   }
 }
 
@@ -172,20 +95,20 @@ function bootstrap() {
   )
 }
 
-function startApp() {
+async function startApp() {
+  // Do not mount legacy OpenCode consumers before the PiUI backend decision.
+  const { initializePiBackend, seedMockChatIfEnabled } = await import('./pi/bootstrapMockChat')
+  const backend = await initializePiBackend()
   bootstrap()
 
-  // PiUI: 不自动拉起 OpenCode serve（initializeNativeDesktopService 已停用）
+  // PiUI never auto-starts OpenCode. Real Pi also never creates a session on launch.
   if (isNativeTauri) {
     console.info('[PiUI] native shell — opencode auto-start disabled')
-  } else {
-    console.info('[PiUI] browser shell — use packages/server on :8787')
-    void import('./pi/bootstrapMockChat').then(m => m.bootstrapMockChatIfEnabled())
+  } else if (backend.available && backend.driver === 'mock') {
+    void seedMockChatIfEnabled()
+  } else if (!backend.available) {
+    console.info('[PiUI] browser shell — PiUI server unavailable')
   }
 }
 
-// keep reference so tree-shaking does not confuse future re-enable
-void initializeNativeDesktopService
-void getSDKClientAsync
-
-startApp()
+void startApp()

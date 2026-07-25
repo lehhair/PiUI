@@ -18,6 +18,7 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { subscribeToEvents, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
 import { replyPermission } from '../api/permission'
 import { autoApproveStore } from '../store/autoApproveStore'
+import { isPiUiBackendMode } from '../pi/serverMode'
 import type { ApiMessage, ApiPart, ApiPermissionRequest, ApiQuestionRequest } from '../api/types'
 import type { SessionStatusMap } from '../types/api/session'
 
@@ -281,6 +282,10 @@ export function useGlobalEvents(directories?: string[]) {
   const initializedDirectoriesRef = useRef(false)
 
   useEffect(() => {
+    // Pi events come from PiEventSocket. This avoids the legacy health,
+    // permission, and SSE data path while the UI migration is in progress.
+    if (isPiUiBackendMode()) return
+
     // 节流滚动
     let scrollPending = false
     const pendingScrollSessionIds = new Set<string>()

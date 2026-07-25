@@ -8,6 +8,8 @@
 - 运行时：自有 protocol + server + pi-worker，**不**接 OpenCode SDK / 兼容层
 - 不调用真实模型做开发验收（用 mock / 无网络 unit 测试）
 
+主计划：`docs/PIUI_MASTER_PLAN.md`
+
 基线设计：`docs/universal-agent-pi-technical-design.md`
 
 ## 原则
@@ -52,6 +54,8 @@ npm run dev:app      # vite
 
 ## 当前
 
+当前属于“单会话演示可用”，尚未达到稳定产品标准。OpenCode SDK shim、旧 SSE/server 状态、内存会话和缺失的 PTY 后端仍需按主计划处理。下列勾选表示对应能力已有基础实现，不代表已经满足主计划中的完整完成标准。
+
 - [x] Phase 0 结构
 - [x] Phase 1 health + workspace + 安全文件 list/read
 - [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
@@ -66,6 +70,7 @@ npm run dev:app      # vite
 - [x] 文件名搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
 - [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
 - [x] Pi 能力对齐 UI（有壳才接）：模型/thinking level/compact/skills·commands/steer·followUp/runtime 状态
+- [~] 阶段 0/1：固定 mock 根测试、Pi app 子集测试、server typecheck、render 前 Pi health 探测、旧 SSE 禁用、真实 Pi 不再启动即建会话
 - [ ] fork/undo 映射 Pi tree；终端 PTY
 - 矩阵：`docs/PI_UI_INTEGRATION.md`
 

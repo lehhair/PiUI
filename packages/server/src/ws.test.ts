@@ -65,4 +65,44 @@ describe("event websocket", () => {
       await close()
     }
   })
+
+  it("rejects non-local browser origins", async () => {
+    const server = createAppServer()
+    attachEventWebSocket(server)
+    const { port, close } = await listen(server)
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, {
+        headers: { origin: "https://example.test" },
+      })
+      const error = await new Promise<Error>(resolve => ws.on("error", resolve))
+      assert.match(error.message, /Unexpected server response: 403/)
+      ws.close()
+    } finally {
+      await close()
+    }
+  })
+
+  it("requires the configured token", async () => {
+    const previous = process.env.PIUI_AUTH_TOKEN
+    process.env.PIUI_AUTH_TOKEN = "test-token"
+    const server = createAppServer()
+    attachEventWebSocket(server)
+    const { port, close } = await listen(server)
+    try {
+      const rejected = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
+      const rejection = await new Promise<Error>(resolve => rejected.on("error", resolve))
+      assert.match(rejection.message, /Unexpected server response: 403/)
+
+      const accepted = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=test-token`)
+      await new Promise<void>((resolve, reject) => {
+        accepted.on("open", resolve)
+        accepted.on("error", reject)
+      })
+      accepted.close()
+    } finally {
+      await close()
+      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
+      else process.env.PIUI_AUTH_TOKEN = previous
+    }
+  })
 })
