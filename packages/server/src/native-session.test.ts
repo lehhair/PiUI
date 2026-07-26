@@ -694,4 +694,143 @@ describe("native Pi session discovery", () => {
 
     rmSync(cwd, { recursive: true, force: true })
   })
+
+  it("reports every credential change on the provider stream", async () => {
+    const backend: PiSessionBackend = {
+      listAll: async () => [],
+      open: async () => { throw new Error("not used") },
+      setRuntimeApiKey: async () => undefined,
+      removeRuntimeApiKey: async () => undefined,
+      logoutProvider: async () => undefined,
+    }
+    const hub = new EventHub()
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend, hub)
+    const updates: Array<{ providerId: string; authenticated: boolean; stream: string }> = []
+    hub.subscribeV2(event => {
+      if (event.type === "provider.auth.updated") {
+        updates.push({
+          providerId: event.payload.providerId,
+          authenticated: event.payload.authenticated,
+          stream: `${event.stream.kind}:${event.stream.id}`,
+        })
+      }
+    })
+
+    // Without these the UI cannot tell a provider became usable without polling.
+    await registry.setRuntimeApiKey("anthropic", "secret")
+    await registry.removeRuntimeApiKey("anthropic")
+    await registry.logoutProvider("anthropic")
+
+    assert.deepEqual(updates, [
+      { providerId: "anthropic", authenticated: true, stream: "provider:anthropic" },
+      { providerId: "anthropic", authenticated: false, stream: "provider:anthropic" },
+      { providerId: "anthropic", authenticated: false, stream: "provider:anthropic" },
+    ])
+  })
+
+  it("scopes session credential changes to that session's stream", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-session-auth-"))
+    const runtime = {
+      getSessionId: () => "auth-session",
+      getSessionFile: () => path.join(cwd, "auth-session.jsonl"),
+      getSessionName: () => "auth",
+      getProjection: () => createProjectionState(),
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => undefined,
+      getRuntimeUiState: () => undefined,
+      getModel: () => undefined,
+      getThinkingLevel: () => "medium",
+      getAvailableThinkingLevels: () => ["off", "medium"],
+      isStreaming: () => false,
+      setSessionRuntimeApiKey: async () => undefined,
+      logoutRuntimeProvider: async () => undefined,
+      dispose: async () => undefined,
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "auth-session",
+        path: path.join(cwd, "auth-session.jsonl"),
+        cwd,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => runtime,
+    }
+    const hub = new EventHub()
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend, hub)
+    await registry.list()
+
+    const updates: Array<{ authenticated: boolean; sessionId?: string; stream: string }> = []
+    hub.subscribeV2(event => {
+      if (event.type === "provider.auth.updated") {
+        updates.push({
+          authenticated: event.payload.authenticated,
+          sessionId: event.payload.sessionId,
+          stream: `${event.stream.kind}:${event.stream.id}`,
+        })
+      }
+    })
+
+    await registry.setSessionRuntimeApiKey("auth-session", "anthropic", "secret")
+    await registry.logoutSessionProvider("auth-session", "anthropic")
+
+    // A session-scoped credential only affects that runtime, so a client
+    // watching the global provider stream must not be told otherwise.
+    assert.deepEqual(updates, [
+      { authenticated: true, sessionId: "auth-session", stream: "session:auth-session" },
+      { authenticated: false, sessionId: "auth-session", stream: "session:auth-session" },
+    ])
+
+    rmSync(cwd, { recursive: true, force: true })
+  })
+
+  it("keeps package progress attached to the workspace that asked for it", async () => {
+    const firstRoot = mkdtempSync(path.join(tmpdir(), "piui-pkg-a-"))
+    const secondRoot = mkdtempSync(path.join(tmpdir(), "piui-pkg-b-"))
+    let emit: ((event: { commandId: string; type: "start"; action: "install"; source: string }) => void) | undefined
+    const started: string[] = []
+    const backend: PiSessionBackend = {
+      listAll: async () => [],
+      open: async () => { throw new Error("not used") },
+      onPackageProgress: listener => {
+        emit = listener as typeof emit
+        return () => undefined
+      },
+      managePackage: async (_cwd, commandId) => {
+        started.push(commandId)
+        emit?.({ commandId, type: "start", action: "install", source: "./pkg" })
+        return []
+      },
+    }
+    const hub = new EventHub()
+    const workspaces = new WorkspaceStore()
+    const registry = new SessionRegistry(workspaces, "pi", backend, hub)
+    const progress: Array<{ commandId: string; workspaceId?: string }> = []
+    const resourceRevisions: string[] = []
+    hub.subscribeV2(event => {
+      if (event.type === "packages.progress") {
+        progress.push(event.payload as { commandId: string; workspaceId?: string })
+      } else if (event.type === "resources.updated") {
+        resourceRevisions.push(event.payload.revision)
+      }
+    })
+
+    const first = workspaces.register(firstRoot).id
+    const second = workspaces.register(secondRoot).id
+    // Clients pick their own command ids, so two workspaces can collide.
+    await registry.managePackage(first, "shared-id", "install", "./pkg")
+    await registry.managePackage(second, "shared-id", "install", "./pkg")
+
+    assert.equal(new Set(started).size, 2, "the worker must see distinct progress ids")
+    assert.deepEqual(progress.map(item => item.workspaceId), [first, second])
+    // The client still gets back the id it submitted.
+    assert.deepEqual(progress.map(item => item.commandId), ["shared-id", "shared-id"])
+    assert.deepEqual(resourceRevisions, ["shared-id", "shared-id"])
+
+    rmSync(firstRoot, { recursive: true, force: true })
+    rmSync(secondRoot, { recursive: true, force: true })
+  })
 })

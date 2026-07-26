@@ -40,8 +40,8 @@ function sessionSummary(
 }
 
 const CORS_HEADERS: Record<string, string> = {
-  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-  "access-control-allow-headers": "content-type,authorization",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  "access-control-allow-headers": "content-type,authorization,x-command-id,if-match",
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
@@ -73,6 +73,44 @@ async function readBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): P
     chunks.push(chunk)
   }
   return Buffer.concat(chunks).toString("utf8")
+}
+
+function invalidRequest(message: string): Error & { code: "INVALID_REQUEST" } {
+  return Object.assign(new Error(message), { code: "INVALID_REQUEST" as const })
+}
+
+async function readCommandBody<T extends object = Record<string, never>>(
+  req: IncomingMessage,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<T & { commandId?: string }> {
+  const raw = await readBody(req, maxBytes)
+  let body: unknown
+  try {
+    body = JSON.parse(raw || "{}")
+  } catch {
+    throw invalidRequest("invalid json")
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw invalidRequest("json body must be an object")
+  }
+  return body as T & { commandId?: string }
+}
+
+function resolveCommandId(req: IncomingMessage, body: { commandId?: unknown } = {}): string {
+  const bodyId = body.commandId
+  const headerValue = req.headers["x-command-id"]
+  const headerId = Array.isArray(headerValue) ? headerValue[0] : headerValue
+  const candidate = bodyId ?? headerId
+  if (candidate === undefined) return randomUUID()
+  if (typeof candidate !== "string" || !candidate.trim() || candidate.length > 256) {
+    throw invalidRequest("commandId must be a non-empty string of at most 256 characters")
+  }
+  return candidate
+}
+
+function sendMethodNotAllowed(res: ServerResponse, allowed: string) {
+  res.setHeader("allow", allowed)
+  return sendProblem(res, 405, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 
 function parseUrl(req: IncomingMessage) {
@@ -145,7 +183,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const p = url.pathname
 
       if (!requestHasAllowedOrigin(req)) {
-        return sendProblem(res, 403, "INVALID_REQUEST", "origin not allowed")
+        return sendProblem(res, 403, "FORBIDDEN", "origin not allowed")
       }
       if (typeof req.headers.origin === "string") {
         res.setHeader("access-control-allow-origin", req.headers.origin)
@@ -159,15 +197,16 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       }
 
       if (!requestHasValidToken(req, authToken)) {
-        return sendProblem(res, 401, "INVALID_REQUEST", "missing or invalid authorization token")
+        return sendProblem(res, 401, "UNAUTHORIZED", "missing or invalid authorization token")
       }
 
       const commandStatus = p.match(/^\/api\/v1\/commands\/([^/]+)$/)
       if (method === "GET" && commandStatus) {
         const command = sessionExecutor.get(decodeURIComponent(commandStatus[1]))
-        if (!command) return sendProblem(res, 404, "INVALID_REQUEST", "command not found")
+        if (!command) return sendProblem(res, 404, "NOT_FOUND", "command not found")
         return sendJson(res, 200, { command })
       }
+      if (commandStatus) return sendMethodNotAllowed(res, "GET")
 
       if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
         const body = {
@@ -432,8 +471,8 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (sessionModelRuntime && (method === "GET" || method === "POST")) {
         const sessionId = decodeURIComponent(sessionModelRuntime[1])
         const action = sessionModelRuntime[2]
-        if (method === "GET" && action) return sendProblem(res, 405, "INVALID_REQUEST", "method not allowed")
-        if (method === "POST" && !action) return sendProblem(res, 405, "INVALID_REQUEST", "method not allowed")
+        if (method === "GET" && action) return sendMethodNotAllowed(res, "POST")
+        if (method === "POST" && !action) return sendMethodNotAllowed(res, "GET")
         try {
           if (method === "GET") return sendJson(res, 200, await sessions.inspectSessionModelRuntime(sessionId))
           if (action === "reload") {
@@ -630,17 +669,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && workspacePackageCommand) {
         const workspaceId = decodeURIComponent(workspacePackageCommand[1])
         const action = workspacePackageCommand[2] as "install" | "remove" | "update"
-        const raw = await readBody(req)
-        let body: { source?: string; local?: boolean; persist?: boolean; commandId?: string }
-        try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ source?: string; local?: boolean; persist?: boolean }>(req)
         if ((action === "install" || action === "remove") && !body.source?.trim()) {
           return sendProblem(res, 400, "INVALID_REQUEST", "package source required")
         }
-        const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+        const commandId = resolveCommandId(req, body)
         try {
           const packages = await sessions.managePackage(
             workspaceId,
@@ -864,10 +897,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionOnly = p.match(/^\/api\/v1\/sessions\/([^/]+)$/)
       if (method === "DELETE" && sessionOnly) {
         const id = decodeURIComponent(sessionOnly[1])
+        const body = await readCommandBody(req)
         const session = await sessions.find(id)
         if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -891,33 +925,19 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionPrompt) {
         const id = decodeURIComponent(sessionPrompt[1])
         const operation = sessionPrompt[2] as "prompt" | "steer" | "follow-up"
-        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
-        let body: {
+        const body = await readCommandBody<{
           text?: string
           stream?: boolean
           model?: { provider?: string; id?: string }
           thinkingLevel?: string
           attachments?: SessionAttachmentV2[]
-          commandId?: string
-        }
-        try {
-          body = JSON.parse(raw || "{}") as {
-            text?: string
-            stream?: boolean
-            model?: { provider?: string; id?: string }
-            thinkingLevel?: string
-            attachments?: SessionAttachmentV2[]
-            commandId?: string
-          }
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        }>(req, MAX_PROMPT_BODY_BYTES)
         try {
           const knownSession = await sessions.find(id)
           if (!knownSession) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
           // stream defaults off for tests/speed; client passes stream:true for UI
           const stream = body.stream === true
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = operation === "prompt"
             ? sessionExecutor.submit(
                 {
@@ -1007,11 +1027,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionAbort = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort$/)
       if (method === "POST" && sessionAbort) {
         const id = decodeURIComponent(sessionAbort[1])
-        const raw = await readBody(req)
-        let body: { commandId?: string } = {}
-        try { body = JSON.parse(raw || "{}") as { commandId?: string } } catch { /* empty ok */ }
+        const body = await readCommandBody(req)
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1043,16 +1061,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionBash = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/bash$/)
       if (method === "POST" && sessionBash) {
         const id = decodeURIComponent(sessionBash[1])
-        const raw = await readBody(req)
-        let body: { command?: string; excludeFromContext?: boolean; commandId?: string }
-        try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ command?: string; excludeFromContext?: boolean }>(req)
         if (!body.command?.trim()) return sendProblem(res, 400, "INVALID_REQUEST", "command required")
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1080,8 +1092,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionAbortBash = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort-bash$/)
       if (method === "POST" && sessionAbortBash) {
         const id = decodeURIComponent(sessionAbortBash[1])
+        const body = await readCommandBody(req)
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1105,15 +1118,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionExport) {
         const id = decodeURIComponent(sessionExport[1])
         const format = sessionExport[2] as "html" | "jsonl"
-        const raw = await readBody(req)
-        let body: { outputPath?: string; commandId?: string }
+        const body = await readCommandBody<{ outputPath?: string }>(req)
         try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
-        try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1136,10 +1143,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionReload = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/reload-resources$/)
       if (method === "POST" && sessionReload) {
         const id = decodeURIComponent(sessionReload[1])
+        const body = await readCommandBody(req)
         try {
           const session = await sessions.find(id)
           if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1234,18 +1242,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionSetModel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-model$/)
       if (method === "POST" && sessionSetModel) {
         const id = decodeURIComponent(sessionSetModel[1])
-        const raw = await readBody(req)
-        let body: { provider?: string; id?: string }
-        try {
-          body = JSON.parse(raw || "{}") as { provider?: string; id?: string }
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ provider?: string; id?: string }>(req)
         if (!body.provider || !body.id) {
           return sendProblem(res, 400, "INVALID_REQUEST", "provider and id required")
         }
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1269,18 +1271,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionCycleModel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/cycle-model$/)
       if (method === "POST" && sessionCycleModel) {
         const id = decodeURIComponent(sessionCycleModel[1])
-        const raw = await readBody(req)
-        let body: { direction?: "forward" | "backward" }
-        try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ direction?: "forward" | "backward" }>(req)
         if (body.direction && body.direction !== "forward" && body.direction !== "backward") {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid direction")
         }
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1303,18 +1299,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionScopedModels = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-scoped-models$/)
       if (method === "POST" && sessionScopedModels) {
         const id = decodeURIComponent(sessionScopedModels[1])
-        const raw = await readBody(req)
-        let body: { patterns?: string[] }
-        try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ patterns?: string[] }>(req)
         if (!Array.isArray(body.patterns) || body.patterns.some(pattern => typeof pattern !== "string")) {
           return sendProblem(res, 400, "INVALID_REQUEST", "patterns must be a string array")
         }
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1343,16 +1333,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionThinking = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-thinking-level$/)
       if (method === "POST" && sessionThinking) {
         const id = decodeURIComponent(sessionThinking[1])
-        const raw = await readBody(req)
-        let body: { level?: string }
-        try {
-          body = JSON.parse(raw || "{}") as { level?: string }
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ level?: string }>(req)
         if (!body.level) return sendProblem(res, 400, "INVALID_REQUEST", "level required")
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1376,8 +1360,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionCycleThinking = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/cycle-thinking-level$/)
       if (method === "POST" && sessionCycleThinking) {
         const id = decodeURIComponent(sessionCycleThinking[1])
+        const body = await readCommandBody(req)
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1401,13 +1386,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionUserMessage = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/send-user-message$/)
       if (method === "POST" && sessionUserMessage) {
         const id = decodeURIComponent(sessionUserMessage[1])
-        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
-        let body: { text?: string; deliverAs?: "steer" | "followUp"; attachments?: SessionAttachmentV2[] }
-        try {
-          body = JSON.parse(raw || "{}") as typeof body
-        } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{
+          text?: string
+          deliverAs?: "steer" | "followUp"
+          attachments?: SessionAttachmentV2[]
+        }>(req, MAX_PROMPT_BODY_BYTES)
         if (typeof body.text !== "string") {
           return sendProblem(res, 400, "INVALID_REQUEST", "text required")
         }
@@ -1415,7 +1398,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           return sendProblem(res, 400, "INVALID_REQUEST", "deliverAs must be steer or followUp")
         }
         try {
-          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1455,17 +1438,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionCompact = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/compact$/)
       if (method === "POST" && sessionCompact) {
         const id = decodeURIComponent(sessionCompact[1])
-        const raw = await readBody(req)
-        let body: { instructions?: string; commandId?: string } = {}
-        try {
-          body = JSON.parse(raw || "{}") as { instructions?: string; commandId?: string }
-        } catch {
-          /* empty ok */
-        }
+        const body = await readCommandBody<{ instructions?: string }>(req)
         try {
           const knownSession = await sessions.find(id)
           if (!knownSession) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1499,11 +1476,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionRuntimeControl) {
         const id = decodeURIComponent(sessionRuntimeControl[1])
         const operation = sessionRuntimeControl[2]
-        const raw = await readBody(req)
-        let body: { commandId?: string } = {}
-        try { body = JSON.parse(raw || "{}") as typeof body } catch { /* empty ok */ }
+        const body = await readCommandBody(req)
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = operation === "abort-compaction"
             ? sessionExecutor.submit(
                 {
@@ -1571,19 +1546,14 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionRuntimeSetting) {
         const id = decodeURIComponent(sessionRuntimeSetting[1])
         const operation = sessionRuntimeSetting[2]
-        const raw = await readBody(req)
-        let body: {
+        const body = await readCommandBody<{
           enabled?: boolean
           steeringMode?: "all" | "one-at-a-time"
           followUpMode?: "all" | "one-at-a-time"
           toolNames?: string[]
-          commandId?: string
-        }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        }>(req)
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           if ((operation === "set-auto-compaction" || operation === "set-auto-retry") && typeof body.enabled !== "boolean") {
             return sendProblem(res, 400, "INVALID_REQUEST", "enabled must be boolean")
           }
@@ -1671,21 +1641,16 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionNavigate = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/navigate-tree$/)
       if (method === "POST" && sessionNavigate) {
         const id = decodeURIComponent(sessionNavigate[1])
-        const raw = await readBody(req)
-        let body: {
+        const body = await readCommandBody<{
           entryId?: string
           summarize?: boolean
           customInstructions?: string
           replaceInstructions?: boolean
           label?: string
-          commandId?: string
-        }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        }>(req)
         if (!body.entryId) return sendProblem(res, 400, "INVALID_REQUEST", "entryId required")
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1727,14 +1692,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionLabel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-label$/)
       if (method === "POST" && sessionLabel) {
         const id = decodeURIComponent(sessionLabel[1])
-        const raw = await readBody(req)
-        let body: { entryId?: string; label?: string; commandId?: string }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ entryId?: string; label?: string }>(req)
         if (!body.entryId) return sendProblem(res, 400, "INVALID_REQUEST", "entryId required")
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1757,14 +1718,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const sessionName = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-name$/)
       if (method === "POST" && sessionName) {
         const id = decodeURIComponent(sessionName[1])
-        const raw = await readBody(req)
-        let body: { name?: string; commandId?: string }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ name?: string }>(req)
         if (typeof body.name !== "string") return sendProblem(res, 400, "INVALID_REQUEST", "name required")
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = sessionExecutor.submit(
             {
               protocolVersion: 2,
@@ -1789,16 +1746,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && runtimeReplacement) {
         const id = decodeURIComponent(runtimeReplacement[1])
         const operation = runtimeReplacement[2]
-        const raw = await readBody(req)
-        let body: { parentSessionId?: string; targetSessionId?: string; commandId?: string }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        const body = await readCommandBody<{ parentSessionId?: string; targetSessionId?: string }>(req)
         if (operation === "switch-session" && !body.targetSessionId) {
           return sendProblem(res, 400, "INVALID_REQUEST", "targetSessionId required")
         }
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = operation === "new-session"
             ? sessionExecutor.submit(
                 {
@@ -1843,19 +1796,14 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionReplacement) {
         const id = decodeURIComponent(sessionReplacement[1])
         const operation = sessionReplacement[2]
-        const raw = await readBody(req)
-        let body: {
+        const body = await readCommandBody<{
           entryId?: string
           position?: "before" | "at"
           inputPath?: string
           cwdOverride?: string
-          commandId?: string
-        }
-        try { body = JSON.parse(raw || "{}") as typeof body } catch {
-          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
-        }
+        }>(req)
         try {
-          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const commandId = resolveCommandId(req, body)
           const submitted = operation === "fork"
             ? sessionExecutor.submit(
                 {
@@ -2103,6 +2051,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     } catch (e) {
       if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "BODY_TOO_LARGE") {
         return sendProblem(res, 413, "INVALID_REQUEST", "request body too large")
+      }
+      if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "INVALID_REQUEST") {
+        return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
       }
       if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "SESSION_BUSY") {
         return sendProblem(res, 409, "SESSION_BUSY", e instanceof Error ? e.message : String(e))

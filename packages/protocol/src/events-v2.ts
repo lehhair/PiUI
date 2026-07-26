@@ -59,7 +59,9 @@ export interface EventPayloadsV2 {
   "extension.ui.state.updated": { sessionId: string; patch: ExtensionUiStatePatchV1; state: ExtensionUiStateV1 }
   "extension.ui.notified": { sessionId: string; message: string; notifyType?: "info" | "warning" | "error" }
   "extension.ui.editor.command": { sessionId: string; command: ExtensionUiEditorCommandV1 }
-  "provider.auth.updated": { providerId: string; authenticated: boolean }
+  /** `sessionId` is set when the change came from a session-scoped runtime
+   *  rather than the shared catalog. */
+  "provider.auth.updated": { providerId: string; authenticated: boolean; sessionId?: string }
   "provider.auth.flow": ProviderAuthEventV1
   "resources.updated": { workspaceId?: string; revision: string }
   "packages.progress": PackageProgressV1

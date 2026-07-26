@@ -220,6 +220,133 @@ describe("http phase1", () => {
     }
   })
 
+  it("accepts a commandId from either the header or the body", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "command ids" })
+      const sessionId = created.data.session.id as string
+
+      const viaHeader = await fetch(
+        `http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/commands/set-thinking-level`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-command-id": "from-header" },
+          body: JSON.stringify({ level: "high" }),
+        },
+      )
+      assert.equal(viaHeader.status, 200)
+      assert.equal((await viaHeader.json()).commandId, "from-header")
+
+      // The body wins so a retried request keeps its identity even if a proxy
+      // rewrites headers.
+      const viaBoth = await fetch(
+        `http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/commands/set-thinking-level`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-command-id": "from-header" },
+          body: JSON.stringify({ level: "high", commandId: "from-body" }),
+        },
+      )
+      assert.equal((await viaBoth.json()).commandId, "from-body")
+
+      const blank = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/set-thinking-level`, {
+        level: "high",
+        commandId: "   ",
+      })
+      assert.equal(blank.status, 400)
+      assert.equal(blank.data.code, "INVALID_REQUEST")
+    } finally {
+      await close()
+    }
+  })
+
+  it("rejects malformed json instead of dropping the payload", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const created = await json(port, "POST", "/api/v1/sessions", { title: "bad json" })
+      const sessionId = created.data.session.id as string
+
+      // compact used to swallow this and run with no instructions at all.
+      for (const route of ["compact", "abort", "set-name"]) {
+        const res = await fetch(`http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/commands/${route}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{not json",
+        })
+        assert.equal(res.status, 400, `${route} accepted malformed json`)
+        assert.equal((await res.json()).code, "INVALID_REQUEST")
+      }
+
+      const array = await fetch(`http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/commands/compact`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "[]",
+      })
+      assert.equal(array.status, 400)
+    } finally {
+      await close()
+    }
+  })
+
+  it("reports method mismatches as 405 with an Allow header", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/commands/anything`, { method: "POST" })
+      assert.equal(res.status, 405)
+      assert.equal(res.headers.get("allow"), "GET")
+      assert.equal((await res.json()).code, "METHOD_NOT_ALLOWED")
+
+      const missing = await json(port, "GET", "/api/v1/commands/anything")
+      assert.equal(missing.status, 404)
+      assert.equal(missing.data.code, "NOT_FOUND")
+    } finally {
+      await close()
+    }
+  })
+
+  it("separates unauthorized from forbidden", async () => {
+    const previous = process.env.PIUI_AUTH_TOKEN
+    process.env.PIUI_AUTH_TOKEN = "test-token"
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const unauthorized = await json(port, "GET", "/api/v1/health")
+      assert.equal(unauthorized.status, 401)
+      assert.equal(unauthorized.data.code, "UNAUTHORIZED")
+
+      const forbidden = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+        headers: { origin: "https://example.test", authorization: "Bearer test-token" },
+      })
+      assert.equal(forbidden.status, 403)
+      assert.equal((await forbidden.json()).code, "FORBIDDEN")
+    } finally {
+      await close()
+      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
+      else process.env.PIUI_AUTH_TOKEN = previous
+    }
+  })
+
+  it("allows the methods and headers the client needs", async () => {
+    const server = createAppServer()
+    const { port, close } = await listen(server)
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+        method: "OPTIONS",
+        headers: { origin: "http://localhost:5173" },
+      })
+      assert.equal(res.status, 204)
+      const methods = res.headers.get("access-control-allow-methods") ?? ""
+      const headers = res.headers.get("access-control-allow-headers") ?? ""
+      assert.ok(methods.includes("PATCH"), "pi-settings needs PATCH")
+      assert.ok(headers.includes("x-command-id"), "command retries need x-command-id")
+    } finally {
+      await close()
+    }
+  })
+
   it("waits for backend cleanup before close completes", async () => {
     let release!: () => void
     const cleanup = new Promise<void>(resolve => { release = resolve })
