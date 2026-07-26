@@ -695,6 +695,105 @@ describe("native Pi session discovery", () => {
     rmSync(cwd, { recursive: true, force: true })
   })
 
+  it("reclaims idle runtimes but never one with work in flight", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-idle-"))
+    const idleState = {
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["off", "medium"],
+      isStreaming: false,
+      isCompacting: false,
+      isIdle: true,
+      isBashRunning: false,
+      hasPendingBashMessages: false,
+      isRetrying: false,
+      retryAttempt: 0,
+      pendingMessageCount: 0,
+      queue: { steering: [], followUp: [], steeringMode: "all", followUpMode: "all" },
+      retry: { phase: "idle", autoEnabled: false },
+    }
+    let uiState: Record<string, unknown> = { ...idleState }
+    let disposals = 0
+    let opens = 0
+    const makeRuntime = (id: string) => ({
+      getSessionId: () => id,
+      getSessionFile: () => path.join(cwd, `${id}.jsonl`),
+      getSessionName: () => id,
+      getProjection: () => createProjectionState(),
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => undefined,
+      getRuntimeUiState: () => uiState,
+      getModel: () => undefined,
+      getThinkingLevel: () => "medium",
+      getAvailableThinkingLevels: () => ["off", "medium"],
+      isStreaming: () => false,
+      dispose: async () => { disposals += 1 },
+    }) as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "idle-session",
+        path: path.join(cwd, "idle-session.jsonl"),
+        cwd,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => { opens += 1; return makeRuntime("idle-session") },
+    }
+    const hub = new EventHub()
+    const registry = new SessionRegistry(
+      new WorkspaceStore(), "pi", backend, hub, undefined,
+      // Disable the timer; the test drives the sweep directly.
+      { idleRuntimeTimeoutMs: 1000, idleSweepIntervalMs: 0 },
+    )
+    await registry.list()
+    await registry.attach("idle-session")
+    assert.equal((await registry.find("idle-session"))?.real !== undefined, true)
+
+    // Recently used, so it stays.
+    assert.deepEqual(await registry.reclaimIdleRuntimes(), [])
+
+    const future = Date.now() + 5000
+    // Each of these means work is still in flight and must block reclamation.
+    for (const busy of [
+      { isStreaming: true },
+      { isCompacting: true },
+      { isBashRunning: true },
+      { hasPendingBashMessages: true },
+      { isRetrying: true },
+      { retry: { phase: "waiting", autoEnabled: true } },
+      { pendingMessageCount: 2 },
+      { queue: { steering: ["queued"], followUp: [], steeringMode: "all", followUpMode: "all" } },
+    ]) {
+      uiState = { ...idleState, ...busy }
+      assert.deepEqual(
+        await registry.reclaimIdleRuntimes(future),
+        [],
+        `a session with ${Object.keys(busy)[0]} must not be reclaimed`,
+      )
+    }
+
+    const events: string[] = []
+    hub.subscribeV2(event => {
+      if (event.type === "session.snapshot.updated") events.push(event.payload.sessionId)
+    })
+    uiState = { ...idleState }
+    assert.deepEqual(await registry.reclaimIdleRuntimes(future), ["idle-session"])
+    assert.equal(disposals, 1)
+    assert.deepEqual(events, ["idle-session"], "clients must learn the runtime detached")
+
+    // The session record survives, so using it again simply reopens it.
+    const session = await registry.find("idle-session")
+    assert.equal(session?.real, undefined)
+    await registry.attach("idle-session")
+    assert.equal((await registry.find("idle-session"))?.real !== undefined, true)
+    assert.equal(opens, 2)
+
+    await registry.dispose()
+    rmSync(cwd, { recursive: true, force: true })
+  })
+
   it("reports every credential change on the provider stream", async () => {
     const backend: PiSessionBackend = {
       listAll: async () => [],

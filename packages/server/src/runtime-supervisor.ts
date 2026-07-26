@@ -23,6 +23,12 @@ export interface RuntimeSupervisorOptions {
   workerEntry?: URL
   worker?: PiWorkerClientOptions
   leases?: RuntimeLeaseManager
+  /**
+   * How many pre-warmed workers to keep. Booting one costs ~1.7s, so opening a
+   * session is only fast while a warm worker is available; a single spare made
+   * every burst of openings after the first pay that cost.
+   */
+  standbySize?: number
 }
 
 export interface RuntimeLeaseManager {
@@ -37,7 +43,8 @@ export class RuntimeSupervisor {
   private catalog?: PiWorkerCatalog
   private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
   private readonly packageProgressListeners = new Set<(event: PackageProgressV1) => void>()
-  private standby: PiWorkerHost
+  private readonly standbyPool: PiWorkerHost[] = []
+  private readonly standbySize: number
   private readonly active = new Set<PiWorkerSession>()
   private readonly opening = new Set<PiWorkerHost>()
   private readonly pendingOpens = new Set<Promise<PiWorkerSession>>()
@@ -47,8 +54,23 @@ export class RuntimeSupervisor {
     this.workerEntry = options.workerEntry ?? getPiWorkerEntryUrl()
     this.workerOptions = options.worker
     this.leases = options.leases ?? new SessionLeaseManager()
+    this.standbySize = Math.max(1, options.standbySize ?? 2)
     this.catalog = this.createCatalog()
-    this.standby = this.createHost()
+    this.replenishStandby()
+  }
+
+  /** Never refills after disposal, otherwise shutdown would leak workers. */
+  private replenishStandby(): void {
+    if (this.disposed) return
+    while (this.standbyPool.length < this.standbySize) {
+      this.standbyPool.push(this.createHost())
+    }
+  }
+
+  private takeStandby(): PiWorkerHost {
+    const host = this.standbyPool.shift() ?? this.createHost()
+    this.replenishStandby()
+    return host
   }
 
   list(cwd: string): Promise<PiSessionInfo[]> {
@@ -187,8 +209,7 @@ export class RuntimeSupervisor {
       lease?.release()
       throw new Error("Runtime supervisor is disposed")
     }
-    const host = this.standby
-    this.standby = this.createHost()
+    const host = this.takeStandby()
     this.opening.add(host)
     try {
       const runtime = await host.open(cwd, sessionFile)
@@ -232,11 +253,12 @@ export class RuntimeSupervisor {
     if (this.disposed) return
     this.disposed = true
     const pendingOpens = [...this.pendingOpens]
+    const standby = this.standbyPool.splice(0, this.standbyPool.length)
     await Promise.allSettled([
       ...[...this.active].map(runtime => runtime.dispose()),
       ...[...this.opening].map(host => host.dispose()),
       this.catalog?.dispose() ?? Promise.resolve(),
-      this.standby.dispose(),
+      ...standby.map(host => host.dispose()),
       ...pendingOpens,
     ])
     // An open that resolved after the sweep above registers itself in `active`,

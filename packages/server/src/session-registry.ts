@@ -118,6 +118,16 @@ export interface PiSessionBackend {
 }
 
 const DISCOVERY_TTL_MS = 5_000
+/** Each attached runtime is its own process holding ~130MB, so idle ones are
+ *  released. Reattaching is cheap while a warm worker is available. */
+const DEFAULT_IDLE_RUNTIME_TIMEOUT_MS = 15 * 60_000
+const DEFAULT_IDLE_SWEEP_INTERVAL_MS = 60_000
+
+export interface SessionRegistryOptions {
+  /** Set to 0 to keep every attached runtime alive. */
+  idleRuntimeTimeoutMs?: number
+  idleSweepIntervalMs?: number
+}
 
 function emptyExtensionUiState(): ExtensionUiStateV1 {
   return {
@@ -152,6 +162,9 @@ export class SessionRegistry {
   /** Keyed by a server-generated progress id, because the client-supplied
    *  commandId is not unique across workspaces. */
   private readonly packageCommandWorkspaces = new Map<string, { workspaceId: string; commandId: string }>()
+  private readonly lastActivity = new Map<string, number>()
+  private readonly idleRuntimeTimeoutMs: number
+  private idleSweepTimer?: NodeJS.Timeout
 
   constructor(
     private readonly workspaces: WorkspaceStore,
@@ -159,8 +172,15 @@ export class SessionRegistry {
     private readonly injectedBackend?: PiSessionBackend,
     private readonly eventHub?: EventHub,
     private readonly onRuntimeCrash?: (sessionId: string, workerGeneration: string | undefined, error: Error) => void,
+    options: SessionRegistryOptions = {},
   ) {
     this.driver = driver
+    this.idleRuntimeTimeoutMs = options.idleRuntimeTimeoutMs ?? DEFAULT_IDLE_RUNTIME_TIMEOUT_MS
+    const sweepInterval = options.idleSweepIntervalMs ?? DEFAULT_IDLE_SWEEP_INTERVAL_MS
+    if (this.idleRuntimeTimeoutMs > 0 && sweepInterval > 0) {
+      this.idleSweepTimer = setInterval(() => void this.reclaimIdleRuntimes(), sweepInterval)
+      this.idleSweepTimer.unref()
+    }
   }
 
   private resourceEventCoalescing = 0
@@ -231,12 +251,7 @@ export class SessionRegistry {
     const result = await backend.setProjectTrust(workspace.canonicalRoot, decision)
     const detached: AppSession[] = []
     for (const session of [...this.byId.values()].filter(value => value.workspaceId === workspaceId && value.real)) {
-      const runtime = session.real
-      this.unbindRuntime(session)
-      session.real = undefined
-      session.workerGeneration = undefined
-      if (runtime) await this.disposeRuntime(runtime)
-      this.touch(session)
+      await this.detachRuntime(session)
       detached.push(session)
     }
     // Trust changes force every runtime to reload extensions, so clients must
@@ -1428,6 +1443,9 @@ export class SessionRegistry {
     if (!session) {
       throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
     }
+    // Every session-scoped route funnels through attach, so this is the single
+    // place that keeps a runtime from being reclaimed while it is in use.
+    this.lastActivity.set(sessionId, Date.now())
     if (session.driver !== "pi" || session.real) return session
     let pending = this.attaching.get(sessionId)
     if (!pending) {
@@ -1719,6 +1737,63 @@ export class SessionRegistry {
     return result
   }
 
+  /**
+   * Only reclaim a runtime when nothing is in flight. This is deliberately
+   * conservative: reclaiming late just costs memory, but reclaiming a session
+   * that is mid-turn would drop queued work and streaming output.
+   */
+  private isRuntimeReclaimable(session: AppSession): boolean {
+    if (!session.real || session.runtimeError) return false
+    if (this.attaching.has(session.id) || this.deleting.has(session.id)) return false
+    if (session.projection.isStreaming || session.real.isStreaming()) return false
+    const ui = session.real.getRuntimeUiState()
+    if (!ui) return false
+    if (ui.isStreaming || ui.isCompacting || ui.isBashRunning || ui.hasPendingBashMessages) return false
+    if (ui.isRetrying || ui.retry.phase === "waiting" || ui.retry.phase === "running") return false
+    if (ui.pendingMessageCount > 0) return false
+    if (ui.queue.steering.length > 0 || ui.queue.followUp.length > 0) return false
+    // An open dialog is waiting on a human, so the runtime must stay.
+    for (const request of this.extensionUiPending.values()) {
+      if (request.sessionId === session.id) return false
+    }
+    return true
+  }
+
+  /** Exposed for tests; the sweep also runs on a timer. */
+  async reclaimIdleRuntimes(now = Date.now()): Promise<string[]> {
+    if (this.idleRuntimeTimeoutMs <= 0) return []
+    const reclaimed: string[] = []
+    for (const session of [...this.byId.values()]) {
+      if (!session.real) continue
+      const idleFor = now - (this.lastActivity.get(session.id) ?? 0)
+      if (idleFor < this.idleRuntimeTimeoutMs) continue
+      if (!this.isRuntimeReclaimable(session)) continue
+      try {
+        await this.detachRuntime(session)
+      } catch {
+        continue
+      }
+      this.lastActivity.delete(session.id)
+      reclaimed.push(session.id)
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    }
+    return reclaimed
+  }
+
+  /** Drops the runtime but keeps the session record, so a later attach reopens it. */
+  private async detachRuntime(session: AppSession): Promise<void> {
+    const runtime = session.real
+    this.unbindRuntime(session)
+    session.real = undefined
+    session.workerGeneration = undefined
+    if (runtime) await this.disposeRuntime(runtime)
+    this.touch(session)
+  }
+
   private unbindRuntime(session: AppSession): void {
     const binding = this.runtimeBindings.get(session.id)
     if (!binding) return
@@ -1898,6 +1973,10 @@ export class SessionRegistry {
   }
 
   async dispose(): Promise<void> {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer)
+      this.idleSweepTimer = undefined
+    }
     this.providerAuthUnsubscribe?.()
     this.providerAuthUnsubscribe = undefined
     this.packageProgressUnsubscribe?.()

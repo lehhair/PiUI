@@ -200,6 +200,44 @@ describe("RuntimeSupervisor", () => {
     }
   })
 
+  it("keeps warm workers ready so a burst of openings does not pay boot cost", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-standby-"))
+    roots.push(root)
+    // The fixture reports one fixed session id, so a real lease would collide
+    // on the second open. Leases are covered elsewhere; this test is about the
+    // warm pool.
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: fixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: {
+        acquire: async sessionFile => ({
+          key: sessionFile,
+          refresh: async () => undefined,
+          replace: async () => undefined,
+          release: () => undefined,
+        }),
+        dispose: () => undefined,
+      },
+      standbySize: 3,
+    })
+    const pool = () => (supervisor as unknown as { standbyPool: unknown[] }).standbyPool
+    try {
+      assert.equal(pool().length, 3, "the pool should be warm before any open")
+
+      // Each open consumes a warm worker, and the pool refills immediately so
+      // the next open in the burst still hits a warm one.
+      const runtimes = []
+      for (let i = 0; i < 3; i += 1) {
+        runtimes.push(await supervisor.open(root, path.join(root, `session-${i}.jsonl`)))
+        assert.equal(pool().length, 3, `pool should stay warm after open ${i}`)
+      }
+      for (const runtime of runtimes) await runtime.dispose()
+    } finally {
+      await supervisor.dispose()
+    }
+    assert.equal(pool().length, 0, "disposal must not leave warm workers behind")
+  })
+
   it("does not create another standby while a lease acquisition is being disposed", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-lease-wait-"))
     roots.push(root)
