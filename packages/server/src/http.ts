@@ -24,6 +24,7 @@ import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode, type DriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
 import { MAX_JSON_BODY_BYTES, MAX_PROMPT_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
+import { resolveAuthToken } from "./auth-token.ts"
 import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
 import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
@@ -134,6 +135,11 @@ export interface CreateAppServerOptions {
   piBackend?: PiSessionBackend
   eventHub?: EventHub
   sessionRegistry?: SessionRegistryOptions
+  /**
+   * Defaults to the persisted local token. Pass `null` to serve without
+   * authentication, which only tests should do.
+   */
+  authToken?: string | null
 }
 
 /** Ignores unset and malformed values so a bad env var falls back to defaults. */
@@ -192,7 +198,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     defaultWorkspaceId = rec.id
     return rec.id
   }
-  const authToken = process.env.PIUI_AUTH_TOKEN
+  const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
   const server = createServer(async (req, res) => {
     try {
       const url = parseUrl(req)

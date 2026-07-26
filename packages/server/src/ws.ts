@@ -11,19 +11,29 @@ import {
   type EventSubscribeMessageV2,
 } from "@piui/protocol"
 import { getBoundEventHub, type EventHub } from "./event-hub.ts"
-import { requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
+import { requestHasAllowedOrigin, requestHasValidToken, timingSafeTokenEquals } from "./security.ts"
+import { resolveAuthToken } from "./auth-token.ts"
 
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024
 
-export function attachEventWebSocket(server: HttpServer) {
+export interface EventWebSocketOptions {
+  /** Pass `null` to accept connections without authentication (tests only). */
+  authToken?: string | null
+}
+
+export function attachEventWebSocket(server: HttpServer, options: EventWebSocketOptions = {}) {
   const wss = new WebSocketServer({ noServer: true })
   const eventHub = getBoundEventHub(server)
-  const authToken = process.env.PIUI_AUTH_TOKEN
+  const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1")
+    // Browsers cannot set headers on a WebSocket handshake, so a query token
+    // stays supported. It is accepted only as a fallback because query strings
+    // are the part of a URL most likely to end up in logs.
     const wsToken = url.searchParams.get("token")
-    const hasToken = !authToken || wsToken === authToken || requestHasValidToken(req, authToken)
+    const hasToken = requestHasValidToken(req, authToken) ||
+      (authToken !== null && wsToken !== null && timingSafeTokenEquals(wsToken, authToken))
     if (url.pathname !== "/api/v1/events" || !requestHasAllowedOrigin(req) || !hasToken) {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
       socket.destroy()

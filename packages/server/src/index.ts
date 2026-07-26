@@ -5,6 +5,7 @@
  */
 import { DEFAULT_HTTP_BASE } from "@piui/protocol"
 import { getDriverMode } from "@piui/pi-worker"
+import { authTokenPath, resolveAuthToken } from "./auth-token.ts"
 import { createAppServer } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
@@ -17,12 +18,19 @@ const SHUTDOWN_TIMEOUT_MS = Number.isFinite(requestedShutdownTimeout) && request
   : 10_000
 const driver = getDriverMode()
 
-const server = createAppServer()
-const eventServer = attachEventWebSocket(server)
+// Resolved once so the HTTP and WebSocket listeners cannot disagree.
+const authToken = resolveAuthToken()
+const server = createAppServer({ authToken })
+const eventServer = attachEventWebSocket(server, { authToken })
 server.listen(PORT, HOST, () => {
   console.info(`[piui-server] listening http://${HOST}:${PORT} (base ${DEFAULT_HTTP_BASE})`)
   console.info(`[piui-server] events ws://${HOST}:${PORT}/api/v1/events`)
   console.info(`[piui-server] driver=${driver}${driver === "pi" ? " (real models when prompt)" : " (no LLM)"}`)
+  console.info(
+    process.env.PIUI_AUTH_TOKEN
+      ? "[piui-server] auth token from PIUI_AUTH_TOKEN"
+      : `[piui-server] auth token at ${authTokenPath()}`,
+  )
 })
 
 let shuttingDown = false

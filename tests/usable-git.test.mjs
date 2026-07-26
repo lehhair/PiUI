@@ -13,6 +13,11 @@ import { dirname, join } from "node:path"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PORT = 18789
+// The server now requires a local token; wrap fetch so every call carries it.
+const TOKEN = "usable-test-token"
+const rawFetch = globalThis.fetch
+const fetch = (url, init = {}) =>
+  rawFetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${TOKEN}` } })
 
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" })
@@ -38,7 +43,7 @@ describe("usable git status", () => {
 
     child = spawn(process.execPath, ["--import", "tsx", "packages/server/src/index.ts"], {
       cwd: root,
-      env: { ...process.env, PIUI_PORT: String(PORT) },
+      env: { ...process.env, PIUI_PORT: String(PORT), PIUI_AUTH_TOKEN: TOKEN },
       stdio: ["ignore", "pipe", "pipe"],
     })
 

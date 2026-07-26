@@ -6,8 +6,8 @@ import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
 
 it("ends a stalled HTTP request at the shutdown deadline without forcing exit", async () => {
-  const server = createAppServer()
-  const eventServer = attachEventWebSocket(server)
+  const server = createAppServer({ authToken: null })
+  const eventServer = attachEventWebSocket(server, { authToken: null })
   await new Promise<void>((resolve, reject) => {
     server.listen(0, "127.0.0.1", (error?: Error) => (error ? reject(error) : resolve()))
   })

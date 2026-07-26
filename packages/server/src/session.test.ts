@@ -60,7 +60,7 @@ describe("session mock snapshot (no LLM)", () => {
   after(() => rmSync(root, { recursive: true, force: true }))
 
   it("dev mock-chat seeds workspace + snapshot", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const res = await json(port, "POST", "/api/v1/dev/mock-chat")
@@ -78,7 +78,7 @@ describe("session mock snapshot (no LLM)", () => {
     eventHub.subscribeV2(event => {
       if (event.type === "workspace.sessions.updated") workspaceEvents.push(event.payload.sessionId ?? "")
     })
-    const server = createAppServer({ eventHub })
+    const server = createAppServer({ authToken: null, eventHub })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "blank" })
@@ -106,7 +106,7 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("does not share in-memory sessions across server instances", async () => {
-    const firstServer = createAppServer()
+    const firstServer = createAppServer({ authToken: null })
     const first = await listen(firstServer)
     try {
       const created = await json(first.port, "POST", "/api/v1/sessions", { title: "first server" })
@@ -115,7 +115,7 @@ describe("session mock snapshot (no LLM)", () => {
       await first.close()
     }
 
-    const secondServer = createAppServer()
+    const secondServer = createAppServer({ authToken: null })
     const second = await listen(secondServer)
     try {
       const listed = await json(second.port, "GET", "/api/v1/sessions")
@@ -132,7 +132,7 @@ describe("session mock snapshot (no LLM)", () => {
     eventHub.subscribeV2(event => {
       if (event.type === "session.snapshot.updated") snapshots.push(event.payload)
     })
-    const server = createAppServer({ eventHub })
+    const server = createAppServer({ authToken: null, eventHub })
     const { port, close } = await listen(server)
     try {
       const seeded = await json(port, "POST", "/api/v1/dev/mock-chat")
@@ -164,7 +164,7 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("returns native commands and skills as arrays", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "commands" })
@@ -188,7 +188,7 @@ describe("session mock snapshot (no LLM)", () => {
         commandSnapshots.push(event.payload.snapshot.sequence)
       }
     })
-    const server = createAppServer({ eventHub })
+    const server = createAppServer({ authToken: null, eventHub })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "sequence" })
@@ -209,7 +209,7 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("reuses a prompt commandId without executing the turn twice", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "idempotent" })
@@ -294,7 +294,7 @@ describe("session mock snapshot (no LLM)", () => {
         return runtime
       },
     }
-    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const server = createAppServer({ authToken: null, driver: "pi", piBackend: backend })
     const { port, close } = await listen(server)
     try {
       const prompted = await json(port, "POST", "/api/v1/sessions/crash-session/commands/prompt", {
@@ -311,7 +311,7 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("creates session with projected timeline", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const ws = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
@@ -350,7 +350,7 @@ describe("session mock snapshot (no LLM)", () => {
       workerEntry: workerFixture,
       leases: new SessionLeaseManager(path.join(root, "r3-http-leases")),
     })
-    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const server = createAppServer({ authToken: null, driver: "pi", piBackend: backend })
     const { port, close } = await listen(server)
     try {
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
@@ -420,7 +420,7 @@ describe("session mock snapshot (no LLM)", () => {
       workerEntry: workerFixture,
       leases: new SessionLeaseManager(path.join(root, "r4-http-leases")),
     })
-    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const server = createAppServer({ authToken: null, driver: "pi", piBackend: backend })
     const { port, close } = await listen(server)
     try {
       const health = await json(port, "GET", "/api/v1/health")
@@ -577,7 +577,7 @@ describe("session mock snapshot (no LLM)", () => {
       workerEntry: workerFixture,
       leases: new SessionLeaseManager(path.join(root, "r6-http-leases")),
     })
-    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const server = createAppServer({ authToken: null, driver: "pi", piBackend: backend })
     const { port, close } = await listen(server)
     try {
       const health = await json(port, "GET", "/api/v1/health")

@@ -10,6 +10,11 @@ import { dirname, join } from "node:path"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PORT = 18790
+// The server now requires a local token; wrap fetch so every call carries it.
+const TOKEN = "usable-test-token"
+const rawFetch = globalThis.fetch
+const fetch = (url, init = {}) =>
+  rawFetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${TOKEN}` } })
 
 describe("usable search + write", () => {
   let child
@@ -25,7 +30,7 @@ describe("usable search + write", () => {
   it("search and put file", async () => {
     child = spawn(process.execPath, ["--import", "tsx", "packages/server/src/index.ts"], {
       cwd: root,
-      env: { ...process.env, PIUI_PORT: String(PORT) },
+      env: { ...process.env, PIUI_PORT: String(PORT), PIUI_AUTH_TOKEN: TOKEN },
       stdio: ["ignore", "pipe", "pipe"],
     })
     for (let i = 0; i < 40; i++) {
