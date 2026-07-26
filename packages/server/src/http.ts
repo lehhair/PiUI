@@ -12,7 +12,12 @@ import {
 import { listFiles, readFileText, writeFileText } from "./files.ts"
 import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
-import { SessionRegistry, type AppSession, type PiSessionBackend } from "./session-registry.ts"
+import {
+  SessionRegistry,
+  type AppSession,
+  type PiSessionBackend,
+  type SessionRegistryOptions,
+} from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { bindEventHub, EventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
@@ -128,6 +133,14 @@ export interface CreateAppServerOptions {
   driver?: DriverMode
   piBackend?: PiSessionBackend
   eventHub?: EventHub
+  sessionRegistry?: SessionRegistryOptions
+}
+
+/** Ignores unset and malformed values so a bad env var falls back to defaults. */
+function positiveEnvMs(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 export function createAppServer(options: CreateAppServerOptions = {}) {
@@ -146,6 +159,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     options.piBackend,
     eventHub,
     sessionId => sessionExecutor.markRuntimeCrashed(sessionId),
+    options.sessionRegistry ?? {
+      idleRuntimeTimeoutMs: positiveEnvMs(process.env.PIUI_IDLE_RUNTIME_TIMEOUT_MS),
+      idleSweepIntervalMs: positiveEnvMs(process.env.PIUI_IDLE_SWEEP_INTERVAL_MS),
+    },
   )
   const publishSessionSnapshot = (session: AppSession) => {
     eventHub.publish({

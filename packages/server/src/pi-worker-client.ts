@@ -54,6 +54,8 @@ interface PendingRequest {
 export interface PiWorkerClientOptions {
   handshakeTimeoutMs?: number
   heartbeatTimeoutMs?: number
+  /** Grace period between SIGTERM and SIGKILL when terminating a worker. */
+  terminateEscalationMs?: number
 }
 
 export interface PiWorkerCatalog {
@@ -1031,7 +1033,16 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   private terminate(): void {
     if (this.child.connected) this.child.disconnect()
-    if (!this.child.killed) this.child.kill()
+    if (this.child.killed) return
+    this.child.kill()
+    // A worker stuck inside a native call never reacts to SIGTERM, and the
+    // dispose path awaits `closed`, so without this escalation a single wedged
+    // worker would stall reclamation for the whole server.
+    const escalation = setTimeout(() => {
+      if (!this.child.killed) this.child.kill("SIGKILL")
+    }, this.options.terminateEscalationMs ?? 5_000)
+    escalation.unref()
+    void this.closed.then(() => clearTimeout(escalation), () => clearTimeout(escalation))
   }
 }
 
@@ -1148,6 +1159,11 @@ function spawnWorker(workerEntry: URL): ChildProcess {
   return fork(fileURLToPath(workerEntry), [], {
     stdio: ["ignore", "ignore", "inherit", "ipc"],
     env: process.env,
+    // `fork` inherits execArgv by default, so running the server under
+    // `--import tsx` loaded the transpiler into every worker as well. The
+    // worker entry is always compiled JavaScript, which made that roughly
+    // 1.5s of startup per worker for nothing.
+    execArgv: [],
   })
 }
 
