@@ -1359,6 +1359,78 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
       }
 
+      const sessionCycleThinking = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/cycle-thinking-level$/)
+      if (method === "POST" && sessionCycleThinking) {
+        const id = decodeURIComponent(sessionCycleThinking[1])
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.cycleThinkingLevel",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: {},
+            },
+            () => sessions.cycleThinkingLevel(id),
+          )
+          const { session: s, level } = await submitted.promise
+          publishSessionSnapshot(s)
+          publishSessionUpdated(s)
+          return sendJson(res, 200, { commandId, command: submitted.record, level, snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionUserMessage = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/send-user-message$/)
+      if (method === "POST" && sessionUserMessage) {
+        const id = decodeURIComponent(sessionUserMessage[1])
+        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
+        let body: { text?: string; deliverAs?: "steer" | "followUp"; attachments?: SessionAttachmentV2[] }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (typeof body.text !== "string") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "text required")
+        }
+        if (body.deliverAs !== undefined && body.deliverAs !== "steer" && body.deliverAs !== "followUp") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "deliverAs must be steer or followUp")
+        }
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.sendUserMessage",
+              concurrency: "run-control",
+              sessionId: id,
+              payload: { text: body.text, deliverAs: body.deliverAs, attachments: body.attachments },
+            },
+            () => sessions.sendUserMessage(id, body.text!, {
+              deliverAs: body.deliverAs,
+              attachments: body.attachments,
+            }),
+            {
+              recordRequest: request => ({
+                ...request,
+                payload: { ...request.payload, attachments: redactAttachmentData(request.payload.attachments) },
+              }),
+            },
+          )
+          const s = await submitted.promise
+          publishSessionSnapshot(s)
+          publishSessionUpdated(s)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(s) })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
+      }
+
       const sessionCompact = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/compact$/)
       if (method === "POST" && sessionCompact) {
         const id = decodeURIComponent(sessionCompact[1])

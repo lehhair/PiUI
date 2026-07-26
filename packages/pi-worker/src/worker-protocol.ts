@@ -118,6 +118,8 @@ export type WorkerCommand =
   | { type: "abort" }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinkingLevel"; level: string }
+  | { type: "cycleThinkingLevel" }
+  | { type: "sendUserMessage"; text: string; images?: PiImageInput[]; deliverAs?: "steer" | "followUp" }
   | { type: "compact"; instructions?: string }
   | { type: "abortCompaction" }
   | { type: "abortBranchSummary" }
@@ -243,6 +245,7 @@ export type WorkerResult =
   | ({ type: "navigation"; session: WorkerSessionWire } & PiNavigationResultV1)
   | { type: "compaction"; compaction: CompactionCommandResultV1; session: WorkerSessionWire }
   | { type: "queue"; steering: string[]; followUp: string[]; session: WorkerSessionWire }
+  | { type: "thinkingLevel"; level: string; session: WorkerSessionWire }
   | { type: "replacement"; replacement: SessionReplacementResultV1; session: WorkerSessionWire }
   | { type: "ok" }
 

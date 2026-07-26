@@ -773,6 +773,32 @@ export class SessionRegistry {
     return session
   }
 
+  async sendUserMessage(
+    sessionId: string,
+    text: string,
+    options?: { deliverAs?: "steer" | "followUp"; attachments?: SessionAttachmentV2[] },
+  ): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const workspace = this.workspaces.get(session.workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
+    const prepared = preparePromptInput(workspace.canonicalRoot, text, options?.attachments)
+    const trimmed = prepared.text.trim()
+    if (!trimmed && prepared.images.length === 0) {
+      throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    }
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("user messages")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.sendUserMessage(trimmed, prepared.images, options?.deliverAs),
+    )
+    session.projection = runtime.getProjection()
+    this.touch(session)
+    return session
+  }
+
   async abort(sessionId: string): Promise<{
     session: AppSession
     cleared: { steering: string[]; followUp: string[] }
@@ -1016,6 +1042,21 @@ export class SessionRegistry {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
+  }
+
+  async cycleThinkingLevel(sessionId: string): Promise<{ session: AppSession; level: string }> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("thinking level cycling")
+    const level = await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.cycleThinkingLevel(),
+    )
+    session.sequence += 1
+    session.updatedAt = new Date().toISOString()
+    return { session, level }
   }
 
   async compact(
@@ -1846,6 +1887,11 @@ export class SessionRegistry {
             : ["off", "minimal", "low", "medium", "high"]),
         isStreaming,
         isCompacting,
+        isBashRunning: !session.runtimeError && (ui?.isBashRunning ?? false),
+        hasPendingBashMessages: !session.runtimeError && (ui?.hasPendingBashMessages ?? false),
+        isRetrying: !session.runtimeError && (ui?.isRetrying ?? false),
+        retryAttempt: ui?.retryAttempt ?? 0,
+        pendingMessageCount: ui?.pendingMessageCount ?? 0,
         queue: ui?.queue ?? {
           steering: [],
           followUp: [],

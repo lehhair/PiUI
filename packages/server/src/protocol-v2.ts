@@ -27,7 +27,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r6",
+    revision: "pi-0.81.1-r7",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -46,7 +46,9 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         html: true,
         jsonl: true,
       }),
-      "prompt.text": capability(true, "session"),
+      "prompt.text": capability(true, "session", undefined, {
+        sendUserMessage: nativePi,
+      }),
       "prompt.multimodal": capability(nativePi, "model", nativePi ? undefined : "Requires the Pi runtime", {
         maxImages: 4,
         maxImageBytes: 4.5 * 1024 * 1024,
@@ -114,6 +116,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         extensionProviders: nativePi,
         scopedModels: nativePi,
         cycle: nativePi,
+        cycleThinkingLevel: nativePi,
         inspectRuntime: nativePi,
         runtimeApiKeys: nativePi,
         reload: nativePi,

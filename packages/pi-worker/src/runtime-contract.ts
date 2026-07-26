@@ -49,6 +49,7 @@ export interface PiSessionRuntime {
   getRuntimeUiState(): PiRuntimeUiState
   setModel(provider: string, modelId: string): Promise<void>
   setThinkingLevel(level: string): void | Promise<void>
+  cycleThinkingLevel(): string | Promise<string>
   compact(customInstructions?: string): Promise<CompactionCommandResultV1>
   abortCompaction(): void | Promise<void>
   abortBranchSummary(): void | Promise<void>
@@ -75,6 +76,7 @@ export interface PiSessionRuntime {
     },
   ): Promise<void>
   appendCustomEntry(customType: string, data?: unknown): void | Promise<void>
+  sendUserMessage(text: string, images?: PiImageInput[], deliverAs?: "steer" | "followUp"): Promise<void>
   waitForIdle(): Promise<void>
   getToolDefinition(toolName: string): unknown | Promise<unknown>
   hasExtensionHandlers(eventType: string): boolean | Promise<boolean>

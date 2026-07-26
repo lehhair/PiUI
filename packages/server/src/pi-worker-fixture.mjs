@@ -63,6 +63,11 @@ function state() {
     isStreaming: false,
     isCompacting,
     isIdle: !isCompacting,
+    isBashRunning: false,
+    hasPendingBashMessages: false,
+    isRetrying: false,
+    retryAttempt: 0,
+    pendingMessageCount: steering.length + followUp.length,
     queue: {
       steering,
       followUp,
@@ -262,6 +267,25 @@ process.on("message", request => {
   } else if (command.type === "setThinkingLevel") {
     thinkingLevel = command.level
     session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "cycleThinkingLevel") {
+    const levels = ["off", "minimal", "low", "medium", "high"]
+    thinkingLevel = levels[(levels.indexOf(thinkingLevel) + 1) % levels.length]
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "thinkingLevel", level: thinkingLevel, session }
+  } else if (command.type === "sendUserMessage") {
+    const projection = {
+      timeline: [{
+        type: "user",
+        id: "fixture-user-message",
+        entryId: "fixture-user-message",
+        timestamp: 2,
+        text: command.text,
+      }],
+      isStreaming: false,
+    }
+    session = { ...(session ?? snapshot()), projection }
+    process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
     result = { type: "session", session }
   } else if (command.type === "setModel") {
     model = { provider: command.provider, id: command.modelId, displayName: command.modelId }

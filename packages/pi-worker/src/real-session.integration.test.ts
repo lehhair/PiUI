@@ -22,6 +22,7 @@ describe("RealPiSession with the Pi SDK", () => {
     const faux = fauxProvider({ provider: "piui-faux", api: "piui-faux" })
     faux.setResponses([
       fauxAssistantMessage("offline answer"),
+      fauxAssistantMessage("idle reply"),
       fauxAssistantMessage("", { stopReason: "error", errorMessage: "offline failure" }),
     ])
     const modelRuntime = await ModelRuntime.create({
@@ -101,9 +102,26 @@ describe("RealPiSession with the Pi SDK", () => {
       assert.notEqual(replacement.targetSessionId, sourceSessionId)
       assert.equal(replacement.cancelled, false)
 
+      const uiState = session.getRuntimeUiState()
+      assert.equal(uiState.isBashRunning, false)
+      assert.equal(uiState.hasPendingBashMessages, false)
+      assert.equal(uiState.isRetrying, false)
+      assert.equal(uiState.retryAttempt, 0)
+      assert.equal(uiState.pendingMessageCount, 0)
+      assert.throws(
+        () => session!.cycleThinkingLevel(),
+        error => (error as { code?: string }).code === "CAPABILITY_DISABLED",
+      )
+
+      await session.sendUserMessage("sent while idle")
+      assert.equal(faux.state.callCount, 2)
+      assert.ok(session.getProjection().timeline.some(
+        item => item.type === "user" && item.text === "sent while idle",
+      ))
+
       await session.prompt("fail offline")
       const failed = session.getProjection().timeline.filter(item => item.type === "assistant").at(-1)
-      assert.equal(faux.state.callCount, 2)
+      assert.equal(faux.state.callCount, 3)
       assert.equal(failed?.status, "error")
       assert.equal(failed?.stopReason, "error")
     } finally {
