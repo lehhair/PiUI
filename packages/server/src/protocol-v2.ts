@@ -27,7 +27,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r8",
+    revision: "pi-0.81.1-r9",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
