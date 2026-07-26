@@ -536,19 +536,25 @@ describe("native Pi session discovery", () => {
       getWorkerGeneration: () => "generation-1",
       getProjection: () => initialProjection,
       onState: () => () => {},
+      onProjection: (listener: (projection: typeof staleProjection) => void) => {
+        listener(initialProjection)
+        staleTick = listener
+        return () => {}
+      },
       onCrash: (listener: (error: Error) => void) => {
         crashFirst = listener
         return () => {}
       },
-      prompt: async (_text: string, onTick?: (projection: typeof staleProjection) => void) => {
-        staleTick = onTick
-        await promptGate
-      },
+      prompt: async () => { await promptGate },
     } as unknown as PiSessionRuntime
     const second = {
       ...common,
       getWorkerGeneration: () => "generation-2",
       getProjection: () => initialProjection,
+      onProjection: (listener: (projection: typeof staleProjection) => void) => {
+        listener(initialProjection)
+        return () => {}
+      },
       onState: (listener: () => void) => {
         listener()
         secondState = listener

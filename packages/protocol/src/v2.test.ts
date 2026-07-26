@@ -117,6 +117,18 @@ describe("protocol v2 foundation", () => {
   })
 
   it("declares independent R4 control commands", () => {
+    const prompt: CommandRequestV2<"session.prompt"> = {
+      protocolVersion: 2,
+      commandId: "prompt-1",
+      type: "session.prompt",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: {
+        text: "hello",
+        model: { provider: "anthropic", modelId: "claude" },
+        thinkingLevel: "high",
+      },
+    }
     const steer: CommandRequestV2<"session.steer"> = {
       protocolVersion: 2,
       commandId: "steer-1",
@@ -133,7 +145,41 @@ describe("protocol v2 foundation", () => {
       sessionId: "session-1",
       payload: { toolNames: ["read", "bash"] },
     }
+    assert.equal(prompt.payload.thinkingLevel, "high")
     assert.equal(steer.payload.text, "change direction")
     assert.deepEqual(tools.payload.toolNames, ["read", "bash"])
+  })
+
+  it("types native attachments, user bash, export, and reload commands", () => {
+    const prompt: CommandRequestV2<"session.prompt"> = {
+      protocolVersion: 2,
+      commandId: "prompt-image",
+      type: "session.prompt",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: {
+        text: "inspect",
+        attachments: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
+      },
+    }
+    const bash: CommandRequestV2<"session.executeBash"> = {
+      protocolVersion: 2,
+      commandId: "bash-1",
+      type: "session.executeBash",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: { command: "git status", excludeFromContext: true },
+    }
+    const exportJsonl: CommandRequestV2<"session.exportJsonl"> = {
+      protocolVersion: 2,
+      commandId: "export-1",
+      type: "session.exportJsonl",
+      concurrency: "idle-only",
+      sessionId: "session-1",
+      payload: { outputPath: "exports/session.jsonl" },
+    }
+    assert.equal(prompt.payload.attachments?.[0]?.type, "image")
+    assert.equal(bash.payload.excludeFromContext, true)
+    assert.equal(exportJsonl.payload.outputPath, "exports/session.jsonl")
   })
 })

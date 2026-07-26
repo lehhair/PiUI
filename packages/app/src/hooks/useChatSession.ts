@@ -107,7 +107,7 @@ export function useChatSession({
     () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
   )
   const [restoredContent, setRestoredContent] = useState<{ sessionId: string; content: RevertHistoryItem } | null>(null)
-  const pendingPiCommandIds = useRef(new Set<string>())
+  const pendingPiCommands = useRef(new Map<string, RevertHistoryItem>())
 
   useEffect(() => {
     const handleCommandUpdate = (rawEvent: Event) => {
@@ -120,17 +120,17 @@ export function useChatSession({
         inputText?: string
       }>).detail
       if (!routeSessionId || detail?.sessionId !== routeSessionId) return
-      if (!detail.commandId || !pendingPiCommandIds.current.has(detail.commandId)) return
+      if (!detail.commandId || !pendingPiCommands.current.has(detail.commandId)) return
       if (detail.status !== 'completed' && detail.status !== 'failed' && detail.status !== 'cancelled' &&
         detail.status !== 'unknown_after_crash') return
-      pendingPiCommandIds.current.delete(detail.commandId)
+      const pendingDraft = pendingPiCommands.current.get(detail.commandId)
+      pendingPiCommands.current.delete(detail.commandId)
       if (detail.status === 'completed') return
       const type = detail.commandType
-      const text = detail.inputText
-      if ((type === 'session.prompt' || type === 'session.steer' || type === 'session.followUp') && text) {
+      if ((type === 'session.prompt' || type === 'session.steer' || type === 'session.followUp') && pendingDraft) {
         setRestoredContent({
           sessionId: routeSessionId,
-          content: { messageId: detail.commandId ?? `failed-${Date.now()}`, text, attachments: [] },
+          content: pendingDraft,
         })
       }
       if (detail.error?.message) handleError('execute command', new Error(detail.error.message))
@@ -510,9 +510,6 @@ export function useChatSession({
           navigateToSession(sessionId, newSession.directory)
         }
 
-        if (input.attachments.length > 0) {
-          throw new Error('PiUI attachments are not supported yet')
-        }
         const busy = messageStore.getSessionState(sessionId)?.isStreaming === true
         const delivery = busy ? input.options?.delivery : undefined
         if (busy && !delivery) throw new Error('Choose steer or follow-up while the session is running')
@@ -523,16 +520,22 @@ export function useChatSession({
           const { ensurePiEventSocket } = await import('../pi/eventSocket')
           ensurePiEventSocket()
           commandId = globalThis.crypto?.randomUUID?.() ?? `cmd-${Date.now()}-${Math.random().toString(36).slice(2)}`
-          pendingPiCommandIds.current.add(commandId)
+          pendingPiCommands.current.set(commandId, {
+            messageId: commandId,
+            text: input.content,
+            attachments: [...input.attachments],
+          })
           await promptSession(sessionId, input.content, {
             stream: true,
             model: input.model,
+            attachments: input.attachments,
+            thinkingLevel: input.options?.variant,
             deliverAs: delivery,
             commandId,
           })
           return true
         } catch (error) {
-          if (commandId) pendingPiCommandIds.current.delete(commandId)
+          if (commandId) pendingPiCommands.current.delete(commandId)
           if (!busy) {
             messageStore.setStreaming(sessionId, false)
             activeSessionStore.updateStatus(sessionId, { type: 'idle' })

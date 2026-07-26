@@ -141,9 +141,12 @@ describe("session mock snapshot (no LLM)", () => {
 
       const prompted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
         text: "second turn",
+        stream: true,
       })
       assert.equal(prompted.status, 202)
       assert.equal(prompted.data.accepted, true)
+      assert.equal(await waitFor(async () => snapshots.some(item => item.snapshot.session.title === "second turn")), true)
+      assert.equal(snapshots[0]?.snapshot.session.title, "second turn")
       await waitForCommand(port, prompted.data.commandId)
       const completed = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
       const after = completed.data.timeline as { type: string; text?: string }[]
@@ -423,12 +426,71 @@ describe("session mock snapshot (no LLM)", () => {
       const health = await json(port, "GET", "/api/v1/health")
       assert.equal(health.data.protocolV2.capabilities.capabilities["prompt.steer"].enabled, true)
       assert.equal(health.data.protocolV2.capabilities.capabilities["tools.manage"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["prompt.multimodal"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["bash.user"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["session.export"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["resources.reload"].enabled, true)
+      assert.equal(health.data.protocolV2.capabilities.capabilities["extension.commands"].enabled, true)
+      assert.equal(health.data.capabilities.undo, false)
 
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
       const created = await json(port, "POST", "/api/v1/sessions", {
         workspaceId: workspace.data.workspace.id,
       })
       const sessionId = created.data.snapshot.session.id as string
+
+      const prompted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
+        text: "Use native thinking",
+        model: { provider: "fixture", id: "fixture-model" },
+        thinkingLevel: "high",
+        commandId: "r4-native-thinking",
+      })
+      assert.equal(prompted.status, 202)
+      assert.equal(prompted.data.command.request.payload.thinkingLevel, "high")
+      await waitForCommand(port, "r4-native-thinking")
+      const configured = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+      assert.equal(configured.data.runtime.thinkingLevel, "high")
+
+      const imagePrompt = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
+        text: "Inspect image",
+        attachments: [{
+          type: "image",
+          mimeType: "image/png",
+          data: Buffer.from("89504e470d0a1a0a", "hex").toString("base64"),
+        }],
+        commandId: "r5-image",
+      })
+      assert.equal(imagePrompt.status, 202)
+      assert.equal((await waitForCommand(port, "r5-image")).data.command.status, "completed")
+
+      const bash = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/bash`, {
+        command: "git status",
+        excludeFromContext: true,
+        commandId: "r5-bash",
+      })
+      assert.equal(bash.status, 202)
+      const bashCommand = await waitForCommand(port, "r5-bash")
+      assert.deepEqual(bashCommand.data.command.result, {
+        output: "fixture bash: git status",
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+        fullOutputAvailable: false,
+      })
+
+      const exported = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/export-jsonl`, {
+        outputPath: "exports/session.jsonl",
+        commandId: "r5-export",
+      })
+      assert.equal(exported.status, 202)
+      assert.deepEqual((await waitForCommand(port, "r5-export")).data.command.result, {
+        format: "jsonl",
+        path: "exports/session.jsonl",
+      })
+
+      const reloaded = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/reload-resources`, {})
+      assert.equal(reloaded.status, 202)
+      assert.equal((await waitForCommand(port, reloaded.data.commandId)).data.command.status, "completed")
 
       const steered = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/steer`, {
         text: "Correct the parser",

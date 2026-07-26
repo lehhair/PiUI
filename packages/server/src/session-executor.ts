@@ -8,12 +8,18 @@ import type {
 interface CommandEntry {
   record: CommandRecordV2
   promise: Promise<unknown>
+  requestFingerprint: string
 }
 
 export interface SubmittedCommand<T, C extends CommandTypeV2 = CommandTypeV2> {
   record: CommandRecordV2<C>
   promise: Promise<T>
   reused: boolean
+}
+
+export interface SubmitCommandOptions<T, C extends CommandTypeV2> {
+  recordResult?: (result: T) => unknown
+  recordRequest?: (request: CommandRequestV2<C>) => CommandRequestV2<C>
 }
 
 export class SessionExecutor {
@@ -23,14 +29,15 @@ export class SessionExecutor {
 
   constructor(private readonly onUpdate?: (record: CommandRecordV2) => void) {}
 
-  submit<T, C extends CommandTypeV2>(request: CommandRequestV2<C>, run: () => Promise<T>): SubmittedCommand<T, C> {
+  submit<T, C extends CommandTypeV2>(
+    request: CommandRequestV2<C>,
+    run: () => Promise<T>,
+    options?: SubmitCommandOptions<T, C>,
+  ): SubmittedCommand<T, C> {
+    const requestFingerprint = JSON.stringify(request)
     const existing = this.commands.get(request.commandId)
     if (existing) {
-      if (
-        existing.record.request.sessionId !== request.sessionId ||
-        existing.record.request.workspaceId !== request.workspaceId ||
-        existing.record.request.type !== request.type
-      ) {
+      if (existing.requestFingerprint !== requestFingerprint) {
         throw Object.assign(new Error("commandId already used for another command"), { code: "COMMAND_CONFLICT" })
       }
       return {
@@ -41,7 +48,7 @@ export class SessionExecutor {
     }
 
     const record: CommandRecordV2<C> = {
-      request,
+      request: options?.recordRequest?.(request) ?? request,
       status: "accepted",
       submittedAt: new Date().toISOString(),
     }
@@ -64,6 +71,7 @@ export class SessionExecutor {
           const result = await run()
           if ((record as CommandRecordV2).status === "unknown_after_crash") throw runtimeCrashError()
           record.status = "completed"
+          if (options?.recordResult) record.result = options.recordResult(result)
           record.completedAt = new Date().toISOString()
           this.emit(record)
           return result
@@ -88,7 +96,7 @@ export class SessionExecutor {
         if (this.tails.get(laneId) === tail) this.tails.delete(laneId)
       })
     }
-    this.commands.set(request.commandId, { record, promise })
+    this.commands.set(request.commandId, { record, promise, requestFingerprint })
     this.emit(record)
     return { record, promise, reused: false }
   }
@@ -123,6 +131,7 @@ export class SessionExecutor {
       ...record,
       request: { ...record.request, payload: { ...record.request.payload } },
       error: record.error ? { ...record.error } : undefined,
+      result: record.result,
     })
   }
 }

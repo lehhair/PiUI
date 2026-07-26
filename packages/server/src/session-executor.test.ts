@@ -74,6 +74,13 @@ test("SessionExecutor reuses commandId and records failures", async () => {
   assert.equal(first.promise, duplicate.promise)
   assert.equal(calls, 1)
   assert.equal(executor.get("same")?.status, "completed")
+  assert.throws(
+    () => executor.submit(
+      request("same", "a", "session.prompt", "idle-only", { text: "different" }),
+      async () => ++calls,
+    ),
+    /commandId already used/,
+  )
 
   const failed = executor.submit(
     request("failed", "a", "session.compact", "idle-only", {}),
@@ -81,6 +88,17 @@ test("SessionExecutor reuses commandId and records failures", async () => {
   )
   await assert.rejects(failed.promise, /bad/)
   assert.deepEqual(executor.get("failed")?.error, { code: "INVALID_REQUEST", message: "bad" })
+})
+
+test("SessionExecutor records selected command results", async () => {
+  const executor = new SessionExecutor()
+  const command = executor.submit(
+    request("result", "a", "session.executeBash", "idle-only", { command: "pwd" }),
+    async () => ({ output: "workspace", secret: "hidden" }),
+    { recordResult: result => ({ output: result.output }) },
+  )
+  await command.promise
+  assert.deepEqual(executor.get("result")?.result, { output: "workspace" })
 })
 
 test("SessionExecutor emits immutable command status updates", async () => {

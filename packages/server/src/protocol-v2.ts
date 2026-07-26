@@ -27,7 +27,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r4",
+    revision: "pi-0.81.1-r5",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -40,7 +40,16 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
       "session.fork": capability(true, "session"),
       "session.clone": capability(true, "session"),
       "session.import": capability(true, "session"),
+      "session.export": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        html: true,
+        jsonl: true,
+      }),
       "prompt.text": capability(true, "session"),
+      "prompt.multimodal": capability(nativePi, "model", nativePi ? undefined : "Requires the Pi runtime", {
+        maxImages: 4,
+        maxImageBytes: 4.5 * 1024 * 1024,
+        maxTotalImageBytes: 16 * 1024 * 1024,
+      }),
       "prompt.steer": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "prompt.followUp": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "queue.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
@@ -58,7 +67,15 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         auto: true,
         branchSummary: true,
       }),
+      "bash.user": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        excludeFromContext: true,
+        abort: true,
+      }),
       "tools.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "extension.commands": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        interactiveUi: false,
+      }),
+      "resources.reload": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "models.manage": capability(true, "server", undefined, {
         authentication: false,
         extensionProviders: false,

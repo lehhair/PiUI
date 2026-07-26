@@ -18,7 +18,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 4)
+      assert.equal(hello.workerProtocolVersion, 5)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -65,6 +65,17 @@ describe("PiWorkerSession IPC", () => {
       assert.equal(runtime.getTree()[0]?.label, "checkpoint")
       await runtime.setSessionName("Renamed fixture")
       assert.equal(runtime.getSessionName(), "Renamed fixture")
+      await runtime.prompt("image", [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }])
+      assert.deepEqual(await runtime.executeBash("git status", true), {
+        output: "fixture bash: git status",
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+      })
+      await runtime.abortBash()
+      assert.equal(await runtime.exportHtml("/fixture/export.html"), "/fixture/export.html")
+      assert.equal(await runtime.exportJsonl("/fixture/export.jsonl"), "/fixture/export.jsonl")
+      await runtime.reload()
     } finally {
       await runtime.dispose()
     }

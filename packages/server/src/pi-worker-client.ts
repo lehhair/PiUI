@@ -13,6 +13,8 @@ import {
   PI_WORKER_PROTOCOL_VERSION,
   restoreProjection,
   type PiCommandInfo,
+  type PiBashResult,
+  type PiImageInput,
   type PiModelInfo,
   type PiRuntimeUiState,
   type PiSessionInfo,
@@ -332,16 +334,16 @@ export class PiWorkerSession implements PiSessionRuntime {
     return this.applyReplacement(await this.request({ type: "importSession", inputPath, cwdOverride }))
   }
 
-  async prompt(text: string): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "prompt", text })))
+  async prompt(text: string, images?: PiImageInput[]): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "prompt", text, images })))
   }
 
-  async steer(text: string): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "steer", text })))
+  async steer(text: string, images?: PiImageInput[]): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "steer", text, images })))
   }
 
-  async followUp(text: string): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "followUp", text })))
+  async followUp(text: string, images?: PiImageInput[]): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "followUp", text, images })))
   }
 
   async abort(): Promise<{ steering: string[]; followUp: string[] }> {
@@ -349,6 +351,37 @@ export class PiWorkerSession implements PiSessionRuntime {
     if (result.type !== "queue") throw new Error(`unexpected Pi worker result: ${result.type}`)
     this.applySession(result.session)
     return { steering: result.steering, followUp: result.followUp }
+  }
+
+  async executeBash(command: string, excludeFromContext?: boolean): Promise<PiBashResult> {
+    const result = await this.request({ type: "executeBash", command, excludeFromContext })
+    if (result.type !== "bash") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return result.result
+  }
+
+  async abortBash(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "abortBash" })))
+  }
+
+  async exportHtml(outputPath: string): Promise<string> {
+    const result = await this.request({ type: "exportHtml", outputPath })
+    if (result.type !== "export" || result.format !== "html") {
+      throw new Error(`unexpected Pi worker result: ${result.type}`)
+    }
+    return result.path
+  }
+
+  async exportJsonl(outputPath: string): Promise<string> {
+    const result = await this.request({ type: "exportJsonl", outputPath })
+    if (result.type !== "export" || result.format !== "jsonl") {
+      throw new Error(`unexpected Pi worker result: ${result.type}`)
+    }
+    return result.path
+  }
+
+  async reload(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "reload" })))
   }
 
   async listSkills(): Promise<PiSkillInfo[]> {
@@ -611,6 +644,14 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
       return "runtime.retry"
     case "setActiveTools":
       return "runtime.tools"
+    case "executeBash":
+    case "abortBash":
+      return "runtime.bash"
+    case "exportHtml":
+    case "exportJsonl":
+      return "runtime.export"
+    case "reload":
+      return "runtime.reload"
     case "navigateTree":
     case "setLabel":
     case "setSessionName":

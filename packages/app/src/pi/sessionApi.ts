@@ -5,10 +5,12 @@
 
 import type {
   CommandRecordV2,
+  SessionAttachmentV2,
   SessionReplacementResultV1,
   SessionSnapshotV1,
 } from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
+import type { Attachment } from "../features/attachment/types"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
 import { sessionProjectionStore } from "./sessionProjectionStore"
@@ -603,6 +605,43 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   return (await res.json()) as SessionSnapshotV1
 }
 
+export function serializeSessionAttachments(attachments: Attachment[]): SessionAttachmentV2[] {
+  return attachments.flatMap<SessionAttachmentV2>(attachment => {
+    if (attachment.type === "agent" || attachment.type === "command") return []
+
+    if (attachment.type === "folder") {
+      if (!attachment.relativePath) throw new Error(`Attachment path missing: ${attachment.displayName}`)
+      return [{ type: "directory" as const, path: attachment.relativePath }]
+    }
+
+    if (attachment.type === "file" && attachment.relativePath) {
+      return [{ type: "file" as const, path: attachment.relativePath }]
+    }
+
+    const dataUrl = attachment.url?.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/)
+    if (attachment.mime?.startsWith("image/") || dataUrl?.[1].startsWith("image/")) {
+      if (!dataUrl) throw new Error(`Image data missing: ${attachment.displayName}`)
+      return [{
+        type: "image" as const,
+        mimeType: attachment.mime || dataUrl[1],
+        data: dataUrl[2],
+        name: attachment.displayName,
+      }]
+    }
+
+    if (attachment.content !== undefined) {
+      return [{ type: "text" as const, text: attachment.content, name: attachment.displayName }]
+    }
+
+    if (attachment.type === "text" && dataUrl?.[1].startsWith("text/")) {
+      const bytes = Uint8Array.from(atob(dataUrl[2]), character => character.charCodeAt(0))
+      return [{ type: "text" as const, text: new TextDecoder().decode(bytes), name: attachment.displayName }]
+    }
+
+    throw new Error(`Unsupported Pi attachment: ${attachment.displayName}`)
+  })
+}
+
 /** Prompt session. stream=true emits WS snapshots. Real driver may call LLM. */
 export async function promptSession(
   sessionId: string,
@@ -610,6 +649,8 @@ export async function promptSession(
   opts?: {
     stream?: boolean
     model?: { providerID: string; modelID: string }
+    attachments?: Attachment[]
+    thinkingLevel?: string
     deliverAs?: "steer" | "followUp"
     commandId?: string
   },
@@ -626,11 +667,13 @@ export async function promptSession(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         text,
+        attachments: opts?.attachments ? serializeSessionAttachments(opts.attachments) : undefined,
         commandId: opts?.commandId ?? newCommandId(),
         stream: opts?.stream === true,
         model: opts?.model
           ? { provider: opts.model.providerID, id: opts.model.modelID }
           : undefined,
+        thinkingLevel: opts?.thinkingLevel,
       }),
     },
   )

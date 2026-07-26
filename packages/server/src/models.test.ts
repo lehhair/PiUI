@@ -16,4 +16,20 @@ describe("listModelsForUi", () => {
       else process.env.PIUI_DRIVER = prev
     }
   })
+
+  it("returns Pi-native thinking levels with each model", async () => {
+    const result = await listModelsForUi("pi", async () => [{
+      id: "reasoning-model",
+      name: "Reasoning model",
+      providerId: "test",
+      family: "test",
+      contextLimit: 100,
+      outputLimit: 10,
+      supportsReasoning: true,
+      thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"],
+      supportsImages: false,
+    }])
+
+    assert.deepEqual(result.models[0]?.variants, ["off", "minimal", "low", "medium", "high", "xhigh"])
+  })
 })

@@ -1,13 +1,32 @@
 export type CommandConcurrencyV2 = "query" | "idle-only" | "run-control" | "queueable"
 
+export type SessionAttachmentV2 =
+  | { type: "image"; mimeType: string; data: string; name?: string }
+  | { type: "file" | "directory"; path: string }
+  | { type: "text"; text: string; name?: string }
+
+export interface BashCommandResultV2 {
+  output: string
+  exitCode?: number
+  cancelled: boolean
+  truncated: boolean
+  fullOutputAvailable: boolean
+}
+
+export interface SessionExportResultV2 {
+  format: "html" | "jsonl"
+  path: string
+}
+
 export interface CommandPayloadsV2 {
   "session.prompt": {
     text: string
-    attachments?: Array<{ type: "image"; mimeType: string; data: string }>
+    attachments?: SessionAttachmentV2[]
     model?: { provider: string; modelId: string }
+    thinkingLevel?: string
   }
-  "session.steer": { text: string }
-  "session.followUp": { text: string }
+  "session.steer": { text: string; attachments?: SessionAttachmentV2[] }
+  "session.followUp": { text: string; attachments?: SessionAttachmentV2[] }
   "session.abort": Record<string, never>
   "session.setModel": { provider: string; modelId: string }
   "session.setThinkingLevel": { level: string }
@@ -23,6 +42,10 @@ export interface CommandPayloadsV2 {
   }
   "session.clearQueue": Record<string, never>
   "session.setActiveTools": { toolNames: string[] }
+  "session.executeBash": { command: string; excludeFromContext?: boolean }
+  "session.abortBash": Record<string, never>
+  "session.exportHtml": { outputPath?: string }
+  "session.exportJsonl": { outputPath?: string }
   "session.navigateTree": {
     entryId: string
     summarizeAbandonedBranch?: boolean
@@ -67,4 +90,5 @@ export interface CommandRecordV2<T extends CommandTypeV2 = CommandTypeV2> {
   startedAt?: string
   completedAt?: string
   error?: { code: string; message: string; retryable?: boolean }
+  result?: unknown
 }

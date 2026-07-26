@@ -4,6 +4,7 @@ import {
   problem,
   type CommandRequestV2,
   type HealthResponseV1,
+  type SessionAttachmentV2,
   type WorkspaceCreateRequestV1,
 } from "@piui/protocol"
 import { listFiles, readFileText, writeFileText } from "./files.ts"
@@ -15,7 +16,7 @@ import { bindEventHub, EventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode, type DriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
-import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
+import { MAX_JSON_BODY_BYTES, MAX_PROMPT_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
 import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
 import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
@@ -60,13 +61,13 @@ function sendProblem(
   sendJson(res, status, problem(code, message))
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): Promise<string> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     const chunk = c as Buffer
     size += chunk.length
-    if (size > MAX_JSON_BODY_BYTES) throw Object.assign(new Error("request body too large"), { code: "BODY_TOO_LARGE" })
+    if (size > maxBytes) throw Object.assign(new Error("request body too large"), { code: "BODY_TOO_LARGE" })
     chunks.push(chunk)
   }
   return Buffer.concat(chunks).toString("utf8")
@@ -75,6 +76,12 @@ async function readBody(req: IncomingMessage): Promise<string> {
 function parseUrl(req: IncomingMessage) {
   const host = req.headers.host ?? "127.0.0.1"
   return new URL(req.url ?? "/", `http://${host}`)
+}
+
+function redactAttachmentData(attachments: SessionAttachmentV2[] | undefined): SessionAttachmentV2[] | undefined {
+  return attachments?.map(attachment => attachment.type === "image"
+    ? { ...attachment, data: `<redacted:${attachment.data.length}>` }
+    : attachment)
 }
 
 export interface CreateAppServerOptions {
@@ -175,7 +182,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             pty: false,
             share: false,
             fork: true,
-            undo: true,
+            undo: false,
             fileWrite: true,
             gitDiff: true,
             sessionRename: true,
@@ -286,11 +293,13 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "POST" && sessionPrompt) {
         const id = decodeURIComponent(sessionPrompt[1])
         const operation = sessionPrompt[2] as "prompt" | "steer" | "follow-up"
-        const raw = await readBody(req)
+        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
         let body: {
           text?: string
           stream?: boolean
           model?: { provider?: string; id?: string }
+          thinkingLevel?: string
+          attachments?: SessionAttachmentV2[]
           commandId?: string
         }
         try {
@@ -298,6 +307,8 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             text?: string
             stream?: boolean
             model?: { provider?: string; id?: string }
+            thinkingLevel?: string
+            attachments?: SessionAttachmentV2[]
             commandId?: string
           }
         } catch {
@@ -322,13 +333,27 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                     model: body.model?.provider && body.model.id
                       ? { provider: body.model.provider, modelId: body.model.id }
                       : undefined,
+                    thinkingLevel: body.thinkingLevel,
+                    attachments: body.attachments,
                   },
                 },
                 () => sessions.prompt(id, body.text ?? "", {
                   stream,
                   model: body.model,
+                  thinkingLevel: body.thinkingLevel,
+                  attachments: body.attachments,
                   onTick: publishSessionSnapshot,
+                  onMetadataChange: session => {
+                    publishSessionSnapshot(session)
+                    publishSessionUpdated(session)
+                  },
                 }),
+                {
+                  recordRequest: request => ({
+                    ...request,
+                    payload: { ...request.payload, attachments: redactAttachmentData(request.payload.attachments) },
+                  }),
+                },
               )
             : operation === "steer"
               ? sessionExecutor.submit(
@@ -338,9 +363,15 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                     type: "session.steer",
                     concurrency: "run-control",
                     sessionId: id,
-                    payload: { text: body.text ?? "" },
+                    payload: { text: body.text ?? "", attachments: body.attachments },
                   },
-                  () => sessions.deliverControl(id, body.text ?? "", "steer"),
+                  () => sessions.deliverControl(id, body.text ?? "", "steer", body.attachments),
+                  {
+                    recordRequest: request => ({
+                      ...request,
+                      payload: { ...request.payload, attachments: redactAttachmentData(request.payload.attachments) },
+                    }),
+                  },
                 )
               : sessionExecutor.submit(
                   {
@@ -349,9 +380,15 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                     type: "session.followUp",
                     concurrency: "run-control",
                     sessionId: id,
-                    payload: { text: body.text ?? "" },
+                    payload: { text: body.text ?? "", attachments: body.attachments },
                   },
-                  () => sessions.deliverControl(id, body.text ?? "", "followUp"),
+                  () => sessions.deliverControl(id, body.text ?? "", "followUp", body.attachments),
+                  {
+                    recordRequest: request => ({
+                      ...request,
+                      payload: { ...request.payload, attachments: redactAttachmentData(request.payload.attachments) },
+                    }),
+                  },
                 )
           void submitted.promise.then(session => {
             publishSessionSnapshot(session)
@@ -399,6 +436,130 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           cleared: result.cleared,
           snapshot: sessions.snapshot(result.session),
         })
+      }
+
+      const sessionBash = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/bash$/)
+      if (method === "POST" && sessionBash) {
+        const id = decodeURIComponent(sessionBash[1])
+        const raw = await readBody(req)
+        let body: { command?: string; excludeFromContext?: boolean; commandId?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.command?.trim()) return sendProblem(res, 400, "INVALID_REQUEST", "command required")
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.executeBash",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { command: body.command, excludeFromContext: body.excludeFromContext === true },
+            },
+            () => sessions.executeBash(id, body.command!, body.excludeFromContext === true),
+            { recordResult: result => result },
+          )
+          void submitted.promise.then(async () => {
+            const session = await sessions.find(id)
+            if (session) publishSessionSnapshot(session)
+          }).catch(() => undefined)
+          return sendJson(res, 202, { commandId, accepted: true, reused: submitted.reused, command: submitted.record })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionAbortBash = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/abort-bash$/)
+      if (method === "POST" && sessionAbortBash) {
+        const id = decodeURIComponent(sessionAbortBash[1])
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.abortBash",
+              concurrency: "run-control",
+              sessionId: id,
+              payload: {},
+            },
+            () => sessions.abortBash(id),
+          )
+          const session = await submitted.promise
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(session) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionExport = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/export-(html|jsonl)$/)
+      if (method === "POST" && sessionExport) {
+        const id = decodeURIComponent(sessionExport[1])
+        const format = sessionExport[2] as "html" | "jsonl"
+        const raw = await readBody(req)
+        let body: { outputPath?: string; commandId?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: format === "html" ? "session.exportHtml" : "session.exportJsonl",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { outputPath: body.outputPath },
+            },
+            () => sessions.exportSession(id, format, body.outputPath),
+            { recordResult: result => result },
+          )
+          void submitted.promise.catch(() => undefined)
+          return sendJson(res, 202, { commandId, accepted: true, reused: submitted.reused, command: submitted.record })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionReload = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/reload-resources$/)
+      if (method === "POST" && sessionReload) {
+        const id = decodeURIComponent(sessionReload[1])
+        try {
+          const session = await sessions.find(id)
+          if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "resources.reload",
+              concurrency: "idle-only",
+              sessionId: id,
+              workspaceId: session.workspaceId,
+              payload: { workspaceId: session.workspaceId },
+            },
+            () => sessions.reloadResources(id),
+          )
+          void submitted.promise.then(updated => {
+            publishSessionSnapshot(updated)
+            eventHub.publishV2(
+              { kind: "workspace", id: updated.workspaceId },
+              "resources.updated",
+              { workspaceId: updated.workspaceId, revision: commandId },
+            )
+          }).catch(() => undefined)
+          return sendJson(res, 202, { commandId, accepted: true, reused: submitted.reused, command: submitted.record })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
       }
 
       const sessionSetModel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-model$/)
@@ -1106,6 +1267,12 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   }
   if (code === "SESSION_RUNTIME_CRASHED") {
     return sendProblem(res, 503, "SESSION_RUNTIME_CRASHED", e instanceof Error ? e.message : String(e))
+  }
+  if (code === "FILE_TOO_LARGE") {
+    return sendProblem(res, 413, "FILE_TOO_LARGE", e instanceof Error ? e.message : String(e))
+  }
+  if (code === "PATH_OUTSIDE_WORKSPACE" || code === "SYMLINK_ESCAPE") {
+    return sendProblem(res, 403, code, e instanceof Error ? e.message : String(e))
   }
   return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
 }

@@ -39,6 +39,9 @@ const workerCapabilities: PiWorkerCapability[] = [
   "runtime.import",
   "runtime.skills",
   "runtime.commands",
+  "runtime.bash",
+  "runtime.export",
+  "runtime.reload",
 ]
 
 function send(message: WorkerMessage): void {
@@ -98,14 +101,14 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "session", session: sessionWire() }
     }
     case "prompt": {
-      await requireRuntime().prompt(command.text)
+      await requireRuntime().prompt(command.text, command.images)
       return { type: "session", session: sessionWire() }
     }
     case "steer":
-      await requireRuntime().steer(command.text)
+      await requireRuntime().steer(command.text, command.images)
       return { type: "session", session: sessionWire() }
     case "followUp":
-      await requireRuntime().followUp(command.text)
+      await requireRuntime().followUp(command.text, command.images)
       return { type: "session", session: sessionWire() }
     case "abort":
       return { type: "queue", ...await requireRuntime().abort(), session: sessionWire() }
@@ -143,6 +146,20 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
     }
     case "setActiveTools":
       await requireRuntime().setActiveTools(command.toolNames)
+      return { type: "session", session: sessionWire() }
+    case "executeBash": {
+      const result = await requireRuntime().executeBash(command.command, command.excludeFromContext)
+      return { type: "bash", result, session: sessionWire() }
+    }
+    case "abortBash":
+      await requireRuntime().abortBash()
+      return { type: "session", session: sessionWire() }
+    case "exportHtml":
+      return { type: "export", format: "html", path: await requireRuntime().exportHtml(command.outputPath) }
+    case "exportJsonl":
+      return { type: "export", format: "jsonl", path: await requireRuntime().exportJsonl(command.outputPath) }
+    case "reload":
+      await requireRuntime().reload()
       return { type: "session", session: sessionWire() }
     case "navigateTree": {
       const result = await requireRuntime().navigateTree(command.entryId, {

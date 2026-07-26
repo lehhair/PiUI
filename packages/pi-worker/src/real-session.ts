@@ -38,7 +38,7 @@ import {
   type ProjectionState,
 } from "./projection.js"
 import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
-import type { PiModelInfo } from "./worker-protocol.js"
+import type { PiBashResult, PiImageInput, PiModelInfo } from "./worker-protocol.js"
 
 export interface PiRuntimeUiState {
   thinkingLevel: string
@@ -81,6 +81,15 @@ export interface PiSessionInfo {
   updatedAt: string
   messageCount: number
   firstMessage: string
+}
+
+function extensionBindings() {
+  return {
+    mode: "rpc" as const,
+    onError: (error: { extensionPath: string; event: string; error: string }) => {
+      console.error(`[piui-worker] extension error (${error.event}) ${error.extensionPath}: ${error.error}`)
+    },
+  }
 }
 
 export interface RealPiSessionOpenOptions {
@@ -248,11 +257,11 @@ export class RealPiSession {
       sessionManager,
     })
 
-    await runtime.session.bindExtensions({})
+    await runtime.session.bindExtensions(extensionBindings())
     const result = new RealPiSession(runtime)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
-      await session.bindExtensions({})
+      await session.bindExtensions(extensionBindings())
       result.bindStateEvents()
     })
     if (projection) result.projection = projection
@@ -279,6 +288,7 @@ export class RealPiSession {
         contextLimit: model.contextWindow ?? 0,
         outputLimit: model.maxTokens ?? 0,
         supportsReasoning: Boolean((model as { reasoning?: boolean }).reasoning),
+        thinkingLevels: supportedThinkingLevels(model),
         supportsImages: Array.isArray(input) && input.includes("image"),
       }
     })
@@ -625,29 +635,87 @@ export class RealPiSession {
     this.emitState()
   }
 
-  async steer(text: string): Promise<void> {
-    if (!this.runtime.session.isStreaming) {
-      throw Object.assign(new Error("Cannot steer an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
-    }
-    await this.runtime.session.steer(text)
-    this.emitState()
-  }
-
-  async followUp(text: string): Promise<void> {
-    if (!this.runtime.session.isStreaming) {
-      throw Object.assign(new Error("Cannot queue a follow-up on an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
-    }
-    await this.runtime.session.followUp(text)
-    this.emitState()
-  }
-
-  async prompt(text: string): Promise<void> {
+  async executeBash(command: string, excludeFromContext = false): Promise<PiBashResult> {
+    const normalized = command.trim()
+    if (!normalized) throw Object.assign(new Error("empty bash command"), { code: "INVALID_REQUEST" })
     try {
-      await this.runtime.session.prompt(text)
+      const eventResult = await this.runtime.session.extensionRunner?.emitUserBash({
+        type: "user_bash",
+        command: normalized,
+        excludeFromContext,
+        cwd: this.runtime.session.sessionManager.getCwd(),
+      })
+      if (eventResult?.result) {
+        this.runtime.session.recordBashResult(normalized, eventResult.result, { excludeFromContext })
+        return eventResult.result
+      }
+      return await this.runtime.session.executeBash(normalized, undefined, {
+        excludeFromContext,
+        operations: eventResult?.operations,
+      })
     } finally {
       this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
       this.emitProjection()
       this.emitState()
+    }
+  }
+
+  abortBash(): void {
+    this.runtime.session.abortBash()
+    this.emitState()
+  }
+
+  exportHtml(outputPath: string): Promise<string> {
+    return this.runtime.session.exportToHtml(outputPath)
+  }
+
+  exportJsonl(outputPath: string): string {
+    return this.runtime.session.exportToJsonl(outputPath)
+  }
+
+  async reload(): Promise<void> {
+    await this.runtime.session.reload()
+    this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    this.emitProjection()
+    this.emitState()
+  }
+
+  async steer(text: string, images?: PiImageInput[]): Promise<void> {
+    if (!this.runtime.session.isStreaming) {
+      throw Object.assign(new Error("Cannot steer an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
+    }
+    this.assertImageSupport(images)
+    await this.runtime.session.steer(text, images)
+    this.emitState()
+  }
+
+  async followUp(text: string, images?: PiImageInput[]): Promise<void> {
+    if (!this.runtime.session.isStreaming) {
+      throw Object.assign(new Error("Cannot queue a follow-up on an idle Pi session"), { code: "SESSION_NOT_RUNNING" })
+    }
+    this.assertImageSupport(images)
+    await this.runtime.session.followUp(text, images)
+    this.emitState()
+  }
+
+  async prompt(text: string, images?: PiImageInput[]): Promise<void> {
+    try {
+      this.assertImageSupport(images)
+      await this.runtime.session.prompt(text, images?.length ? { images } : undefined)
+    } finally {
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitProjection()
+      this.emitState()
+    }
+  }
+
+  private assertImageSupport(images: PiImageInput[] | undefined): void {
+    if (!images?.length) return
+    const model = this.runtime.session.model as { input?: string[] } | undefined
+    if (!model?.input?.includes("image")) {
+      throw Object.assign(new Error("The selected Pi model does not support image input"), {
+        code: "CAPABILITY_DISABLED",
+      })
     }
   }
 
@@ -679,32 +747,30 @@ export class RealPiSession {
   }
 
   listCommands(): PiCommandInfo[] {
-    const out: PiCommandInfo[] = [
-      { name: "compact", description: "Compact session context", source: "builtin" },
-      { name: "new", description: "New session", source: "builtin" },
-    ]
-    for (const s of this.listSkills()) {
-      out.push({
-        name: `skill:${s.name}`,
-        description: s.description ?? `Skill ${s.name}`,
-        source: "skill",
-      })
-    }
-    try {
-      const loader = this.runtime.session.resourceLoader as unknown as {
-        promptTemplates?: Array<{ name: string; description?: string }>
-        getPromptTemplates?: () => Array<{ name: string; description?: string }>
-      }
-      const templates = loader.getPromptTemplates?.() ?? loader.promptTemplates ?? []
-      for (const t of templates) {
+    const out: PiCommandInfo[] = []
+    const runner = this.runtime.session.extensionRunner
+    if (runner) {
+      for (const command of runner.getRegisteredCommands()) {
         out.push({
-          name: t.name,
-          description: t.description ?? `Prompt ${t.name}`,
-          source: "prompt",
+          name: command.invocationName,
+          description: command.description,
+          source: "extension",
         })
       }
-    } catch {
-      /* */
+    }
+    for (const template of this.runtime.session.promptTemplates) {
+      out.push({
+        name: template.name,
+        description: template.description,
+        source: "prompt",
+      })
+    }
+    for (const skill of this.listSkills()) {
+      out.push({
+        name: `skill:${skill.name}`,
+        description: skill.description,
+        source: "skill",
+      })
     }
     return out
   }
@@ -845,6 +911,18 @@ function sessionInfo(info: {
 function pathKey(value: string): string {
   const resolved = path.resolve(value)
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+function supportedThinkingLevels(model: {
+  reasoning?: boolean
+  thinkingLevelMap?: Partial<Record<string, unknown | null>>
+}): string[] {
+  if (!model.reasoning) return ["off"]
+  return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(level => {
+    const mapped = model.thinkingLevelMap?.[level]
+    if (mapped === null) return false
+    return level !== "xhigh" && level !== "max" || mapped !== undefined
+  })
 }
 
 function mapCompactionResult(result: {
