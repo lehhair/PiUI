@@ -56,6 +56,31 @@ describe("createWorkerCommandScheduler", () => {
     await prompt
   })
 
+  it("queues a user message that starts its own turn and lets queued delivery through", async () => {
+    const gate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async ({ command }) => {
+      started.push(command.type)
+      if (command.type === "prompt") await gate.promise
+      return { type: "ok" }
+    })
+
+    const prompt = schedule(request({ type: "prompt", text: "hello" }))
+    await Promise.resolve()
+    // Queued delivery joins the running turn.
+    await schedule(request({ type: "sendUserMessage", text: "steered", deliverAs: "steer" }))
+    assert.deepEqual(started, ["prompt", "sendUserMessage"])
+
+    // Without deliverAs it would start a second turn, so it must wait.
+    const standalone = schedule(request({ type: "sendUserMessage", text: "later" }))
+    await Promise.resolve()
+    assert.deepEqual(started, ["prompt", "sendUserMessage"])
+
+    gate.resolve()
+    await Promise.all([prompt, standalone])
+    assert.deepEqual(started, ["prompt", "sendUserMessage", "sendUserMessage"])
+  })
+
   it("continues after a command fails", async () => {
     const started: string[] = []
     const schedule = createWorkerCommandScheduler(async ({ command }) => {

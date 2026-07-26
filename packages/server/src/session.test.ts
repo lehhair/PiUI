@@ -640,13 +640,16 @@ describe("session mock snapshot (no LLM)", () => {
       const userMessage = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/send-user-message`, {
         text: "from sendUserMessage",
       })
-      assert.equal(userMessage.status, 200, JSON.stringify(userMessage.data))
-      assert.equal(
-        userMessage.data.snapshot.timeline.some(
-          item => item.type === "user" && item.text === "from sendUserMessage",
-        ),
-        true,
-      )
+      assert.equal(userMessage.status, 202, JSON.stringify(userMessage.data))
+      assert.equal(userMessage.data.accepted, true)
+      const delivered = await waitFor(async () => {
+        const current = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+        return current.data.timeline.some(
+          (item: { type?: string; text?: string }) =>
+            item.type === "user" && item.text === "from sendUserMessage",
+        )
+      })
+      assert.equal(delivered, true)
       const badDeliver = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/send-user-message`, {
         text: "x",
         deliverAs: "nextTurn",
@@ -662,6 +665,11 @@ describe("session mock snapshot (no LLM)", () => {
       const settings = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/pi-settings`)
       assert.equal(settings.status, 200)
       assert.equal(settings.data.workspacePath, root)
+      // Raw scope objects must not cross the worker boundary; only key names do.
+      assert.equal(settings.data.global, undefined)
+      assert.equal(settings.data.project, undefined)
+      assert.deepEqual(settings.data.globalKeys, [])
+      assert.deepEqual(settings.data.projectKeys, [])
       const patched = await json(port, "PATCH", `/api/v1/workspaces/${workspaceId}/pi-settings`, {
         defaultThinkingLevel: "high",
       })

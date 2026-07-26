@@ -1,8 +1,10 @@
 export interface PiSettingsSnapshotV1 {
   workspacePath: string
   projectTrusted: boolean
-  global: unknown
-  project: unknown
+  /** Key names present in each scope. Values stay inside the worker because
+   *  Pi preserves unknown user-authored keys that may hold credentials. */
+  globalKeys: string[]
+  projectKeys: string[]
   effective: Record<string, unknown>
   errors: Array<{ scope: "global" | "project"; message: string }>
 }

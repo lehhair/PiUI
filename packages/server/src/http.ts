@@ -1051,6 +1051,8 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               payload: { command: body.command, excludeFromContext: body.excludeFromContext === true },
             },
             () => sessions.executeBash(id, body.command!, body.excludeFromContext === true),
+            // The record is the only delivery channel for excludeFromContext
+            // runs, so the output has to stay; retention is bounded instead.
             { recordResult: result => result },
           )
           void submitted.promise.then(async () => {
@@ -1406,8 +1408,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             {
               protocolVersion: 2,
               commandId,
+              // Queued delivery joins a running turn; otherwise it starts one.
+              concurrency: body.deliverAs ? "run-control" : "idle-only",
               type: "session.sendUserMessage",
-              concurrency: "run-control",
               sessionId: id,
               payload: { text: body.text, deliverAs: body.deliverAs, attachments: body.attachments },
             },
@@ -1422,10 +1425,16 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               }),
             },
           )
-          const s = await submitted.promise
-          publishSessionSnapshot(s)
-          publishSessionUpdated(s)
-          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(s) })
+          void submitted.promise.then(session => {
+            publishSessionSnapshot(session)
+            publishSessionUpdated(session)
+          }).catch(() => undefined)
+          return sendJson(res, 202, {
+            commandId,
+            accepted: true,
+            reused: submitted.reused,
+            command: submitted.record,
+          })
         } catch (e) {
           return handleSessionCmdError(res, e)
         }
@@ -2140,6 +2149,23 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   }
   if (code === "PATH_OUTSIDE_WORKSPACE" || code === "SYMLINK_ESCAPE") {
     return sendProblem(res, 403, code, e instanceof Error ? e.message : String(e))
+  }
+  if (code === "COMMAND_ALREADY_ACCEPTED" || code === "SESSION_CONFLICT") {
+    return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))
+  }
+  if (code === "CAPABILITY_DISABLED" || code === "MODEL_NOT_AVAILABLE" || code === "SESSION_NOT_RUNNING") {
+    return sendProblem(res, 409, code === "SESSION_NOT_RUNNING" ? "SESSION_CONFLICT" : code,
+      e instanceof Error ? e.message : String(e))
+  }
+  if (code === "DRIVER_UNAVAILABLE") {
+    return sendProblem(res, 503, code, e instanceof Error ? e.message : String(e))
+  }
+  if (
+    code === "INTERNAL" ||
+    code === "SESSION_REPLACEMENT_COMMIT_FAILED" ||
+    code === "SESSION_REPLACEMENT_FILE_CONFLICT"
+  ) {
+    return sendProblem(res, 500, "INTERNAL", e instanceof Error ? e.message : String(e))
   }
   return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
 }

@@ -202,8 +202,11 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
   return {
     workspacePath: cwd,
     projectTrusted: trusted,
-    global: manager.getGlobalSettings(),
-    project: manager.getProjectSettings(),
+    // Raw scope objects preserve unknown user-authored keys, which may hold
+    // credentials. Only the key names cross the worker boundary; the resolved
+    // values below come from typed SDK getters.
+    globalKeys: settingsKeys(manager.getGlobalSettings()),
+    projectKeys: settingsKeys(manager.getProjectSettings()),
     effective: {
       lastChangelogVersion: manager.getLastChangelogVersion(),
       sessionDir: manager.getSessionDir(),
@@ -257,6 +260,11 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
     },
     errors: manager.drainErrors().map(error => ({ scope: error.scope, message: error.error.message })),
   }
+}
+
+function settingsKeys(settings: unknown): string[] {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return []
+  return Object.keys(settings as Record<string, unknown>).sort()
 }
 
 function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1): void {
@@ -404,7 +412,7 @@ export class RealPiSession {
   private bindStateEvents(): void {
     this.stateUnsub?.()
     this.stateUnsub = this.runtime.session.subscribe(event => {
-      const nativeEvent = toJsonValue(event)
+      const nativeEvent = sanitizeNativeEvent(event)
       for (const listener of this.nativeEventListeners) listener(nativeEvent)
       let projectionChanged = false
       for (const workerEvent of mapPiEventToWorker(event, this)) {
@@ -501,6 +509,18 @@ export class RealPiSession {
     this.stateUnsub = null
   }
 
+  /** Shadow state tracks one session; a replacement must not inherit it. */
+  private resetSessionShadowState(): void {
+    this.isCompactingFlag = false
+    this.retryState = { phase: "idle", autoEnabled: this.runtime.session.autoRetryEnabled }
+    this.compactionState = {
+      autoEnabled: this.runtime.session.autoCompactionEnabled,
+      operation: { type: "none" },
+    }
+    this.lastUserId = null
+    this.currentAsstId = null
+  }
+
   static async open(
     cwd: string,
     sessionFile?: string,
@@ -527,6 +547,7 @@ export class RealPiSession {
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
       result.extensionUi.cancelAll("session_replaced")
+      result.resetSessionShadowState()
       if (result.extensionsInitialized) {
         await session.bindExtensions(extensionBindings(
           result.extensionUi.context,
@@ -1470,6 +1491,30 @@ function mapSessionEntry(entry: SessionEntry): PiSessionEntryV1 {
     case "session_info":
       return { ...base, type: entry.type, name: entry.name }
   }
+}
+
+/**
+ * Lifecycle metadata that is safe to broadcast for a native Pi event. Tool
+ * arguments, tool results and message content are deliberately excluded: they
+ * can carry file contents, environment values or credentials. Clients receive
+ * that data through the projected timeline, which maps explicit DTOs.
+ */
+const NATIVE_EVENT_METADATA_KEYS = new Set([
+  "turnIndex", "toolCallId", "toolName", "attempt", "maxAttempts", "delayMs",
+  "reason", "success", "aborted", "isError", "errorMessage", "finalError",
+  "entryId", "messageId", "role", "stopReason", "phase", "targetEntryId",
+  "durationMs", "index", "count",
+])
+
+function sanitizeNativeEvent(event: { type: string; [k: string]: unknown }): unknown {
+  const safe: Record<string, unknown> = { type: event.type }
+  for (const [key, value] of Object.entries(event)) {
+    if (key === "type" || !NATIVE_EVENT_METADATA_KEYS.has(key)) continue
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      safe[key] = value
+    }
+  }
+  return safe
 }
 
 function toJsonValue(value: unknown): unknown {

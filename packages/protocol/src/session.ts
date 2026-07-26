@@ -332,6 +332,13 @@ export function isRuntimeControlStateV1(value: unknown): value is Pick<
   "queue" | "retry" | "compaction" | "tools" | "activeTools"
 > {
   if (!isRecord(value)) return false
+  if (!optionalBoolean(value.isBashRunning) ||
+    !optionalBoolean(value.hasPendingBashMessages) ||
+    !optionalBoolean(value.isRetrying) ||
+    !optionalNonNegativeInteger(value.retryAttempt) ||
+    !optionalNonNegativeInteger(value.pendingMessageCount)) {
+    return false
+  }
   return isQueueStateV1(value.queue) &&
     isRetryStateV1(value.retry) &&
     isCompactionStateV1(value.compaction) &&
@@ -365,4 +372,8 @@ function optionalNonNegativeNumber(value: unknown): boolean {
 
 function optionalNonNegativeInteger(value: unknown): boolean {
   return value === undefined || isNonNegativeInteger(value)
+}
+
+function optionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean"
 }

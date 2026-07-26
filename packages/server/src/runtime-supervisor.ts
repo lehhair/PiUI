@@ -239,6 +239,11 @@ export class RuntimeSupervisor {
       this.standby.dispose(),
       ...pendingOpens,
     ])
+    // An open that resolved after the sweep above registers itself in `active`,
+    // so clean up anything that appeared while we were waiting.
+    if (this.active.size > 0) {
+      await Promise.allSettled([...this.active].map(runtime => runtime.dispose()))
+    }
     this.active.clear()
     this.opening.clear()
     this.pendingOpens.clear()

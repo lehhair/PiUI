@@ -156,8 +156,8 @@ process.on("message", request => {
       settings: {
         workspacePath: command.cwd,
         projectTrusted: true,
-        global: {},
-        project: {},
+        globalKeys: [],
+        projectKeys: [],
         effective: command.type === "patchSettings" ? command.patch : {},
         errors: [],
       },
