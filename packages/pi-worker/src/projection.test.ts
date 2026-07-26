@@ -36,7 +36,11 @@ describe("projectEntries", () => {
           role: "toolResult",
           toolCallId: "tc1",
           toolName: "read",
-          result: "export const x = 1",
+          result: [
+            { type: "text", text: "export const x = 1" },
+            { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+          ],
+          details: { patch: "@@ -1 +1 @@", cwd: "/workspace", exitCode: 0 },
         },
       },
     ]
@@ -52,6 +56,11 @@ describe("projectEntries", () => {
     if (tool.output?.[0]?.type === "text") {
       assert.match(tool.output[0].text, /export const x/)
     }
+    assert.equal(tool.output?.[1]?.type, "image")
+    assert.equal(tool.normalized?.patch, "@@ -1 +1 @@")
+    assert.equal(tool.normalized?.cwd, "/workspace")
+    assert.equal(tool.normalized?.exitCode, 0)
+    assert.deepEqual(tool.nativeDetails, { patch: "@@ -1 +1 @@", cwd: "/workspace", exitCode: 0 })
   })
 
   it("preserves native Pi assistant identity and completion state", () => {

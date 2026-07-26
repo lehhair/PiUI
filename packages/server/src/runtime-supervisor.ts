@@ -1,4 +1,16 @@
 import { getPiWorkerEntryUrl, type PiModelInfo, type PiSessionInfo } from "@piui/pi-worker"
+import type {
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ProviderAuthEventV1,
+  ProviderAuthInfoV1,
+  ConfiguredPackageV1,
+  PackageProgressV1,
+  ResolvedPackageResourcesV1,
+  PackageUpdateV1,
+  PiModelRuntimeSnapshotV1,
+} from "@piui/protocol"
 import {
   PiWorkerSession,
   type PiWorkerCatalog,
@@ -23,6 +35,8 @@ export class RuntimeSupervisor {
   private readonly workerOptions?: PiWorkerClientOptions
   private readonly leases: RuntimeLeaseManager
   private catalog?: PiWorkerCatalog
+  private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
+  private readonly packageProgressListeners = new Set<(event: PackageProgressV1) => void>()
   private standby: PiWorkerHost
   private readonly active = new Set<PiWorkerSession>()
   private readonly opening = new Set<PiWorkerHost>()
@@ -38,15 +52,125 @@ export class RuntimeSupervisor {
   }
 
   list(cwd: string): Promise<PiSessionInfo[]> {
-    return this.runCatalog(catalog => catalog.list(cwd))
+    return this.runCatalog(catalog => catalog.list(cwd), { retry: true })
   }
 
   listAll(): Promise<PiSessionInfo[]> {
-    return this.runCatalog(catalog => catalog.listAll())
+    return this.runCatalog(catalog => catalog.listAll(), { retry: true })
   }
 
   listModels(): Promise<PiModelInfo[]> {
-    return this.runCatalog(catalog => catalog.listModels())
+    return this.runCatalog(catalog => catalog.listModels(), { retry: true })
+  }
+
+  getSettings(cwd: string): Promise<PiSettingsSnapshotV1> {
+    return this.runCatalog(catalog => catalog.getSettings(cwd), { retry: true })
+  }
+
+  patchSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+    return this.runCatalog(catalog => catalog.patchSettings(cwd, patch))
+  }
+
+  getProjectTrust(cwd: string): Promise<ProjectTrustV1> {
+    return this.runCatalog(catalog => catalog.getProjectTrust(cwd), { retry: true })
+  }
+
+  setProjectTrust(cwd: string, decision: boolean | null): Promise<ProjectTrustV1> {
+    return this.runCatalog(catalog => catalog.setProjectTrust(cwd, decision))
+  }
+
+  listProviders(): Promise<ProviderAuthInfoV1[]> {
+    return this.runCatalog(catalog => catalog.listProviders(), { retry: true })
+  }
+
+  startProviderAuth(providerId: string, authType: "api_key" | "oauth"): Promise<string> {
+    return this.runCatalog(catalog => catalog.startProviderAuth(providerId, authType))
+  }
+
+  respondProviderAuth(flowId: string, promptId: string, value: string): Promise<void> {
+    return this.runCatalog(catalog => catalog.respondProviderAuth(flowId, promptId, value))
+  }
+
+  cancelProviderAuth(flowId: string): Promise<void> {
+    return this.runCatalog(catalog => catalog.cancelProviderAuth(flowId))
+  }
+
+  logoutProvider(providerId: string): Promise<void> {
+    return this.runCatalog(catalog => catalog.logoutProvider(providerId))
+  }
+
+  inspectModelRuntime(): Promise<PiModelRuntimeSnapshotV1> {
+    return this.runCatalog(catalog => catalog.inspectModelRuntime(), { retry: true })
+  }
+
+  setRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
+    return this.runCatalog(catalog => catalog.setRuntimeApiKey(providerId, apiKey))
+  }
+
+  removeRuntimeApiKey(providerId: string): Promise<void> {
+    return this.runCatalog(catalog => catalog.removeRuntimeApiKey(providerId))
+  }
+
+  reloadModelRuntime(): Promise<void> {
+    return this.runCatalog(catalog => catalog.reloadModelRuntime())
+  }
+
+  refreshModelRuntime(options?: Record<string, unknown>): Promise<unknown> {
+    return this.runCatalog(catalog => catalog.refreshModelRuntime(options))
+  }
+
+  onProviderAuth(listener: (event: ProviderAuthEventV1) => void): () => void {
+    this.providerAuthListeners.add(listener)
+    return () => this.providerAuthListeners.delete(listener)
+  }
+
+  listPackages(cwd: string): Promise<ConfiguredPackageV1[]> {
+    return this.runCatalog(catalog => catalog.listPackages(cwd), { retry: true })
+  }
+
+  managePackage(
+    cwd: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source?: string,
+    local?: boolean,
+    persist?: boolean,
+  ): Promise<ConfiguredPackageV1[]> {
+    return this.runCatalog(catalog => catalog.managePackage(cwd, commandId, action, source, local, persist))
+  }
+
+  resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
+    return this.runCatalog(catalog => catalog.resolvePackages(cwd, missingAction))
+  }
+
+  resolveExtensionSources(
+    cwd: string,
+    sources: string[],
+    options?: { local?: boolean; temporary?: boolean },
+  ): Promise<ResolvedPackageResourcesV1> {
+    return this.runCatalog(catalog => catalog.resolveExtensionSources(cwd, sources, options))
+  }
+
+  changePackageSource(
+    cwd: string,
+    source: string,
+    operation: "add" | "remove",
+    local?: boolean,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
+    return this.runCatalog(catalog => catalog.changePackageSource(cwd, source, operation, local))
+  }
+
+  getInstalledPackagePath(cwd: string, source: string, scope: "user" | "project"): Promise<string | undefined> {
+    return this.runCatalog(catalog => catalog.getInstalledPackagePath(cwd, source, scope), { retry: true })
+  }
+
+  checkPackageUpdates(cwd: string): Promise<PackageUpdateV1[]> {
+    return this.runCatalog(catalog => catalog.checkPackageUpdates(cwd), { retry: true })
+  }
+
+  onPackageProgress(listener: (event: PackageProgressV1) => void): () => void {
+    this.packageProgressListeners.add(listener)
+    return () => this.packageProgressListeners.delete(listener)
   }
 
   open(cwd: string, sessionFile?: string): Promise<PiWorkerSession> {
@@ -132,16 +256,31 @@ export class RuntimeSupervisor {
       if (this.catalog === catalog) this.catalog = undefined
       void catalog.dispose()
     })
+    catalog.onProviderAuth(event => {
+      for (const listener of this.providerAuthListeners) listener(event)
+    })
+    catalog.onPackageProgress(event => {
+      for (const listener of this.packageProgressListeners) listener(event)
+    })
     return catalog
   }
 
-  private async runCatalog<T>(run: (catalog: PiWorkerCatalog) => Promise<T>): Promise<T> {
+  private async runCatalog<T>(
+    run: (catalog: PiWorkerCatalog) => Promise<T>,
+    options: { retry?: boolean } = {},
+  ): Promise<T> {
     if (this.disposed) throw new Error("Runtime supervisor is disposed")
     const catalog = this.catalog ?? (this.catalog = this.createCatalog())
     try {
       return await run(catalog)
     } catch (error) {
       if (this.disposed || this.catalog === catalog) throw error
+      if (!options.retry) {
+        throw Object.assign(
+          new Error("Pi catalog worker crashed before confirming the command result", { cause: error }),
+          { code: "WORKER_RESULT_UNKNOWN" },
+        )
+      }
       const replacement = this.catalog ?? (this.catalog = this.createCatalog())
       return run(replacement)
     }

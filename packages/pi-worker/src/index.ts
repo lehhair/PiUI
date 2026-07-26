@@ -3,6 +3,7 @@ export * from "./projection.js"
 export * from "./mock-runtime.js"
 export * from "./runtime-contract.js"
 export * from "./worker-protocol.js"
+export type { PiExtensionUiEvent } from "./extension-ui-bridge.js"
 export type {
   PiCommandInfo,
   PiRuntimeUiState,

@@ -1,12 +1,28 @@
 import type {
   CompactionCommandResultV1,
+  ExtensionUiDialogResponseV1,
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ProviderAuthEventV1,
+  ProviderAuthInfoV1,
+  ConfiguredPackageV1,
+  CustomMessageContentV1,
+  PackageProgressV1,
   PiNavigationResultV1,
+  PiResourceSnapshotV1,
+  PiResourceExtensionPathsV1,
+  PiRuntimeInspectionV1,
+  ResolvedPackageResourcesV1,
+  PackageUpdateV1,
+  PiModelRuntimeSnapshotV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
   TimelineItemV1,
 } from "@piui/protocol"
+import type { PiExtensionUiEvent } from "./extension-ui-bridge.js"
 import type { PiCommandInfo, PiRuntimeUiState, PiSessionInfo, PiSkillInfo } from "./real-session.js"
 
 export interface ProjectionWire {
@@ -52,7 +68,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 5 as const
+export const PI_WORKER_PROTOCOL_VERSION = 7 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -75,6 +91,11 @@ export type PiWorkerCapability =
   | "runtime.bash"
   | "runtime.export"
   | "runtime.reload"
+  | "runtime.extensionUi"
+  | "management.settings"
+  | "management.trust"
+  | "management.auth"
+  | "management.packages"
 
 export interface WorkerHello {
   kind: "hello"
@@ -110,11 +131,63 @@ export type WorkerCommand =
     }
   | { type: "clearQueue" }
   | { type: "setActiveTools"; toolNames: string[] }
+  | { type: "cycleModel"; direction?: "forward" | "backward" }
+  | { type: "setScopedModels"; patterns: string[] }
+  | { type: "listRuntimeModels" }
+  | {
+      type: "sendCustomMessage"
+      customType: string
+      content: CustomMessageContentV1[]
+      display: boolean
+      details?: unknown
+      triggerTurn?: boolean
+      deliverAs?: "steer" | "followUp" | "nextTurn"
+    }
+  | { type: "appendCustomEntry"; customType: string; data?: unknown }
+  | { type: "waitForIdle" }
+  | { type: "inspectToolDefinition"; toolName: string }
+  | { type: "hasExtensionHandlers"; eventType: string }
+  | { type: "inspectSystemPrompt" }
+  | { type: "inspectRuntime" }
+  | { type: "inspectResources" }
+  | { type: "extendResources"; paths: PiResourceExtensionPathsV1 }
   | { type: "executeBash"; command: string; excludeFromContext?: boolean }
   | { type: "abortBash" }
   | { type: "exportHtml"; outputPath: string }
   | { type: "exportJsonl"; outputPath: string }
   | { type: "reload" }
+  | { type: "initializeExtensions" }
+  | { type: "respondExtensionUi"; requestId: string; response: ExtensionUiDialogResponseV1 }
+  | { type: "setExtensionEditorState"; text: string }
+  | { type: "getSettings"; cwd: string }
+  | { type: "patchSettings"; cwd: string; patch: PiSettingsPatchV1 }
+  | { type: "getProjectTrust"; cwd: string }
+  | { type: "setProjectTrust"; cwd: string; decision: boolean | null }
+  | { type: "listProviders" }
+  | { type: "startProviderAuth"; providerId: string; authType: "api_key" | "oauth" }
+  | { type: "respondProviderAuth"; flowId: string; promptId: string; value: string }
+  | { type: "cancelProviderAuth"; flowId: string }
+  | { type: "logoutProvider"; providerId: string }
+  | { type: "inspectModelRuntime" }
+  | { type: "setRuntimeApiKey"; providerId: string; apiKey: string }
+  | { type: "removeRuntimeApiKey"; providerId: string }
+  | { type: "reloadModelRuntime" }
+  | { type: "refreshModelRuntime"; options?: Record<string, unknown> }
+  | { type: "listPackages"; cwd: string }
+  | {
+      type: "managePackage"
+      cwd: string
+      commandId: string
+      action: "install" | "remove" | "update"
+      source?: string
+      local?: boolean
+      persist?: boolean
+    }
+  | { type: "resolvePackages"; cwd: string; missingAction?: "skip" | "error" }
+  | { type: "resolveExtensionSources"; cwd: string; sources: string[]; local?: boolean; temporary?: boolean }
+  | { type: "changePackageSource"; cwd: string; source: string; operation: "add" | "remove"; local?: boolean }
+  | { type: "getInstalledPackagePath"; cwd: string; source: string; scope: "user" | "project" }
+  | { type: "checkPackageUpdates"; cwd: string }
   | {
       type: "navigateTree"
       entryId: string
@@ -127,6 +200,8 @@ export type WorkerCommand =
   | { type: "setSessionName"; name: string }
   | { type: "fork"; entryId: string; position: "before" | "at" }
   | { type: "clone"; entryId?: string }
+  | { type: "newSession"; parentSession?: string }
+  | { type: "switchSession"; sessionPath: string; cwdOverride?: string }
   | { type: "importSession"; inputPath: string; cwdOverride?: string }
   | { type: "listSkills" }
   | { type: "listCommands" }
@@ -136,6 +211,7 @@ export interface WorkerRequest {
   kind: "request"
   id: string
   generation: string
+  sessionId?: string
   command: WorkerCommand
 }
 
@@ -147,6 +223,23 @@ export type WorkerResult =
   | { type: "commands"; commands: PiCommandInfo[] }
   | { type: "bash"; result: PiBashResult; session: WorkerSessionWire }
   | { type: "export"; format: "html" | "jsonl"; path: string }
+  | { type: "scopedModels"; diagnostics: Array<{ message: string; pattern: string }>; session: WorkerSessionWire }
+  | { type: "settings"; settings: PiSettingsSnapshotV1 }
+  | { type: "trust"; trust: ProjectTrustV1 }
+  | { type: "providers"; providers: ProviderAuthInfoV1[] }
+  | { type: "authFlow"; flowId: string }
+  | { type: "modelRuntime"; runtime: PiModelRuntimeSnapshotV1 }
+  | { type: "modelRefresh"; result: unknown }
+  | { type: "packages"; packages: ConfiguredPackageV1[] }
+  | { type: "packageResources"; resources: ResolvedPackageResourcesV1 }
+  | { type: "packageSource"; changed: boolean; packages: ConfiguredPackageV1[] }
+  | { type: "packagePath"; path?: string }
+  | { type: "packageUpdates"; updates: PackageUpdateV1[] }
+  | { type: "text"; text: string }
+  | { type: "data"; data?: unknown }
+  | { type: "boolean"; value: boolean }
+  | { type: "runtimeInspection"; inspection: PiRuntimeInspectionV1 }
+  | { type: "resources"; resources: PiResourceSnapshotV1 }
   | ({ type: "navigation"; session: WorkerSessionWire } & PiNavigationResultV1)
   | { type: "compaction"; compaction: CompactionCommandResultV1; session: WorkerSessionWire }
   | { type: "queue"; steering: string[]; followUp: string[]; session: WorkerSessionWire }
@@ -161,6 +254,11 @@ export type WorkerIpcEvent =
   | { kind: "event"; generation: string; type: "projection"; projection: ProjectionWire }
   | { kind: "event"; generation: string; type: "projectionDelta"; projection: ProjectionWire }
   | { kind: "event"; generation: string; type: "state"; state: PiRuntimeUiState }
+  | { kind: "event"; generation: string; type: "nativeEvent"; event: unknown }
+  | { kind: "event"; generation: string; type: "resourcesChanged" }
+  | { kind: "event"; generation: string; type: "extensionUi"; event: PiExtensionUiEvent }
+  | { kind: "event"; generation: string; type: "providerAuth"; event: ProviderAuthEventV1 }
+  | { kind: "event"; generation: string; type: "packageProgress"; event: PackageProgressV1 }
 
 export interface WorkerHeartbeat {
   kind: "heartbeat"

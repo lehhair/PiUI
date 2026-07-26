@@ -16,6 +16,8 @@ export * from "./git.js"
 export * from "./command.js"
 export * from "./capabilities-v2.js"
 export * from "./events-v2.js"
+export * from "./extension-ui.js"
+export * from "./management.js"
 export * from "./handshake-v2.js"
 export * from "./commands-v2.js"
 

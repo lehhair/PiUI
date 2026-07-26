@@ -276,13 +276,36 @@ describe("RuntimeSupervisor", () => {
   })
 
   it("replaces a crashed catalog worker for later discovery", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-test-"))
+    roots.push(root)
     const supervisor = new RuntimeSupervisor({
       workerEntry: crashingCatalogFixture,
       worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(path.join(root, "locks")),
     })
     try {
       assert.equal((await supervisor.listAll())[0]?.id, "catalog-fixture")
       await new Promise(resolve => setTimeout(resolve, 50))
+      assert.equal((await supervisor.listAll())[0]?.id, "catalog-fixture")
+    } finally {
+      await supervisor.dispose()
+    }
+  })
+
+  it("does not replay catalog mutations after a worker crash", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-test-"))
+    roots.push(root)
+    const supervisor = new RuntimeSupervisor({
+      workerEntry: crashingCatalogFixture,
+      worker: { heartbeatTimeoutMs: 500 },
+      leases: new SessionLeaseManager(path.join(root, "locks")),
+    })
+    try {
+      await assert.rejects(supervisor.patchSettings("/fixture", {}), (error: { code?: string }) => {
+        assert.equal(error.code, "WORKER_RESULT_UNKNOWN")
+        return true
+      })
+      // Read-only discovery still recovers on a fresh worker afterwards.
       assert.equal((await supervisor.listAll())[0]?.id, "catalog-fixture")
     } finally {
       await supervisor.dispose()

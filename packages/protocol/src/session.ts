@@ -97,7 +97,29 @@ export interface ContextUsageV1 {
   outputTokens?: number
   contextTokens?: number
   contextWindow?: number
+  percent?: number | null
 }
+
+export interface SessionStatsV1 {
+  userMessages: number
+  assistantMessages: number
+  toolCalls: number
+  toolResults: number
+  totalMessages: number
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number }
+  cost: number
+}
+
+export interface ScopedModelV1 {
+  provider: string
+  id: string
+  displayName?: string
+  thinkingLevel?: string
+}
+
+export type CustomMessageContentV1 =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
 
 export interface TextContentV1 {
   type: "text"
@@ -158,6 +180,7 @@ export interface PiSessionEntryBaseV1 {
   id: string
   parentId: string | null
   timestamp: string
+  native?: unknown
 }
 
 export type PiSessionEntryV1 =
@@ -229,6 +252,8 @@ export interface SessionSnapshotV1 {
     retry: RetryStateV1
     compaction: CompactionStateV1
     contextUsage?: ContextUsageV1
+    sessionStats?: SessionStatsV1
+    scopedModels?: ScopedModelV1[]
     tools: PiToolInfoV1[]
     activeTools: string[]
     workerGeneration?: string

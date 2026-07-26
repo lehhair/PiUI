@@ -23,7 +23,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 5,
+  workerProtocolVersion: 7,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -48,6 +48,11 @@ process.send?.({
     "runtime.bash",
     "runtime.export",
     "runtime.reload",
+    "runtime.extensionUi",
+    "management.settings",
+    "management.trust",
+    "management.auth",
+    "management.packages",
   ],
 })
 
@@ -111,6 +116,16 @@ process.on("message", request => {
     })
     return
   }
+  if (request.sessionId && request.sessionId !== session?.sessionId) {
+    process.send?.({
+      kind: "response",
+      id: request.id,
+      generation,
+      ok: false,
+      error: { code: "RUNTIME_REPLACED", message: "runtime session mismatch" },
+    })
+    return
+  }
   const command = request.command
   let result
   if (command.type === "list" || command.type === "listAll") {
@@ -128,8 +143,58 @@ process.on("message", request => {
         firstMessage: "",
       }],
     }
-  } else if (command.type === "listModels") {
+  } else if (command.type === "listModels" || command.type === "listRuntimeModels") {
     result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, thinkingLevels: ["off"], supportsImages: false }] }
+  } else if (command.type === "getSettings" || command.type === "patchSettings") {
+    result = {
+      type: "settings",
+      settings: {
+        workspacePath: command.cwd,
+        projectTrusted: true,
+        global: {},
+        project: {},
+        effective: command.type === "patchSettings" ? command.patch : {},
+        errors: [],
+      },
+    }
+  } else if (command.type === "getProjectTrust" || command.type === "setProjectTrust") {
+    const decision = command.type === "setProjectTrust" ? command.decision : null
+    result = {
+      type: "trust",
+      trust: {
+        workspacePath: command.cwd,
+        required: false,
+        decision,
+        defaultDecision: "ask",
+        trusted: decision ?? true,
+      },
+    }
+  } else if (command.type === "listProviders") {
+    result = { type: "providers", providers: [] }
+  } else if (command.type === "startProviderAuth") {
+    result = { type: "authFlow", flowId: "fixture-auth-flow" }
+  } else if (command.type === "inspectModelRuntime") {
+    result = {
+      type: "modelRuntime",
+      runtime: {
+        providers: [], models: [], availableModels: [], availableSnapshot: [], credentials: [],
+        registeredProviderIds: [], registeredProviderConfigs: {}, authChecks: {},
+      },
+    }
+  } else if (command.type === "refreshModelRuntime") {
+    result = { type: "modelRefresh", result: { refreshed: true } }
+  } else if (["setRuntimeApiKey", "removeRuntimeApiKey", "reloadModelRuntime"].includes(command.type)) {
+    result = { type: "ok" }
+  } else if (command.type === "listPackages" || command.type === "managePackage") {
+    result = { type: "packages", packages: [] }
+  } else if (command.type === "resolvePackages" || command.type === "resolveExtensionSources") {
+    result = { type: "packageResources", resources: { extensions: [], skills: [], prompts: [], themes: [] } }
+  } else if (command.type === "changePackageSource") {
+    result = { type: "packageSource", changed: true, packages: [] }
+  } else if (command.type === "getInstalledPackagePath") {
+    result = { type: "packagePath", path: "/fixture/package" }
+  } else if (command.type === "checkPackageUpdates") {
+    result = { type: "packageUpdates", updates: [] }
   } else if (command.type === "open") {
     if (command.cwd.includes("hang-open")) return
     runtimeCwd = command.cwd
@@ -185,6 +250,12 @@ process.on("message", request => {
       timeline: [{ type: "user", id: "fixture-entry", entryId: "fixture-entry", timestamp: 1, text: command.text }],
       isStreaming: false,
     }
+    process.send?.({
+      kind: "event",
+      generation,
+      type: "nativeEvent",
+      event: { type: "turn_start", turnIndex: 0 },
+    })
     session = { ...(session ?? snapshot()), projection }
     process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
     result = { type: "session", session }
@@ -247,6 +318,38 @@ process.on("message", request => {
     activeTools = command.toolNames
     session = { ...(session ?? snapshot()), state: state() }
     result = { type: "session", session }
+  } else if (command.type === "setScopedModels") {
+    result = { type: "scopedModels", diagnostics: [], session: session ?? snapshot() }
+  } else if (command.type === "inspectToolDefinition") {
+    result = { type: "data", data: { name: command.toolName, description: "Fixture tool" } }
+  } else if (command.type === "hasExtensionHandlers") {
+    result = { type: "boolean", value: command.eventType === "session_start" }
+  } else if (command.type === "appendCustomEntry" || command.type === "waitForIdle") {
+    result = { type: "session", session: session ?? snapshot() }
+  } else if (command.type === "inspectSystemPrompt") {
+    result = { type: "text", text: "Fixture system prompt" }
+  } else if (command.type === "inspectRuntime") {
+    result = {
+      type: "runtimeInspection",
+      inspection: {
+        header: { type: "session", id: "fixture-session", cwd: runtimeCwd },
+        entries: [],
+        branch: [],
+        contextEntries: [],
+        context: { messages: [], thinkingLevel, model: null },
+        agentMessages: [],
+        lastAssistantText: undefined,
+        userMessagesForForking: [],
+      },
+    }
+  } else if (command.type === "inspectResources" || command.type === "extendResources") {
+    result = {
+      type: "resources",
+      resources: {
+        extensions: [], extensionErrors: [], skills: [], prompts: [], themes: [], agentsFiles: [],
+        systemPrompt: "Fixture system prompt", appendSystemPrompt: [], diagnostics: [], runtimeDiagnostics: [],
+      },
+    }
   } else if (command.type === "executeBash") {
     result = {
       type: "bash",
@@ -290,7 +393,7 @@ process.on("message", request => {
   } else if (command.type === "setSessionName") {
     session = { ...(session ?? snapshot()), sessionName: command.name }
     result = { type: "session", session }
-  } else if (command.type === "fork" || command.type === "clone" || command.type === "importSession") {
+  } else if (["fork", "clone", "newSession", "switchSession", "importSession"].includes(command.type)) {
     const sourceSessionId = (session ?? snapshot()).sessionId
     replacementCount += 1
     const targetSessionId = `fixture-replacement-${replacementCount}`
