@@ -64,7 +64,7 @@ export function* mockTurnEvents(
       type: "tool_execution_end",
       toolCallId: ids.tool,
       isError: turn.tool.isError,
-      result: turn.tool.result,
+      result: [{ type: "text", text: turn.tool.result }],
     }
   }
 

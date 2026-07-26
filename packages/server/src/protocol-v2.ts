@@ -27,7 +27,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r5",
+    revision: "pi-0.81.1-r6",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -35,10 +35,12 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
       "session.open": capability(true, "session"),
       "session.delete": capability(true, "session"),
       "session.name": capability(true, "session"),
-      "session.tree": capability(true, "session"),
+      "session.tree": capability(true, "session", undefined, { rawEntries: nativePi, runtimeInspection: nativePi }),
       "session.navigate": capability(true, "session", undefined, { branchSummary: nativePi }),
       "session.fork": capability(true, "session"),
       "session.clone": capability(true, "session"),
+      "session.new": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "session.switch": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "session.import": capability(true, "session"),
       "session.export": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
         html: true,
@@ -73,13 +75,50 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
       }),
       "tools.manage": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "extension.commands": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
-        interactiveUi: false,
+        interactiveUi: true,
+        customEntries: true,
+        waitForIdle: true,
+        handlerInspection: true,
+        sessionReplacementContext: false,
+        shutdownContext: false,
       }),
-      "resources.reload": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "extension.ui": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        supportedMethods: [
+          "select", "confirm", "input", "editor", "notify", "setStatus", "setWorkingMessage",
+          "setWorkingVisible", "setWorkingIndicator", "setHiddenThinkingLabel", "setWidget:string[]",
+          "setTitle", "setEditorText", "pasteToEditor", "getEditorText",
+        ].join(","),
+        unsupportedMethods: [
+          "custom", "setHeader", "setFooter", "setEditorComponent", "addAutocompleteProvider", "onTerminalInput",
+        ].join(","),
+      }),
+      "resources.reload": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        inspect: true,
+        extend: true,
+        updateEvents: true,
+      }),
+      "settings.manage": capability(nativePi, "workspace", nativePi ? undefined : "Requires the Pi runtime"),
+      "project.trust": capability(nativePi, "workspace", nativePi ? undefined : "Requires the Pi runtime"),
+      "providers.auth": capability(nativePi, "server", nativePi ? undefined : "Requires the Pi runtime", {
+        apiKey: true,
+        oauth: true,
+        interactiveFlows: true,
+      }),
+      "packages.manage": capability(nativePi, "workspace", nativePi ? undefined : "Requires the Pi runtime", {
+        userScope: true,
+        projectScope: true,
+        progressEvents: true,
+      }),
       "models.manage": capability(true, "server", undefined, {
-        authentication: false,
-        extensionProviders: false,
-        scopedModels: false,
+        authentication: nativePi,
+        extensionProviders: nativePi,
+        scopedModels: nativePi,
+        cycle: nativePi,
+        inspectRuntime: nativePi,
+        runtimeApiKeys: nativePi,
+        reload: nativePi,
+        refresh: nativePi,
+        sessionScopedRuntime: nativePi,
       }),
       "files.read": capability(true, "workspace"),
       "files.write": capability(true, "workspace"),

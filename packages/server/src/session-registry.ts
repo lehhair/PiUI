@@ -5,7 +5,26 @@ import path from "node:path"
 import type {
   CompactionCommandResultV1,
   BashCommandResultV2,
+  ExtensionUiDialogRequestV1,
+  ExtensionUiDialogResponseV1,
+  ExtensionUiSnapshotV1,
+  ExtensionUiStatePatchV1,
+  ExtensionUiStateV1,
   PiNavigationResultV1,
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ProviderAuthEventV1,
+  ProviderAuthInfoV1,
+  ConfiguredPackageV1,
+  CustomMessageContentV1,
+  PackageProgressV1,
+  PiResourceSnapshotV1,
+  PiResourceExtensionPathsV1,
+  PiRuntimeInspectionV1,
+  ResolvedPackageResourcesV1,
+  PackageUpdateV1,
+  PiModelRuntimeSnapshotV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
   QueueDeliveryModeV1,
@@ -55,11 +74,60 @@ export interface PiSessionBackend {
   list?(cwd: string): Promise<PiSessionInfo[]>
   listAll(): Promise<PiSessionInfo[]>
   listModels?(): Promise<PiModelInfo[]>
+  getSettings?(cwd: string): Promise<PiSettingsSnapshotV1>
+  patchSettings?(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1>
+  getProjectTrust?(cwd: string): Promise<ProjectTrustV1>
+  setProjectTrust?(cwd: string, decision: boolean | null): Promise<ProjectTrustV1>
+  listProviders?(): Promise<ProviderAuthInfoV1[]>
+  startProviderAuth?(providerId: string, authType: "api_key" | "oauth"): Promise<string>
+  respondProviderAuth?(flowId: string, promptId: string, value: string): Promise<void>
+  cancelProviderAuth?(flowId: string): Promise<void>
+  logoutProvider?(providerId: string): Promise<void>
+  inspectModelRuntime?(): Promise<PiModelRuntimeSnapshotV1>
+  setRuntimeApiKey?(providerId: string, apiKey: string): Promise<void>
+  removeRuntimeApiKey?(providerId: string): Promise<void>
+  reloadModelRuntime?(): Promise<void>
+  refreshModelRuntime?(options?: Record<string, unknown>): Promise<unknown>
+  onProviderAuth?(listener: (event: ProviderAuthEventV1) => void): () => void
+  listPackages?(cwd: string): Promise<ConfiguredPackageV1[]>
+  managePackage?(
+    cwd: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source?: string,
+    local?: boolean,
+    persist?: boolean,
+  ): Promise<ConfiguredPackageV1[]>
+  resolvePackages?(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1>
+  resolveExtensionSources?(
+    cwd: string,
+    sources: string[],
+    options?: { local?: boolean; temporary?: boolean },
+  ): Promise<ResolvedPackageResourcesV1>
+  changePackageSource?(
+    cwd: string,
+    source: string,
+    operation: "add" | "remove",
+    local?: boolean,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }>
+  getInstalledPackagePath?(cwd: string, source: string, scope: "user" | "project"): Promise<string | undefined>
+  checkPackageUpdates?(cwd: string): Promise<PackageUpdateV1[]>
+  onPackageProgress?(listener: (event: PackageProgressV1) => void): () => void
   open(cwd: string, sessionFile?: string): Promise<PiSessionRuntime>
   dispose?(): Promise<void>
 }
 
 const DISCOVERY_TTL_MS = 5_000
+
+function emptyExtensionUiState(): ExtensionUiStateV1 {
+  return {
+    revision: 0,
+    statuses: {},
+    workingVisible: true,
+    widgets: {},
+    editorText: "",
+  }
+}
 
 export class SessionRegistry {
   private readonly byId = new Map<string, AppSession>()
@@ -69,12 +137,19 @@ export class SessionRegistry {
   private readonly hiddenIds = new Set<string>()
   private readonly deleting = new Set<string>()
   private readonly runtimeDisposals = new WeakMap<PiSessionRuntime, Promise<void>>()
+  private readonly extensionInitializations = new WeakMap<PiSessionRuntime, Promise<void>>()
+  private readonly extensionUiPending = new Map<string, ExtensionUiDialogRequestV1>()
+  private readonly extensionUiStates = new Map<string, ExtensionUiStateV1>()
   private readonly runtimeBindings = new Map<string, {
     runtime: PiSessionRuntime
     unsubscribe: () => void
   }>()
   private readonly driver: DriverMode
   private backendPromise?: Promise<PiSessionBackend>
+  private providerAuthBackend?: PiSessionBackend
+  private providerAuthUnsubscribe?: () => void
+  private packageProgressUnsubscribe?: () => void
+  private readonly packageCommandWorkspaces = new Map<string, string>()
 
   constructor(
     private readonly workspaces: WorkspaceStore,
@@ -108,8 +183,398 @@ export class SessionRegistry {
     return backend.listModels?.() ?? []
   }
 
+  async listSessionModels(sessionId: string): Promise<PiModelInfo[]> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("session model catalog")
+    return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.listAvailableModels())
+  }
+
+  async getSettings(workspaceId: string): Promise<PiSettingsSnapshotV1> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.getSettings) throw unsupportedRuntimeOperation("settings")
+    return backend.getSettings(workspace.canonicalRoot)
+  }
+
+  async patchSettings(workspaceId: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.patchSettings) throw unsupportedRuntimeOperation("settings")
+    const result = await backend.patchSettings(workspace.canonicalRoot, patch)
+    await Promise.all([...this.byId.values()]
+      .filter(session => session.workspaceId === workspaceId && session.real)
+      .map(session => this.reloadResources(session.id, false)))
+    this.publishResourcesUpdated(workspaceId)
+    return result
+  }
+
+  async getProjectTrust(workspaceId: string): Promise<ProjectTrustV1> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.getProjectTrust) throw unsupportedRuntimeOperation("project trust")
+    return backend.getProjectTrust(workspace.canonicalRoot)
+  }
+
+  async setProjectTrust(workspaceId: string, decision: boolean | null): Promise<ProjectTrustV1> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.setProjectTrust) throw unsupportedRuntimeOperation("project trust")
+    const result = await backend.setProjectTrust(workspace.canonicalRoot, decision)
+    for (const session of [...this.byId.values()].filter(value => value.workspaceId === workspaceId && value.real)) {
+      const runtime = session.real
+      this.unbindRuntime(session)
+      session.real = undefined
+      session.workerGeneration = undefined
+      if (runtime) await this.disposeRuntime(runtime)
+    }
+    return result
+  }
+
+  async listProviders(): Promise<ProviderAuthInfoV1[]> {
+    const backend = await this.getBackend()
+    if (!backend.listProviders) throw unsupportedRuntimeOperation("provider authentication")
+    return backend.listProviders()
+  }
+
+  async listSessionProviders(sessionId: string): Promise<ProviderAuthInfoV1[]> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.listRuntimeProviders) throw unsupportedRuntimeOperation("session providers")
+    return this.runBoundRuntimeCommand(
+      session, runtime, session.workerGeneration, () => runtime.listRuntimeProviders!(),
+    )
+  }
+
+  async startSessionProviderAuth(
+    sessionId: string,
+    providerId: string,
+    authType: "api_key" | "oauth",
+  ): Promise<string> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.startRuntimeProviderAuth) throw unsupportedRuntimeOperation("session provider authentication")
+    return this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.startRuntimeProviderAuth!(providerId, authType),
+    )
+  }
+
+  async respondSessionProviderAuth(
+    sessionId: string,
+    flowId: string,
+    promptId: string,
+    value: string,
+  ): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.respondRuntimeProviderAuth) throw unsupportedRuntimeOperation("session provider authentication")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.respondRuntimeProviderAuth!(flowId, promptId, value),
+    )
+  }
+
+  async cancelSessionProviderAuth(sessionId: string, flowId: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.cancelRuntimeProviderAuth) throw unsupportedRuntimeOperation("session provider authentication")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.cancelRuntimeProviderAuth!(flowId),
+    )
+  }
+
+  async logoutSessionProvider(sessionId: string, providerId: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.logoutRuntimeProvider) throw unsupportedRuntimeOperation("session provider authentication")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.logoutRuntimeProvider!(providerId),
+    )
+  }
+
+  async inspectSessionModelRuntime(sessionId: string): Promise<PiModelRuntimeSnapshotV1> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.inspectSessionModelRuntime) throw unsupportedRuntimeOperation("session model runtime")
+    return this.runBoundRuntimeCommand(
+      session, runtime, session.workerGeneration, () => runtime.inspectSessionModelRuntime!(),
+    )
+  }
+
+  async setSessionRuntimeApiKey(sessionId: string, providerId: string, apiKey: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.setSessionRuntimeApiKey) throw unsupportedRuntimeOperation("session runtime API keys")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.setSessionRuntimeApiKey!(providerId, apiKey),
+    )
+  }
+
+  async removeSessionRuntimeApiKey(sessionId: string, providerId: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.removeSessionRuntimeApiKey) throw unsupportedRuntimeOperation("session runtime API keys")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.removeSessionRuntimeApiKey!(providerId),
+    )
+  }
+
+  async reloadSessionModelRuntime(sessionId: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.reloadSessionModelRuntime) throw unsupportedRuntimeOperation("session model runtime reload")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.reloadSessionModelRuntime!(),
+    )
+  }
+
+  async refreshSessionModelRuntime(sessionId: string, options?: Record<string, unknown>): Promise<unknown> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime?.refreshSessionModelRuntime) throw unsupportedRuntimeOperation("session model runtime refresh")
+    return this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.refreshSessionModelRuntime!(options),
+    )
+  }
+
+  async startProviderAuth(providerId: string, authType: "api_key" | "oauth"): Promise<string> {
+    const backend = await this.getBackend()
+    if (!backend.startProviderAuth) throw unsupportedRuntimeOperation("provider authentication")
+    return backend.startProviderAuth(providerId, authType)
+  }
+
+  async respondProviderAuth(flowId: string, promptId: string, value: string): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.respondProviderAuth) throw unsupportedRuntimeOperation("provider authentication")
+    await backend.respondProviderAuth(flowId, promptId, value)
+  }
+
+  async cancelProviderAuth(flowId: string): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.cancelProviderAuth) throw unsupportedRuntimeOperation("provider authentication")
+    await backend.cancelProviderAuth(flowId)
+  }
+
+  async logoutProvider(providerId: string): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.logoutProvider) throw unsupportedRuntimeOperation("provider authentication")
+    await backend.logoutProvider(providerId)
+    this.eventHub?.publishV2(
+      { kind: "provider", id: providerId },
+      "provider.auth.updated",
+      { providerId, authenticated: false },
+    )
+  }
+
+  async inspectModelRuntime(): Promise<PiModelRuntimeSnapshotV1> {
+    const backend = await this.getBackend()
+    if (!backend.inspectModelRuntime) throw unsupportedRuntimeOperation("model runtime inspection")
+    return backend.inspectModelRuntime()
+  }
+
+  async setRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.setRuntimeApiKey) throw unsupportedRuntimeOperation("runtime API keys")
+    await backend.setRuntimeApiKey(providerId, apiKey)
+  }
+
+  async removeRuntimeApiKey(providerId: string): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.removeRuntimeApiKey) throw unsupportedRuntimeOperation("runtime API keys")
+    await backend.removeRuntimeApiKey(providerId)
+  }
+
+  async reloadModelRuntime(): Promise<void> {
+    const backend = await this.getBackend()
+    if (!backend.reloadModelRuntime) throw unsupportedRuntimeOperation("model runtime reload")
+    await backend.reloadModelRuntime()
+  }
+
+  async refreshModelRuntime(options?: Record<string, unknown>): Promise<unknown> {
+    const backend = await this.getBackend()
+    if (!backend.refreshModelRuntime) throw unsupportedRuntimeOperation("model runtime refresh")
+    return backend.refreshModelRuntime(options)
+  }
+
+  async listPackages(workspaceId: string): Promise<ConfiguredPackageV1[]> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.listPackages) throw unsupportedRuntimeOperation("packages")
+    return backend.listPackages(workspace.canonicalRoot)
+  }
+
+  async managePackage(
+    workspaceId: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source?: string,
+    local?: boolean,
+    persist?: boolean,
+  ): Promise<ConfiguredPackageV1[]> {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const backend = await this.getBackend()
+    if (!backend.managePackage) throw unsupportedRuntimeOperation("packages")
+    this.packageCommandWorkspaces.set(commandId, workspaceId)
+    let packages: ConfiguredPackageV1[]
+    try {
+      packages = await backend.managePackage(workspace.canonicalRoot, commandId, action, source, local, persist)
+    } finally {
+      this.packageCommandWorkspaces.delete(commandId)
+    }
+    await Promise.all([...this.byId.values()]
+      .filter(session => session.workspaceId === workspaceId && session.real)
+      .map(session => this.reloadResources(session.id, false)))
+    this.publishResourcesUpdated(workspaceId, commandId)
+    return packages
+  }
+
+  async resolvePackages(workspaceId: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
+    const workspace = this.requireWorkspace(workspaceId)
+    const backend = await this.getBackend()
+    if (!backend.resolvePackages) throw unsupportedRuntimeOperation("package resolution")
+    return backend.resolvePackages(workspace.canonicalRoot, missingAction)
+  }
+
+  async resolveExtensionSources(
+    workspaceId: string,
+    sources: string[],
+    options?: { local?: boolean; temporary?: boolean },
+  ): Promise<ResolvedPackageResourcesV1> {
+    const workspace = this.requireWorkspace(workspaceId)
+    const backend = await this.getBackend()
+    if (!backend.resolveExtensionSources) throw unsupportedRuntimeOperation("extension source resolution")
+    return backend.resolveExtensionSources(workspace.canonicalRoot, sources, options)
+  }
+
+  async changePackageSource(
+    workspaceId: string,
+    source: string,
+    operation: "add" | "remove",
+    local?: boolean,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
+    const workspace = this.requireWorkspace(workspaceId)
+    const backend = await this.getBackend()
+    if (!backend.changePackageSource) throw unsupportedRuntimeOperation("package settings")
+    const result = await backend.changePackageSource(workspace.canonicalRoot, source, operation, local)
+    await Promise.all([...this.byId.values()]
+      .filter(session => session.workspaceId === workspaceId && session.real)
+      .map(session => this.reloadResources(session.id, false)))
+    this.publishResourcesUpdated(workspaceId)
+    return result
+  }
+
+  async getInstalledPackagePath(
+    workspaceId: string,
+    source: string,
+    scope: "user" | "project",
+  ): Promise<string | undefined> {
+    const workspace = this.requireWorkspace(workspaceId)
+    const backend = await this.getBackend()
+    if (!backend.getInstalledPackagePath) throw unsupportedRuntimeOperation("package path")
+    return backend.getInstalledPackagePath(workspace.canonicalRoot, source, scope)
+  }
+
+  async checkPackageUpdates(workspaceId: string): Promise<PackageUpdateV1[]> {
+    const workspace = this.requireWorkspace(workspaceId)
+    const backend = await this.getBackend()
+    if (!backend.checkPackageUpdates) throw unsupportedRuntimeOperation("package update checks")
+    return backend.checkPackageUpdates(workspace.canonicalRoot)
+  }
+
   get(id: string): AppSession | undefined {
     return this.byId.get(id)
+  }
+
+  extensionUiSnapshot(sessionId: string): ExtensionUiSnapshotV1 | undefined {
+    if (!this.byId.has(sessionId)) return undefined
+    return {
+      sessionId,
+      state: structuredClone(this.extensionUiStates.get(sessionId) ?? emptyExtensionUiState()),
+      pending: [...this.extensionUiPending.values()]
+        .filter(request => request.sessionId === sessionId)
+        .map(request => ({ ...request, options: request.options ? [...request.options] : undefined })),
+    }
+  }
+
+  async respondExtensionUi(
+    sessionId: string,
+    requestId: string,
+    response: ExtensionUiDialogResponseV1,
+    workerGeneration?: string,
+  ): Promise<void> {
+    const request = this.extensionUiPending.get(requestId)
+    if (!request || request.sessionId !== sessionId) {
+      throw Object.assign(new Error("extension UI request not found"), { code: "NOT_FOUND" })
+    }
+    if (workerGeneration && request.workerGeneration !== workerGeneration) {
+      throw Object.assign(new Error("extension UI request belongs to another worker generation"), {
+        code: "EXTENSION_UI_CANCELLED",
+      })
+    }
+    if (!("cancelled" in response && response.cancelled)) {
+      if (request.kind === "confirm" && !("confirmed" in response)) {
+        throw Object.assign(new Error("confirmation response required"), { code: "INVALID_REQUEST" })
+      }
+      if (request.kind !== "confirm" && !("value" in response)) {
+        throw Object.assign(new Error("value response required"), { code: "INVALID_REQUEST" })
+      }
+      if (request.kind === "select" && "value" in response && !request.options?.includes(response.value)) {
+        throw Object.assign(new Error("selected value is not an available option"), { code: "INVALID_REQUEST" })
+      }
+    }
+    const session = this.byId.get(sessionId)
+    const runtime = session?.real
+    if (!session || !runtime || session.workerGeneration !== request.workerGeneration) {
+      this.extensionUiPending.delete(requestId)
+      throw Object.assign(new Error("extension UI request is closed"), { code: "EXTENSION_UI_CANCELLED" })
+    }
+    if (!runtime.respondExtensionUi) throw unsupportedRuntimeOperation("extension UI response")
+    await runtime.respondExtensionUi(requestId, response)
+    this.extensionUiPending.delete(requestId)
+    this.eventHub?.publishV2(
+      { kind: "session", id: sessionId },
+      "extension.ui.cancelled",
+      { requestId, reason: "responded" },
+    )
+  }
+
+  async setExtensionEditorState(sessionId: string, text: string): Promise<void> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("extension editor state")
+    const state = this.extensionUiStates.get(sessionId) ?? emptyExtensionUiState()
+    this.extensionUiStates.set(sessionId, { ...state, revision: state.revision + 1, editorText: text })
+    if (!runtime.setExtensionEditorState) throw unsupportedRuntimeOperation("extension editor state")
+    await runtime.setExtensionEditorState(text)
   }
 
   async delete(id: string): Promise<boolean> {
@@ -233,13 +698,15 @@ export class SessionRegistry {
       const runtime = session.real
       const generation = session.workerGeneration
       try {
-        if (opts?.model?.provider && opts.model.id) {
-          await runtime.setModel(opts.model.provider, opts.model.id)
-        }
-        if (opts?.thinkingLevel) {
-          await runtime.setThinkingLevel(opts.thinkingLevel)
-        }
-        await runtime.prompt(trimmed, prepared.images)
+        await this.runBoundRuntimeCommand(session, runtime, generation, async () => {
+          if (opts?.model?.provider && opts.model.id) {
+            await runtime.setModel(opts.model.provider, opts.model.id)
+          }
+          if (opts?.thinkingLevel) {
+            await runtime.setThinkingLevel(opts.thinkingLevel)
+          }
+          return runtime.prompt(trimmed, prepared.images)
+        })
       } catch (e) {
         if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
         const msg = e instanceof Error ? e.message : String(e)
@@ -385,7 +852,7 @@ export class SessionRegistry {
     return { format, path: resolved.relative }
   }
 
-  async reloadResources(sessionId: string): Promise<AppSession> {
+  async reloadResources(sessionId: string, publish: boolean | string = true): Promise<AppSession> {
     const session = await this.attach(sessionId)
     const runtime = session.real
     if (!runtime) throw unsupportedRuntimeOperation("resource reload")
@@ -395,6 +862,9 @@ export class SessionRegistry {
     session.nativeTree = runtime.getTree()
     session.nativeLeafId = runtime.getLeafId()
     this.touch(session)
+    if (publish !== false) {
+      this.publishResourcesUpdated(session.workspaceId, typeof publish === "string" ? publish : undefined)
+    }
     return session
   }
 
@@ -408,6 +878,132 @@ export class SessionRegistry {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return session
+  }
+
+  async cycleModel(sessionId: string, direction?: "forward" | "backward"): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("cycle model")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.cycleModel(direction),
+    )
+    this.touch(session)
+    return session
+  }
+
+  async setScopedModels(
+    sessionId: string,
+    patterns: string[],
+  ): Promise<{ session: AppSession; diagnostics: Array<{ message: string; pattern: string }> }> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("scoped models")
+    const diagnostics = await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.setScopedModels(patterns),
+    )
+    this.touch(session)
+    return { session, diagnostics }
+  }
+
+  async sendCustomMessage(
+    sessionId: string,
+    customType: string,
+    content: CustomMessageContentV1[],
+    options: {
+      display: boolean
+      details?: unknown
+      triggerTurn?: boolean
+      deliverAs?: "steer" | "followUp" | "nextTurn"
+    },
+  ): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("custom messages")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.sendCustomMessage(customType, content, options),
+    )
+    session.projection = runtime.getProjection()
+    this.touch(session)
+    return session
+  }
+
+  async appendCustomEntry(sessionId: string, customType: string, data?: unknown): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("custom entries")
+    await this.runBoundRuntimeCommand(
+      session, runtime, session.workerGeneration, () => runtime.appendCustomEntry(customType, data),
+    )
+    session.nativeEntries = runtime.getEntries()
+    session.nativeTree = runtime.getTree()
+    this.touch(session)
+    return session
+  }
+
+  async waitForIdle(sessionId: string): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("wait for idle")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.waitForIdle())
+    return session
+  }
+
+  async getToolDefinition(sessionId: string, toolName: string): Promise<unknown> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("tool definitions")
+    return this.runBoundRuntimeCommand(
+      session, runtime, session.workerGeneration, () => runtime.getToolDefinition(toolName),
+    )
+  }
+
+  async hasExtensionHandlers(sessionId: string, eventType: string): Promise<boolean> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("extension handlers")
+    return this.runBoundRuntimeCommand(
+      session, runtime, session.workerGeneration, () => runtime.hasExtensionHandlers(eventType),
+    )
+  }
+
+  async getSystemPrompt(sessionId: string): Promise<string> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("system prompt")
+    return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.getSystemPrompt())
+  }
+
+  async inspectRuntime(sessionId: string): Promise<PiRuntimeInspectionV1> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("runtime inspection")
+    return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.inspectRuntime())
+  }
+
+  async inspectResources(sessionId: string): Promise<PiResourceSnapshotV1> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("resource inspection")
+    return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.inspectResources())
+  }
+
+  async extendResources(sessionId: string, paths: PiResourceExtensionPathsV1): Promise<PiResourceSnapshotV1> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("resource extension")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.extendResources(paths))
+    this.touch(session)
+    this.publishResourcesUpdated(session.workspaceId)
+    return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.inspectResources())
   }
 
   async setThinkingLevel(sessionId: string, level: string): Promise<AppSession> {
@@ -553,6 +1149,39 @@ export class SessionRegistry {
     return this.replaceSession(sessionId, runtime => runtime.clone(entryId))
   }
 
+  async newSession(
+    sessionId: string,
+    parentSessionId?: string,
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    let parentSession: string | undefined
+    if (parentSessionId) {
+      const parent = await this.find(parentSessionId)
+      if (!parent?.sessionFile) {
+        throw Object.assign(new Error("parent session not found"), { code: "SESSION_NOT_FOUND" })
+      }
+      parentSession = parent.sessionFile
+    }
+    return this.replaceSession(sessionId, runtime => runtime.newSession(parentSession))
+  }
+
+  async switchSession(
+    sessionId: string,
+    targetSessionId: string,
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
+    if (sessionId === targetSessionId) {
+      throw Object.assign(new Error("source and target session must differ"), { code: "INVALID_REQUEST" })
+    }
+    const target = await this.find(targetSessionId)
+    if (!target?.sessionFile) throw Object.assign(new Error("target session not found"), { code: "SESSION_NOT_FOUND" })
+    if (target.real) throw Object.assign(new Error("target session is active"), { code: "SESSION_BUSY" })
+    const workspace = this.workspaces.get(target.workspaceId)
+    return this.replaceSession(
+      sessionId,
+      runtime => runtime.switchSession(target.sessionFile!, workspace?.canonicalRoot),
+      { existingTargetId: targetSessionId },
+    )
+  }
+
   importSession(
     sessionId: string,
     inputPath: string,
@@ -603,6 +1232,7 @@ export class SessionRegistry {
   private async replaceSession(
     sessionId: string,
     replace: (runtime: PiSessionRuntime) => Promise<SessionReplacementResultV1>,
+    options: { existingTargetId?: string } = {},
   ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
     const source = await this.attach(sessionId)
     const runtime = source.real
@@ -625,6 +1255,17 @@ export class SessionRegistry {
       }
       throw error
     }
+    return this.commitReplacement(source, runtime, sourceProjection, sourceGeneration, replacement, options)
+  }
+
+  private async commitReplacement(
+    source: AppSession,
+    runtime: PiSessionRuntime,
+    sourceProjection: ProjectionState,
+    sourceGeneration: string | undefined,
+    replacement: SessionReplacementResultV1,
+    options: { existingTargetId?: string } = {},
+  ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
     if (replacement.cancelled) return { source, target: source, replacement }
     if (!this.isCurrentRuntime(source, runtime, sourceGeneration)) throw runtimeReplacedError()
 
@@ -633,9 +1274,16 @@ export class SessionRegistry {
       if (!targetId || targetId === source.id) {
         throw Object.assign(new Error("Pi session replacement did not produce a new session"), { code: "INTERNAL" })
       }
+      if (options.existingTargetId && targetId !== options.existingTargetId) {
+        throw Object.assign(new Error("Pi switched to an unexpected session"), { code: "INTERNAL" })
+      }
       const existingTarget = this.byId.get(targetId)
-      if (existingTarget) {
+      const mayReuseTarget = existingTarget?.id === options.existingTargetId
+      if (existingTarget && !mayReuseTarget) {
         throw Object.assign(new Error("Replacement target already exists"), { code: "SESSION_BUSY" })
+      }
+      if (existingTarget?.real) {
+        throw Object.assign(new Error("Replacement target is active"), { code: "SESSION_BUSY" })
       }
       const targetSessionFile = replacement.targetSessionFile ?? runtime.getSessionFile()
       if (sameSessionFile(source.sessionFile, targetSessionFile)) {
@@ -653,7 +1301,7 @@ export class SessionRegistry {
       let workspaceId = source.workspaceId
       if (replacement.targetCwd) workspaceId = this.workspaces.register(replacement.targetCwd).id
       const now = new Date().toISOString()
-      const target: AppSession = {
+      const target: AppSession = existingTarget ?? {
         id: targetId,
         workspaceId,
         driverSessionId: targetId,
@@ -669,6 +1317,9 @@ export class SessionRegistry {
       target.workspaceId = workspaceId
       target.sessionFile = targetSessionFile
       target.projection = runtime.getProjection()
+      target.driverSessionId = targetId
+      target.updatedAt = now
+      target.runtimeError = undefined
       this.byId.set(target.id, target)
       this.bindRuntime(target, runtime)
       return { source, target, replacement }
@@ -713,6 +1364,16 @@ export class SessionRegistry {
         /* preserve SESSION_NOT_FOUND after best-effort cleanup */
       }
       throw Object.assign(new Error("session not found"), { code: "SESSION_NOT_FOUND" as const })
+    }
+    if (session.sessionFile && runtime.getSessionId() !== session.driverSessionId) {
+      try {
+        await this.disposeRuntime(runtime)
+      } catch {
+        /* preserve identity mismatch error after best-effort cleanup */
+      }
+      throw Object.assign(new Error("Pi session file no longer contains the requested session"), {
+        code: "SESSION_IDENTITY_MISMATCH",
+      })
     }
     if (!session.real) {
       this.bindRuntime(session, runtime)
@@ -799,10 +1460,79 @@ export class SessionRegistry {
         },
       )
     })
+    const unsubscribeNativeEvent = runtime.onNativeEvent?.(event => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.native.event",
+        { sessionId: session.id, event },
+      )
+    })
+    const unsubscribeProviderAuth = runtime.onProviderAuth?.(event => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "provider.auth.flow",
+        event,
+      )
+    })
+    const unsubscribeResourcesChanged = runtime.onResourcesChanged?.(() => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.publishResourcesUpdated(session.workspaceId)
+    })
+    const unsubscribeExtensionUi = runtime.onExtensionUi?.(event => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (event.type === "requested") {
+        const request = {
+          ...event.request,
+          sessionId: session.id,
+          workerGeneration: generation,
+        }
+        this.extensionUiPending.set(request.requestId, request)
+        this.eventHub?.publishV2(
+          { kind: "session", id: session.id },
+          "extension.ui.requested",
+          request,
+        )
+        return
+      }
+      if (event.type === "cancelled") {
+        this.extensionUiPending.delete(event.requestId)
+        this.eventHub?.publishV2(
+          { kind: "session", id: session.id },
+          "extension.ui.cancelled",
+          { requestId: event.requestId, reason: event.reason },
+        )
+        return
+      }
+      if (event.type === "state") {
+        const state = this.applyExtensionUiPatch(session.id, event.patch)
+        this.eventHub?.publishV2(
+          { kind: "session", id: session.id },
+          "extension.ui.state.updated",
+          { sessionId: session.id, patch: event.patch, state },
+        )
+        return
+      }
+      if (event.type === "notify") {
+        this.eventHub?.publishV2(
+          { kind: "session", id: session.id },
+          "extension.ui.notified",
+          { sessionId: session.id, message: event.message, notifyType: event.notifyType },
+        )
+        return
+      }
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "extension.ui.editor.command",
+        { sessionId: session.id, command: event.command },
+      )
+    })
     const unsubscribeCrash = runtime.onCrash?.(error => {
       if (!this.isCurrentRuntime(session, runtime, generation)) return
       this.runtimeBindings.delete(session.id)
       binding.unsubscribe()
+      this.closeExtensionUi(session.id, "runtime_crashed", generation)
       session.real = undefined
       session.runtimeError = error.message
       session.projection = {
@@ -832,8 +1562,47 @@ export class SessionRegistry {
       unsubscribeState?.()
       unsubscribeProjection?.()
       unsubscribeProjectionDelta?.()
+      unsubscribeNativeEvent?.()
+      unsubscribeProviderAuth?.()
+      unsubscribeResourcesChanged?.()
+      unsubscribeExtensionUi?.()
       unsubscribeCrash?.()
     }
+    const initialization = runtime.initializeExtensions?.() ?? Promise.resolve()
+    this.extensionInitializations.set(runtime, initialization)
+    void initialization.catch(error => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      session.runtimeError = error instanceof Error ? error.message : String(error)
+      this.touch(session)
+    })
+  }
+
+  private applyExtensionUiPatch(sessionId: string, patch: ExtensionUiStatePatchV1): ExtensionUiStateV1 {
+    const previous = this.extensionUiStates.get(sessionId) ?? emptyExtensionUiState()
+    let next: ExtensionUiStateV1 = { ...previous, revision: previous.revision + 1 }
+    if (patch.kind === "status") {
+      const statuses = { ...previous.statuses }
+      if (patch.text === undefined) delete statuses[patch.key]
+      else statuses[patch.key] = patch.text
+      next = { ...next, statuses }
+    } else if (patch.kind === "workingMessage") {
+      next = { ...next, workingMessage: patch.message }
+    } else if (patch.kind === "workingVisible") {
+      next = { ...next, workingVisible: patch.visible }
+    } else if (patch.kind === "workingIndicator") {
+      next = { ...next, workingIndicator: patch.frames ? { frames: [...patch.frames], intervalMs: patch.intervalMs } : undefined }
+    } else if (patch.kind === "hiddenThinkingLabel") {
+      next = { ...next, hiddenThinkingLabel: patch.label }
+    } else if (patch.kind === "widget") {
+      const widgets = { ...previous.widgets }
+      if (!patch.lines) delete widgets[patch.key]
+      else widgets[patch.key] = { lines: [...patch.lines], placement: patch.placement ?? "aboveEditor" }
+      next = { ...next, widgets }
+    } else {
+      next = { ...next, title: patch.title }
+    }
+    this.extensionUiStates.set(sessionId, next)
+    return structuredClone(next)
   }
 
   private isCurrentRuntime(
@@ -853,6 +1622,8 @@ export class SessionRegistry {
   ): Promise<T> {
     let result: T
     try {
+      await this.extensionInitializations.get(runtime)
+      if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
       result = await run()
     } catch (error) {
       if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
@@ -867,6 +1638,21 @@ export class SessionRegistry {
     if (!binding) return
     this.runtimeBindings.delete(session.id)
     binding.unsubscribe()
+    this.closeExtensionUi(session.id, "runtime_replaced", session.workerGeneration)
+  }
+
+  private closeExtensionUi(sessionId: string, reason: string, generation?: string): void {
+    for (const [requestId, request] of this.extensionUiPending) {
+      if (request.sessionId !== sessionId) continue
+      if (generation && request.workerGeneration !== generation) continue
+      this.extensionUiPending.delete(requestId)
+      this.eventHub?.publishV2(
+        { kind: "session", id: sessionId },
+        "extension.ui.cancelled",
+        { requestId, reason },
+      )
+    }
+    this.extensionUiStates.delete(sessionId)
   }
 
   private disposeRuntime(runtime: PiSessionRuntime): Promise<void> {
@@ -911,12 +1697,52 @@ export class SessionRegistry {
     this.discoveredAt.set(cwd ?? "*", Date.now())
   }
 
+  private requireWorkspace(workspaceId: string) {
+    const workspace = this.workspaces.get(workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    return workspace
+  }
+
+  private publishResourcesUpdated(workspaceId: string, revision: string = randomUUID()): void {
+    this.eventHub?.publishV2(
+      { kind: "resources", id: workspaceId },
+      "resources.updated",
+      { workspaceId, revision },
+    )
+  }
+
   private async getBackend(): Promise<PiSessionBackend> {
-    if (this.injectedBackend) return this.injectedBackend
-    this.backendPromise ??= import("./runtime-supervisor.ts").then(({ RuntimeSupervisor }) => {
+    const backend = this.injectedBackend ?? await (this.backendPromise ??= import("./runtime-supervisor.ts").then(({ RuntimeSupervisor }) => {
       return new RuntimeSupervisor()
-    })
-    return this.backendPromise
+    }))
+    if (this.providerAuthBackend !== backend) {
+      this.providerAuthUnsubscribe?.()
+      this.packageProgressUnsubscribe?.()
+      this.providerAuthBackend = backend
+      this.providerAuthUnsubscribe = backend.onProviderAuth?.(event => {
+        this.eventHub?.publishV2(
+          { kind: "provider", id: event.providerId },
+          "provider.auth.flow",
+          event,
+        )
+        if (event.type === "completed") {
+          this.eventHub?.publishV2(
+            { kind: "provider", id: event.providerId },
+            "provider.auth.updated",
+            { providerId: event.providerId, authenticated: true },
+          )
+        }
+      })
+      this.packageProgressUnsubscribe = backend.onPackageProgress?.(event => {
+        const workspace = event.workspaceId ?? this.packageCommandWorkspaces.get(event.commandId)
+        this.eventHub?.publishV2(
+          { kind: "resources", id: workspace ?? "global" },
+          "packages.progress",
+          { ...event, workspaceId: workspace },
+        )
+      })
+    }
+    return backend
   }
 
   private addDiscovered(info: PiSessionInfo): void {
@@ -954,6 +1780,10 @@ export class SessionRegistry {
   }
 
   async dispose(): Promise<void> {
+    this.providerAuthUnsubscribe?.()
+    this.providerAuthUnsubscribe = undefined
+    this.packageProgressUnsubscribe?.()
+    this.packageProgressUnsubscribe = undefined
     for (const session of this.byId.values()) this.unbindRuntime(session)
     await Promise.all([
       ...[...this.byId.values()].map(async session => {
@@ -1027,6 +1857,9 @@ export class SessionRegistry {
           autoEnabled: false,
           operation: { type: "none" },
         },
+        contextUsage: ui?.contextUsage,
+        sessionStats: ui?.sessionStats,
+        scopedModels: ui?.scopedModels,
         tools: ui?.tools ?? [],
         activeTools: ui?.activeTools ?? [],
         workerGeneration: session.workerGeneration,

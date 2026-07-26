@@ -17,7 +17,13 @@ export interface PiThinkingBlock {
   thinking: string
 }
 
-export type PiContentBlock = PiTextBlock | PiThinkingBlock | PiToolCallBlock
+export interface PiImageBlock {
+  type: "image"
+  data: string
+  mimeType: string
+}
+
+export type PiContentBlock = PiTextBlock | PiThinkingBlock | PiToolCallBlock | PiImageBlock
 
 export interface PiMessageEntry {
   type: "message"
@@ -35,7 +41,8 @@ export interface PiMessageEntry {
     stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted"
     errorMessage?: string
     /** toolResult text content */
-    result?: string | Array<{ type: "text"; text: string }>
+    result?: string | Array<{ type: "text"; text: string } | PiImageBlock>
+    details?: unknown
   }
 }
 
@@ -63,9 +70,16 @@ export type WorkerEvent =
       args: unknown
     }
   | {
+      type: "tool_execution_update"
+      toolCallId: string
+      result?: Array<{ type: "text"; text: string } | PiImageBlock>
+      details?: unknown
+    }
+  | {
       type: "tool_execution_end"
       toolCallId: string
       isError?: boolean
-      result?: string
+      result?: Array<{ type: "text"; text: string } | PiImageBlock>
+      details?: unknown
     }
   | { type: "agent_end" }

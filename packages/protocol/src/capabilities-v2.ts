@@ -10,6 +10,8 @@ export const PI_CAPABILITY_IDS = [
   "session.navigate",
   "session.fork",
   "session.clone",
+  "session.new",
+  "session.switch",
   "session.import",
   "session.export",
   "prompt.text",

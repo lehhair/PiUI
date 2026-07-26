@@ -3,6 +3,8 @@ import {
   PROTOCOL_VERSION,
   problem,
   type CommandRequestV2,
+  type CustomMessageContentV1,
+  type ExtensionUiDialogResponseV1,
   type HealthResponseV1,
   type SessionAttachmentV2,
   type WorkspaceCreateRequestV1,
@@ -220,6 +222,440 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         return sendJson(res, 200, await listModelsForUi(sessions.getDriver(), () => sessions.listModels()))
       }
 
+      if (method === "GET" && p === "/api/v1/providers") {
+        try {
+          return sendJson(res, 200, { providers: await sessions.listProviders() })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      if (method === "GET" && p === "/api/v1/model-runtime") {
+        try {
+          return sendJson(res, 200, await sessions.inspectModelRuntime())
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      if (method === "POST" && (p === "/api/v1/model-runtime/reload" || p === "/api/v1/model-runtime/refresh")) {
+        try {
+          if (p.endsWith("/reload")) {
+            await sessions.reloadModelRuntime()
+            return sendJson(res, 200, { reloaded: true })
+          }
+          const raw = await readBody(req)
+          let options: Record<string, unknown>
+          try {
+            options = JSON.parse(raw || "{}") as Record<string, unknown>
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          return sendJson(res, 200, { result: await sessions.refreshModelRuntime(options) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const runtimeApiKey = p.match(/^\/api\/v1\/providers\/([^/]+)\/runtime-api-key$/)
+      if (runtimeApiKey && (method === "PUT" || method === "DELETE")) {
+        const providerId = decodeURIComponent(runtimeApiKey[1])
+        try {
+          if (method === "DELETE") {
+            await sessions.removeRuntimeApiKey(providerId)
+            res.writeHead(204)
+            return res.end()
+          }
+          const raw = await readBody(req)
+          let body: { apiKey?: string }
+          try {
+            body = JSON.parse(raw || "{}") as typeof body
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (!body.apiKey) return sendProblem(res, 400, "INVALID_REQUEST", "apiKey required")
+          await sessions.setRuntimeApiKey(providerId, body.apiKey)
+          return sendJson(res, 200, { configured: true })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const providerAuthFlow = p.match(/^\/api\/v1\/providers\/([^/]+)\/auth-flows$/)
+      if (method === "POST" && providerAuthFlow) {
+        const providerId = decodeURIComponent(providerAuthFlow[1])
+        const raw = await readBody(req)
+        let body: { type?: "api_key" | "oauth" }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (body.type !== "api_key" && body.type !== "oauth") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "auth type must be api_key or oauth")
+        }
+        try {
+          return sendJson(res, 202, { flowId: await sessions.startProviderAuth(providerId, body.type) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const authPromptResponse = p.match(/^\/api\/v1\/auth-flows\/([^/]+)\/prompts\/([^/]+)\/response$/)
+      if (method === "POST" && authPromptResponse) {
+        const flowId = decodeURIComponent(authPromptResponse[1])
+        const promptId = decodeURIComponent(authPromptResponse[2])
+        const raw = await readBody(req)
+        let body: { value?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (typeof body.value !== "string") return sendProblem(res, 400, "INVALID_REQUEST", "value required")
+        try {
+          await sessions.respondProviderAuth(flowId, promptId, body.value)
+          return sendJson(res, 200, { accepted: true })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const authFlowOnly = p.match(/^\/api\/v1\/auth-flows\/([^/]+)$/)
+      if (method === "DELETE" && authFlowOnly) {
+        try {
+          await sessions.cancelProviderAuth(decodeURIComponent(authFlowOnly[1]))
+          res.writeHead(204)
+          return res.end()
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const providerAuthOnly = p.match(/^\/api\/v1\/providers\/([^/]+)\/auth$/)
+      if (method === "DELETE" && providerAuthOnly) {
+        try {
+          await sessions.logoutProvider(decodeURIComponent(providerAuthOnly[1]))
+          res.writeHead(204)
+          return res.end()
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionProviders = p.match(/^\/api\/v1\/sessions\/([^/]+)\/providers$/)
+      if (method === "GET" && sessionProviders) {
+        try {
+          return sendJson(res, 200, {
+            providers: await sessions.listSessionProviders(decodeURIComponent(sessionProviders[1])),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionProviderFlow = p.match(/^\/api\/v1\/sessions\/([^/]+)\/providers\/([^/]+)\/auth-flows$/)
+      if (method === "POST" && sessionProviderFlow) {
+        const raw = await readBody(req)
+        let body: { type?: "api_key" | "oauth" }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (body.type !== "api_key" && body.type !== "oauth") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "auth type must be api_key or oauth")
+        }
+        try {
+          return sendJson(res, 202, { flowId: await sessions.startSessionProviderAuth(
+            decodeURIComponent(sessionProviderFlow[1]),
+            decodeURIComponent(sessionProviderFlow[2]),
+            body.type,
+          ) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionAuthPrompt = p.match(
+        /^\/api\/v1\/sessions\/([^/]+)\/auth-flows\/([^/]+)\/prompts\/([^/]+)\/response$/,
+      )
+      if (method === "POST" && sessionAuthPrompt) {
+        const raw = await readBody(req)
+        let body: { value?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (typeof body.value !== "string") return sendProblem(res, 400, "INVALID_REQUEST", "value required")
+        try {
+          await sessions.respondSessionProviderAuth(
+            decodeURIComponent(sessionAuthPrompt[1]),
+            decodeURIComponent(sessionAuthPrompt[2]),
+            decodeURIComponent(sessionAuthPrompt[3]),
+            body.value,
+          )
+          return sendJson(res, 200, { accepted: true })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionAuthFlow = p.match(/^\/api\/v1\/sessions\/([^/]+)\/auth-flows\/([^/]+)$/)
+      if (method === "DELETE" && sessionAuthFlow) {
+        try {
+          await sessions.cancelSessionProviderAuth(
+            decodeURIComponent(sessionAuthFlow[1]), decodeURIComponent(sessionAuthFlow[2]),
+          )
+          res.writeHead(204)
+          return res.end()
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionProviderAuth = p.match(/^\/api\/v1\/sessions\/([^/]+)\/providers\/([^/]+)\/auth$/)
+      if (method === "DELETE" && sessionProviderAuth) {
+        try {
+          await sessions.logoutSessionProvider(
+            decodeURIComponent(sessionProviderAuth[1]), decodeURIComponent(sessionProviderAuth[2]),
+          )
+          res.writeHead(204)
+          return res.end()
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionModelRuntime = p.match(/^\/api\/v1\/sessions\/([^/]+)\/model-runtime(?:\/(reload|refresh))?$/)
+      if (sessionModelRuntime && (method === "GET" || method === "POST")) {
+        const sessionId = decodeURIComponent(sessionModelRuntime[1])
+        const action = sessionModelRuntime[2]
+        if (method === "GET" && action) return sendProblem(res, 405, "INVALID_REQUEST", "method not allowed")
+        if (method === "POST" && !action) return sendProblem(res, 405, "INVALID_REQUEST", "method not allowed")
+        try {
+          if (method === "GET") return sendJson(res, 200, await sessions.inspectSessionModelRuntime(sessionId))
+          if (action === "reload") {
+            await sessions.reloadSessionModelRuntime(sessionId)
+            return sendJson(res, 200, { reloaded: true })
+          }
+          const raw = await readBody(req)
+          let options: Record<string, unknown>
+          try {
+            options = JSON.parse(raw || "{}") as Record<string, unknown>
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          return sendJson(res, 200, { result: await sessions.refreshSessionModelRuntime(sessionId, options) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionRuntimeApiKey = p.match(
+        /^\/api\/v1\/sessions\/([^/]+)\/providers\/([^/]+)\/runtime-api-key$/,
+      )
+      if (sessionRuntimeApiKey && (method === "PUT" || method === "DELETE")) {
+        const sessionId = decodeURIComponent(sessionRuntimeApiKey[1])
+        const providerId = decodeURIComponent(sessionRuntimeApiKey[2])
+        try {
+          if (method === "DELETE") {
+            await sessions.removeSessionRuntimeApiKey(sessionId, providerId)
+            res.writeHead(204)
+            return res.end()
+          }
+          const raw = await readBody(req)
+          let body: { apiKey?: string }
+          try {
+            body = JSON.parse(raw || "{}") as typeof body
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (!body.apiKey) return sendProblem(res, 400, "INVALID_REQUEST", "apiKey required")
+          await sessions.setSessionRuntimeApiKey(sessionId, providerId, body.apiKey)
+          return sendJson(res, 200, { configured: true })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspaceSettings = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/pi-settings$/)
+      if (workspaceSettings && (method === "GET" || method === "PATCH")) {
+        const workspaceId = decodeURIComponent(workspaceSettings[1])
+        try {
+          if (method === "GET") return sendJson(res, 200, await sessions.getSettings(workspaceId))
+          const raw = await readBody(req)
+          let patch: Record<string, unknown>
+          try {
+            patch = JSON.parse(raw || "{}") as Record<string, unknown>
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "settings patch must be an object")
+          }
+          const result = await sessions.patchSettings(workspaceId, patch)
+          return sendJson(res, 200, result)
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspaceTrust = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/trust$/)
+      if (workspaceTrust && (method === "GET" || method === "PUT")) {
+        const workspaceId = decodeURIComponent(workspaceTrust[1])
+        try {
+          if (method === "GET") return sendJson(res, 200, await sessions.getProjectTrust(workspaceId))
+          const raw = await readBody(req)
+          let body: { decision?: boolean | null }
+          try {
+            body = JSON.parse(raw || "{}") as typeof body
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (!("decision" in body) || (body.decision !== true && body.decision !== false && body.decision !== null)) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "decision must be true, false, or null")
+          }
+          return sendJson(res, 200, await sessions.setProjectTrust(workspaceId, body.decision))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackages = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages$/)
+      if (method === "GET" && workspacePackages) {
+        try {
+          return sendJson(res, 200, { packages: await sessions.listPackages(decodeURIComponent(workspacePackages[1])) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackageResolved = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages\/resolved$/)
+      if (method === "GET" && workspacePackageResolved) {
+        const missingAction = url.searchParams.get("missingAction")
+        if (missingAction && missingAction !== "skip" && missingAction !== "error") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "missingAction must be skip or error")
+        }
+        try {
+          return sendJson(res, 200, await sessions.resolvePackages(
+            decodeURIComponent(workspacePackageResolved[1]),
+            (missingAction || undefined) as "skip" | "error" | undefined,
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackageResolveSources = p.match(
+        /^\/api\/v1\/workspaces\/([^/]+)\/packages\/resolve-extension-sources$/,
+      )
+      if (method === "POST" && workspacePackageResolveSources) {
+        const raw = await readBody(req)
+        let body: { sources?: string[]; local?: boolean; temporary?: boolean }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!Array.isArray(body.sources) || body.sources.some(source => typeof source !== "string")) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "sources must be an array of strings")
+        }
+        try {
+          return sendJson(res, 200, await sessions.resolveExtensionSources(
+            decodeURIComponent(workspacePackageResolveSources[1]),
+            body.sources,
+            { local: body.local, temporary: body.temporary },
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackageSources = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages\/sources$/)
+      if ((method === "POST" || method === "DELETE") && workspacePackageSources) {
+        const raw = await readBody(req)
+        let body: { source?: string; local?: boolean }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.source?.trim()) return sendProblem(res, 400, "INVALID_REQUEST", "package source required")
+        try {
+          return sendJson(res, 200, await sessions.changePackageSource(
+            decodeURIComponent(workspacePackageSources[1]),
+            body.source.trim(),
+            method === "POST" ? "add" : "remove",
+            body.local,
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackagePath = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages\/installed-path$/)
+      if (method === "GET" && workspacePackagePath) {
+        const source = url.searchParams.get("source")?.trim()
+        const scope = url.searchParams.get("scope")
+        if (!source || (scope !== "user" && scope !== "project")) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "source and user/project scope required")
+        }
+        try {
+          return sendJson(res, 200, {
+            path: await sessions.getInstalledPackagePath(
+              decodeURIComponent(workspacePackagePath[1]), source, scope,
+            ),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackageUpdates = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages\/updates$/)
+      if (method === "GET" && workspacePackageUpdates) {
+        try {
+          return sendJson(res, 200, {
+            updates: await sessions.checkPackageUpdates(decodeURIComponent(workspacePackageUpdates[1])),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const workspacePackageCommand = p.match(
+        /^\/api\/v1\/workspaces\/([^/]+)\/commands\/packages\/(install|remove|update)$/,
+      )
+      if (method === "POST" && workspacePackageCommand) {
+        const workspaceId = decodeURIComponent(workspacePackageCommand[1])
+        const action = workspacePackageCommand[2] as "install" | "remove" | "update"
+        const raw = await readBody(req)
+        let body: { source?: string; local?: boolean; persist?: boolean; commandId?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if ((action === "install" || action === "remove") && !body.source?.trim()) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "package source required")
+        }
+        const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+        try {
+          const packages = await sessions.managePackage(
+            workspaceId,
+            commandId,
+            action,
+            body.source?.trim(),
+            body.local === true,
+            body.persist !== false,
+          )
+          return sendJson(res, 200, { commandId, packages })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
         const list = (await sessions.list(workspaceId))
@@ -265,6 +701,160 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
         const attached = await sessions.attach(id)
         return sendJson(res, 200, sessions.snapshot(attached))
+      }
+
+      const sessionModels = p.match(/^\/api\/v1\/sessions\/([^/]+)\/models$/)
+      if (method === "GET" && sessionModels) {
+        try {
+          const models = await sessions.listSessionModels(decodeURIComponent(sessionModels[1]))
+          return sendJson(res, 200, models.map(model => ({
+            id: model.id,
+            name: model.name,
+            providerId: model.providerId,
+            family: model.family,
+            contextLimit: model.contextLimit,
+            outputLimit: model.outputLimit,
+            supportsReasoning: model.supportsReasoning,
+            supportsImages: model.supportsImages,
+            variants: model.thinkingLevels,
+          })))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const extensionUiSnapshot = p.match(/^\/api\/v1\/sessions\/([^/]+)\/extension-ui$/)
+      if (method === "GET" && extensionUiSnapshot) {
+        const id = decodeURIComponent(extensionUiSnapshot[1])
+        const snapshot = sessions.extensionUiSnapshot(id)
+        if (!snapshot) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+        return sendJson(res, 200, snapshot)
+      }
+
+      const sessionSystemPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/system-prompt$/)
+      if (method === "GET" && sessionSystemPrompt) {
+        try {
+          return sendJson(res, 200, { text: await sessions.getSystemPrompt(decodeURIComponent(sessionSystemPrompt[1])) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionInspection = p.match(/^\/api\/v1\/sessions\/([^/]+)\/(runtime-inspection|resources)$/)
+      if (method === "GET" && sessionInspection) {
+        const id = decodeURIComponent(sessionInspection[1])
+        try {
+          return sendJson(
+            res,
+            200,
+            sessionInspection[2] === "resources"
+              ? await sessions.inspectResources(id)
+              : await sessions.inspectRuntime(id),
+          )
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+      const sessionToolDefinition = p.match(/^\/api\/v1\/sessions\/([^/]+)\/tools\/([^/]+)\/definition$/)
+      if (method === "GET" && sessionToolDefinition) {
+        try {
+          return sendJson(res, 200, {
+            definition: await sessions.getToolDefinition(
+              decodeURIComponent(sessionToolDefinition[1]),
+              decodeURIComponent(sessionToolDefinition[2]),
+            ),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+      const sessionExtensionHandlers = p.match(/^\/api\/v1\/sessions\/([^/]+)\/extension-handlers\/([^/]+)$/)
+      if (method === "GET" && sessionExtensionHandlers) {
+        try {
+          return sendJson(res, 200, {
+            registered: await sessions.hasExtensionHandlers(
+              decodeURIComponent(sessionExtensionHandlers[1]),
+              decodeURIComponent(sessionExtensionHandlers[2]),
+            ),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+      if (method === "POST" && sessionInspection?.[2] === "resources") {
+        const id = decodeURIComponent(sessionInspection[1])
+        const raw = await readBody(req)
+        let body: import("@piui/protocol").PiResourceExtensionPathsV1
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "resource paths must be an object")
+        }
+        try {
+          return sendJson(res, 200, await sessions.extendResources(id, body))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+      if (method === "PUT" && extensionUiSnapshot) {
+        const id = decodeURIComponent(extensionUiSnapshot[1])
+        const raw = await readBody(req)
+        let body: { editorText?: string }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (typeof body.editorText !== "string") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "editorText required")
+        }
+        try {
+          await sessions.setExtensionEditorState(id, body.editorText)
+          return sendJson(res, 200, sessions.extensionUiSnapshot(id))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const extensionUiResponse = p.match(/^\/api\/v1\/sessions\/([^/]+)\/extension-ui\/requests\/([^/]+)\/response$/)
+      if (method === "POST" && extensionUiResponse) {
+        const sessionId = decodeURIComponent(extensionUiResponse[1])
+        const requestId = decodeURIComponent(extensionUiResponse[2])
+        const raw = await readBody(req)
+        let body: (ExtensionUiDialogResponseV1 & { workerGeneration?: string })
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        let response: ExtensionUiDialogResponseV1
+        if ("cancelled" in body) {
+          if (body.cancelled !== true) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "cancelled must be true when present")
+          }
+          response = { cancelled: true }
+        } else if ("confirmed" in body) {
+          if (typeof body.confirmed !== "boolean") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "confirmed must be a boolean")
+          }
+          response = { confirmed: body.confirmed }
+        } else if ("value" in body) {
+          if (typeof body.value !== "string") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "value must be a string")
+          }
+          response = { value: body.value }
+        } else {
+          return sendProblem(res, 400, "INVALID_REQUEST", "response requires cancelled, confirmed, or value")
+        }
+        try {
+          await sessions.respondExtensionUi(sessionId, requestId, response, body.workerGeneration)
+          return sendJson(res, 200, { requestId, accepted: true })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
       }
 
       const sessionOnly = p.match(/^\/api\/v1\/sessions\/([^/]+)$/)
@@ -546,17 +1136,82 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               workspaceId: session.workspaceId,
               payload: { workspaceId: session.workspaceId },
             },
-            () => sessions.reloadResources(id),
+            () => sessions.reloadResources(id, commandId),
           )
           void submitted.promise.then(updated => {
             publishSessionSnapshot(updated)
-            eventHub.publishV2(
-              { kind: "workspace", id: updated.workspaceId },
-              "resources.updated",
-              { workspaceId: updated.workspaceId, revision: commandId },
-            )
           }).catch(() => undefined)
           return sendJson(res, 202, { commandId, accepted: true, reused: submitted.reused, command: submitted.record })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionCustomMessage = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/custom-message$/)
+      if (method === "POST" && sessionCustomMessage) {
+        const id = decodeURIComponent(sessionCustomMessage[1])
+        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
+        let body: {
+          customType?: string
+          content?: CustomMessageContentV1[]
+          display?: boolean
+          details?: unknown
+          triggerTurn?: boolean
+          deliverAs?: "steer" | "followUp" | "nextTurn"
+        }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.customType?.trim() || !Array.isArray(body.content)) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "customType and content required")
+        }
+        if (body.content.some(block => !block || (block.type !== "text" && block.type !== "image"))) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid custom message content")
+        }
+        if (body.deliverAs && !["steer", "followUp", "nextTurn"].includes(body.deliverAs)) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid custom message delivery")
+        }
+        try {
+          const session = await sessions.sendCustomMessage(id, body.customType, body.content, {
+            display: body.display !== false,
+            details: body.details,
+            triggerTurn: body.triggerTurn,
+            deliverAs: body.deliverAs,
+          })
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, sessions.snapshot(session))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionCustomEntry = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/custom-entry$/)
+      if (method === "POST" && sessionCustomEntry) {
+        const id = decodeURIComponent(sessionCustomEntry[1])
+        const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
+        let body: { customType?: string; data?: unknown }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!body.customType?.trim()) return sendProblem(res, 400, "INVALID_REQUEST", "customType required")
+        try {
+          const session = await sessions.appendCustomEntry(id, body.customType, body.data)
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, sessions.snapshot(session))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionWaitIdle = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/wait-for-idle$/)
+      if (method === "POST" && sessionWaitIdle) {
+        try {
+          const session = await sessions.waitForIdle(decodeURIComponent(sessionWaitIdle[1]))
+          return sendJson(res, 200, sessions.snapshot(session))
         } catch (error) {
           return handleSessionCmdError(res, error)
         }
@@ -594,6 +1249,80 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(s) })
         } catch (e) {
           return handleSessionCmdError(res, e)
+        }
+      }
+
+      const sessionCycleModel = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/cycle-model$/)
+      if (method === "POST" && sessionCycleModel) {
+        const id = decodeURIComponent(sessionCycleModel[1])
+        const raw = await readBody(req)
+        let body: { direction?: "forward" | "backward" }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (body.direction && body.direction !== "forward" && body.direction !== "backward") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid direction")
+        }
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.cycleModel",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { direction: body.direction },
+            },
+            () => sessions.cycleModel(id, body.direction),
+          )
+          const session = await submitted.promise
+          publishSessionSnapshot(session)
+          return sendJson(res, 200, { commandId, command: submitted.record, snapshot: sessions.snapshot(session) })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionScopedModels = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/set-scoped-models$/)
+      if (method === "POST" && sessionScopedModels) {
+        const id = decodeURIComponent(sessionScopedModels[1])
+        const raw = await readBody(req)
+        let body: { patterns?: string[] }
+        try {
+          body = JSON.parse(raw || "{}") as typeof body
+        } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (!Array.isArray(body.patterns) || body.patterns.some(pattern => typeof pattern !== "string")) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "patterns must be a string array")
+        }
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.setScopedModels",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { patterns: body.patterns },
+            },
+            () => sessions.setScopedModels(id, body.patterns!),
+            { recordResult: result => ({ diagnostics: result.diagnostics }) },
+          )
+          const result = await submitted.promise
+          publishSessionSnapshot(result.session)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            diagnostics: result.diagnostics,
+            snapshot: sessions.snapshot(result.session),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
         }
       }
 
@@ -963,6 +1692,60 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
       }
 
+      const runtimeReplacement = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/(new-session|switch-session)$/)
+      if (method === "POST" && runtimeReplacement) {
+        const id = decodeURIComponent(runtimeReplacement[1])
+        const operation = runtimeReplacement[2]
+        const raw = await readBody(req)
+        let body: { parentSessionId?: string; targetSessionId?: string; commandId?: string }
+        try { body = JSON.parse(raw || "{}") as typeof body } catch {
+          return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+        }
+        if (operation === "switch-session" && !body.targetSessionId) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "targetSessionId required")
+        }
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = operation === "new-session"
+            ? sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.new",
+                  concurrency: "idle-only",
+                  sessionId: id,
+                  payload: { parentSessionId: body.parentSessionId },
+                },
+                () => sessions.newSession(id, body.parentSessionId),
+              )
+            : sessionExecutor.submit(
+                {
+                  protocolVersion: 2,
+                  commandId,
+                  type: "session.switch",
+                  concurrency: "idle-only",
+                  sessionId: id,
+                  payload: { targetSessionId: body.targetSessionId! },
+                },
+                () => sessions.switchSession(id, body.targetSessionId!),
+              )
+          const result = await submitted.promise
+          publishSessionSnapshot(result.source)
+          if (result.target !== result.source) publishSessionSnapshot(result.target)
+          publishSessionUpdated(result.source)
+          publishSessionUpdated(result.target)
+          return sendJson(res, 200, {
+            commandId,
+            command: submitted.record,
+            replacement: result.replacement,
+            sourceSnapshot: sessions.snapshot(result.source),
+            targetSnapshot: sessions.snapshot(result.target),
+          })
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
       const sessionReplacement = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/(fork|clone|import)$/)
       if (method === "POST" && sessionReplacement) {
         const id = decodeURIComponent(sessionReplacement[1])
@@ -1262,14 +2045,26 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   if (code === "SESSION_NOT_FOUND") {
     return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
   }
+  if (code === "WORKSPACE_NOT_FOUND") {
+    return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
+  }
   if (code === "SESSION_BUSY") {
     return sendProblem(res, 409, "SESSION_BUSY", e instanceof Error ? e.message : String(e))
   }
-  if (code === "SESSION_RUNTIME_CRASHED") {
-    return sendProblem(res, 503, "SESSION_RUNTIME_CRASHED", e instanceof Error ? e.message : String(e))
+  if (code === "SESSION_RUNTIME_CRASHED" || code === "RUNTIME_REPLACED" || code === "WORKER_RESULT_UNKNOWN") {
+    return sendProblem(res, 503, code, e instanceof Error ? e.message : String(e))
+  }
+  if (code === "SESSION_IDENTITY_MISMATCH") {
+    return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))
   }
   if (code === "FILE_TOO_LARGE") {
     return sendProblem(res, 413, "FILE_TOO_LARGE", e instanceof Error ? e.message : String(e))
+  }
+  if (code === "NOT_FOUND") {
+    return sendProblem(res, 404, code, e instanceof Error ? e.message : String(e))
+  }
+  if (code === "EXTENSION_UI_CANCELLED") {
+    return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))
   }
   if (code === "PATH_OUTSIDE_WORKSPACE" || code === "SYMLINK_ESCAPE") {
     return sendProblem(res, 403, code, e instanceof Error ? e.message : String(e))

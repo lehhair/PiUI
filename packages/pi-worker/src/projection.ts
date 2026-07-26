@@ -128,6 +128,7 @@ export function projectEntries(entries: PiEntry[]): ProjectionState {
         isError: e.message.isError,
         result: e.message.result,
         content: e.message.content,
+        details: e.message.details,
       })
     }
   }
@@ -149,14 +150,24 @@ function applyToolResult(
   t.status = message.isError ? "error" : "completed"
   t.isError = message.isError
   t.endedAt = Date.now()
-  let text = ""
-  if (typeof message.result === "string") text = message.result
-  else if (Array.isArray(message.result)) {
-    text = message.result.map(r => r.text).join("")
-  } else if (message.content) {
-    text = textFromContent(message.content)
-  }
-  t.output = text ? [{ type: "text", text }] : undefined
+  const result = Array.isArray(message.result)
+    ? message.result
+    : typeof message.result === "string"
+      ? [{ type: "text" as const, text: message.result }]
+      : Array.isArray(message.content)
+        ? message.content.filter((block): block is { type: "text"; text: string } | { type: "image"; data: string; mimeType: string } =>
+            block.type === "text" || block.type === "image")
+        : []
+  t.output = result.length ? result : undefined
+  t.nativeDetails = message.details
+  const details = message.details && typeof message.details === "object"
+    ? message.details as Record<string, unknown>
+    : undefined
+  t.normalized = details ? {
+    patch: typeof details.patch === "string" ? details.patch : typeof details.diff === "string" ? details.diff : undefined,
+    cwd: typeof details.cwd === "string" ? details.cwd : undefined,
+    exitCode: typeof details.exitCode === "number" ? details.exitCode : undefined,
+  } : undefined
 }
 
 /** Apply streaming worker events onto projection (pure reducer). */
@@ -303,7 +314,27 @@ export function applyWorkerEvent(state: ProjectionState, event: WorkerEvent): Pr
         toolCallId: event.toolCallId,
         isError: event.isError,
         result: event.result,
+        details: event.details,
       })
+      break
+    }
+    case "tool_execution_update": {
+      const ref = next.toolsByCallId.get(event.toolCallId)
+      if (!ref) break
+      const index = next.byEntryId.get(ref.timelineId)
+      if (index === undefined) break
+      const item = next.timeline[index]
+      if (!item || item.type !== "assistant") break
+      const content = item.content.slice()
+      const tool = content[ref.toolIndex]
+      if (!tool || tool.type !== "tool") break
+      content[ref.toolIndex] = {
+        ...tool,
+        status: "running",
+        output: event.result,
+        nativeDetails: event.details,
+      }
+      next.timeline[index] = { ...item, content }
       break
     }
     case "agent_end": {

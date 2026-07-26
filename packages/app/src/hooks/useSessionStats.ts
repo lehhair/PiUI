@@ -1,6 +1,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { messageStore } from '../store/messageStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
+import { sessionProjectionStore } from '../pi/sessionProjectionStore'
 import { computeSessionStats, isSameSessionStats } from './sessionStatsCompute'
 import type { SessionStats } from './sessionStatsTypes'
 
@@ -20,7 +21,25 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
   const getSnapshot = useCallback((): SessionStats => {
     const sessionId = paneLayoutStore.getFocusedSessionId()
     const messages = messageStore.getVisibleMessages(sessionId)
-    const next = computeSessionStats(messages, contextLimit)
+    const fallback = computeSessionStats(messages, contextLimit)
+    const runtime = sessionProjectionStore.getSnapshot(sessionId)?.runtime
+    const authoritative = runtime?.sessionStats
+    const usage = runtime?.contextUsage
+    const contextUsed = usage?.contextTokens ?? fallback.contextUsed
+    const resolvedContextLimit = usage?.contextWindow ?? contextLimit
+    const next = authoritative ? {
+      inputTokens: authoritative.tokens.input,
+      outputTokens: authoritative.tokens.output,
+      reasoningTokens: 0,
+      cacheRead: authoritative.tokens.cacheRead,
+      cacheWrite: authoritative.tokens.cacheWrite,
+      totalTokens: authoritative.tokens.total,
+      totalCost: authoritative.cost,
+      contextUsed,
+      contextLimit: resolvedContextLimit,
+      contextPercent: usage?.percent ?? (resolvedContextLimit > 0 ? (contextUsed / resolvedContextLimit) * 100 : 0),
+      contextEstimated: usage?.contextTokens === undefined,
+    } : fallback
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev
     cacheRef.current = next
@@ -53,9 +72,11 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
 
     const unsubMessage = messageStore.subscribe(schedule)
     const unsubPane = paneLayoutStore.subscribe(schedule)
+    const unsubProjection = sessionProjectionStore.subscribe(schedule)
     return () => {
       unsubMessage()
       unsubPane()
+      unsubProjection()
       if (timer) clearTimeout(timer)
     }
   }, [])

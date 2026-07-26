@@ -18,13 +18,17 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 5)
+      assert.equal(hello.workerProtocolVersion, 7)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
       const second = await catalog.list("/fixture")
       assert.equal(first[0]?.name, "Fixture 1")
       assert.equal(second[0]?.name, "Fixture 2")
+      assert.equal((await catalog.getSettings("/fixture")).projectTrusted, true)
+      assert.deepEqual((await catalog.patchSettings("/fixture", { theme: "dark" })).effective, { theme: "dark" })
+      assert.equal((await catalog.getProjectTrust("/fixture")).decision, null)
+      assert.equal((await catalog.setProjectTrust("/fixture", false)).trusted, false)
     } finally {
       await catalog.dispose()
     }
@@ -50,13 +54,17 @@ describe("PiWorkerSession IPC", () => {
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
       let ticks = 0
       let deltas = 0
+      const nativeEvents: unknown[] = []
       const unsubscribe = runtime.onProjection(() => { ticks += 1 })
       const unsubscribeDelta = runtime.onProjectionDelta(() => { deltas += 1 })
+      const unsubscribeNative = runtime.onNativeEvent(event => { nativeEvents.push(event) })
       await runtime.prompt("hello")
       unsubscribe()
       unsubscribeDelta()
+      unsubscribeNative()
       assert.equal(ticks > 1, true)
       assert.equal(deltas, 1)
+      assert.deepEqual(nativeEvents, [{ type: "turn_start", turnIndex: 0 }])
       assert.equal(runtime.getProjection().timeline[0]?.entryId, "fixture-entry")
       assert.equal(runtime.getEntries()[0]?.type, "message")
       assert.equal(runtime.getTree()[0]?.entry.id, "fixture-entry")
@@ -87,6 +95,21 @@ describe("PiWorkerSession IPC", () => {
     try {
       assert.equal(runtime.getSessionId(), "fixture-session")
       await assert.rejects(host.open("/fixture"), /already in use/)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("tracks the runtime session identity across a replacement", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
+    try {
+      assert.equal(runtime.getSessionId(), "fixture-session")
+      const replacement = await runtime.fork("fixture-entry", "at")
+      assert.equal(replacement.sourceSessionId, "fixture-session")
+      assert.equal(runtime.getSessionId(), replacement.targetSessionId)
+      // The fixture rejects requests whose sessionId does not match its current
+      // session, so this only succeeds when the client tracks the replacement.
+      assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
     } finally {
       await runtime.dispose()
     }

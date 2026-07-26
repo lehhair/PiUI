@@ -1,3 +1,6 @@
+import type { CustomMessageContentV1 } from "./session.js"
+import type { PiResourceExtensionPathsV1 } from "./management.js"
+
 export type CommandConcurrencyV2 = "query" | "idle-only" | "run-control" | "queueable"
 
 export type SessionAttachmentV2 =
@@ -42,6 +45,24 @@ export interface CommandPayloadsV2 {
   }
   "session.clearQueue": Record<string, never>
   "session.setActiveTools": { toolNames: string[] }
+  "session.cycleModel": { direction?: "forward" | "backward" }
+  "session.setScopedModels": { patterns: string[] }
+  "session.sendCustomMessage": {
+    customType: string
+    content: CustomMessageContentV1[]
+    display: boolean
+    details?: unknown
+    triggerTurn?: boolean
+    deliverAs?: "steer" | "followUp" | "nextTurn"
+  }
+  "session.appendCustomEntry": { customType: string; data?: unknown }
+  "session.waitForIdle": Record<string, never>
+  "session.inspectRuntime": Record<string, never>
+  "session.inspectResources": Record<string, never>
+  "session.extendResources": PiResourceExtensionPathsV1
+  "session.inspectToolDefinition": { toolName: string }
+  "session.hasExtensionHandlers": { eventType: string }
+  "session.inspectSystemPrompt": Record<string, never>
   "session.executeBash": { command: string; excludeFromContext?: boolean }
   "session.abortBash": Record<string, never>
   "session.exportHtml": { outputPath?: string }
@@ -57,6 +78,8 @@ export interface CommandPayloadsV2 {
   "session.setName": { name: string }
   "session.fork": { entryId: string; position: "before" | "at" }
   "session.clone": { entryId?: string }
+  "session.new": { parentSessionId?: string }
+  "session.switch": { targetSessionId: string }
   "session.import": { inputPath: string; cwdOverride?: string }
   "session.delete": { durable: true }
   "extension.ui.respond": { requestId: string; value?: unknown; cancelled?: boolean }

@@ -50,7 +50,11 @@ function toolState(tool: ToolPresentationV1) {
     input,
     output: outputText,
     title: tool.normalized?.title ?? tool.name,
-    metadata: {},
+    metadata: {
+      nativeDetails: tool.nativeDetails,
+      normalized: tool.normalized,
+      images: tool.output?.filter(output => output.type === 'image') ?? [],
+    },
     time: {
       start: tool.startedAt ?? Date.now(),
       end: tool.endedAt ?? Date.now(),

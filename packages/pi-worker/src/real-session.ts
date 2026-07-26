@@ -6,9 +6,14 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  DefaultPackageManager,
   getAgentDir,
   ModelRuntime,
+  ProjectTrustStore,
+  resolveModelScopeWithDiagnostics,
   SessionManager,
+  SettingsManager,
+  hasTrustRequiringProjectResources,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type SessionEntry,
@@ -21,6 +26,20 @@ import type {
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
   PiToolInfoV1,
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ContextUsageV1,
+  SessionStatsV1,
+  ScopedModelV1,
+  ConfiguredPackageV1,
+  PackageProgressV1,
+  PiResourceSnapshotV1,
+  PiResourceExtensionPathsV1,
+  PiRuntimeInspectionV1,
+  ResolvedPackageResourcesV1,
+  PackageUpdateV1,
+  CustomMessageContentV1,
   QueueDeliveryModeV1,
   RetryStateV1,
   SessionReplacementResultV1,
@@ -39,6 +58,7 @@ import {
 } from "./projection.js"
 import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
 import type { PiBashResult, PiImageInput, PiModelInfo } from "./worker-protocol.js"
+import { ExtensionUiBridge, type PiExtensionUiEvent } from "./extension-ui-bridge.js"
 
 export interface PiRuntimeUiState {
   thinkingLevel: string
@@ -58,6 +78,9 @@ export interface PiRuntimeUiState {
   activeTools: string[]
   model?: { provider: string; id: string; displayName: string }
   supportsThinking: boolean
+  contextUsage?: ContextUsageV1
+  sessionStats?: SessionStatsV1
+  scopedModels: ScopedModelV1[]
 }
 
 export interface PiSkillInfo {
@@ -83,13 +106,48 @@ export interface PiSessionInfo {
   firstMessage: string
 }
 
-function extensionBindings() {
+function extensionBindings(
+  uiContext: ExtensionUiBridge["context"],
+  runtime: AgentSessionRuntime,
+  navigateTree: RealPiSession["navigateTree"],
+  reload: RealPiSession["reload"],
+) {
   return {
     mode: "rpc" as const,
+    uiContext,
+    commandContextActions: {
+      waitForIdle: () => runtime.session.waitForIdle(),
+      newSession: () => unsupportedExtensionSessionReplacement("newSession"),
+      fork: () => unsupportedExtensionSessionReplacement("fork"),
+      navigateTree: async (entryId: string, options?: {
+        summarize?: boolean
+        customInstructions?: string
+        replaceInstructions?: boolean
+        label?: string
+      }) => {
+        const result = await navigateTree(entryId, options)
+        return { cancelled: result.cancelled }
+      },
+      switchSession: () => unsupportedExtensionSessionReplacement("switchSession"),
+      reload,
+    },
+    abortHandler: () => { void runtime.session.abort() },
+    shutdownHandler: () => {
+      throw Object.assign(new Error("Extension-requested host shutdown is not available in the remote worker"), {
+        code: "CAPABILITY_DISABLED",
+      })
+    },
     onError: (error: { extensionPath: string; event: string; error: string }) => {
       console.error(`[piui-worker] extension error (${error.event}) ${error.extensionPath}: ${error.error}`)
     },
   }
+}
+
+function unsupportedExtensionSessionReplacement(action: string): Promise<never> {
+  return Promise.reject(Object.assign(
+    new Error(`Extension command context ${action} requires host coordination unavailable in Pi SDK 0.81.1`),
+    { code: "CAPABILITY_DISABLED" },
+  ))
 }
 
 export interface RealPiSessionOpenOptions {
@@ -103,7 +161,14 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   sessionManager,
   sessionStartEvent,
 }) => {
-  const services = await createAgentSessionServices({ cwd })
+  const agentDir = getAgentDir()
+  const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+  const required = hasTrustRequiringProjectResources(cwd)
+  const savedDecision = new ProjectTrustStore(agentDir).get(cwd)
+  const defaultTrust = globalSettings.getDefaultProjectTrust()
+  const projectTrusted = !required || (savedDecision ?? defaultTrust === "always")
+  const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted })
+  const services = await createAgentSessionServices({ cwd, agentDir, settingsManager })
   return {
     ...(await createAgentSessionFromServices({
       services,
@@ -115,8 +180,196 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   }
 }
 
+function settingsForWorkspace(cwd: string): { manager: SettingsManager; trusted: boolean } {
+  const trust = RealPiSession.getProjectTrust(cwd)
+  return {
+    manager: SettingsManager.create(cwd, getAgentDir(), { projectTrusted: trust.trusted }),
+    trusted: trust.trusted,
+  }
+}
+
+function packageManagerForWorkspace(cwd: string): DefaultPackageManager {
+  const { manager } = settingsForWorkspace(cwd)
+  return new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: manager })
+}
+
+function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): PiSettingsSnapshotV1 {
+  return {
+    workspacePath: cwd,
+    projectTrusted: trusted,
+    global: manager.getGlobalSettings(),
+    project: manager.getProjectSettings(),
+    effective: {
+      lastChangelogVersion: manager.getLastChangelogVersion(),
+      sessionDir: manager.getSessionDir(),
+      defaultProvider: manager.getDefaultProvider(),
+      defaultModel: manager.getDefaultModel(),
+      defaultThinkingLevel: manager.getDefaultThinkingLevel(),
+      transport: manager.getTransport(),
+      steeringMode: manager.getSteeringMode(),
+      followUpMode: manager.getFollowUpMode(),
+      theme: manager.getThemeSetting(),
+      compaction: manager.getCompactionSettings(),
+      branchSummary: manager.getBranchSummarySettings(),
+      retry: manager.getRetrySettings(),
+      providerRetry: manager.getProviderRetrySettings(),
+      httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
+      websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs(),
+      externalEditor: manager.getExternalEditorCommand(),
+      hideThinkingBlock: manager.getHideThinkingBlock(),
+      showCacheMissNotices: manager.getShowCacheMissNotices(),
+      shellPath: manager.getShellPath(),
+      shellCommandPrefix: manager.getShellCommandPrefix(),
+      quietStartup: manager.getQuietStartup(),
+      defaultProjectTrust: manager.getDefaultProjectTrust(),
+      npmCommand: manager.getNpmCommand(),
+      enableAnalytics: manager.getEnableAnalytics(),
+      trackingId: manager.getTrackingId(),
+      enableInstallTelemetry: manager.getEnableInstallTelemetry(),
+      collapseChangelog: manager.getCollapseChangelog(),
+      enableSkillCommands: manager.getEnableSkillCommands(),
+      packages: manager.getPackages(),
+      extensionPaths: manager.getExtensionPaths(),
+      skillPaths: manager.getSkillPaths(),
+      promptTemplatePaths: manager.getPromptTemplatePaths(),
+      themePaths: manager.getThemePaths(),
+      showImages: manager.getShowImages(),
+      imageWidthCells: manager.getImageWidthCells(),
+      imageAutoResize: manager.getImageAutoResize(),
+      blockImages: manager.getBlockImages(),
+      enabledModels: manager.getEnabledModels(),
+      thinkingBudgets: manager.getThinkingBudgets(),
+      doubleEscapeAction: manager.getDoubleEscapeAction(),
+      treeFilterMode: manager.getTreeFilterMode(),
+      clearOnShrink: manager.getClearOnShrink(),
+      showTerminalProgress: manager.getShowTerminalProgress(),
+      showHardwareCursor: manager.getShowHardwareCursor(),
+      editorPaddingX: manager.getEditorPaddingX(),
+      outputPad: manager.getOutputPad(),
+      autocompleteMaxVisible: manager.getAutocompleteMaxVisible(),
+      codeBlockIndent: manager.getCodeBlockIndent(),
+      warnings: manager.getWarnings(),
+    },
+    errors: manager.drainErrors().map(error => ({ scope: error.scope, message: error.error.message })),
+  }
+}
+
+function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1): void {
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "defaultModelAndProvider") {
+      const pair = expectRecord(key, value)
+      manager.setDefaultModelAndProvider(expectString("provider", pair.provider), expectString("model", pair.model))
+    }
+    else if (key === "lastChangelogVersion") manager.setLastChangelogVersion(expectString(key, value))
+    else if (key === "defaultProvider") manager.setDefaultProvider(expectString(key, value))
+    else if (key === "defaultModel") manager.setDefaultModel(expectString(key, value))
+    else if (key === "defaultThinkingLevel") manager.setDefaultThinkingLevel(expectEnum(key, value, ["off", "minimal", "low", "medium", "high", "xhigh"]))
+    else if (key === "transport") manager.setTransport(expectEnum(key, value, ["auto", "sse", "websocket"]))
+    else if (key === "steeringMode") manager.setSteeringMode(expectEnum(key, value, ["all", "one-at-a-time"]))
+    else if (key === "followUpMode") manager.setFollowUpMode(expectEnum(key, value, ["all", "one-at-a-time"]))
+    else if (key === "theme") manager.setTheme(expectString(key, value))
+    else if (key === "compactionEnabled") manager.setCompactionEnabled(expectBoolean(key, value))
+    else if (key === "retryEnabled") manager.setRetryEnabled(expectBoolean(key, value))
+    else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNumber(key, value))
+    else if (key === "hideThinkingBlock") manager.setHideThinkingBlock(expectBoolean(key, value))
+    else if (key === "showCacheMissNotices") manager.setShowCacheMissNotices(expectBoolean(key, value))
+    else if (key === "shellPath") manager.setShellPath(expectOptionalString(key, value))
+    else if (key === "shellCommandPrefix") manager.setShellCommandPrefix(expectOptionalString(key, value))
+    else if (key === "quietStartup") manager.setQuietStartup(expectBoolean(key, value))
+    else if (key === "defaultProjectTrust") manager.setDefaultProjectTrust(expectEnum(key, value, ["always", "never", "ask"]))
+    else if (key === "npmCommand") manager.setNpmCommand(expectOptionalStringArray(key, value))
+    else if (key === "enableAnalytics") manager.setEnableAnalytics(expectBoolean(key, value))
+    else if (key === "enableInstallTelemetry") manager.setEnableInstallTelemetry(expectBoolean(key, value))
+    else if (key === "collapseChangelog") manager.setCollapseChangelog(expectBoolean(key, value))
+    else if (key === "enableSkillCommands") manager.setEnableSkillCommands(expectBoolean(key, value))
+    else if (key === "packages") manager.setPackages(expectArray(key, value) as never)
+    else if (key === "projectPackages") manager.setProjectPackages(expectArray(key, value) as never)
+    else if (key === "extensionPaths") manager.setExtensionPaths(expectStringArray(key, value))
+    else if (key === "projectExtensionPaths") manager.setProjectExtensionPaths(expectStringArray(key, value))
+    else if (key === "skillPaths") manager.setSkillPaths(expectStringArray(key, value))
+    else if (key === "projectSkillPaths") manager.setProjectSkillPaths(expectStringArray(key, value))
+    else if (key === "promptTemplatePaths") manager.setPromptTemplatePaths(expectStringArray(key, value))
+    else if (key === "projectPromptTemplatePaths") manager.setProjectPromptTemplatePaths(expectStringArray(key, value))
+    else if (key === "themePaths") manager.setThemePaths(expectStringArray(key, value))
+    else if (key === "projectThemePaths") manager.setProjectThemePaths(expectStringArray(key, value))
+    else if (key === "showImages") manager.setShowImages(expectBoolean(key, value))
+    else if (key === "imageWidthCells") manager.setImageWidthCells(expectNumber(key, value))
+    else if (key === "imageAutoResize") manager.setImageAutoResize(expectBoolean(key, value))
+    else if (key === "blockImages") manager.setBlockImages(expectBoolean(key, value))
+    else if (key === "enabledModels") manager.setEnabledModels(expectOptionalStringArray(key, value))
+    else if (key === "doubleEscapeAction") manager.setDoubleEscapeAction(expectEnum(key, value, ["fork", "tree", "none"]))
+    else if (key === "treeFilterMode") manager.setTreeFilterMode(expectEnum(key, value, ["default", "no-tools", "user-only", "labeled-only", "all"]))
+    else if (key === "clearOnShrink") manager.setClearOnShrink(expectBoolean(key, value))
+    else if (key === "showTerminalProgress") manager.setShowTerminalProgress(expectBoolean(key, value))
+    else if (key === "showHardwareCursor") manager.setShowHardwareCursor(expectBoolean(key, value))
+    else if (key === "editorPaddingX") manager.setEditorPaddingX(expectNumber(key, value))
+    else if (key === "outputPad") manager.setOutputPad(expectOutputPad(key, value))
+    else if (key === "autocompleteMaxVisible") manager.setAutocompleteMaxVisible(expectNumber(key, value))
+    else if (key === "warnings") manager.setWarnings(expectRecord(key, value) as never)
+    else throw Object.assign(new Error(`unsupported Pi setting: ${key}`), { code: "INVALID_REQUEST" })
+  }
+}
+
+function expectString(key: string, value: unknown): string {
+  if (typeof value !== "string") throw invalidSetting(key)
+  return value
+}
+
+function expectOptionalString(key: string, value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined
+  return expectString(key, value)
+}
+
+function expectBoolean(key: string, value: unknown): boolean {
+  if (typeof value !== "boolean") throw invalidSetting(key)
+  return value
+}
+
+function expectNumber(key: string, value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw invalidSetting(key)
+  return value
+}
+
+function expectEnum<T extends string>(key: string, value: unknown, values: readonly T[]): T {
+  if (typeof value !== "string" || !values.includes(value as T)) throw invalidSetting(key)
+  return value as T
+}
+
+function expectOptionalStringArray(key: string, value: unknown): string[] | undefined {
+  if (value === null || value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw invalidSetting(key)
+  return value
+}
+
+function expectStringArray(key: string, value: unknown): string[] {
+  const result = expectOptionalStringArray(key, value)
+  if (!result) throw invalidSetting(key)
+  return result
+}
+
+function expectRecord(key: string, value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidSetting(key)
+  return value as Record<string, unknown>
+}
+
+function expectArray(key: string, value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw invalidSetting(key)
+  return value
+}
+
+function expectOutputPad(key: string, value: unknown): 0 | 1 {
+  if (value !== 0 && value !== 1) throw invalidSetting(key)
+  return value
+}
+
+function invalidSetting(key: string): Error {
+  return Object.assign(new Error(`invalid Pi setting: ${key}`), { code: "INVALID_REQUEST" })
+}
+
 export class RealPiSession {
   private runtime: AgentSessionRuntime
+  private readonly extensionUi: ExtensionUiBridge
+  private extensionsInitialized = false
   private projection: ProjectionState = createProjectionState()
   private stateUnsub: (() => void) | null = null
   private lastUserId: string | null = null
@@ -124,6 +377,8 @@ export class RealPiSession {
   private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
   private projectionListeners = new Set<(projection: ProjectionState) => void>()
   private projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
+  private nativeEventListeners = new Set<(event: unknown) => void>()
+  private resourceListeners = new Set<() => void>()
   /** last known runtime flags from events */
   private isCompactingFlag = false
   private retryState: RetryStateV1 = { phase: "idle", autoEnabled: true }
@@ -134,12 +389,18 @@ export class RealPiSession {
 
   private constructor(runtime: AgentSessionRuntime) {
     this.runtime = runtime
+    this.extensionUi = new ExtensionUiBridge(
+      () => this.runtime.session.sessionManager.getSessionId(),
+      () => undefined,
+    )
     this.bindStateEvents()
   }
 
   private bindStateEvents(): void {
     this.stateUnsub?.()
     this.stateUnsub = this.runtime.session.subscribe(event => {
+      const nativeEvent = toJsonValue(event)
+      for (const listener of this.nativeEventListeners) listener(nativeEvent)
       let projectionChanged = false
       for (const workerEvent of mapPiEventToWorker(event, this)) {
         this.projection = applyWorkerEvent(this.projection, workerEvent)
@@ -257,15 +518,45 @@ export class RealPiSession {
       sessionManager,
     })
 
-    await runtime.session.bindExtensions(extensionBindings())
     const result = new RealPiSession(runtime)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
-      await session.bindExtensions(extensionBindings())
+      result.extensionUi.cancelAll("session_replaced")
+      if (result.extensionsInitialized) {
+        await session.bindExtensions(extensionBindings(
+          result.extensionUi.context,
+          result.runtime,
+          result.navigateTree.bind(result),
+          result.reload.bind(result),
+        ))
+      }
       result.bindStateEvents()
     })
     if (projection) result.projection = projection
     return result
+  }
+
+  async initializeExtensions(): Promise<void> {
+    if (this.extensionsInitialized) return
+    await this.runtime.session.bindExtensions(extensionBindings(
+      this.extensionUi.context,
+      this.runtime,
+      this.navigateTree.bind(this),
+      this.reload.bind(this),
+    ))
+    this.extensionsInitialized = true
+  }
+
+  onExtensionUi(listener: (event: PiExtensionUiEvent) => void): () => void {
+    return this.extensionUi.onEvent(listener)
+  }
+
+  respondExtensionUi(requestId: string, response: import("@piui/protocol").ExtensionUiDialogResponseV1): boolean {
+    return this.extensionUi.respond(requestId, response)
+  }
+
+  setExtensionEditorState(text: string): void {
+    this.extensionUi.setEditorState(text)
   }
 
   static async list(cwd: string): Promise<PiSessionInfo[]> {
@@ -278,20 +569,114 @@ export class RealPiSession {
 
   static async listModels(): Promise<PiModelInfo[]> {
     const runtime = await ModelRuntime.create({ allowModelNetwork: false })
-    return (await runtime.getAvailable()).map(model => {
-      const input = (model as { input?: string[] }).input
-      return {
-        id: model.id,
-        name: model.name || model.id,
-        providerId: model.provider,
-        family: (model as { family?: string }).family || "",
-        contextLimit: model.contextWindow ?? 0,
-        outputLimit: model.maxTokens ?? 0,
-        supportsReasoning: Boolean((model as { reasoning?: boolean }).reasoning),
-        thinkingLevels: supportedThinkingLevels(model),
-        supportsImages: Array.isArray(input) && input.includes("image"),
-      }
-    })
+    return (await runtime.getAvailable()).map(modelInfo)
+  }
+
+  static getSettings(cwd: string): PiSettingsSnapshotV1 {
+    const { manager, trusted } = settingsForWorkspace(cwd)
+    return settingsSnapshot(cwd, manager, trusted)
+  }
+
+  static async patchSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+    const { manager, trusted } = settingsForWorkspace(cwd)
+    applySettingsPatch(manager, patch)
+    await manager.flush()
+    return settingsSnapshot(cwd, manager, trusted)
+  }
+
+  static getProjectTrust(cwd: string): ProjectTrustV1 {
+    const agentDir = getAgentDir()
+    const store = new ProjectTrustStore(agentDir)
+    const entry = store.getEntry(cwd)
+    const manager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+    const defaultDecision = manager.getDefaultProjectTrust()
+    const required = hasTrustRequiringProjectResources(cwd)
+    const decision = store.get(cwd)
+    return {
+      workspacePath: cwd,
+      required,
+      decision,
+      inheritedFrom: entry?.path,
+      defaultDecision,
+      trusted: !required || (decision ?? defaultDecision === "always"),
+    }
+  }
+
+  static setProjectTrust(cwd: string, decision: boolean | null): ProjectTrustV1 {
+    new ProjectTrustStore(getAgentDir()).set(cwd, decision)
+    return RealPiSession.getProjectTrust(cwd)
+  }
+
+  static listPackages(cwd: string): ConfiguredPackageV1[] {
+    const { manager } = settingsForWorkspace(cwd)
+    return new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: manager })
+      .listConfiguredPackages()
+      .map(pkg => ({ ...pkg }))
+  }
+
+  static async managePackage(
+    cwd: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source: string | undefined,
+    local: boolean,
+    persist: boolean,
+    onProgress: (event: PackageProgressV1) => void,
+  ): Promise<ConfiguredPackageV1[]> {
+    const { manager } = settingsForWorkspace(cwd)
+    const packages = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: manager })
+    packages.setProgressCallback(event => onProgress({ ...event, commandId }))
+    if (action === "install") {
+      if (!source) throw Object.assign(new Error("package source required"), { code: "INVALID_REQUEST" })
+      await (persist ? packages.installAndPersist(source, { local }) : packages.install(source, { local }))
+    } else if (action === "remove") {
+      if (!source) throw Object.assign(new Error("package source required"), { code: "INVALID_REQUEST" })
+      if (persist) await packages.removeAndPersist(source, { local })
+      else await packages.remove(source, { local })
+    } else {
+      await packages.update(source)
+    }
+    await manager.flush()
+    return packages.listConfiguredPackages().map(pkg => ({ ...pkg }))
+  }
+
+  static async resolvePackages(
+    cwd: string,
+    missingAction: "skip" | "error" = "skip",
+  ): Promise<ResolvedPackageResourcesV1> {
+    const packages = packageManagerForWorkspace(cwd)
+    return packages.resolve(async () => missingAction)
+  }
+
+  static async resolveExtensionSources(
+    cwd: string,
+    sources: string[],
+    options: { local?: boolean; temporary?: boolean } = {},
+  ): Promise<ResolvedPackageResourcesV1> {
+    return packageManagerForWorkspace(cwd).resolveExtensionSources(sources, options)
+  }
+
+  static async changePackageSource(
+    cwd: string,
+    source: string,
+    operation: "add" | "remove",
+    local = false,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
+    const { manager } = settingsForWorkspace(cwd)
+    const packages = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: manager })
+    const changed = operation === "add"
+      ? packages.addSourceToSettings(source, { local })
+      : packages.removeSourceFromSettings(source, { local })
+    await manager.flush()
+    return { changed, packages: packages.listConfiguredPackages().map(pkg => ({ ...pkg })) }
+  }
+
+  static getInstalledPackagePath(cwd: string, source: string, scope: "user" | "project"): string | undefined {
+    return packageManagerForWorkspace(cwd).getInstalledPath(source, scope)
+  }
+
+  static checkPackageUpdates(cwd: string): Promise<PackageUpdateV1[]> {
+    return packageManagerForWorkspace(cwd).checkForAvailableUpdates()
   }
 
   onState(listener: (s: PiRuntimeUiState) => void): () => void {
@@ -309,6 +694,16 @@ export class RealPiSession {
   onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
     this.projectionDeltaListeners.add(listener)
     return () => this.projectionDeltaListeners.delete(listener)
+  }
+
+  onNativeEvent(listener: (event: unknown) => void): () => void {
+    this.nativeEventListeners.add(listener)
+    return () => this.nativeEventListeners.delete(listener)
+  }
+
+  onResourcesChanged(listener: () => void): () => void {
+    this.resourceListeners.add(listener)
+    return () => this.resourceListeners.delete(listener)
   }
 
   private emitState() {
@@ -399,6 +794,8 @@ export class RealPiSession {
     const session = this.runtime.session
     const steering = [...(session.getSteeringMessages?.() ?? [])].map(String)
     const followUp = [...(session.getFollowUpMessages?.() ?? [])].map(String)
+    const contextUsage = session.getContextUsage()
+    const stats = session.getSessionStats()
     return {
       thinkingLevel: this.getThinkingLevel(),
       availableThinkingLevels: this.getAvailableThinkingLevels(),
@@ -421,6 +818,26 @@ export class RealPiSession {
       activeTools: session.getActiveToolNames?.() ?? [],
       model: this.getModel(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
+      contextUsage: contextUsage ? {
+        contextTokens: contextUsage.tokens ?? undefined,
+        contextWindow: contextUsage.contextWindow,
+        percent: contextUsage.percent,
+      } : undefined,
+      sessionStats: {
+        userMessages: stats.userMessages,
+        assistantMessages: stats.assistantMessages,
+        toolCalls: stats.toolCalls,
+        toolResults: stats.toolResults,
+        totalMessages: stats.totalMessages,
+        tokens: { ...stats.tokens },
+        cost: stats.cost,
+      },
+      scopedModels: session.scopedModels.map(item => ({
+        provider: item.model.provider,
+        id: item.model.id,
+        displayName: item.model.name,
+        thinkingLevel: item.thinkingLevel,
+      })),
     }
   }
 
@@ -546,6 +963,36 @@ export class RealPiSession {
     return this.fork(entryId, "at")
   }
 
+  async newSession(parentSession?: string): Promise<SessionReplacementResultV1> {
+    await this.runtime.session.waitForIdle()
+    const sourceSessionId = this.getSessionId()
+    const result = await this.runtime.newSession({ parentSession })
+    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    this.emitState()
+    return {
+      sourceSessionId,
+      targetSessionId: this.getSessionId(),
+      targetSessionFile: this.getSessionFile(),
+      targetCwd: this.runtime.cwd,
+      cancelled: result.cancelled,
+    }
+  }
+
+  async switchSession(sessionPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
+    await this.runtime.session.waitForIdle()
+    const sourceSessionId = this.getSessionId()
+    const result = await this.runtime.switchSession(resolveUserPath(sessionPath), { cwdOverride })
+    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    this.emitState()
+    return {
+      sourceSessionId,
+      targetSessionId: this.getSessionId(),
+      targetSessionFile: this.getSessionFile(),
+      targetCwd: this.runtime.cwd,
+      cancelled: result.cancelled,
+    }
+  }
+
   async importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
@@ -635,6 +1082,147 @@ export class RealPiSession {
     this.emitState()
   }
 
+  async cycleModel(direction: "forward" | "backward" = "forward"): Promise<void> {
+    const result = await this.runtime.session.cycleModel(direction)
+    if (!result) throw Object.assign(new Error("no authenticated model is available to cycle to"), {
+      code: "MODEL_NOT_AVAILABLE",
+    })
+    this.emitState()
+  }
+
+  async setScopedModels(patterns: string[]): Promise<Array<{ message: string; pattern: string }>> {
+    const normalized = patterns.map(pattern => pattern.trim()).filter(Boolean)
+    const result = await resolveModelScopeWithDiagnostics(normalized, this.runtime.session.modelRuntime)
+    this.runtime.session.setScopedModels(result.scopedModels)
+    this.emitState()
+    return result.diagnostics.map(diagnostic => ({ message: diagnostic.message, pattern: diagnostic.pattern }))
+  }
+
+  async listAvailableModels(): Promise<PiModelInfo[]> {
+    return (await this.runtime.session.modelRuntime.getAvailable()).map(modelInfo)
+  }
+
+  async sendCustomMessage(
+    customType: string,
+    content: CustomMessageContentV1[],
+    options: {
+      display: boolean
+      details?: unknown
+      triggerTurn?: boolean
+      deliverAs?: "steer" | "followUp" | "nextTurn"
+    },
+  ): Promise<void> {
+    if (!customType.trim()) throw Object.assign(new Error("custom message type required"), { code: "INVALID_REQUEST" })
+    await this.runtime.session.sendCustomMessage({
+      customType: customType.trim(),
+      content,
+      display: options.display,
+      details: options.details,
+    }, {
+      triggerTurn: options.triggerTurn,
+      deliverAs: options.deliverAs,
+    })
+    this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    this.emitProjection()
+    this.emitState()
+  }
+
+  appendCustomEntry(customType: string, data?: unknown): void {
+    const normalized = customType.trim()
+    if (!normalized) throw Object.assign(new Error("custom entry type required"), { code: "INVALID_REQUEST" })
+    this.runtime.session.sessionManager.appendCustomEntry(normalized, data)
+    this.emitState()
+  }
+
+  waitForIdle(): Promise<void> {
+    return this.runtime.session.waitForIdle()
+  }
+
+  getToolDefinition(toolName: string): unknown {
+    return toJsonValue(this.runtime.session.getToolDefinition(toolName))
+  }
+
+  hasExtensionHandlers(eventType: string): boolean {
+    return this.runtime.session.hasExtensionHandlers(eventType as never)
+  }
+
+  getSystemPrompt(): string {
+    return this.runtime.session.systemPrompt
+  }
+
+  getModelRuntime(): ModelRuntime {
+    return this.runtime.session.modelRuntime
+  }
+
+  inspectRuntime(): PiRuntimeInspectionV1 {
+    const session = this.runtime.session
+    const manager = session.sessionManager
+    return {
+      header: toJsonValue(manager.getHeader()),
+      entries: toJsonValue(manager.getEntries()) as unknown[],
+      branch: toJsonValue(manager.getBranch()) as unknown[],
+      contextEntries: toJsonValue(manager.buildContextEntries()) as unknown[],
+      context: toJsonValue(manager.buildSessionContext()),
+      agentMessages: toJsonValue(session.agent.state.messages) as unknown[],
+      lastAssistantText: session.getLastAssistantText(),
+      userMessagesForForking: toJsonValue(session.getUserMessagesForForking()) as unknown[],
+    }
+  }
+
+  inspectResources(): PiResourceSnapshotV1 {
+    const loader = this.runtime.session.resourceLoader
+    const extensions = loader.getExtensions()
+    const skills = loader.getSkills()
+    const prompts = loader.getPrompts()
+    const themes = loader.getThemes()
+    return {
+      extensions: extensions.extensions.map(extension => ({
+        path: extension.path,
+        resolvedPath: extension.resolvedPath,
+        hidden: extension.hidden,
+        sourceInfo: toJsonValue(extension.sourceInfo),
+      })),
+      extensionErrors: extensions.errors.map(error => ({ ...error })),
+      skills: skills.skills.map(skill => ({
+        name: skill.name,
+        description: skill.description,
+        filePath: skill.filePath,
+        baseDir: skill.baseDir,
+        disableModelInvocation: skill.disableModelInvocation,
+        sourceInfo: toJsonValue(skill.sourceInfo),
+      })),
+      prompts: prompts.prompts.map(prompt => ({
+        name: prompt.name,
+        description: prompt.description,
+        argumentHint: prompt.argumentHint,
+        content: prompt.content,
+        filePath: prompt.filePath,
+        sourceInfo: toJsonValue(prompt.sourceInfo),
+      })),
+      themes: themes.themes.map(theme => ({
+        name: theme.name,
+        sourcePath: theme.sourcePath,
+        sourceInfo: toJsonValue(theme.sourceInfo),
+      })),
+      agentsFiles: loader.getAgentsFiles().agentsFiles.map(file => ({ ...file })),
+      systemPrompt: loader.getSystemPrompt(),
+      appendSystemPrompt: [...loader.getAppendSystemPrompt()],
+      diagnostics: [...skills.diagnostics, ...prompts.diagnostics, ...themes.diagnostics].map(diagnostic => ({
+        type: diagnostic.type,
+        message: diagnostic.message,
+        path: diagnostic.path,
+        collision: toJsonValue(diagnostic.collision),
+      })),
+      runtimeDiagnostics: this.runtime.diagnostics.map(diagnostic => ({ ...diagnostic })),
+      modelFallbackMessage: this.runtime.modelFallbackMessage,
+    }
+  }
+
+  extendResources(paths: PiResourceExtensionPathsV1): void {
+    this.runtime.session.resourceLoader.extendResources(paths)
+    for (const listener of this.resourceListeners) listener()
+  }
+
   async executeBash(command: string, excludeFromContext = false): Promise<PiBashResult> {
     const normalized = command.trim()
     if (!normalized) throw Object.assign(new Error("empty bash command"), { code: "INVALID_REQUEST" })
@@ -674,10 +1262,12 @@ export class RealPiSession {
   }
 
   async reload(): Promise<void> {
+    this.extensionUi.cancelAll("runtime_reloaded")
     await this.runtime.session.reload()
     this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
     this.emitProjection()
     this.emitState()
+    for (const listener of this.resourceListeners) listener()
   }
 
   async steer(text: string, images?: PiImageInput[]): Promise<void> {
@@ -776,10 +1366,13 @@ export class RealPiSession {
   }
 
   async dispose(): Promise<void> {
+    this.extensionUi.cancelAll("runtime_disposed")
     this.detachSessionSubscriptions()
     this.stateListeners.clear()
     this.projectionListeners.clear()
     this.projectionDeltaListeners.clear()
+    this.nativeEventListeners.clear()
+    this.resourceListeners.clear()
     await this.runtime.dispose()
   }
 
@@ -798,7 +1391,7 @@ export class RealPiSession {
 }
 
 function mapSessionEntry(entry: SessionEntry): PiSessionEntryV1 {
-  const base = { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp }
+  const base = { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp, native: toJsonValue(entry) }
   switch (entry.type) {
     case "message": {
       const message = entry.message as unknown as Record<string, unknown>
@@ -838,6 +1431,16 @@ function mapSessionEntry(entry: SessionEntry): PiSessionEntryV1 {
     case "session_info":
       return { ...base, type: entry.type, name: entry.name }
   }
+}
+
+function toJsonValue(value: unknown): unknown {
+  if (value === undefined) return undefined
+  return JSON.parse(JSON.stringify(value, (_key, item) => {
+    if (typeof item === "bigint") return item.toString()
+    if (typeof item === "function" || typeof item === "symbol") return undefined
+    if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
+    return item
+  }))
 }
 
 function mapSessionTree(nodes: SessionTreeNode[]): PiSessionTreeNodeV1[] {
@@ -911,6 +1514,29 @@ function sessionInfo(info: {
 function pathKey(value: string): string {
   const resolved = path.resolve(value)
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+function modelInfo(model: {
+  id: string
+  name?: string
+  provider: string
+  family?: string
+  contextWindow?: number
+  maxTokens?: number
+  reasoning?: boolean
+  input?: string[]
+}): PiModelInfo {
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    providerId: model.provider,
+    family: model.family || "",
+    contextLimit: model.contextWindow ?? 0,
+    outputLimit: model.maxTokens ?? 0,
+    supportsReasoning: Boolean(model.reasoning),
+    thinkingLevels: supportedThinkingLevels(model),
+    supportsImages: Array.isArray(model.input) && model.input.includes("image"),
+  }
 }
 
 function supportedThinkingLevels(model: {
@@ -1006,7 +1632,8 @@ function projectNativeBranch(entries: SessionEntry[]): ProjectionState {
           toolCallId: String(message.toolCallId ?? ""),
           toolName: typeof message.toolName === "string" ? message.toolName : undefined,
           isError: Boolean(message.isError),
-          result: extractText(message.content),
+          result: toResultBlocks(message.content),
+          details: message.details,
         },
       })
     }
@@ -1078,12 +1705,13 @@ function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: 
         result?: unknown
       }
       const toolCallId = m.toolCallId ?? ""
-      const resultText = extractText(m.content ?? m.result)
+      const result = toResultBlocks(m.content ?? m.result)
       out.push({
         type: "tool_execution_end",
         toolCallId,
         isError: m.isError,
-        result: resultText,
+        result,
+        details: (message as Record<string, unknown>).details,
       })
       out.push({
         type: "message_end",
@@ -1095,7 +1723,8 @@ function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: 
           role: "toolResult",
           toolCallId,
           isError: m.isError,
-          result: resultText,
+          result,
+          details: (message as Record<string, unknown>).details,
         },
       })
     }
@@ -1117,7 +1746,19 @@ function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: 
       type: "tool_execution_end",
       toolCallId: String(event.toolCallId ?? ""),
       isError: Boolean(event.isError),
-      result: extractText(event.result),
+      result: toResultBlocks((event.result as { content?: unknown } | undefined)?.content ?? event.result),
+      details: (event.result as { details?: unknown } | undefined)?.details,
+    })
+    return out
+  }
+
+  if (event.type === "tool_execution_update") {
+    const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
+    out.push({
+      type: "tool_execution_update",
+      toolCallId: String(event.toolCallId ?? ""),
+      result: toResultBlocks(partial?.content),
+      details: partial?.details,
     })
     return out
   }
@@ -1166,6 +1807,25 @@ function toContentBlocks(content: unknown): PiContentBlock[] {
         name: String(o.name ?? o.toolName ?? "tool"),
         arguments: o.arguments ?? o.input ?? {},
       })
+    }
+  }
+  return blocks
+}
+
+function toResultBlocks(content: unknown): Array<
+  { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+> {
+  if (content == null) return []
+  if (typeof content === "string") return [{ type: "text", text: content }]
+  if (!Array.isArray(content)) return [{ type: "text", text: String(content) }]
+  const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = []
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue
+    const value = block as Record<string, unknown>
+    if (value.type === "text" && typeof value.text === "string") {
+      blocks.push({ type: "text", text: value.text })
+    } else if (value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string") {
+      blocks.push({ type: "image", data: value.data, mimeType: value.mimeType })
     }
   }
   return blocks

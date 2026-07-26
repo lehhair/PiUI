@@ -4,7 +4,22 @@ import { fileURLToPath } from "node:url"
 import { isRuntimeControlStateV1, PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type {
   CompactionCommandResultV1,
+  ExtensionUiDialogResponseV1,
   PiNavigationResultV1,
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ProviderAuthEventV1,
+  ProviderAuthInfoV1,
+  ConfiguredPackageV1,
+  CustomMessageContentV1,
+  PackageProgressV1,
+  PiResourceSnapshotV1,
+  PiResourceExtensionPathsV1,
+  PiRuntimeInspectionV1,
+  ResolvedPackageResourcesV1,
+  PackageUpdateV1,
+  PiModelRuntimeSnapshotV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
 } from "@piui/protocol"
@@ -15,6 +30,7 @@ import {
   type PiCommandInfo,
   type PiBashResult,
   type PiImageInput,
+  type PiExtensionUiEvent,
   type PiModelInfo,
   type PiRuntimeUiState,
   type PiSessionInfo,
@@ -45,6 +61,45 @@ export interface PiWorkerCatalog {
   list(cwd: string): Promise<PiSessionInfo[]>
   listAll(): Promise<PiSessionInfo[]>
   listModels(): Promise<PiModelInfo[]>
+  getSettings(cwd: string): Promise<PiSettingsSnapshotV1>
+  patchSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1>
+  getProjectTrust(cwd: string): Promise<ProjectTrustV1>
+  setProjectTrust(cwd: string, decision: boolean | null): Promise<ProjectTrustV1>
+  listProviders(): Promise<ProviderAuthInfoV1[]>
+  startProviderAuth(providerId: string, authType: "api_key" | "oauth"): Promise<string>
+  respondProviderAuth(flowId: string, promptId: string, value: string): Promise<void>
+  cancelProviderAuth(flowId: string): Promise<void>
+  logoutProvider(providerId: string): Promise<void>
+  inspectModelRuntime(): Promise<PiModelRuntimeSnapshotV1>
+  setRuntimeApiKey(providerId: string, apiKey: string): Promise<void>
+  removeRuntimeApiKey(providerId: string): Promise<void>
+  reloadModelRuntime(): Promise<void>
+  refreshModelRuntime(options?: Record<string, unknown>): Promise<unknown>
+  onProviderAuth(listener: (event: ProviderAuthEventV1) => void): () => void
+  listPackages(cwd: string): Promise<ConfiguredPackageV1[]>
+  managePackage(
+    cwd: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source?: string,
+    local?: boolean,
+    persist?: boolean,
+  ): Promise<ConfiguredPackageV1[]>
+  resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1>
+  resolveExtensionSources(
+    cwd: string,
+    sources: string[],
+    options?: { local?: boolean; temporary?: boolean },
+  ): Promise<ResolvedPackageResourcesV1>
+  changePackageSource(
+    cwd: string,
+    source: string,
+    operation: "add" | "remove",
+    local?: boolean,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }>
+  getInstalledPackagePath(cwd: string, source: string, scope: "user" | "project"): Promise<string | undefined>
+  checkPackageUpdates(cwd: string): Promise<PackageUpdateV1[]>
+  onPackageProgress(listener: (event: PackageProgressV1) => void): () => void
   onCrash(listener: (error: Error) => void): () => void
   dispose(): Promise<void>
 }
@@ -62,6 +117,11 @@ export class PiWorkerSession implements PiSessionRuntime {
   private readonly projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
   private readonly closeListeners = new Set<() => void>()
+  private readonly extensionUiListeners = new Set<(event: PiExtensionUiEvent) => void>()
+  private readonly nativeEventListeners = new Set<(event: unknown) => void>()
+  private readonly resourceListeners = new Set<() => void>()
+  private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
+  private readonly packageProgressListeners = new Set<(event: PackageProgressV1) => void>()
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
@@ -146,6 +206,31 @@ export class PiWorkerSession implements PiSessionRuntime {
       list: cwd => client.listCatalogSessions({ type: "list", cwd }),
       listAll: () => client.listCatalogSessions({ type: "listAll" }),
       listModels: () => client.listCatalogModels(),
+      getSettings: cwd => client.getCatalogSettings(cwd),
+      patchSettings: (cwd, patch) => client.patchCatalogSettings(cwd, patch),
+      getProjectTrust: cwd => client.getCatalogTrust(cwd),
+      setProjectTrust: (cwd, decision) => client.setCatalogTrust(cwd, decision),
+      listProviders: () => client.listCatalogProviders(),
+      startProviderAuth: (providerId, authType) => client.startCatalogProviderAuth(providerId, authType),
+      respondProviderAuth: (flowId, promptId, value) => client.respondCatalogProviderAuth(flowId, promptId, value),
+      cancelProviderAuth: flowId => client.cancelCatalogProviderAuth(flowId),
+      logoutProvider: providerId => client.logoutCatalogProvider(providerId),
+      inspectModelRuntime: () => client.inspectCatalogModelRuntime(),
+      setRuntimeApiKey: (providerId, apiKey) => client.setCatalogRuntimeApiKey(providerId, apiKey),
+      removeRuntimeApiKey: providerId => client.removeCatalogRuntimeApiKey(providerId),
+      reloadModelRuntime: () => client.reloadCatalogModelRuntime(),
+      refreshModelRuntime: options => client.refreshCatalogModelRuntime(options),
+      onProviderAuth: listener => client.onProviderAuth(listener),
+      listPackages: cwd => client.listCatalogPackages(cwd),
+      managePackage: (cwd, commandId, action, source, local, persist) =>
+        client.manageCatalogPackage(cwd, commandId, action, source, local, persist),
+      resolvePackages: (cwd, missingAction) => client.resolveCatalogPackages(cwd, missingAction),
+      resolveExtensionSources: (cwd, sources, options) => client.resolveCatalogExtensionSources(cwd, sources, options),
+      changePackageSource: (cwd, source, operation, local) =>
+        client.changeCatalogPackageSource(cwd, source, operation, local),
+      getInstalledPackagePath: (cwd, source, scope) => client.getCatalogInstalledPackagePath(cwd, source, scope),
+      checkPackageUpdates: cwd => client.checkCatalogPackageUpdates(cwd),
+      onPackageProgress: listener => client.onPackageProgress(listener),
       onCrash: listener => client.onCrash(listener),
       dispose: () => client.dispose(),
     }
@@ -211,6 +296,193 @@ export class PiWorkerSession implements PiSessionRuntime {
     return result.models
   }
 
+  private async getCatalogSettings(cwd: string): Promise<PiSettingsSnapshotV1> {
+    const result = await this.request({ type: "getSettings", cwd })
+    if (result.type !== "settings") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.settings
+  }
+
+  private async patchCatalogSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+    const result = await this.request({ type: "patchSettings", cwd, patch })
+    if (result.type !== "settings") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.settings
+  }
+
+  private async getCatalogTrust(cwd: string): Promise<ProjectTrustV1> {
+    const result = await this.request({ type: "getProjectTrust", cwd })
+    if (result.type !== "trust") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.trust
+  }
+
+  private async setCatalogTrust(cwd: string, decision: boolean | null): Promise<ProjectTrustV1> {
+    const result = await this.request({ type: "setProjectTrust", cwd, decision })
+    if (result.type !== "trust") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.trust
+  }
+
+  private async listCatalogProviders(): Promise<ProviderAuthInfoV1[]> {
+    const result = await this.request({ type: "listProviders" })
+    if (result.type !== "providers") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.providers
+  }
+
+  private async startCatalogProviderAuth(providerId: string, authType: "api_key" | "oauth"): Promise<string> {
+    const result = await this.request({ type: "startProviderAuth", providerId, authType })
+    if (result.type !== "authFlow") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.flowId
+  }
+
+  private async respondCatalogProviderAuth(flowId: string, promptId: string, value: string): Promise<void> {
+    await this.request({ type: "respondProviderAuth", flowId, promptId, value })
+  }
+
+  private async cancelCatalogProviderAuth(flowId: string): Promise<void> {
+    await this.request({ type: "cancelProviderAuth", flowId })
+  }
+
+  private async logoutCatalogProvider(providerId: string): Promise<void> {
+    await this.request({ type: "logoutProvider", providerId })
+  }
+
+  private async inspectCatalogModelRuntime(): Promise<PiModelRuntimeSnapshotV1> {
+    const result = await this.request({ type: "inspectModelRuntime" })
+    if (result.type !== "modelRuntime") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.runtime
+  }
+
+  private async setCatalogRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
+    await this.request({ type: "setRuntimeApiKey", providerId, apiKey })
+  }
+
+  private async removeCatalogRuntimeApiKey(providerId: string): Promise<void> {
+    await this.request({ type: "removeRuntimeApiKey", providerId })
+  }
+
+  private async reloadCatalogModelRuntime(): Promise<void> {
+    await this.request({ type: "reloadModelRuntime" })
+  }
+
+  private async refreshCatalogModelRuntime(options?: Record<string, unknown>): Promise<unknown> {
+    const result = await this.request({ type: "refreshModelRuntime", options })
+    if (result.type !== "modelRefresh") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.result
+  }
+
+  onProviderAuth(listener: (event: ProviderAuthEventV1) => void): () => void {
+    this.providerAuthListeners.add(listener)
+    return () => this.providerAuthListeners.delete(listener)
+  }
+
+  listRuntimeProviders(): Promise<ProviderAuthInfoV1[]> {
+    return this.listCatalogProviders()
+  }
+
+  startRuntimeProviderAuth(providerId: string, authType: "api_key" | "oauth"): Promise<string> {
+    return this.startCatalogProviderAuth(providerId, authType)
+  }
+
+  respondRuntimeProviderAuth(flowId: string, promptId: string, value: string): Promise<void> {
+    return this.respondCatalogProviderAuth(flowId, promptId, value)
+  }
+
+  cancelRuntimeProviderAuth(flowId: string): Promise<void> {
+    return this.cancelCatalogProviderAuth(flowId)
+  }
+
+  logoutRuntimeProvider(providerId: string): Promise<void> {
+    return this.logoutCatalogProvider(providerId)
+  }
+
+  inspectSessionModelRuntime(): Promise<PiModelRuntimeSnapshotV1> {
+    return this.inspectCatalogModelRuntime()
+  }
+
+  setSessionRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
+    return this.setCatalogRuntimeApiKey(providerId, apiKey)
+  }
+
+  removeSessionRuntimeApiKey(providerId: string): Promise<void> {
+    return this.removeCatalogRuntimeApiKey(providerId)
+  }
+
+  reloadSessionModelRuntime(): Promise<void> {
+    return this.reloadCatalogModelRuntime()
+  }
+
+  refreshSessionModelRuntime(options?: Record<string, unknown>): Promise<unknown> {
+    return this.refreshCatalogModelRuntime(options)
+  }
+
+  private async listCatalogPackages(cwd: string): Promise<ConfiguredPackageV1[]> {
+    const result = await this.request({ type: "listPackages", cwd })
+    if (result.type !== "packages") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.packages
+  }
+
+  private async manageCatalogPackage(
+    cwd: string,
+    commandId: string,
+    action: "install" | "remove" | "update",
+    source?: string,
+    local?: boolean,
+    persist?: boolean,
+  ): Promise<ConfiguredPackageV1[]> {
+    const result = await this.request({ type: "managePackage", cwd, commandId, action, source, local, persist })
+    if (result.type !== "packages") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.packages
+  }
+
+  private async resolveCatalogPackages(
+    cwd: string,
+    missingAction?: "skip" | "error",
+  ): Promise<ResolvedPackageResourcesV1> {
+    const result = await this.request({ type: "resolvePackages", cwd, missingAction })
+    if (result.type !== "packageResources") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.resources
+  }
+
+  private async resolveCatalogExtensionSources(
+    cwd: string,
+    sources: string[],
+    options: { local?: boolean; temporary?: boolean } = {},
+  ): Promise<ResolvedPackageResourcesV1> {
+    const result = await this.request({ type: "resolveExtensionSources", cwd, sources, ...options })
+    if (result.type !== "packageResources") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.resources
+  }
+
+  private async changeCatalogPackageSource(
+    cwd: string,
+    source: string,
+    operation: "add" | "remove",
+    local?: boolean,
+  ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
+    const result = await this.request({ type: "changePackageSource", cwd, source, operation, local })
+    if (result.type !== "packageSource") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return { changed: result.changed, packages: result.packages }
+  }
+
+  private async getCatalogInstalledPackagePath(
+    cwd: string,
+    source: string,
+    scope: "user" | "project",
+  ): Promise<string | undefined> {
+    const result = await this.request({ type: "getInstalledPackagePath", cwd, source, scope })
+    if (result.type !== "packagePath") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.path
+  }
+
+  private async checkCatalogPackageUpdates(cwd: string): Promise<PackageUpdateV1[]> {
+    const result = await this.request({ type: "checkPackageUpdates", cwd })
+    if (result.type !== "packageUpdates") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.updates
+  }
+
+  private onPackageProgress(listener: (event: PackageProgressV1) => void): () => void {
+    this.packageProgressListeners.add(listener)
+    return () => this.packageProgressListeners.delete(listener)
+  }
+
   onState(listener: (state: PiRuntimeUiState) => void): () => void {
     this.stateListeners.add(listener)
     listener(this.getRuntimeUiState())
@@ -226,6 +498,16 @@ export class PiWorkerSession implements PiSessionRuntime {
   onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
     this.projectionDeltaListeners.add(listener)
     return () => this.projectionDeltaListeners.delete(listener)
+  }
+
+  onNativeEvent(listener: (event: unknown) => void): () => void {
+    this.nativeEventListeners.add(listener)
+    return () => this.nativeEventListeners.delete(listener)
+  }
+
+  onResourcesChanged(listener: () => void): () => void {
+    this.resourceListeners.add(listener)
+    return () => this.resourceListeners.delete(listener)
   }
 
   getProjection(): ProjectionState { return this.projection }
@@ -247,6 +529,79 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   async setThinkingLevel(level: string): Promise<void> {
     this.applySession(expectSession(await this.request({ type: "setThinkingLevel", level })))
+  }
+
+  async cycleModel(direction?: "forward" | "backward"): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "cycleModel", direction })))
+  }
+
+  async setScopedModels(patterns: string[]): Promise<Array<{ message: string; pattern: string }>> {
+    const result = await this.request({ type: "setScopedModels", patterns })
+    if (result.type !== "scopedModels") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return result.diagnostics
+  }
+
+  async listAvailableModels(): Promise<PiModelInfo[]> {
+    const result = await this.request({ type: "listRuntimeModels" })
+    if (result.type !== "models") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.models
+  }
+
+  async sendCustomMessage(
+    customType: string,
+    content: CustomMessageContentV1[],
+    options: {
+      display: boolean
+      details?: unknown
+      triggerTurn?: boolean
+      deliverAs?: "steer" | "followUp" | "nextTurn"
+    },
+  ): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "sendCustomMessage", customType, content, ...options })))
+  }
+
+  async appendCustomEntry(customType: string, data?: unknown): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "appendCustomEntry", customType, data })))
+  }
+
+  async waitForIdle(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "waitForIdle" })))
+  }
+
+  async getToolDefinition(toolName: string): Promise<unknown> {
+    const result = await this.request({ type: "inspectToolDefinition", toolName })
+    if (result.type !== "data") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.data
+  }
+
+  async hasExtensionHandlers(eventType: string): Promise<boolean> {
+    const result = await this.request({ type: "hasExtensionHandlers", eventType })
+    if (result.type !== "boolean") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.value
+  }
+
+  async getSystemPrompt(): Promise<string> {
+    const result = await this.request({ type: "inspectSystemPrompt" })
+    if (result.type !== "text") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.text
+  }
+
+  async inspectRuntime(): Promise<PiRuntimeInspectionV1> {
+    const result = await this.request({ type: "inspectRuntime" })
+    if (result.type !== "runtimeInspection") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.inspection
+  }
+
+  async inspectResources(): Promise<PiResourceSnapshotV1> {
+    const result = await this.request({ type: "inspectResources" })
+    if (result.type !== "resources") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.resources
+  }
+
+  async extendResources(paths: PiResourceExtensionPathsV1): Promise<void> {
+    const result = await this.request({ type: "extendResources", paths })
+    if (result.type !== "resources") throw new Error(`unexpected Pi worker result: ${result.type}`)
   }
 
   async compact(customInstructions?: string): Promise<CompactionCommandResultV1> {
@@ -330,6 +685,14 @@ export class PiWorkerSession implements PiSessionRuntime {
     return this.applyReplacement(await this.request({ type: "clone", entryId }))
   }
 
+  async newSession(parentSession?: string): Promise<SessionReplacementResultV1> {
+    return this.applyReplacement(await this.request({ type: "newSession", parentSession }))
+  }
+
+  async switchSession(sessionPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
+    return this.applyReplacement(await this.request({ type: "switchSession", sessionPath, cwdOverride }))
+  }
+
   async importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
     return this.applyReplacement(await this.request({ type: "importSession", inputPath, cwdOverride }))
   }
@@ -358,6 +721,24 @@ export class PiWorkerSession implements PiSessionRuntime {
     if (result.type !== "bash") throw new Error(`unexpected Pi worker result: ${result.type}`)
     this.applySession(result.session)
     return result.result
+  }
+
+  async initializeExtensions(): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "initializeExtensions" })))
+  }
+
+  onExtensionUi(listener: (event: PiExtensionUiEvent) => void): () => void {
+    this.extensionUiListeners.add(listener)
+    return () => this.extensionUiListeners.delete(listener)
+  }
+
+  async respondExtensionUi(requestId: string, response: ExtensionUiDialogResponseV1): Promise<boolean> {
+    await this.request({ type: "respondExtensionUi", requestId, response })
+    return true
+  }
+
+  async setExtensionEditorState(text: string): Promise<void> {
+    await this.request({ type: "setExtensionEditorState", text })
   }
 
   async abortBash(): Promise<void> {
@@ -458,7 +839,13 @@ export class PiWorkerSession implements PiSessionRuntime {
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      this.child.send({ kind: "request", id, generation: hello.generation, command }, error => {
+      this.child.send({
+        kind: "request",
+        id,
+        generation: hello.generation,
+        sessionId: this.session?.sessionId,
+        command,
+      }, error => {
         if (!error) return
         this.pending.delete(id)
         reject(error)
@@ -519,6 +906,32 @@ export class PiWorkerSession implements PiSessionRuntime {
     if (message.type === "projection") {
       this.projection = restoreProjection(message.projection.timeline, message.projection.isStreaming)
       for (const listener of this.projectionListeners) listener(this.projection)
+      return
+    }
+    if (message.type === "extensionUi") {
+      const event = message.event.type === "requested"
+        ? {
+            ...message.event,
+            request: { ...message.event.request, workerGeneration: message.generation },
+          } satisfies PiExtensionUiEvent
+        : message.event
+      for (const listener of this.extensionUiListeners) listener(event)
+      return
+    }
+    if (message.type === "nativeEvent") {
+      for (const listener of this.nativeEventListeners) listener(message.event)
+      return
+    }
+    if (message.type === "resourcesChanged") {
+      for (const listener of this.resourceListeners) listener()
+      return
+    }
+    if (message.type === "providerAuth") {
+      for (const listener of this.providerAuthListeners) listener(message.event)
+      return
+    }
+    if (message.type === "packageProgress") {
+      for (const listener of this.packageProgressListeners) listener(message.event)
       return
     }
     if (message.type === "projectionDelta") {
@@ -630,7 +1043,15 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
     case "abort":
       return "runtime.abort"
     case "setModel":
+    case "cycleModel":
+    case "setScopedModels":
+    case "listRuntimeModels":
       return "runtime.model"
+    case "inspectRuntime":
+      return "runtime.tree"
+    case "inspectResources":
+    case "extendResources":
+      return "runtime.reload"
     case "setThinkingLevel":
       return "runtime.thinking"
     case "compact":
@@ -652,19 +1073,58 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
       return "runtime.export"
     case "reload":
       return "runtime.reload"
+    case "getSettings":
+    case "patchSettings":
+      return "management.settings"
+    case "getProjectTrust":
+    case "setProjectTrust":
+      return "management.trust"
+    case "listProviders":
+    case "startProviderAuth":
+    case "respondProviderAuth":
+    case "cancelProviderAuth":
+    case "logoutProvider":
+    case "inspectModelRuntime":
+    case "setRuntimeApiKey":
+    case "removeRuntimeApiKey":
+    case "reloadModelRuntime":
+    case "refreshModelRuntime":
+      return "management.auth"
+    case "listPackages":
+    case "managePackage":
+    case "resolvePackages":
+    case "resolveExtensionSources":
+    case "changePackageSource":
+    case "getInstalledPackagePath":
+    case "checkPackageUpdates":
+      return "management.packages"
+    case "initializeExtensions":
+    case "respondExtensionUi":
+    case "setExtensionEditorState":
+      return "runtime.extensionUi"
     case "navigateTree":
     case "setLabel":
     case "setSessionName":
       return "runtime.tree"
     case "fork":
     case "clone":
+    case "newSession":
+    case "switchSession":
       return "runtime.fork"
     case "importSession":
       return "runtime.import"
     case "listSkills":
       return "runtime.skills"
     case "listCommands":
+    case "appendCustomEntry":
+    case "waitForIdle":
+    case "hasExtensionHandlers":
       return "runtime.commands"
+    case "sendCustomMessage":
+    case "inspectSystemPrompt":
+      return "runtime.commands"
+    case "inspectToolDefinition":
+      return "runtime.tools"
     case "dispose":
       return undefined
   }

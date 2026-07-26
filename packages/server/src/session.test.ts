@@ -357,7 +357,7 @@ describe("session mock snapshot (no LLM)", () => {
       const created = await json(port, "POST", "/api/v1/sessions", {
         workspaceId: workspace.data.workspace.id,
       })
-      assert.equal(created.status, 201)
+      assert.equal(created.status, 201, JSON.stringify(created.data))
       const sourceId = created.data.snapshot.session.id as string
       assert.equal(created.data.snapshot.native.entries[0]?.type, "message")
       assert.equal(created.data.snapshot.native.tree[0]?.entry.id, "fixture-entry")
@@ -396,7 +396,7 @@ describe("session mock snapshot (no LLM)", () => {
       const cloned = await json(port, "POST", `/api/v1/sessions/${forkTargetId}/commands/clone`, {
         entryId: "fixture-entry",
       })
-      assert.equal(cloned.status, 200)
+      assert.equal(cloned.status, 200, JSON.stringify(cloned.data))
       assert.notEqual(cloned.data.targetSnapshot.session.id, forkTargetId)
 
       const cloneTargetId = cloned.data.targetSnapshot.session.id as string
@@ -404,7 +404,7 @@ describe("session mock snapshot (no LLM)", () => {
         inputPath: path.join(root, "import.jsonl"),
         cwdOverride: root,
       })
-      assert.equal(imported.status, 200)
+      assert.equal(imported.status, 200, JSON.stringify(imported.data))
       assert.notEqual(imported.data.targetSnapshot.session.id, cloneTargetId)
 
       const deleted = await json(port, "DELETE", `/api/v1/sessions/${sourceId}`)
@@ -567,6 +567,143 @@ describe("session mock snapshot (no LLM)", () => {
       )
       assert.equal(stoppedCompaction.status, 200)
       assert.equal((await waitForCommand(port, "r4-compact")).data.command.status, "completed")
+    } finally {
+      await close()
+    }
+  })
+
+  it("routes R6 native model and management APIs through the worker", async () => {
+    const backend = new RuntimeSupervisor({
+      workerEntry: workerFixture,
+      leases: new SessionLeaseManager(path.join(root, "r6-http-leases")),
+    })
+    const server = createAppServer({ driver: "pi", piBackend: backend })
+    const { port, close } = await listen(server)
+    try {
+      const health = await json(port, "GET", "/api/v1/health")
+      const capabilities = health.data.protocolV2.capabilities.capabilities
+      assert.equal(capabilities["settings.manage"].enabled, true)
+      assert.equal(capabilities["project.trust"].enabled, true)
+      assert.equal(capabilities["providers.auth"].enabled, true)
+      assert.equal(capabilities["packages.manage"].enabled, true)
+      assert.equal(capabilities["models.manage"].limits.extensionProviders, true)
+
+      const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
+      const workspaceId = workspace.data.workspace.id as string
+      const created = await json(port, "POST", "/api/v1/sessions", { workspaceId })
+      const sessionId = created.data.session.id as string
+
+      const models = await json(port, "GET", `/api/v1/sessions/${sessionId}/models`)
+      assert.equal(models.status, 200)
+      assert.equal(models.data[0].id, "fixture-model")
+      assert.equal(models.data[0].providerId, "fixture")
+
+      const systemPrompt = await json(port, "GET", `/api/v1/sessions/${sessionId}/system-prompt`)
+      assert.deepEqual(systemPrompt, { status: 200, data: { text: "Fixture system prompt" } })
+
+      const inspected = await json(port, "GET", `/api/v1/sessions/${sessionId}/runtime-inspection`)
+      assert.equal(inspected.status, 200)
+      assert.equal(inspected.data.header.id, "fixture-session")
+      const resources = await json(port, "GET", `/api/v1/sessions/${sessionId}/resources`)
+      assert.equal(resources.status, 200)
+      assert.equal(resources.data.systemPrompt, "Fixture system prompt")
+      const extendedResources = await json(port, "POST", `/api/v1/sessions/${sessionId}/resources`, {
+        skillPaths: [], promptPaths: [], themePaths: [],
+      })
+      assert.equal(extendedResources.status, 200)
+      const toolDefinition = await json(port, "GET", `/api/v1/sessions/${sessionId}/tools/read/definition`)
+      assert.equal(toolDefinition.data.definition.name, "read")
+      const handlers = await json(port, "GET", `/api/v1/sessions/${sessionId}/extension-handlers/session_start`)
+      assert.equal(handlers.data.registered, true)
+
+      const custom = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/custom-message`, {
+        customType: "fixture.note",
+        content: [{ type: "text", text: "from extension" }],
+        display: true,
+        triggerTurn: false,
+      })
+      assert.equal(custom.status, 200)
+      assert.equal(custom.data.session.id, sessionId)
+      const customEntry = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/custom-entry`, {
+        customType: "fixture.state",
+        data: { enabled: true },
+      })
+      assert.equal(customEntry.status, 200)
+      const waited = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/wait-for-idle`, {})
+      assert.equal(waited.status, 200)
+
+      const settings = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/pi-settings`)
+      assert.equal(settings.status, 200)
+      assert.equal(settings.data.workspacePath, root)
+      const patched = await json(port, "PATCH", `/api/v1/workspaces/${workspaceId}/pi-settings`, {
+        defaultThinkingLevel: "high",
+      })
+      assert.equal(patched.status, 200)
+      assert.equal(patched.data.effective.defaultThinkingLevel, "high")
+
+      const trust = await json(port, "PUT", `/api/v1/workspaces/${workspaceId}/trust`, { decision: true })
+      assert.equal(trust.status, 200)
+      assert.equal(trust.data.trusted, true)
+
+      const providers = await json(port, "GET", "/api/v1/providers")
+      assert.deepEqual(providers, { status: 200, data: { providers: [] } })
+      const modelRuntime = await json(port, "GET", "/api/v1/model-runtime")
+      assert.equal(modelRuntime.status, 200)
+      assert.deepEqual(modelRuntime.data.registeredProviderIds, [])
+      const sessionProviders = await json(port, "GET", `/api/v1/sessions/${sessionId}/providers`)
+      assert.deepEqual(sessionProviders.data.providers, [])
+      const sessionModelRuntime = await json(port, "GET", `/api/v1/sessions/${sessionId}/model-runtime`)
+      assert.deepEqual(sessionModelRuntime.data.registeredProviderIds, [])
+      const sessionRuntimeKey = await json(
+        port,
+        "PUT",
+        `/api/v1/sessions/${sessionId}/providers/fixture/runtime-api-key`,
+        { apiKey: "fixture-session-secret" },
+      )
+      assert.equal(sessionRuntimeKey.status, 200)
+      const runtimeKey = await json(port, "PUT", "/api/v1/providers/fixture/runtime-api-key", {
+        apiKey: "fixture-secret",
+      })
+      assert.deepEqual(runtimeKey, { status: 200, data: { configured: true } })
+      const refreshedModels = await json(port, "POST", "/api/v1/model-runtime/refresh", {})
+      assert.deepEqual(refreshedModels, { status: 200, data: { result: { refreshed: true } } })
+      const auth = await json(port, "POST", "/api/v1/providers/fixture/auth-flows", { type: "api_key" })
+      assert.deepEqual(auth, { status: 202, data: { flowId: "fixture-auth-flow" } })
+
+      const packages = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages`)
+      assert.deepEqual(packages, { status: 200, data: { packages: [] } })
+      const resolved = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages/resolved`)
+      assert.deepEqual(resolved.data, { extensions: [], skills: [], prompts: [], themes: [] })
+      const resolvedSources = await json(
+        port,
+        "POST",
+        `/api/v1/workspaces/${workspaceId}/packages/resolve-extension-sources`,
+        { sources: ["./fixture-package"], temporary: true },
+      )
+      assert.deepEqual(resolvedSources.data, { extensions: [], skills: [], prompts: [], themes: [] })
+      const sourceChanged = await json(port, "POST", `/api/v1/workspaces/${workspaceId}/packages/sources`, {
+        source: "./fixture-package",
+        local: true,
+      })
+      assert.deepEqual(sourceChanged.data, { changed: true, packages: [] })
+      const installedPath = await json(
+        port,
+        "GET",
+        `/api/v1/workspaces/${workspaceId}/packages/installed-path?source=x&scope=user`,
+      )
+      assert.equal(installedPath.data.path, "/fixture/package")
+      const updates = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages/updates`)
+      assert.deepEqual(updates.data.updates, [])
+      const installed = await json(
+        port,
+        "POST",
+        `/api/v1/workspaces/${workspaceId}/commands/packages/install`,
+        { source: "./fixture-package", local: true, commandId: "r6-package" },
+      )
+      assert.deepEqual(installed, {
+        status: 200,
+        data: { commandId: "r6-package", packages: [] },
+      })
     } finally {
       await close()
     }

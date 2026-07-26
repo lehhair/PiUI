@@ -5,16 +5,22 @@ const heartbeat = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 5,
+  workerProtocolVersion: 7,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
   heartbeatIntervalMs: 20,
-  capabilities: ["catalog.sessions", "catalog.models"],
+  capabilities: ["catalog.sessions", "catalog.models", "management.settings"],
 })
 
 process.on("message", request => {
   const command = request.command
+  if (command.type === "patchSettings") {
+    // Simulate a crash after the side effect but before the response is sent.
+    clearInterval(heartbeat)
+    process.exit(17)
+    return
+  }
   const result = command.type === "listModels"
     ? { type: "models", models: [] }
     : command.type === "dispose"

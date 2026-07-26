@@ -1,5 +1,12 @@
 import type { CommandStatusV2, CommandTypeV2 } from "./commands-v2.js"
 import type { SessionSnapshotV1 } from "./session.js"
+import type {
+  ExtensionUiDialogRequestV1,
+  ExtensionUiEditorCommandV1,
+  ExtensionUiStatePatchV1,
+  ExtensionUiStateV1,
+} from "./extension-ui.js"
+import type { PackageProgressV1, ProviderAuthEventV1 } from "./management.js"
 
 export type EventStreamKindV2 = "server" | "workspace" | "session" | "provider" | "resources"
 export type EventStreamKeyV2 =
@@ -37,6 +44,7 @@ export interface EventPayloadsV2 {
   }
   "session.runtime.replaced": { sessionId: string; workerGeneration: string }
   "session.runtime.crashed": { sessionId: string; workerGeneration?: string; message: string }
+  "session.native.event": { sessionId: string; event: unknown }
   "workspace.sessions.updated": { workspaceId?: string; sessionId?: string }
   "command.updated": {
     commandId: string
@@ -46,10 +54,15 @@ export interface EventPayloadsV2 {
     commandType?: CommandTypeV2
     inputText?: string
   }
-  "extension.ui.requested": { requestId: string; sessionId: string; kind: string }
+  "extension.ui.requested": ExtensionUiDialogRequestV1
   "extension.ui.cancelled": { requestId: string; reason: string }
+  "extension.ui.state.updated": { sessionId: string; patch: ExtensionUiStatePatchV1; state: ExtensionUiStateV1 }
+  "extension.ui.notified": { sessionId: string; message: string; notifyType?: "info" | "warning" | "error" }
+  "extension.ui.editor.command": { sessionId: string; command: ExtensionUiEditorCommandV1 }
   "provider.auth.updated": { providerId: string; authenticated: boolean }
+  "provider.auth.flow": ProviderAuthEventV1
   "resources.updated": { workspaceId?: string; revision: string }
+  "packages.progress": PackageProgressV1
 }
 
 export type EventTypeV2 = keyof EventPayloadsV2
