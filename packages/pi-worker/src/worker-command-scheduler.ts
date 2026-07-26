@@ -22,6 +22,10 @@ function canRunConcurrently(command: WorkerCommand, active: WorkerCommand | unde
       return true
     case "sendCustomMessage":
       return active?.type === "prompt" && command.deliverAs !== undefined
+    // Only queued delivery is safe alongside a turn; without deliverAs the SDK
+    // starts a new turn, which must not interleave with the active command.
+    case "sendUserMessage":
+      return active?.type === "prompt" && command.deliverAs !== undefined
     default:
       return false
   }

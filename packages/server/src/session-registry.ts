@@ -570,11 +570,15 @@ export class SessionRegistry {
   async setExtensionEditorState(sessionId: string, text: string): Promise<void> {
     const session = await this.attach(sessionId)
     const runtime = session.real
-    if (!runtime) throw unsupportedRuntimeOperation("extension editor state")
+    if (!runtime?.setExtensionEditorState) throw unsupportedRuntimeOperation("extension editor state")
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.setExtensionEditorState!(text),
+    )
     const state = this.extensionUiStates.get(sessionId) ?? emptyExtensionUiState()
     this.extensionUiStates.set(sessionId, { ...state, revision: state.revision + 1, editorText: text })
-    if (!runtime.setExtensionEditorState) throw unsupportedRuntimeOperation("extension editor state")
-    await runtime.setExtensionEditorState(text)
   }
 
   async delete(id: string): Promise<boolean> {

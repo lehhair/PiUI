@@ -154,7 +154,12 @@ export class ProviderAuthHost {
   }
 
   private async runtime(): Promise<ModelRuntime> {
-    return this.runtimePromise ??= this.createRuntime()
+    // A failed creation must not be cached, otherwise one transient error
+    // would break every later auth operation until a session replacement.
+    return this.runtimePromise ??= this.createRuntime().catch(error => {
+      this.runtimePromise = undefined
+      throw error
+    })
   }
 
   private prompt(flowId: string, providerId: string, prompt: {

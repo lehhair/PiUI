@@ -1,9 +1,13 @@
+import { createHash } from "node:crypto"
 import type {
   CommandRecordV2,
   CommandRequestV2,
   CommandStatusV2,
   CommandTypeV2,
 } from "@piui/protocol"
+
+/** Retained finished commands, enough for idempotent client retries. */
+const MAX_RETAINED_COMMANDS = 512
 
 interface CommandEntry {
   record: CommandRecordV2
@@ -34,11 +38,14 @@ export class SessionExecutor {
     run: () => Promise<T>,
     options?: SubmitCommandOptions<T, C>,
   ): SubmittedCommand<T, C> {
-    const requestFingerprint = JSON.stringify(request)
+    // Hashed so retained entries never hold attachment payloads.
+    const requestFingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex")
     const existing = this.commands.get(request.commandId)
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
-        throw Object.assign(new Error("commandId already used for another command"), { code: "COMMAND_CONFLICT" })
+        throw Object.assign(new Error("commandId already used for another command"), {
+          code: "COMMAND_ALREADY_ACCEPTED",
+        })
       }
       return {
         record: existing.record as CommandRecordV2<C>,
@@ -97,8 +104,19 @@ export class SessionExecutor {
       })
     }
     this.commands.set(request.commandId, { record, promise, requestFingerprint })
+    this.pruneFinishedCommands()
     this.emit(record)
     return { record, promise, reused: false }
+  }
+
+  /** Drops the oldest settled commands so a long-lived server cannot grow without bound. */
+  private pruneFinishedCommands(): void {
+    if (this.commands.size <= MAX_RETAINED_COMMANDS) return
+    for (const [commandId, entry] of this.commands) {
+      if (this.commands.size <= MAX_RETAINED_COMMANDS) return
+      if (entry.record.status === "accepted" || entry.record.status === "running") continue
+      this.commands.delete(commandId)
+    }
   }
 
   get(commandId: string): CommandRecordV2 | undefined {

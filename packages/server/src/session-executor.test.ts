@@ -115,6 +115,32 @@ test("SessionExecutor emits immutable command status updates", async () => {
   assert.equal(updates[2]?.completedAt !== undefined, true)
 })
 
+test("SessionExecutor bounds retained commands and keeps unfinished ones", async () => {
+  const executor = new SessionExecutor()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const pending = executor.submit(
+    request("pending", "a", "session.prompt", "idle-only", { text: "pending" }),
+    async () => { await gate },
+  )
+  await new Promise<void>(resolve => setImmediate(resolve))
+
+  for (let index = 0; index < 600; index += 1) {
+    const finished = executor.submit(
+      request(`done-${index}`, "b", "session.setName", "queueable", { name: `n${index}` }),
+      async () => index,
+    )
+    await finished.promise
+  }
+
+  assert.equal(executor.get("done-0"), undefined)
+  assert.equal(executor.get("done-599")?.status, "completed")
+  // The still-running command must survive pruning.
+  assert.equal(executor.get("pending")?.status, "running")
+  release()
+  await pending.promise
+})
+
 test("SessionExecutor invalidates running and queued commands after a runtime crash", async () => {
   const executor = new SessionExecutor()
   let release!: () => void

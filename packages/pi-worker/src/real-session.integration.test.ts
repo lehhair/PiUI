@@ -71,7 +71,29 @@ describe("RealPiSession with the Pi SDK", () => {
       })
       const skippedCompaction = await session.compact()
       assert.equal(skippedCompaction.status, "skipped")
+      const nativeEvents: Array<Record<string, unknown>> = []
+      const unsubscribeNative = session.onNativeEvent(
+        event => nativeEvents.push(event as Record<string, unknown>),
+      )
       await session.prompt("ping")
+      unsubscribeNative()
+
+      // Native events carry lifecycle metadata only: message content, tool
+      // arguments and tool results must never cross the worker boundary.
+      assert.ok(nativeEvents.length > 0)
+      for (const event of nativeEvents) {
+        assert.equal(typeof event.type, "string")
+        for (const [key, value] of Object.entries(event)) {
+          assert.equal(
+            typeof value === "string" || typeof value === "number" || typeof value === "boolean",
+            true,
+            `native event ${String(event.type)} leaked non-scalar key ${key}`,
+          )
+        }
+        for (const forbidden of ["message", "args", "result", "partialResult", "content"]) {
+          assert.equal(forbidden in event, false, `native event leaked ${forbidden}`)
+        }
+      }
 
       assert.equal(faux.state.callCount, 1)
       assert.equal(session.getSessionFile(), undefined)
