@@ -59,16 +59,17 @@ describe("usable file tree", () => {
     })
     assert.equal(reg.status, 201)
     const { workspace } = await reg.json()
+    const workspacePath = encodeURIComponent(workspace.path)
 
     const list = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/files?path=`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/files?path=`,
     )
     assert.equal(list.status, 200)
     const listed = await list.json()
     assert.ok(listed.entries.some(e => e.name === "src"))
 
     const file = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/file?path=src/hi.txt`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/file?path=src/hi.txt`,
     )
     assert.equal(file.status, 200)
     const body = await file.json()

@@ -14,7 +14,7 @@ import { getApiBase, getPiAuthToken, fetchSnapshot } from "./sessionApi"
 import { applySnapshotToUi } from "./applySnapshot"
 import {
   listTrackedPiSessions,
-  listTrackedPiWorkspaces,
+  listTrackedPiWorkspacePaths,
   subscribePiSessionIndex,
   trackPiSession,
 } from "./piSessionIndex"
@@ -149,7 +149,7 @@ export class PiEventSocket {
     if (event.type === "session.snapshot.updated") {
       const snapshot = event.payload.snapshot
       if (snapshot.session.id !== event.payload.sessionId || snapshot.session.id !== event.stream.id) return
-      trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
+      trackPiSession(snapshot.session.id, snapshot.session.directory)
       applySnapshotToUi(snapshot, { activate: false })
     } else if (event.type === "session.timeline.delta") {
       if (event.payload.sessionId !== event.stream.id) return
@@ -217,7 +217,7 @@ export class PiEventSocket {
     if (event.type === "session.snapshot" && event.payload) {
       const snapshot = event.payload as SessionSnapshotV1
       if (snapshot.session?.id && (!event.sessionId || event.sessionId === snapshot.session.id)) {
-        trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
+        trackPiSession(snapshot.session.id, snapshot.session.directory)
         applySnapshotToUi(snapshot, { activate: false })
       }
     } else if (event.type === "session.updated") {
@@ -229,7 +229,7 @@ export class PiEventSocket {
     const ids = new Set([...listTrackedPiSessions(), ...sessionProjectionStore.getSessionIds()])
     return [
       { kind: "server", id: "server" },
-      ...listTrackedPiWorkspaces().map(id => ({ kind: "workspace" as const, id })),
+      ...listTrackedPiWorkspacePaths().map(path => ({ kind: "workspace" as const, id: path })),
       ...[...ids].map(id => ({ kind: "session" as const, id })),
     ]
   }

@@ -3,13 +3,11 @@ import { messageStore } from "../store/messageStore"
 import { activeSessionStore } from "../store/activeSessionStore"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 import { trackPiSession } from "./piSessionIndex"
-import { cacheWorkspace } from "./workspaceCache"
 import { snapshotToUiMessages } from "./timelineToMessages"
 
 /** Push a Pi snapshot into the UI stores consumed by ChatArea. */
 export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activate?: boolean }) {
-  trackPiSession(snapshot.session.id, snapshot.session.workspaceId)
-  if (snapshot.session.directory) cacheWorkspace(snapshot.session.directory, snapshot.session.workspaceId)
+  trackPiSession(snapshot.session.id, snapshot.session.directory)
   activeSessionStore.syncPiSnapshot(snapshot)
   if (!sessionProjectionStore.replace(snapshot, options)) return snapshot.session.id
   const messages = snapshotToUiMessages(snapshot)

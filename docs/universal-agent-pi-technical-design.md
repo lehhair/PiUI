@@ -456,7 +456,7 @@ interface SessionSnapshotV1 {
 
   session: {
     id: string;
-    workspaceId: string;
+    directory: string;
     driverId: "pi";
     driverSessionId: string;
     title?: string;
@@ -586,7 +586,7 @@ Pi prompt 原生支持文本和 `ImageContent[]`。OpenCodeUI 当前的任意 fi
 - 所有 session event 带 `epoch` 和单调递增 `sequence`
 - snapshot 是恢复真相，event 是增量
 - REST 返回错误使用 `application/problem+json`
-- 浏览器只使用 app session ID 和 workspace ID，不接触 Pi session 文件绝对路径
+- 浏览器使用 app session ID 和 canonical workspace path，不接触 Pi session 文件绝对路径
 
 ### 10.2 Event Envelope
 
@@ -597,7 +597,7 @@ interface EventEnvelopeV1<T = unknown> {
   sequence: number;
   eventId: string;
   sessionId?: string;
-  workspaceId?: string;
+  workspacePath?: string;
   timestamp: string;
   type: string;
   payload: T;
@@ -636,13 +636,13 @@ interface EventEnvelopeV1<T = unknown> {
 - `GET /api/v1/capabilities`
 - `GET /api/v1/workspaces`
 - `POST /api/v1/workspaces`
-- `GET /api/v1/workspaces/:workspaceId`
-- `DELETE /api/v1/workspaces/:workspaceId`
-- `POST /api/v1/workspaces/:workspaceId/trust`
+- `GET /api/v1/workspaces/:encodedWorkspacePath`
+- `DELETE /api/v1/workspaces/:encodedWorkspacePath`
+- `POST /api/v1/workspaces/:encodedWorkspacePath/trust`
 
 #### Session
 
-- `GET /api/v1/sessions?workspaceId=&driverId=&cursor=&limit=&search=`
+- `GET /api/v1/sessions?workspacePath=&driverId=&cursor=&limit=&search=`
 - `POST /api/v1/sessions`
 - `GET /api/v1/sessions/:sessionId`
 - `GET /api/v1/sessions/:sessionId/snapshot`
@@ -699,13 +699,13 @@ interface EventEnvelopeV1<T = unknown> {
 
 #### 文件和搜索
 
-- `GET /api/v1/workspaces/:workspaceId/files?path=`
-- `GET /api/v1/workspaces/:workspaceId/file?path=`
-- `PUT /api/v1/workspaces/:workspaceId/file?path=`
-- `GET /api/v1/workspaces/:workspaceId/search/files?q=`
-- `GET /api/v1/workspaces/:workspaceId/search/text?q=`
-- `GET /api/v1/workspaces/:workspaceId/git/status`
-- `GET /api/v1/workspaces/:workspaceId/git/diff?scope=`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/files?path=`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/file?path=`
+- `PUT /api/v1/workspaces/:encodedWorkspacePath/file?path=`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/search/files?q=`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/search/text?q=`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/git/status`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/git/diff?scope=`
 - `GET /api/v1/sessions/:sessionId/diff?scope=session|turn`
 
 #### Model 和凭据
@@ -720,8 +720,8 @@ API 永远不返回原始 key 或 OAuth token。
 
 #### PTY
 
-- `GET /api/v1/workspaces/:workspaceId/terminals`
-- `POST /api/v1/workspaces/:workspaceId/terminals`
+- `GET /api/v1/workspaces/:encodedWorkspacePath/terminals`
+- `POST /api/v1/workspaces/:encodedWorkspacePath/terminals`
 - `PATCH /api/v1/terminals/:terminalId`
 - `DELETE /api/v1/terminals/:terminalId`
 - `POST /api/v1/terminals/:terminalId/ticket`
@@ -815,7 +815,7 @@ API 永远不返回原始 key 或 OAuth token。
 | Pi 当前 leaf          | 活跃 runtime；app navigation checkpoint；无有效 checkpoint 时为 JSONL 最后 entry |
 | Pi session name       | JSONL `session_info`                                                             |
 | App session 映射      | SQLite                                                                           |
-| workspace 注册        | SQLite                                                                           |
+| workspace 元数据      | SQLite，以 canonical path 为键                                                   |
 | pin、archive、UI 状态 | SQLite                                                                           |
 | session/turn baseline | SQLite + app snapshot storage                                                    |
 | PTY 活跃状态          | 内存，可选保存元数据                                                             |
@@ -827,8 +827,7 @@ API 永远不返回原始 key 或 OAuth token。
 
 ```sql
 CREATE TABLE workspaces (
-  id TEXT PRIMARY KEY,
-  canonical_root TEXT NOT NULL UNIQUE,
+  canonical_root TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   last_opened_at TEXT NOT NULL
@@ -836,7 +835,7 @@ CREATE TABLE workspaces (
 
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  cwd TEXT NOT NULL REFERENCES workspaces(canonical_root),
   driver_id TEXT NOT NULL,
   driver_session_id TEXT NOT NULL,
   session_file TEXT,
@@ -1132,7 +1131,7 @@ ETag 使用内容 hash 或稳定 revision。收到过期 revision 返回 `STALE_
 ### 19.1 后端
 
 - 使用 `node-pty`
-- terminal 绑定 workspace ID 和相对 cwd
+- terminal 绑定 canonical workspace path 和相对 cwd
 - shell 必须来自允许列表或经过服务器设置校验
 - 保存 terminal owner、pid、rows、cols、状态和 output cursor
 - 每个 terminal 维护有限 output replay buffer
@@ -1471,7 +1470,7 @@ Pi `ModelRuntime` 的优先级包括 runtime override、`auth.json`、环境变�
 - appSessionId
 - driverId
 - workerId
-- workspaceId
+- workspacePath
 - event sequence
 - durationMs
 - result status

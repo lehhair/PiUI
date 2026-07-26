@@ -88,11 +88,11 @@ describe("http phase1", () => {
       assert.equal(globalScans, 0)
 
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
-      const workspaceId = workspace.data.workspace.id as string
+      const workspacePath = workspace.data.workspace.path as string
       const sessions = await json(
         port,
         "GET",
-        `/api/v1/sessions?workspaceId=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/sessions?workspacePath=${encodeURIComponent(workspacePath)}`,
       )
       assert.equal(sessions.status, 200)
       assert.equal(scopedCwd, path.resolve(root))
@@ -111,7 +111,7 @@ describe("http phase1", () => {
       assert.equal(res.status, 200)
       assert.equal(res.headers.get("access-control-allow-origin"), origin)
       const body = await res.json()
-      assert.ok(body.workspace.id)
+      assert.ok(body.workspace.path)
 
       const opt = await fetch(`http://127.0.0.1:${port}/api/v1/health`, { method: "OPTIONS", headers: { origin } })
       assert.equal(opt.status, 204)
@@ -181,23 +181,22 @@ describe("http phase1", () => {
         displayName: "test-ws",
       })
       assert.equal(created.status, 201)
-      const id = created.data.workspace.id as string
-      assert.ok(id)
-      // absolute root must not appear in DTO
-      assert.equal(created.data.workspace.canonicalRoot, undefined)
-      assert.equal(created.data.workspace.rootPath, undefined)
+      const workspacePath = created.data.workspace.path as string
+      assert.equal(workspacePath, path.resolve(root))
+      assert.equal(created.data.workspace.id, undefined, "workspace identity is the path itself")
+      const encodedWorkspace = encodeURIComponent(workspacePath)
 
-      const listed = await json(port, "GET", `/api/v1/workspaces/${id}/files?path=`)
+      const listed = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/files?path=`)
       assert.equal(listed.status, 200)
       const names = (listed.data.entries as { name: string }[]).map(e => e.name)
       assert.ok(names.includes("pkg"))
 
-      const file = await json(port, "GET", `/api/v1/workspaces/${id}/file?path=pkg/a.txt`)
+      const file = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/file?path=pkg/a.txt`)
       assert.equal(file.status, 200)
       assert.match(file.data.content, /hello phase1/)
       assert.ok(file.data.etag)
 
-      const searched = await json(port, "GET", `/api/v1/workspaces/${id}/search/text?q=phase1`)
+      const searched = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/search/text?q=phase1`)
       assert.equal(searched.status, 200)
       assert.equal(searched.data.matches[0].path.text, "pkg/a.txt")
       assert.equal(searched.data.matches[0].line_number, 1)
@@ -205,7 +204,7 @@ describe("http phase1", () => {
       const escape = await json(
         port,
         "GET",
-        `/api/v1/workspaces/${id}/file?path=${encodeURIComponent("../secret")}`,
+        `/api/v1/workspaces/${encodedWorkspace}/file?path=${encodeURIComponent("../secret")}`,
       )
       assert.equal(escape.status, 403)
       assert.equal(escape.data.code, "PATH_OUTSIDE_WORKSPACE")
@@ -213,7 +212,7 @@ describe("http phase1", () => {
       const abs = await json(
         port,
         "GET",
-        `/api/v1/workspaces/${id}/file?path=${encodeURIComponent("C:/Windows/win.ini")}`,
+        `/api/v1/workspaces/${encodedWorkspace}/file?path=${encodeURIComponent("C:/Windows/win.ini")}`,
       )
       assert.ok(abs.status >= 400)
     } finally {

@@ -12,7 +12,6 @@ import type {
 import type { PiSessionSummary } from "../types/session"
 import type { Attachment } from "../features/attachment/types"
 import { trackPiSession, untrackPiSession } from "./piSessionIndex"
-import { cacheWorkspace, getWorkspaceIdByPath } from "./workspaceCache"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
@@ -89,14 +88,13 @@ export async function listPiModels(): Promise<{
   return (await res.json()) as { driver: string; models: PiModelDto[]; error?: string }
 }
 
-export async function listPiSessions(workspaceId?: string): Promise<PiSessionSummary[]> {
-  const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""
+export async function listPiSessions(workspacePath?: string): Promise<PiSessionSummary[]> {
+  const query = workspacePath ? `?workspacePath=${encodeURIComponent(workspacePath)}` : ""
   const res = await fetch(`${getApiBase()}/api/v1/sessions${query}`)
   if (!res.ok) throw new Error(`listPiSessions ${res.status}`)
   const data = (await res.json()) as { sessions: PiSessionSummary[] }
   for (const s of data.sessions) {
-    trackPiSession(s.id, s.workspaceId)
-    if (s.directory) cacheWorkspace(s.directory, s.workspaceId)
+    trackPiSession(s.id, s.directory)
   }
   return data.sessions
 }
@@ -104,7 +102,7 @@ export async function listPiSessions(workspaceId?: string): Promise<PiSessionSum
 export async function createPiSession(opts?: {
   title?: string
   seedMock?: boolean
-  workspaceId?: string
+  workspacePath?: string
 }): Promise<{ summary: PiSessionSummary; snapshot: SessionSnapshotV1 }> {
   const res = await fetch(`${getApiBase()}/api/v1/sessions`, {
     method: "POST",
@@ -112,13 +110,12 @@ export async function createPiSession(opts?: {
     body: JSON.stringify({
       title: opts?.title,
       seedMock: opts?.seedMock === true,
-      workspaceId: opts?.workspaceId,
+      workspacePath: opts?.workspacePath,
     }),
   })
   if (!res.ok) throw new Error(`createPiSession ${res.status}`)
   const data = (await res.json()) as { session: PiSessionSummary; snapshot: SessionSnapshotV1 }
-  trackPiSession(data.session.id, data.session.workspaceId)
-  if (data.session.directory) cacheWorkspace(data.session.directory, data.session.workspaceId)
+  trackPiSession(data.session.id, data.session.directory)
   return { summary: data.session, snapshot: data.snapshot }
 }
 
@@ -151,31 +148,16 @@ export async function deletePiSession(sessionId: string): Promise<{
   return result
 }
 
-export async function createWorkspace(rootPath: string, displayName?: string) {
-  const cached = getWorkspaceIdByPath(rootPath)
-  if (cached) return { workspace: { id: cached, displayName: displayName ?? rootPath } }
-
-  const res = await fetch(`${getApiBase()}/api/v1/workspaces`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rootPath, displayName }),
-  })
-  if (!res.ok) throw new Error(`createWorkspace ${res.status}`)
-  const data = (await res.json()) as { workspace: { id: string; displayName: string } }
-  cacheWorkspace(rootPath, data.workspace.id)
-  return data
-}
-
 let defaultWorkspacePromise: Promise<string | null> | null = null
 
-async function ensureDefaultWorkspaceId(): Promise<string | null> {
+async function ensureDefaultWorkspacePath(): Promise<string | null> {
   if (!defaultWorkspacePromise) {
     defaultWorkspacePromise = (async () => {
       try {
         const res = await fetch(`${getApiBase()}/api/v1/workspaces/default`)
         if (!res.ok) return null
-        const data = (await res.json()) as { workspace: { id: string } }
-        return data.workspace.id
+        const data = (await res.json()) as { workspace: { path: string } }
+        return data.workspace.path
       } catch {
         return null
       } finally {
@@ -183,28 +165,27 @@ async function ensureDefaultWorkspaceId(): Promise<string | null> {
       }
     })()
   }
-  const id = await defaultWorkspacePromise
-  if (!id) defaultWorkspacePromise = null
-  return id
+  const workspacePath = await defaultWorkspacePromise
+  if (!workspacePath) defaultWorkspacePromise = null
+  return workspacePath
 }
 
-/** Resolve workspace id from an absolute path or the default workspace. */
-export async function resolveWorkspaceId(directory?: string): Promise<string | null> {
+/** Return the selected absolute path, or ask the server for its default. */
+export async function resolveWorkspacePath(directory?: string): Promise<string | null> {
   if (directory) {
     if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
-      const { workspace } = await createWorkspace(directory)
-      return workspace.id
+      return directory
     }
   }
   // empty / global mode: still allow file tree against default workspace
-  return ensureDefaultWorkspaceId()
+  return ensureDefaultWorkspacePath()
 }
 
-export async function listWorkspaceFiles(workspaceId: string, path = "") {
+export async function listWorkspaceFiles(workspacePath: string, path = "") {
   const q = new URLSearchParams()
   if (path && path !== "." && path !== "./") q.set("path", path)
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/files?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/files?${q}`,
   )
   if (!res.ok) throw new Error(`listWorkspaceFiles ${res.status}`)
   return (await res.json()) as {
@@ -220,10 +201,10 @@ export async function listWorkspaceFiles(workspaceId: string, path = "") {
   }
 }
 
-export async function readWorkspaceFile(workspaceId: string, path: string) {
+export async function readWorkspaceFile(workspacePath: string, path: string) {
   const q = new URLSearchParams({ path })
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/file?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file?${q}`,
   )
   if (!res.ok) throw new Error(`readWorkspaceFile ${res.status}`)
   return (await res.json()) as {
@@ -236,7 +217,7 @@ export async function readWorkspaceFile(workspaceId: string, path: string) {
 }
 
 export async function searchWorkspaceFiles(
-  workspaceId: string,
+  workspacePath: string,
   query: string,
   opts?: { type?: "file" | "directory"; limit?: number },
 ): Promise<string[]> {
@@ -244,17 +225,17 @@ export async function searchWorkspaceFiles(
   if (opts?.type) q.set("type", opts.type)
   if (opts?.limit) q.set("limit", String(opts.limit))
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/search/files?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/search/files?${q}`,
   )
   if (!res.ok) throw new Error(`searchWorkspaceFiles ${res.status}`)
   const data = (await res.json()) as { paths: string[] }
   return data.paths
 }
 
-export async function searchWorkspaceText(workspaceId: string, pattern: string, limit = 50) {
+export async function searchWorkspaceText(workspacePath: string, pattern: string, limit = 50) {
   const q = new URLSearchParams({ q: pattern, limit: String(limit) })
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/search/text?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/search/text?${q}`,
   )
   if (!res.ok) throw new Error(`searchWorkspaceText ${res.status}`)
   const data = (await res.json()) as {
@@ -270,14 +251,14 @@ export async function searchWorkspaceText(workspaceId: string, pattern: string, 
 }
 
 export async function writeWorkspaceFile(
-  workspaceId: string,
+  workspacePath: string,
   path: string,
   content: string,
   ifMatch?: string,
 ) {
   const q = new URLSearchParams({ path })
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/file?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file?${q}`,
     {
       method: "PUT",
       headers: {
@@ -297,9 +278,9 @@ export async function writeWorkspaceFile(
   }
 }
 
-export async function getWorkspaceGitStatus(workspaceId: string) {
+export async function getWorkspaceGitStatus(workspacePath: string) {
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/status`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/status`,
   )
   if (!res.ok) throw new Error(`getWorkspaceGitStatus ${res.status}`)
   return (await res.json()) as {
@@ -310,9 +291,9 @@ export async function getWorkspaceGitStatus(workspaceId: string) {
   }
 }
 
-export async function getWorkspaceGitInfo(workspaceId: string) {
+export async function getWorkspaceGitInfo(workspacePath: string) {
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/info`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/info`,
   )
   if (!res.ok) throw new Error(`getWorkspaceGitInfo ${res.status}`)
   return (await res.json()) as {
@@ -323,10 +304,10 @@ export async function getWorkspaceGitInfo(workspaceId: string) {
   }
 }
 
-export async function getWorkspaceGitDiff(workspaceId: string, mode: "git" | "branch") {
+export async function getWorkspaceGitDiff(workspacePath: string, mode: "git" | "branch") {
   const q = new URLSearchParams({ mode })
   const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/git/diff?${q}`,
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/diff?${q}`,
   )
   if (!res.ok) throw new Error(`getWorkspaceGitDiff ${res.status}`)
   return (await res.json()) as {
@@ -589,11 +570,11 @@ export async function abortSessionCommand(sessionId: string, commandId = newComm
   return { snapshot: data.snapshot, cleared: data.cleared ?? { steering: [], followUp: [] } }
 }
 
-export async function createMockSession(workspaceId: string, title?: string) {
+export async function createMockSession(workspacePath: string, title?: string) {
   const res = await fetch(`${getApiBase()}/api/v1/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workspaceId, title, seedMock: true }),
+    body: JSON.stringify({ workspacePath, title, seedMock: true }),
   })
   if (!res.ok) throw new Error(`createMockSession ${res.status}`)
   return (await res.json()) as { snapshot: SessionSnapshotV1 }

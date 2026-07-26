@@ -4,7 +4,7 @@ export interface EventEnvelopeV1<T = unknown> {
   sequence: number
   eventId: string
   sessionId?: string
-  workspaceId?: string
+  workspacePath?: string
   timestamp: string
   type: string
   payload: T

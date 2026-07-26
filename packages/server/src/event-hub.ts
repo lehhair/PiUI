@@ -51,7 +51,7 @@ export class EventHub {
   publish(partial: {
     type: string
     sessionId?: string
-    workspaceId?: string
+    workspacePath?: string
     reason?: EventPayloadsV2["session.snapshot.updated"]["reason"]
     payload: unknown
   }): EventEnvelopeV1 {
@@ -62,7 +62,7 @@ export class EventHub {
       sequence: this.sequence,
       eventId: randomUUID(),
       sessionId: partial.sessionId,
-      workspaceId: partial.workspaceId,
+      workspacePath: partial.workspacePath,
       timestamp: new Date().toISOString(),
       type: partial.type,
       payload: partial.payload,
@@ -175,7 +175,7 @@ export class EventHub {
   private publishLegacyAsV2(partial: {
     type: string
     sessionId?: string
-    workspaceId?: string
+    workspacePath?: string
     reason?: EventPayloadsV2["session.snapshot.updated"]["reason"]
     payload: unknown
   }): void {
@@ -211,11 +211,11 @@ export class EventHub {
     }
     if (partial.type === "session.updated") {
       this.publishV2(
-        partial.workspaceId
-          ? { kind: "workspace", id: partial.workspaceId }
+        partial.workspacePath
+          ? { kind: "workspace", id: partial.workspacePath }
           : { kind: "server", id: "server" },
         "workspace.sessions.updated",
-        { workspaceId: partial.workspaceId, sessionId: partial.sessionId },
+        { workspacePath: partial.workspacePath, sessionId: partial.sessionId },
       )
     }
   }

@@ -47,7 +47,6 @@ function snapshot(id: string, sequence: number, text: string): SessionSnapshotV1
     sequence,
     session: {
       id,
-      workspaceId: "workspace",
       directory: "/workspace",
       driverId: "pi",
       driverSessionId: id,
@@ -139,7 +138,7 @@ describe("PiEventSocket", () => {
     const initialSubscribe = JSON.parse(ws?.sent[0] ?? "{}") as { streams?: Array<{ kind: string; id: string }> }
     expect(ws?.protocol).toBe(EVENT_WS_SUBPROTOCOL_V2)
     expect(initialSubscribe.streams).toContainEqual({ kind: "session", id: "active" })
-    expect(initialSubscribe.streams).toContainEqual({ kind: "workspace", id: "workspace" })
+    expect(initialSubscribe.streams).toContainEqual({ kind: "workspace", id: "/workspace" })
 
     const key = eventStreamKeyV2({ kind: "session", id: "active" })
     ws?.onmessage?.({

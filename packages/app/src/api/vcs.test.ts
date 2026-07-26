@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getVcsDiff, getVcsInfo } from './vcs'
 
 const mocks = vi.hoisted(() => ({
-  resolveWorkspaceId: vi.fn(),
+  resolveWorkspacePath: vi.fn(),
   getWorkspaceGitInfo: vi.fn(),
   getWorkspaceGitDiff: vi.fn(),
 }))
@@ -12,14 +12,14 @@ vi.mock('../pi/sessionApi', () => mocks)
 describe('Pi workspace VCS API', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.resolveWorkspaceId.mockResolvedValue('workspace-1')
+    mocks.resolveWorkspacePath.mockResolvedValue('/workspace')
   })
 
   it('maps branch and tracking counts', async () => {
     mocks.getWorkspaceGitInfo.mockResolvedValue({ root: true, branch: 'main', ahead: 2, behind: 1 })
 
     await expect(getVcsInfo('C:/workspace')).resolves.toEqual({ branch: 'main', ahead: 2, behind: 1 })
-    expect(mocks.getWorkspaceGitInfo).toHaveBeenCalledWith('workspace-1')
+    expect(mocks.getWorkspaceGitInfo).toHaveBeenCalledWith('/workspace')
   })
 
   it('maps supported diff modes to the Pi endpoint', async () => {
@@ -30,10 +30,10 @@ describe('Pi workspace VCS API', () => {
     await expect(getVcsDiff('staged', '/workspace')).resolves.toEqual([
       { file: 'src/app.ts', status: 'modified', additions: 3, deletions: 1 },
     ])
-    expect(mocks.getWorkspaceGitDiff).toHaveBeenCalledWith('workspace-1', 'git')
+    expect(mocks.getWorkspaceGitDiff).toHaveBeenCalledWith('/workspace', 'git')
 
     await getVcsDiff('branch', '/workspace')
-    expect(mocks.getWorkspaceGitDiff).toHaveBeenLastCalledWith('workspace-1', 'branch')
+    expect(mocks.getWorkspaceGitDiff).toHaveBeenLastCalledWith('/workspace', 'branch')
   })
 
   it('returns empty values when the directory is not a repository', async () => {

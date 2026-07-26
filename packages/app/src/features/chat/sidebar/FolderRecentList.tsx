@@ -1217,8 +1217,8 @@ function WorkspaceFolderList({
     setWorkspaceExpandedIds,
   )
 
-  const handleToggleWorkspace = useCallback((workspaceId: string) => {
-    setWorkspaceExpandedIds(prev => toggleProjectId(prev, workspaceId))
+  const handleToggleWorkspace = useCallback((workspacePath: string) => {
+    setWorkspaceExpandedIds(prev => toggleProjectId(prev, workspacePath))
   }, [])
 
   const {
@@ -1244,8 +1244,8 @@ function WorkspaceFolderList({
 
   return (
     <div className="space-y-1 pt-1" onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-      {displayOrder.map(workspaceId => {
-        const workspaceProject = workspaceById.get(workspaceId)
+      {displayOrder.map(workspacePath => {
+        const workspaceProject = workspaceById.get(workspacePath)
         if (!workspaceProject) return null
         const isWorkspaceExpanded = draggedId === null && expandedWorkspaceIds.includes(workspaceProject.id)
 

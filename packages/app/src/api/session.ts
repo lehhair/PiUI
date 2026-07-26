@@ -10,7 +10,7 @@ import {
   deletePiSession,
   fetchSnapshot,
   listPiSessions,
-  resolveWorkspaceId,
+  resolveWorkspacePath,
   setPiSessionName,
 } from '../pi/sessionApi'
 import { snapshotToUiSession, toUiSession } from '../pi/sessionModel'
@@ -25,8 +25,8 @@ function unsupported(capability: string): never {
 }
 
 export async function getSessionStatus(directory?: string): Promise<SessionStatusMap> {
-  const workspaceId = directory ? await resolveWorkspaceId(directory) : null
-  const sessions = await listPiSessions(workspaceId ?? undefined)
+  const workspacePath = directory ? await resolveWorkspacePath(directory) : null
+  const sessions = await listPiSessions(workspacePath ?? undefined)
   const snapshots = await Promise.all(sessions.map(session => fetchSnapshot(session.id)))
   return Object.fromEntries(
     snapshots.map(snapshot => [
@@ -49,9 +49,8 @@ export async function getLastTurnDiff(_sessionId: string, _directory?: string): 
 }
 
 export async function getSessions(params: SessionListParams = {}): Promise<UiSession[]> {
-  const workspaceId = params.directory ? await resolveWorkspaceId(params.directory) : null
-  let sessions = (await listPiSessions(workspaceId ?? undefined))
-    .filter(session => !workspaceId || session.workspaceId === workspaceId)
+  const workspacePath = params.directory ? await resolveWorkspacePath(params.directory) : null
+  let sessions = (await listPiSessions(workspacePath ?? undefined))
     .filter(session => !params.search || session.title.toLowerCase().includes(params.search.toLowerCase()))
 
   if (params.start != null) {
@@ -68,9 +67,9 @@ export async function getSession(sessionId: string, directory?: string): Promise
 export async function createSession(
   params: { directory?: string; title?: string } = {},
 ): Promise<UiSession> {
-  const workspaceId = await resolveWorkspaceId(params.directory)
-  if (!workspaceId) throw new Error('No Pi workspace is available')
-  const { snapshot } = await createPiSession({ workspaceId, title: params.title })
+  const workspacePath = await resolveWorkspacePath(params.directory)
+  if (!workspacePath) throw new Error('No Pi workspace is available')
+  const { snapshot } = await createPiSession({ workspacePath, title: params.title })
   applySnapshotToUi(snapshot)
   return snapshotToUiSession(snapshot, params.directory)
 }

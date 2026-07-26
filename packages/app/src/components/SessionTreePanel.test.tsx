@@ -52,7 +52,6 @@ function snapshot(id = 'session-1'): SessionSnapshotV1 {
     sequence: 1,
     session: {
       id,
-      workspaceId: 'workspace-1',
       directory: '/workspace',
       driverId: 'pi',
       driverSessionId: id,

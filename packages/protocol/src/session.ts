@@ -232,7 +232,7 @@ export interface SessionSnapshotV1 {
   sequence: number
   session: {
     id: string
-    workspaceId: string
+    /** Canonical workspace root; also how a workspace is addressed. */
     directory: string
     driverId: "pi"
     driverSessionId: string

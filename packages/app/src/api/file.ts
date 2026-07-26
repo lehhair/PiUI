@@ -8,7 +8,7 @@ import {
   getWorkspaceGitStatus,
   listWorkspaceFiles,
   readWorkspaceFile,
-  resolveWorkspaceId,
+  resolveWorkspacePath,
   searchWorkspaceFiles,
   searchWorkspaceText,
 } from '../pi/sessionApi'
@@ -26,10 +26,10 @@ function getRootDirectoryCacheKey(directory?: string): string {
   return directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''
 }
 
-async function requireWorkspaceId(directory?: string): Promise<string> {
-  const workspaceId = await resolveWorkspaceId(directory)
-  if (!workspaceId) throw new Error('No PiUI workspace is available')
-  return workspaceId
+async function requireWorkspacePath(directory?: string): Promise<string> {
+  const workspacePath = await resolveWorkspacePath(directory)
+  if (!workspacePath) throw new Error('No PiUI workspace is available')
+  return workspacePath
 }
 
 function mapPiType(t: string): FileNode['type'] {
@@ -77,9 +77,9 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
       : path && (/^[a-zA-Z]:/.test(path) || path.startsWith('/'))
         ? path
         : directory
-  const workspaceId = await requireWorkspaceId(workspaceDir)
+  const workspacePath = await requireWorkspacePath(workspaceDir)
   const rel = toPiRelativePath(path, workspaceDir)
-  const listed = await listWorkspaceFiles(workspaceId, rel)
+  const listed = await listWorkspaceFiles(workspacePath, rel)
   return listed.entries
     .filter(e => !e.restricted)
     .map(e => ({
@@ -102,8 +102,8 @@ export async function searchFiles(
     limit?: number
   } = {},
 ): Promise<string[]> {
-  const workspaceId = await requireWorkspaceId(options.directory)
-  return searchWorkspaceFiles(workspaceId, query, {
+  const workspacePath = await requireWorkspacePath(options.directory)
+  return searchWorkspaceFiles(workspacePath, query, {
     type: options.type,
     limit: options.limit,
   })
@@ -150,9 +150,9 @@ export async function prefetchRootDirectory(directory?: string): Promise<void> {
  * 读取文件内容
  */
 export async function getFileContent(path: string, directory?: string): Promise<FileContent> {
-  const workspaceId = await requireWorkspaceId(directory)
+  const workspacePath = await requireWorkspacePath(directory)
   const rel = toPiRelativePath(path, directory)
-  const file = await readWorkspaceFile(workspaceId, rel)
+  const file = await readWorkspaceFile(workspacePath, rel)
   return {
     type: 'text',
     content: file.content,
@@ -165,8 +165,8 @@ export async function getFileContent(path: string, directory?: string): Promise<
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
   try {
-    const workspaceId = await requireWorkspaceId(directory)
-    const status = await getWorkspaceGitStatus(workspaceId)
+    const workspacePath = await requireWorkspacePath(directory)
+    const status = await getWorkspaceGitStatus(workspacePath)
     return status.items.map(item => ({
       path: item.path,
       status: item.status,
@@ -191,8 +191,8 @@ export async function searchSymbols(query: string, directory?: string): Promise<
  * 搜索文件正文内容
  */
 export async function searchText(pattern: string, directory?: string): Promise<TextSearchMatch[]> {
-  const workspaceId = await requireWorkspaceId(directory)
-  return searchWorkspaceText(workspaceId, pattern)
+  const workspacePath = await requireWorkspacePath(directory)
+  return searchWorkspaceText(workspacePath, pattern)
 }
 
 /**

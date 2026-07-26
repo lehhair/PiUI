@@ -1,11 +1,5 @@
 import type { SessionSnapshotV1 } from "@piui/protocol"
 import type { PiSessionSummary, UiSession } from "../types/session"
-import { getPathByWorkspaceId } from "./workspaceCache"
-
-function defaultDirectory(workspaceId: string, override?: string): string {
-  if (override) return override
-  return getPathByWorkspaceId(workspaceId) ?? ""
-}
 
 function sessionTimestamps(summary: PiSessionSummary) {
   const parsedCreated = Date.parse(summary.createdAt)
@@ -18,8 +12,7 @@ function sessionTimestamps(summary: PiSessionSummary) {
 export function toUiSession(summary: PiSessionSummary, directory?: string): UiSession {
   return {
     id: summary.id,
-    workspaceId: summary.workspaceId,
-    directory: defaultDirectory(summary.workspaceId, directory ?? summary.directory),
+    directory: directory ?? summary.directory,
     title: summary.title || "New chat",
     ...sessionTimestamps(summary),
   }
@@ -29,7 +22,7 @@ export function snapshotToUiSession(snapshot: SessionSnapshotV1, directory?: str
   return toUiSession(
     {
       id: snapshot.session.id,
-      workspaceId: snapshot.session.workspaceId,
+      directory: snapshot.session.directory,
       title: snapshot.session.title ?? "New chat",
       createdAt: snapshot.session.createdAt,
       updatedAt: snapshot.session.updatedAt,

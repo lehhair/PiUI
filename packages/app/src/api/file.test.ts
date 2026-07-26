@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getFileContent, getFileStatus, listDirectory, searchFiles, searchSymbols, searchText } from './file'
 
 const mocks = vi.hoisted(() => ({
-  resolveWorkspaceId: vi.fn(),
+  resolveWorkspacePath: vi.fn(),
   listWorkspaceFiles: vi.fn(),
   readWorkspaceFile: vi.fn(),
   searchWorkspaceFiles: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock('../pi/sessionApi', () => mocks)
 describe('Pi workspace file API', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.resolveWorkspaceId.mockResolvedValue('workspace-1')
+    mocks.resolveWorkspacePath.mockResolvedValue('C:/workspace')
   })
 
   it('maps directory entries and reads files through the resolved workspace', async () => {
@@ -37,8 +37,8 @@ describe('Pi workspace file API', () => {
       content: '# PiUI',
       encoding: 'utf-8',
     })
-    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('workspace-1', '')
-    expect(mocks.readWorkspaceFile).toHaveBeenCalledWith('workspace-1', 'README.md')
+    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', '')
+    expect(mocks.readWorkspaceFile).toHaveBeenCalledWith('C:/workspace', 'README.md')
   })
 
   it('keeps the selected POSIX parent in child directory paths', async () => {
@@ -49,8 +49,8 @@ describe('Pi workspace file API', () => {
     await expect(listDirectory('/abc/')).resolves.toEqual([
       { name: 'abcc', path: 'abcc', absolute: '/abc/abcc', type: 'directory', ignored: false },
     ])
-    expect(mocks.resolveWorkspaceId).toHaveBeenCalledWith('/abc/')
-    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('workspace-1', '')
+    expect(mocks.resolveWorkspacePath).toHaveBeenCalledWith('/abc/')
+    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', '')
   })
 
   it('delegates filename and text searches without an SDK fallback', async () => {
@@ -68,8 +68,8 @@ describe('Pi workspace file API', () => {
       'src/app.ts',
     ])
     await expect(searchText('PiUI', '/workspace')).resolves.toEqual(textMatches)
-    expect(mocks.searchWorkspaceFiles).toHaveBeenCalledWith('workspace-1', 'app', { type: 'file', limit: 20 })
-    expect(mocks.searchWorkspaceText).toHaveBeenCalledWith('workspace-1', 'PiUI')
+    expect(mocks.searchWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', 'app', { type: 'file', limit: 20 })
+    expect(mocks.searchWorkspaceText).toHaveBeenCalledWith('C:/workspace', 'PiUI')
   })
 
   it('maps Git status and reports unsupported symbol search explicitly', async () => {

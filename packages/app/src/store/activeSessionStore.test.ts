@@ -9,7 +9,6 @@ function snapshot(state: SessionSnapshotV1['session']['state']): SessionSnapshot
     sequence: 1,
     session: {
       id: 'pi-session',
-      workspaceId: 'workspace-1',
       directory: '/workspace/project',
       driverId: 'pi',
       driverSessionId: 'pi-session',

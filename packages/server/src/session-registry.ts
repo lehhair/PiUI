@@ -45,14 +45,16 @@ import {
   type PiSessionRuntime,
   type ProjectionState,
 } from "@piui/pi-worker"
-import type { WorkspaceStore } from "./workspace-store.ts"
+import { workspacePathKey, type WorkspaceStore } from "./workspace-store.ts"
 import type { EventHub } from "./event-hub.ts"
 import { preparePromptInput } from "./prompt-attachments.ts"
 import { resolveWorkspacePath } from "./path-safety.ts"
 
 export interface AppSession {
   id: string
-  workspaceId: string
+  /** Canonical workspace root. Pi identifies a session by its cwd, so this is
+   *  the session's workspace rather than a separate identifier. */
+  cwd: string
   driverSessionId: string
   title: string
   createdAt: string
@@ -164,7 +166,7 @@ export class SessionRegistry {
   private packageProgressUnsubscribe?: () => void
   /** Keyed by a server-generated progress id, because the client-supplied
    *  commandId is not unique across workspaces. */
-  private readonly packageCommandWorkspaces = new Map<string, { workspaceId: string; commandId: string }>()
+  private readonly packageCommandWorkspaces = new Map<string, { cwd: string; commandId: string }>()
   private readonly lastActivity = new Map<string, number>()
   private readonly idleRuntimeTimeoutMs: number
   private idleSweepTimer?: NodeJS.Timeout
@@ -193,16 +195,24 @@ export class SessionRegistry {
     return this.driver
   }
 
-  async list(workspaceId?: string): Promise<AppSession[]> {
-    if (workspaceId) {
-      const workspace = this.workspaces.get(workspaceId)
-      if (!workspace) return []
-      await this.discover(workspace.canonicalRoot)
-    } else {
+  /**
+   * Pi reports a session's cwd with whatever casing it recorded, which need not
+   * match the canonical path, so workspace membership is compared by key.
+   */
+  private sessionsIn(cwd: string, attachedOnly = false): AppSession[] {
+    const key = workspacePathKey(cwd)
+    return [...this.byId.values()].filter(session =>
+      workspacePathKey(session.cwd) === key && (!attachedOnly || session.real))
+  }
+
+  async list(cwd?: string): Promise<AppSession[]> {
+    if (cwd === undefined) {
       await this.discover()
+      return [...this.byId.values()]
     }
-    const all = [...this.byId.values()]
-    return workspaceId ? all.filter(s => s.workspaceId === workspaceId) : all
+    const workspace = this.workspaces.resolve(cwd)
+    await this.discover(workspace.canonicalRoot)
+    return this.sessionsIn(workspace.canonicalRoot)
   }
 
   async listModels(): Promise<PiModelInfo[]> {
@@ -218,42 +228,37 @@ export class SessionRegistry {
     return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.listAvailableModels())
   }
 
-  async getSettings(workspaceId: string): Promise<PiSettingsSnapshotV1> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  async getSettings(cwd: string): Promise<PiSettingsSnapshotV1> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.getSettings) throw unsupportedRuntimeOperation("settings")
     return backend.getSettings(workspace.canonicalRoot)
   }
 
-  async patchSettings(workspaceId: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  async patchSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.patchSettings) throw unsupportedRuntimeOperation("settings")
     const result = await backend.patchSettings(workspace.canonicalRoot, patch)
-    await this.withCoalescedResourceEvents(workspaceId, () => Promise.all([...this.byId.values()]
-      .filter(session => session.workspaceId === workspaceId && session.real)
-      .map(session => this.reloadResources(session.id, false))))
+    await this.withCoalescedResourceEvents(workspace.canonicalRoot, () => Promise.all(
+      this.sessionsIn(workspace.canonicalRoot, true).map(session => this.reloadResources(session.id, false))))
     return result
   }
 
-  async getProjectTrust(workspaceId: string): Promise<ProjectTrustV1> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  async getProjectTrust(cwd: string): Promise<ProjectTrustV1> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.getProjectTrust) throw unsupportedRuntimeOperation("project trust")
     return backend.getProjectTrust(workspace.canonicalRoot)
   }
 
-  async setProjectTrust(workspaceId: string, decision: boolean | null): Promise<ProjectTrustV1> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  async setProjectTrust(cwd: string, decision: boolean | null): Promise<ProjectTrustV1> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.setProjectTrust) throw unsupportedRuntimeOperation("project trust")
     const result = await backend.setProjectTrust(workspace.canonicalRoot, decision)
     const detached: AppSession[] = []
-    for (const session of [...this.byId.values()].filter(value => value.workspaceId === workspaceId && value.real)) {
+    for (const session of this.sessionsIn(workspace.canonicalRoot, true)) {
       await this.detachRuntime(session)
       detached.push(session)
     }
@@ -268,12 +273,12 @@ export class SessionRegistry {
     }
     if (detached.length > 0) {
       this.eventHub?.publishV2(
-        { kind: "workspace", id: workspaceId },
+        { kind: "workspace", id: workspace.canonicalRoot },
         "workspace.sessions.updated",
-        { workspaceId },
+        { workspacePath: workspace.canonicalRoot },
       )
     }
-    this.publishResourcesUpdated(workspaceId)
+    this.publishResourcesUpdated(workspace.canonicalRoot)
     return result
   }
 
@@ -476,28 +481,26 @@ export class SessionRegistry {
     return backend.refreshModelRuntime(options)
   }
 
-  async listPackages(workspaceId: string): Promise<ConfiguredPackageV1[]> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  async listPackages(cwd: string): Promise<ConfiguredPackageV1[]> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.listPackages) throw unsupportedRuntimeOperation("packages")
     return backend.listPackages(workspace.canonicalRoot)
   }
 
   async managePackage(
-    workspaceId: string,
+    cwd: string,
     commandId: string,
     action: "install" | "remove" | "update",
     source?: string,
     local?: boolean,
     persist?: boolean,
   ): Promise<ConfiguredPackageV1[]> {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.managePackage) throw unsupportedRuntimeOperation("packages")
     const progressId = randomUUID()
-    this.packageCommandWorkspaces.set(progressId, { workspaceId, commandId })
+    this.packageCommandWorkspaces.set(progressId, { cwd: workspace.canonicalRoot, commandId })
     let packages: ConfiguredPackageV1[]
     try {
       packages = await backend.managePackage(workspace.canonicalRoot, progressId, action, source, local, persist)
@@ -505,62 +508,60 @@ export class SessionRegistry {
       this.packageCommandWorkspaces.delete(progressId)
     }
     await this.withCoalescedResourceEvents(
-      workspaceId,
-      () => Promise.all([...this.byId.values()]
-        .filter(session => session.workspaceId === workspaceId && session.real)
-        .map(session => this.reloadResources(session.id, false))),
+      workspace.canonicalRoot,
+      () => Promise.all(
+        this.sessionsIn(workspace.canonicalRoot, true).map(session => this.reloadResources(session.id, false))),
       commandId,
     )
     return packages
   }
 
-  async resolvePackages(workspaceId: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
-    const workspace = this.requireWorkspace(workspaceId)
+  async resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.resolvePackages) throw unsupportedRuntimeOperation("package resolution")
     return backend.resolvePackages(workspace.canonicalRoot, missingAction)
   }
 
   async resolveExtensionSources(
-    workspaceId: string,
+    cwd: string,
     sources: string[],
     options?: { local?: boolean; temporary?: boolean },
   ): Promise<ResolvedPackageResourcesV1> {
-    const workspace = this.requireWorkspace(workspaceId)
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.resolveExtensionSources) throw unsupportedRuntimeOperation("extension source resolution")
     return backend.resolveExtensionSources(workspace.canonicalRoot, sources, options)
   }
 
   async changePackageSource(
-    workspaceId: string,
+    cwd: string,
     source: string,
     operation: "add" | "remove",
     local?: boolean,
   ): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
-    const workspace = this.requireWorkspace(workspaceId)
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.changePackageSource) throw unsupportedRuntimeOperation("package settings")
     const result = await backend.changePackageSource(workspace.canonicalRoot, source, operation, local)
-    await this.withCoalescedResourceEvents(workspaceId, () => Promise.all([...this.byId.values()]
-      .filter(session => session.workspaceId === workspaceId && session.real)
-      .map(session => this.reloadResources(session.id, false))))
+    await this.withCoalescedResourceEvents(workspace.canonicalRoot, () => Promise.all(
+      this.sessionsIn(workspace.canonicalRoot, true).map(session => this.reloadResources(session.id, false))))
     return result
   }
 
   async getInstalledPackagePath(
-    workspaceId: string,
+    cwd: string,
     source: string,
     scope: "user" | "project",
   ): Promise<string | undefined> {
-    const workspace = this.requireWorkspace(workspaceId)
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.getInstalledPackagePath) throw unsupportedRuntimeOperation("package path")
     return backend.getInstalledPackagePath(workspace.canonicalRoot, source, scope)
   }
 
-  async checkPackageUpdates(workspaceId: string): Promise<PackageUpdateV1[]> {
-    const workspace = this.requireWorkspace(workspaceId)
+  async checkPackageUpdates(cwd: string): Promise<PackageUpdateV1[]> {
+    const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.checkPackageUpdates) throw unsupportedRuntimeOperation("package update checks")
     return backend.checkPackageUpdates(workspace.canonicalRoot)
@@ -676,13 +677,10 @@ export class SessionRegistry {
    * - pi: opens real AgentSessionRuntime (models when prompted)
    */
   async create(
-    workspaceId: string,
+    cwd: string,
     opts?: { title?: string; seedMock?: boolean },
   ): Promise<AppSession> {
-    const ws = this.workspaces.get(workspaceId)
-    if (!ws) {
-      throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
-    }
+    const ws = this.workspaces.resolve(cwd)
     const now = new Date().toISOString()
     let projection = createProjectionState()
     let sequence = 0
@@ -709,7 +707,7 @@ export class SessionRegistry {
     const seedMock = opts?.seedMock === true && this.driver === "mock"
     const session: AppSession = {
       id: driverSessionId,
-      workspaceId,
+      cwd: ws.canonicalRoot,
       driverSessionId,
       title: opts?.title ?? (seedMock ? "Mock session" : "New chat"),
       createdAt: now,
@@ -740,9 +738,7 @@ export class SessionRegistry {
     },
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    const workspace = this.workspaces.get(session.workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
-    const prepared = preparePromptInput(workspace.canonicalRoot, text, opts?.attachments)
+    const prepared = preparePromptInput(session.cwd, text, opts?.attachments)
     const trimmed = prepared.text.trim()
     if (!trimmed && prepared.images.length === 0) {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
@@ -812,9 +808,7 @@ export class SessionRegistry {
     attachments?: SessionAttachmentV2[],
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    const workspace = this.workspaces.get(session.workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
-    const prepared = preparePromptInput(workspace.canonicalRoot, text, attachments)
+    const prepared = preparePromptInput(session.cwd, text, attachments)
     const trimmed = prepared.text.trim()
     if (!trimmed && prepared.images.length === 0) {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
@@ -839,9 +833,7 @@ export class SessionRegistry {
     options?: { deliverAs?: "steer" | "followUp"; attachments?: SessionAttachmentV2[] },
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    const workspace = this.workspaces.get(session.workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
-    const prepared = preparePromptInput(workspace.canonicalRoot, text, options?.attachments)
+    const prepared = preparePromptInput(session.cwd, text, options?.attachments)
     const trimmed = prepared.text.trim()
     if (!trimmed && prepared.images.length === 0) {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
@@ -920,11 +912,9 @@ export class SessionRegistry {
     const session = await this.attach(sessionId)
     const runtime = session.real
     if (!runtime) throw unsupportedRuntimeOperation("session export")
-    const workspace = this.workspaces.get(session.workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
     const safeId = session.id.replace(/[^A-Za-z0-9._-]/g, "-")
     const relative = outputPath?.trim() || `pi-session-${safeId}.${format}`
-    const resolved = resolveWorkspacePath(workspace.canonicalRoot, relative)
+    const resolved = resolveWorkspacePath(session.cwd, relative)
     if (resolved.exists && statSync(resolved.absolute).isDirectory()) {
       throw Object.assign(new Error("export path must be a file"), { code: "INVALID_REQUEST" })
     }
@@ -949,7 +939,7 @@ export class SessionRegistry {
     session.nativeLeafId = runtime.getLeafId()
     this.touch(session)
     if (publish !== false) {
-      this.publishResourcesUpdated(session.workspaceId, typeof publish === "string" ? publish : undefined)
+      this.publishResourcesUpdated(session.cwd, typeof publish === "string" ? publish : undefined)
     }
     return session
   }
@@ -1088,7 +1078,7 @@ export class SessionRegistry {
     if (!runtime) throw unsupportedRuntimeOperation("resource extension")
     await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.extendResources(paths))
     this.touch(session)
-    this.publishResourcesUpdated(session.workspaceId)
+    this.publishResourcesUpdated(session.cwd)
     return this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.inspectResources())
   }
 
@@ -1275,10 +1265,9 @@ export class SessionRegistry {
     const target = await this.find(targetSessionId)
     if (!target?.sessionFile) throw Object.assign(new Error("target session not found"), { code: "SESSION_NOT_FOUND" })
     if (target.real) throw Object.assign(new Error("target session is active"), { code: "SESSION_BUSY" })
-    const workspace = this.workspaces.get(target.workspaceId)
     return this.replaceSession(
       sessionId,
-      runtime => runtime.switchSession(target.sessionFile!, workspace?.canonicalRoot),
+      runtime => runtime.switchSession(target.sessionFile!, target.cwd),
       { existingTargetId: targetSessionId },
     )
   }
@@ -1399,12 +1388,14 @@ export class SessionRegistry {
       source.projection = sourceProjection
       this.touch(source)
 
-      let workspaceId = source.workspaceId
-      if (replacement.targetCwd) workspaceId = this.workspaces.register(replacement.targetCwd).id
+      // A replacement may move the session to a different directory.
+      const targetCwd = replacement.targetCwd
+        ? this.workspaces.resolve(replacement.targetCwd).canonicalRoot
+        : source.cwd
       const now = new Date().toISOString()
       const target: AppSession = existingTarget ?? {
         id: targetId,
-        workspaceId,
+        cwd: targetCwd,
         driverSessionId: targetId,
         title: runtime.getSessionName() ?? `${source.title} fork`,
         createdAt: now,
@@ -1415,7 +1406,7 @@ export class SessionRegistry {
         driver: "pi",
         sessionFile: targetSessionFile,
       }
-      target.workspaceId = workspaceId
+      target.cwd = targetCwd
       target.sessionFile = targetSessionFile
       target.projection = runtime.getProjection()
       target.driverSessionId = targetId
@@ -1489,12 +1480,8 @@ export class SessionRegistry {
     if (this.driver !== "pi") {
       throw Object.assign(new Error("Pi runtime is not enabled"), { code: "DRIVER_UNAVAILABLE" })
     }
-    const workspace = this.workspaces.get(session.workspaceId)
-    if (!workspace) {
-      throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
-    }
     const backend = await this.getBackend()
-    return backend.open(workspace.canonicalRoot, session.sessionFile)
+    return backend.open(session.cwd, session.sessionFile)
   }
 
   private bindRuntime(session: AppSession, runtime: PiSessionRuntime): void {
@@ -1585,7 +1572,7 @@ export class SessionRegistry {
     })
     const unsubscribeResourcesChanged = runtime.onResourcesChanged?.(() => {
       if (!this.isCurrentRuntime(session, runtime, generation)) return
-      this.publishResourcesUpdated(session.workspaceId)
+      this.publishResourcesUpdated(session.cwd)
     })
     const unsubscribeExtensionUi = runtime.onExtensionUi?.(event => {
       if (!this.isCurrentRuntime(session, runtime, generation)) return
@@ -1853,29 +1840,23 @@ export class SessionRegistry {
     const seen = new Set(infos.map(info => info.id))
     for (const info of infos) this.addDiscovered(info)
 
-    const workspaceId = cwd ? this.workspaces.register(cwd).id : undefined
+    const scopeKey = cwd ? workspacePathKey(this.workspaces.resolve(cwd).canonicalRoot) : undefined
     for (const [id, session] of this.byId) {
       if (session.driver !== "pi" || session.real || seen.has(id)) continue
-      if (!workspaceId || session.workspaceId === workspaceId) this.byId.delete(id)
+      if (!scopeKey || workspacePathKey(session.cwd) === scopeKey) this.byId.delete(id)
     }
     this.discoveredAt.set(cwd ?? "*", Date.now())
   }
 
-  private requireWorkspace(workspaceId: string) {
-    const workspace = this.workspaces.get(workspaceId)
-    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
-    return workspace
-  }
-
-  private publishResourcesUpdated(workspaceId: string, revision: string = randomUUID()): void {
+  private publishResourcesUpdated(cwd: string, revision: string = randomUUID()): void {
     if (this.resourceEventCoalescing > 0) {
-      this.coalescedResourceWorkspaces.add(workspaceId)
+      this.coalescedResourceWorkspaces.add(cwd)
       return
     }
     this.eventHub?.publishV2(
-      { kind: "resources", id: workspaceId },
+      { kind: "resources", id: cwd },
       "resources.updated",
-      { workspaceId, revision },
+      { workspacePath: cwd, revision },
     )
   }
 
@@ -1885,7 +1866,7 @@ export class SessionRegistry {
    * publish N+1 events carrying different revisions.
    */
   private async withCoalescedResourceEvents<T>(
-    workspaceId: string,
+    cwd: string,
     run: () => Promise<T>,
     revision: string = randomUUID(),
   ): Promise<T> {
@@ -1897,8 +1878,8 @@ export class SessionRegistry {
       if (this.resourceEventCoalescing === 0) {
         const pending = [...this.coalescedResourceWorkspaces]
         this.coalescedResourceWorkspaces.clear()
-        for (const pendingWorkspaceId of new Set([workspaceId, ...pending])) {
-          this.publishResourcesUpdated(pendingWorkspaceId, revision)
+        for (const pendingCwd of new Set([cwd, ...pending])) {
+          this.publishResourcesUpdated(pendingCwd, revision)
         }
       }
     }
@@ -1930,11 +1911,11 @@ export class SessionRegistry {
         // The worker echoes the server-generated progress id, so map it back to
         // the workspace and the commandId the client actually submitted.
         const tracked = this.packageCommandWorkspaces.get(event.commandId)
-        const workspace = tracked?.workspaceId ?? event.workspaceId
+        const workspacePath = tracked?.cwd ?? event.workspacePath
         this.eventHub?.publishV2(
-          { kind: "resources", id: workspace ?? "global" },
+          { kind: "resources", id: workspacePath ?? "global" },
           "packages.progress",
-          { ...event, commandId: tracked?.commandId ?? event.commandId, workspaceId: workspace },
+          { ...event, commandId: tracked?.commandId ?? event.commandId, workspacePath },
         )
       })
     }
@@ -1943,16 +1924,16 @@ export class SessionRegistry {
 
   private addDiscovered(info: PiSessionInfo): void {
     if (this.hiddenIds.has(info.id) || !info.cwd) return
-    let workspaceId: string
+    let cwd: string
     try {
-      workspaceId = this.workspaces.register(info.cwd).id
+      cwd = this.workspaces.resolve(info.cwd).canonicalRoot
     } catch {
       return
     }
     const existing = this.byId.get(info.id)
     if (existing) {
       if (!existing.real) {
-        existing.workspaceId = workspaceId
+        existing.cwd = cwd
         existing.title = info.name ?? (info.firstMessage.slice(0, 48) || "New chat")
         existing.createdAt = info.createdAt
         existing.updatedAt = info.updatedAt
@@ -1962,7 +1943,7 @@ export class SessionRegistry {
     }
     this.byId.set(info.id, {
       id: info.id,
-      workspaceId,
+      cwd,
       driverSessionId: info.id,
       title: info.name ?? (info.firstMessage.slice(0, 48) || "New chat"),
       createdAt: info.createdAt,
@@ -2022,8 +2003,7 @@ export class SessionRegistry {
       sequence: session.sequence,
       session: {
         id: session.id,
-        workspaceId: session.workspaceId,
-        directory: this.workspaces.get(session.workspaceId)?.canonicalRoot ?? "",
+        directory: session.cwd,
         driverId: "pi",
         driverSessionId: session.driverSessionId,
         title: session.title,

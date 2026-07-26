@@ -43,6 +43,13 @@ describe("protocol v2 foundation", () => {
     assert.deepEqual(parseEventStreamKeyV2("session:session-1"), event.stream)
   })
 
+  it("round-trips a workspace path as a stream identity", () => {
+    const stream = { kind: "workspace" as const, id: "C:\\Users\\me\\My Project" }
+    const key = eventStreamKeyV2(stream)
+    assert.equal(key, "workspace:C%3A%5CUsers%5Cme%5CMy%20Project")
+    assert.deepEqual(parseEventStreamKeyV2(key), stream)
+  })
+
   it("declares command concurrency explicitly", () => {
     const command: CommandRequestV2<"session.navigateTree"> = {
       protocolVersion: 2,

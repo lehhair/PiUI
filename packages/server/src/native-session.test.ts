@@ -415,7 +415,7 @@ describe("native Pi session discovery", () => {
 
   it("uses Pi scoped listing when a workspace is known", async () => {
     const workspaces = new WorkspaceStore()
-    const workspace = workspaces.register(root)
+    const workspace = workspaces.resolve(root)
     let scopedCwd: string | undefined
     const backend: PiSessionBackend = {
       list: async cwd => {
@@ -427,7 +427,7 @@ describe("native Pi session discovery", () => {
     }
     const registry = new SessionRegistry(workspaces, "pi", backend)
 
-    await registry.list(workspace.id)
+    await registry.list(workspace.canonicalRoot)
     assert.equal(scopedCwd, workspace.canonicalRoot)
   })
 
@@ -676,17 +676,17 @@ describe("native Pi session discovery", () => {
     })
 
     const listed = await registry.list()
-    const workspaceId = listed[0]!.workspaceId
+    const workspacePath = listed[0]!.cwd
     for (const id of sessionIds) await registry.attach(id)
 
     events.length = 0
-    await registry.patchSettings(workspaceId, { quietStartup: true })
+    await registry.patchSettings(workspacePath, { quietStartup: true })
     const resourceEvents = events.filter(event => event.type === "resources.updated")
     assert.equal(resourceEvents.length, 1, `expected one coalesced event, got ${resourceEvents.length}`)
     assert.equal(new Set(resourceEvents.map(event => event.revision)).size, 1)
 
     events.length = 0
-    await registry.setProjectTrust(workspaceId, true)
+    await registry.setProjectTrust(workspacePath, true)
     // Trust changes detach every runtime, so clients must be told.
     assert.equal(events.filter(event => event.type === "session.snapshot.updated").length, sessionIds.length)
     assert.equal(events.some(event => event.type === "workspace.sessions.updated"), true)
@@ -907,24 +907,24 @@ describe("native Pi session discovery", () => {
     const hub = new EventHub()
     const workspaces = new WorkspaceStore()
     const registry = new SessionRegistry(workspaces, "pi", backend, hub)
-    const progress: Array<{ commandId: string; workspaceId?: string }> = []
+    const progress: Array<{ commandId: string; workspacePath?: string }> = []
     const resourceRevisions: string[] = []
     hub.subscribeV2(event => {
       if (event.type === "packages.progress") {
-        progress.push(event.payload as { commandId: string; workspaceId?: string })
+        progress.push(event.payload as { commandId: string; workspacePath?: string })
       } else if (event.type === "resources.updated") {
         resourceRevisions.push(event.payload.revision)
       }
     })
 
-    const first = workspaces.register(firstRoot).id
-    const second = workspaces.register(secondRoot).id
+    const first = workspaces.resolve(firstRoot).canonicalRoot
+    const second = workspaces.resolve(secondRoot).canonicalRoot
     // Clients pick their own command ids, so two workspaces can collide.
     await registry.managePackage(first, "shared-id", "install", "./pkg")
     await registry.managePackage(second, "shared-id", "install", "./pkg")
 
     assert.equal(new Set(started).size, 2, "the worker must see distinct progress ids")
-    assert.deepEqual(progress.map(item => item.workspaceId), [first, second])
+    assert.deepEqual(progress.map(item => item.workspacePath), [first, second])
     // The client still gets back the id it submitted.
     assert.deepEqual(progress.map(item => item.commandId), ["shared-id", "shared-id"])
     assert.deepEqual(resourceRevisions, ["shared-id", "shared-id"])

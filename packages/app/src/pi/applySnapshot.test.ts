@@ -11,7 +11,6 @@ const snap: SessionSnapshotV1 = {
   sequence: 1,
   session: {
     id: "s-apply",
-    workspaceId: "w",
     directory: "/workspace",
     driverId: "pi",
     driverSessionId: "d",

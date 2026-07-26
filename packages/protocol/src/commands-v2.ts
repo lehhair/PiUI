@@ -89,7 +89,7 @@ export interface CommandPayloadsV2 {
   "session.import": { inputPath: string; cwdOverride?: string }
   "session.delete": { durable: true }
   "extension.ui.respond": { requestId: string; value?: unknown; cancelled?: boolean }
-  "resources.reload": { workspaceId?: string }
+  "resources.reload": { workspacePath?: string }
 }
 
 export type CommandTypeV2 = keyof CommandPayloadsV2
@@ -100,7 +100,7 @@ export interface CommandRequestV2<T extends CommandTypeV2 = CommandTypeV2> {
   type: T
   concurrency: CommandConcurrencyV2
   sessionId?: string
-  workspaceId?: string
+  workspacePath?: string
   payload: CommandPayloadsV2[T]
 }
 
