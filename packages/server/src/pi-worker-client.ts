@@ -531,6 +531,17 @@ export class PiWorkerSession implements PiSessionRuntime {
     this.applySession(expectSession(await this.request({ type: "setThinkingLevel", level })))
   }
 
+  async cycleThinkingLevel(): Promise<string> {
+    const result = await this.request({ type: "cycleThinkingLevel" })
+    if (result.type !== "thinkingLevel") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    this.applySession(result.session)
+    return result.level
+  }
+
+  async sendUserMessage(text: string, images?: PiImageInput[], deliverAs?: "steer" | "followUp"): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "sendUserMessage", text, images, deliverAs })))
+  }
+
   async cycleModel(direction?: "forward" | "backward"): Promise<void> {
     this.applySession(expectSession(await this.request({ type: "cycleModel", direction })))
   }
@@ -1053,7 +1064,10 @@ function workerCapabilityFor(command: WorkerCommand): PiWorkerCapability | undef
     case "extendResources":
       return "runtime.reload"
     case "setThinkingLevel":
+    case "cycleThinkingLevel":
       return "runtime.thinking"
+    case "sendUserMessage":
+      return "runtime.prompt"
     case "compact":
     case "abortCompaction":
     case "setAutoCompaction":

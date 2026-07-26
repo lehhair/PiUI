@@ -632,6 +632,33 @@ describe("session mock snapshot (no LLM)", () => {
       const waited = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/wait-for-idle`, {})
       assert.equal(waited.status, 200)
 
+      const cycledThinking = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/cycle-thinking-level`, {})
+      assert.equal(cycledThinking.status, 200, JSON.stringify(cycledThinking.data))
+      assert.equal(cycledThinking.data.level, "high")
+      assert.equal(cycledThinking.data.snapshot.runtime.thinkingLevel, "high")
+
+      const userMessage = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/send-user-message`, {
+        text: "from sendUserMessage",
+      })
+      assert.equal(userMessage.status, 200, JSON.stringify(userMessage.data))
+      assert.equal(
+        userMessage.data.snapshot.timeline.some(
+          item => item.type === "user" && item.text === "from sendUserMessage",
+        ),
+        true,
+      )
+      const badDeliver = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/send-user-message`, {
+        text: "x",
+        deliverAs: "nextTurn",
+      })
+      assert.equal(badDeliver.status, 400)
+
+      const runtimeState = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+      assert.equal(runtimeState.data.runtime.isBashRunning, false)
+      assert.equal(runtimeState.data.runtime.isRetrying, false)
+      assert.equal(runtimeState.data.runtime.retryAttempt, 0)
+      assert.equal(runtimeState.data.runtime.pendingMessageCount, 0)
+
       const settings = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/pi-settings`)
       assert.equal(settings.status, 200)
       assert.equal(settings.data.workspacePath, root)

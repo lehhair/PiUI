@@ -225,6 +225,13 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
     case "setThinkingLevel":
       await requireRuntime().setThinkingLevel(command.level)
       return { type: "session", session: sessionWire() }
+    case "cycleThinkingLevel": {
+      const level = await requireRuntime().cycleThinkingLevel()
+      return { type: "thinkingLevel", level, session: sessionWire() }
+    }
+    case "sendUserMessage":
+      await requireRuntime().sendUserMessage(command.text, command.images, command.deliverAs)
+      return { type: "session", session: sessionWire() }
     case "compact": {
       const compaction = await requireRuntime().compact(command.instructions)
       return { type: "compaction", compaction, session: sessionWire() }

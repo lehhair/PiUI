@@ -33,6 +33,12 @@ export interface CommandPayloadsV2 {
   "session.abort": Record<string, never>
   "session.setModel": { provider: string; modelId: string }
   "session.setThinkingLevel": { level: string }
+  "session.cycleThinkingLevel": Record<string, never>
+  "session.sendUserMessage": {
+    text: string
+    deliverAs?: "steer" | "followUp"
+    attachments?: SessionAttachmentV2[]
+  }
   "session.compact": { instructions?: string }
   "session.abortCompaction": Record<string, never>
   "session.setAutoCompaction": { enabled: boolean }

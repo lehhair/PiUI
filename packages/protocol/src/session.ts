@@ -248,6 +248,11 @@ export interface SessionSnapshotV1 {
     availableThinkingLevels: string[]
     isStreaming: boolean
     isCompacting: boolean
+    isBashRunning?: boolean
+    hasPendingBashMessages?: boolean
+    isRetrying?: boolean
+    retryAttempt?: number
+    pendingMessageCount?: number
     queue: QueueStateV1
     retry: RetryStateV1
     compaction: CompactionStateV1

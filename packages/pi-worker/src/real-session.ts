@@ -66,6 +66,11 @@ export interface PiRuntimeUiState {
   isStreaming: boolean
   isCompacting: boolean
   isIdle: boolean
+  isBashRunning: boolean
+  hasPendingBashMessages: boolean
+  isRetrying: boolean
+  retryAttempt: number
+  pendingMessageCount: number
   queue: {
     steering: string[]
     followUp: string[]
@@ -802,6 +807,11 @@ export class RealPiSession {
       isStreaming: session.isStreaming,
       isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
       isIdle: Boolean(session.isIdle ?? !session.isStreaming),
+      isBashRunning: Boolean(session.isBashRunning),
+      hasPendingBashMessages: Boolean(session.hasPendingBashMessages),
+      isRetrying: Boolean(session.isRetrying),
+      retryAttempt: Number(session.retryAttempt ?? 0),
+      pendingMessageCount: Number(session.pendingMessageCount ?? 0),
       queue: {
         steering,
         followUp,
@@ -1132,6 +1142,35 @@ export class RealPiSession {
     if (!normalized) throw Object.assign(new Error("custom entry type required"), { code: "INVALID_REQUEST" })
     this.runtime.session.sessionManager.appendCustomEntry(normalized, data)
     this.emitState()
+  }
+
+  cycleThinkingLevel(): string {
+    const level = this.runtime.session.cycleThinkingLevel()
+    if (level === undefined) {
+      throw Object.assign(new Error("the selected Pi model does not support thinking levels"), {
+        code: "CAPABILITY_DISABLED",
+      })
+    }
+    this.emitState()
+    return String(level)
+  }
+
+  async sendUserMessage(
+    text: string,
+    images?: PiImageInput[],
+    deliverAs?: "steer" | "followUp",
+  ): Promise<void> {
+    this.assertImageSupport(images)
+    const content = images?.length
+      ? [{ type: "text" as const, text }, ...images]
+      : text
+    try {
+      await this.runtime.session.sendUserMessage(content, deliverAs ? { deliverAs } : undefined)
+    } finally {
+      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      this.emitProjection()
+      this.emitState()
+    }
   }
 
   waitForIdle(): Promise<void> {
