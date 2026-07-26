@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
-import { WorkspaceStore, workspaceIdFor, workspacePathKey } from "./workspace-store.ts"
+import { WorkspaceStore, workspacePathKey } from "./workspace-store.ts"
 
 describe("workspacePathKey", () => {
   it("normalizes case only on Windows", () => {
@@ -22,41 +22,55 @@ describe("workspace identity", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
   })
 
-  it("derives the id from the path so it survives a restart", () => {
+  it("identifies a workspace by its canonical path", () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-ws-id-"))
     roots.push(root)
 
-    const before = new WorkspaceStore().register(root)
-    // A fresh store stands in for a restarted server: clients holding the old
-    // id must still resolve to the same workspace.
-    const after = new WorkspaceStore().register(root)
-    assert.equal(after.id, before.id)
-    assert.equal(new WorkspaceStore().get(before.id), undefined, "a new store starts empty")
-    assert.equal(new WorkspaceStore().register(root).id, before.id)
+    // A fresh store stands in for a restarted server. Nothing is persisted, yet
+    // the same directory resolves to the same identity, because the path is it.
+    const before = new WorkspaceStore().resolve(root)
+    const after = new WorkspaceStore().resolve(root)
+    assert.equal(after.canonicalRoot, before.canonicalRoot)
+    assert.equal(before.canonicalRoot, realpathSync.native(root))
   })
 
-  it("gives different paths different ids", () => {
-    const first = mkdtempSync(path.join(tmpdir(), "piui-ws-a-"))
-    const second = mkdtempSync(path.join(tmpdir(), "piui-ws-b-"))
-    roots.push(first, second)
+  it("resolves paths that differ only in form onto one workspace", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-form-"))
+    roots.push(root)
     const store = new WorkspaceStore()
-    assert.notEqual(store.register(first).id, store.register(second).id)
+    const direct = store.resolve(root)
+    const viaDot = store.resolve(path.join(root, "."))
+    assert.equal(viaDot.canonicalRoot, direct.canonicalRoot)
+    assert.equal(store.list().length, 1, "one directory must not appear twice")
   })
 
-  it("matches the case rules used for deduplication", () => {
-    // Otherwise two ids could exist for one workspace on Windows.
-    assert.equal(workspaceIdFor("C:\\Work\\Project", "win32"), workspaceIdFor("c:\\work\\project", "win32"))
-    assert.notEqual(workspaceIdFor("/home/u/Project", "linux"), workspaceIdFor("/home/u/project", "linux"))
-  })
-
-  it("keeps re-registering the same path on one record", () => {
+  it("keeps metadata when the same path is resolved again", () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-ws-dup-"))
     roots.push(root)
     const store = new WorkspaceStore()
-    const first = store.register(root, "Custom name")
-    const second = store.register(root)
-    assert.equal(second.id, first.id)
-    assert.equal(second.displayName, "Custom name", "re-registering must not reset metadata")
+    const first = store.resolve(root, "Custom name")
+    const second = store.resolve(root)
+    assert.equal(second.canonicalRoot, first.canonicalRoot)
+    assert.equal(second.displayName, "Custom name", "resolving again must not reset metadata")
     assert.equal(store.list().length, 1)
+  })
+
+  it("rejects a path that is not an existing directory", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-bad-"))
+    roots.push(root)
+    const file = path.join(root, "not-a-dir.txt")
+    writeFileSync(file, "x")
+    const store = new WorkspaceStore()
+    assert.throws(() => store.resolve(file), /must be a directory/)
+    assert.throws(() => store.resolve(path.join(root, "missing")), /not found/)
+  })
+
+  it("finds a known workspace without touching the filesystem", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-find-"))
+    roots.push(root)
+    const store = new WorkspaceStore()
+    assert.equal(store.find(root), undefined)
+    store.resolve(root)
+    assert.equal(store.find(root)?.canonicalRoot, realpathSync.native(root))
   })
 })

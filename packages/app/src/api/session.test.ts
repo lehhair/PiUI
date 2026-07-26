@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   deletePiSession: vi.fn(),
   fetchSnapshot: vi.fn(),
   listPiSessions: vi.fn(),
-  resolveWorkspaceId: vi.fn(),
+  resolveWorkspacePath: vi.fn(),
   setPiSessionName: vi.fn(),
   applySnapshotToUi: vi.fn(),
 }))
@@ -27,7 +27,7 @@ vi.mock('../pi/sessionApi', () => ({
   deletePiSession: mocks.deletePiSession,
   fetchSnapshot: mocks.fetchSnapshot,
   listPiSessions: mocks.listPiSessions,
-  resolveWorkspaceId: mocks.resolveWorkspaceId,
+  resolveWorkspacePath: mocks.resolveWorkspacePath,
   setPiSessionName: mocks.setPiSessionName,
 }))
 
@@ -37,7 +37,7 @@ function snapshot(id: string, state: 'idle' | 'running' = 'idle') {
   return {
     session: {
       id,
-      workspaceId: 'workspace-1',
+      directory: '/workspace',
       title: `Session ${id}`,
       state,
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -49,31 +49,24 @@ function snapshot(id: string, state: 'idle' | 'running' = 'idle') {
 describe('Pi session facade', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.resolveWorkspaceId.mockResolvedValue('workspace-1')
+    mocks.resolveWorkspacePath.mockResolvedValue('/workspace')
   })
 
   it('filters Pi session summaries by workspace and search', async () => {
     mocks.listPiSessions.mockResolvedValue([
       {
         id: 'one',
-        workspaceId: 'workspace-1',
+        directory: '/workspace',
         title: 'Review changes',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-03T00:00:00.000Z',
-      },
-      {
-        id: 'two',
-        workspaceId: 'workspace-2',
-        title: 'Review elsewhere',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-02T00:00:00.000Z',
       },
     ])
 
     await expect(getSessions({ directory: '/workspace', search: 'review' })).resolves.toEqual([
       expect.objectContaining({ id: 'one', directory: '/workspace' }),
     ])
-    expect(mocks.listPiSessions).toHaveBeenCalledWith('workspace-1')
+    expect(mocks.listPiSessions).toHaveBeenCalledWith('/workspace')
   })
 
   it('creates, applies, and maps a Pi session snapshot', async () => {
@@ -83,7 +76,7 @@ describe('Pi session facade', () => {
     await expect(createSession({ directory: '/workspace', title: 'Test' })).resolves.toEqual(
       expect.objectContaining({ id: 'created', title: 'Session created' }),
     )
-    expect(mocks.createPiSession).toHaveBeenCalledWith({ workspaceId: 'workspace-1', title: 'Test' })
+    expect(mocks.createPiSession).toHaveBeenCalledWith({ workspacePath: '/workspace', title: 'Test' })
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(created)
   })
 

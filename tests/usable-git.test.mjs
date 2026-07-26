@@ -67,8 +67,9 @@ describe("usable git status", () => {
       body: JSON.stringify({ rootPath: wsRoot }),
     })
     const { workspace } = await reg.json()
+    const workspacePath = encodeURIComponent(workspace.path)
     const st = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/git/status`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/git/status`,
     )
     assert.equal(st.status, 200)
     const body = await st.json()

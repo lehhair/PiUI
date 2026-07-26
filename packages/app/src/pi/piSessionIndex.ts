@@ -1,24 +1,24 @@
 /** Tracks session ids owned by piui-server (not OpenCode). */
 
 const ids = new Set<string>()
-const workspaceBySession = new Map<string, string>()
+const workspacePathBySession = new Map<string, string>()
 const listeners = new Set<() => void>()
 
 function emit() {
   for (const l of listeners) l()
 }
 
-export function trackPiSession(id: string, workspaceId?: string) {
+export function trackPiSession(id: string, workspacePath?: string) {
   if (!id) return
   const added = !ids.has(id)
-  const workspaceChanged = Boolean(workspaceId && workspaceBySession.get(id) !== workspaceId)
+  const workspaceChanged = Boolean(workspacePath && workspacePathBySession.get(id) !== workspacePath)
   ids.add(id)
-  if (workspaceId) workspaceBySession.set(id, workspaceId)
+  if (workspacePath) workspacePathBySession.set(id, workspacePath)
   if (added || workspaceChanged) emit()
 }
 
 export function untrackPiSession(id: string) {
-  workspaceBySession.delete(id)
+  workspacePathBySession.delete(id)
   if (ids.delete(id)) emit()
 }
 
@@ -30,14 +30,14 @@ export function listTrackedPiSessions(): string[] {
   return [...ids]
 }
 
-export function listTrackedPiWorkspaces(): string[] {
-  return [...new Set(workspaceBySession.values())]
+export function listTrackedPiWorkspacePaths(): string[] {
+  return [...new Set(workspacePathBySession.values())]
 }
 
 export function clearPiSessionIndex(): void {
   if (ids.size === 0) return
   ids.clear()
-  workspaceBySession.clear()
+  workspacePathBySession.clear()
   emit()
 }
 

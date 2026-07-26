@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { autoDetectPathStyle, isSameDirectory } from '../utils'
-import { createPiSession, deletePiSession, listPiSessions, resolveWorkspaceId } from '../pi/sessionApi'
+import { createPiSession, deletePiSession, listPiSessions, resolveWorkspacePath } from '../pi/sessionApi'
 import { toUiSession } from '../pi/sessionModel'
 
 interface UseSessionsOptions {
@@ -97,9 +97,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       }
 
       try {
-        const scopedWorkspaceId = normalizedDirectory ? await resolveWorkspaceId(normalizedDirectory) : null
-        const all = (await listPiSessions(scopedWorkspaceId ?? undefined))
-          .filter(summary => !scopedWorkspaceId || summary.workspaceId === scopedWorkspaceId)
+        const workspacePath = normalizedDirectory ? await resolveWorkspacePath(normalizedDirectory) : null
+        const all = (await listPiSessions(workspacePath ?? undefined))
           .map(summary => toUiSession(summary, normalizedDirectory))
         const searchTerm = queryParams.search?.trim().toLowerCase()
         const data = all
@@ -217,8 +216,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const create = useCallback(
     async (title?: string) => {
       // 创建时也要传 directory
-      const workspaceId = await resolveWorkspaceId(normalizedDirectory)
-      const { summary } = await createPiSession({ title, workspaceId: workspaceId ?? undefined })
+      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+      const { summary } = await createPiSession({ title, workspacePath: workspacePath ?? undefined })
       const newSession = toUiSession(summary, normalizedDirectory)
 
       if (searchRef.current) {

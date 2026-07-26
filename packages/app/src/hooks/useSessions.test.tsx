@@ -16,19 +16,19 @@ const {
   listPiSessionsMock,
   createPiSessionMock,
   deletePiSessionMock,
-  resolveWorkspaceIdMock,
+  resolveWorkspacePathMock,
 } = vi.hoisted(() => ({
   listPiSessionsMock: vi.fn<AnyFn>(),
   createPiSessionMock: vi.fn<AnyFn>(),
   deletePiSessionMock: vi.fn<AnyFn>(),
-  resolveWorkspaceIdMock: vi.fn<AnyFn>(),
+  resolveWorkspacePathMock: vi.fn<AnyFn>(),
 }))
 
 vi.mock('../pi/sessionApi', () => ({
   listPiSessions: (...args: unknown[]) => listPiSessionsMock(...args),
   createPiSession: (...args: unknown[]) => createPiSessionMock(...args),
   deletePiSession: (...args: unknown[]) => deletePiSessionMock(...args),
-  resolveWorkspaceId: (...args: unknown[]) => resolveWorkspaceIdMock(...args),
+  resolveWorkspacePath: (...args: unknown[]) => resolveWorkspacePathMock(...args),
 }))
 
 vi.mock('../pi/sessionModel', () => ({
@@ -38,7 +38,6 @@ vi.mock('../pi/sessionModel', () => ({
 function makeSession(id: string, directory = '/workspace/demo') {
   return {
     id,
-    workspaceId: 'project-1',
     directory,
     title: `Session ${id}`,
     createdAt: 1,
@@ -52,11 +51,11 @@ describe('useSessions', () => {
     listPiSessionsMock.mockReset()
     createPiSessionMock.mockReset()
     deletePiSessionMock.mockReset()
-    resolveWorkspaceIdMock.mockReset()
+    resolveWorkspacePathMock.mockReset()
     listPiSessionsMock.mockResolvedValue([])
     createPiSessionMock.mockResolvedValue({ summary: makeSession('new') })
     deletePiSessionMock.mockResolvedValue(undefined)
-    resolveWorkspaceIdMock.mockResolvedValue('project-1')
+    resolveWorkspacePathMock.mockResolvedValue('/workspace/demo')
   })
 
   afterEach(() => {
@@ -77,7 +76,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiSessionsMock).toHaveBeenCalledWith('project-1')
+    expect(listPiSessionsMock).toHaveBeenCalledWith('/workspace/demo')
   })
 
   it('passes the scoped directory when removing a session', async () => {
@@ -99,11 +98,8 @@ describe('useSessions', () => {
     expect(deletePiSessionMock).toHaveBeenCalledWith('session-1')
   })
 
-  it('filters sessions by the resolved Pi workspace', async () => {
-    listPiSessionsMock.mockResolvedValue([
-      makeSession('session-1'),
-      { ...makeSession('session-2'), workspaceId: 'project-2' },
-    ])
+  it('requests sessions with the resolved workspace path', async () => {
+    listPiSessionsMock.mockResolvedValue([makeSession('session-1')])
 
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
 
@@ -112,7 +108,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(resolveWorkspaceIdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(resolveWorkspacePathMock).toHaveBeenCalledWith('/workspace/demo')
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
   })
 

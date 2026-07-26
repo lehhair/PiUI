@@ -2,7 +2,6 @@ import type { SessionSnapshotV1 } from '@piui/protocol'
 
 export interface UiSession {
   id: string
-  workspaceId: string
   directory: string
   title: string
   createdAt: number
@@ -11,8 +10,7 @@ export interface UiSession {
 
 export interface PiSessionSummary {
   id: string
-  workspaceId: string
-  directory?: string
+  directory: string
   state?: SessionSnapshotV1['session']['state']
   title: string
   createdAt: string

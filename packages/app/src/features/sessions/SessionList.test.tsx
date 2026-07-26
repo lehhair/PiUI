@@ -37,7 +37,6 @@ vi.mock('../chat/sidebar/SessionChildrenSlot', () => ({
 describe('SessionListItem', () => {
   const session: UiSession = {
     id: 'session-1',
-    workspaceId: 'workspace-1',
     title: 'Session One',
     directory: '/workspace/demo',
     createdAt: 1,

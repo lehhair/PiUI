@@ -3,7 +3,7 @@
 // ============================================
 
 import type { ModelInfo, ApiProject, ApiPath } from './types'
-import { getWorkspaceGitInfo, listPiModels, resolveWorkspaceId } from '../pi/sessionApi'
+import { getWorkspaceGitInfo, listPiModels, resolveWorkspacePath } from '../pi/sessionApi'
 
 // Re-export all types
 export * from './types'
@@ -67,13 +67,13 @@ export async function getDefaultModels(directory?: string): Promise<Record<strin
  * 获取当前项目
  */
 export async function getCurrentProject(directory?: string): Promise<ApiProject> {
-  const workspaceId = await resolveWorkspaceId(directory)
-  if (!workspaceId) throw new Error('No PiUI workspace is available')
-  const git = await getWorkspaceGitInfo(workspaceId).catch(() => null)
-  const worktree = directory ?? ''
+  const workspacePath = await resolveWorkspacePath(directory)
+  if (!workspacePath) throw new Error('No PiUI workspace is available')
+  const git = await getWorkspaceGitInfo(workspacePath).catch(() => null)
+  const worktree = workspacePath
   const name = worktree.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || worktree
   return {
-    id: workspaceId,
+    id: workspacePath,
     worktree,
     name,
     vcs: git?.root ? 'git' : undefined,

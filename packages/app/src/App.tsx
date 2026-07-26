@@ -454,7 +454,7 @@ function App() {
   }, [ensureMobileRightPanelRendered, isMobilePanelLayout, rightPanelOpen, scrollMobilePagerTo, setSidebarExpanded, sidebarExpanded])
 
   // Pi 全局模式：无 currentDirectory 时使用 pane 对应 session 的真实目录
-  // 空目录时 resolveWorkspaceId 会落到 server 默认 workspace，FileExplorer 仍可 list
+  // 空目录时 resolveWorkspacePath 会落到 server 默认 workspace，FileExplorer 仍可 list
   const focusedDirectory = focusedRouteDirectory || focusedController?.effectiveDirectory || ''
 
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)

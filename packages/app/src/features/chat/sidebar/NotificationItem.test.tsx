@@ -32,7 +32,6 @@ describe('NotificationItem', () => {
   }
   const resolvedSession: UiSession = {
     id: 'session-1',
-    workspaceId: 'workspace-1',
     title: 'Build finished',
     directory: '/workspace',
     createdAt: 1,

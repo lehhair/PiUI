@@ -45,7 +45,7 @@ export interface EventPayloadsV2 {
   "session.runtime.replaced": { sessionId: string; workerGeneration: string }
   "session.runtime.crashed": { sessionId: string; workerGeneration?: string; message: string }
   "session.native.event": { sessionId: string; event: unknown }
-  "workspace.sessions.updated": { workspaceId?: string; sessionId?: string }
+  "workspace.sessions.updated": { workspacePath?: string; sessionId?: string }
   "command.updated": {
     commandId: string
     sessionId?: string
@@ -63,7 +63,7 @@ export interface EventPayloadsV2 {
    *  rather than the shared catalog. */
   "provider.auth.updated": { providerId: string; authenticated: boolean; sessionId?: string }
   "provider.auth.flow": ProviderAuthEventV1
-  "resources.updated": { workspaceId?: string; revision: string }
+  "resources.updated": { workspacePath?: string; revision: string }
   "packages.progress": PackageProgressV1
 }
 

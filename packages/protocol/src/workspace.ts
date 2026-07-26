@@ -1,7 +1,11 @@
 export interface WorkspaceDtoV1 {
-  id: string
+  /**
+   * Canonical absolute path, which is also the identity: a workspace is a
+   * directory, so there is nothing else to identify it by. Clients send this
+   * back URL-encoded wherever a workspace is addressed.
+   */
+  path: string
   displayName: string
-  /** Browser never sees absolute root; server-only. Present only in server memory. */
   createdAt: string
   lastOpenedAt: string
 }

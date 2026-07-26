@@ -9,7 +9,6 @@ function sample(id = "s1", sequence = 2, text = "hi"): SessionSnapshotV1 {
     sequence,
     session: {
       id,
-      workspaceId: "w1",
       directory: `/workspace/${id}`,
       driverId: "pi",
       driverSessionId: "d1",

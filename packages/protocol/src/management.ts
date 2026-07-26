@@ -87,7 +87,7 @@ export interface PackageUpdateV1 {
 
 export interface PackageProgressV1 {
   commandId: string
-  workspaceId?: string
+  workspacePath?: string
   type: "start" | "progress" | "complete" | "error"
   action: "install" | "remove" | "update" | "clone" | "pull"
   source: string

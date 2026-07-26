@@ -71,10 +71,10 @@ describe("SessionRegistry extension UI", () => {
       open: async () => runtime,
     }
     const workspaces = new WorkspaceStore()
-    const workspace = workspaces.register(process.cwd())
+    const workspace = workspaces.resolve(process.cwd())
     const registry = new SessionRegistry(workspaces, "pi", backend, new EventHub())
 
-    const session = await registry.create(workspace.id)
+    const session = await registry.create(workspace.canonicalRoot)
     const pending = registry.extensionUiSnapshot(session.id)
     assert.equal(pending?.pending[0]?.title, "Mode")
     await registry.respondExtensionUi(session.id, "request-1", { value: "plan" }, "generation-1")

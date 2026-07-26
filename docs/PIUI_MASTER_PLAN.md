@@ -289,7 +289,6 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 
 ```ts
 interface WorkspaceRecord {
-  id: string
   canonicalRoot: string
   displayName: string
   trusted: boolean
@@ -300,7 +299,7 @@ interface WorkspaceRecord {
 
 要求：
 
-- `id` 重启后稳定
+- `canonicalRoot` 就是 workspace 身份，不再维护第二套 ID
 - Windows 路径按规范化形式比较，处理盘符大小写
 - 不把绝对路径放进浏览器 hash
 - 删除 workspace 不删除项目文件
@@ -313,7 +312,7 @@ interface WorkspaceRecord {
 ```ts
 interface SessionRecord {
   id: string
-  workspaceId: string
+  cwd: string
   driverId: "pi"
   driverSessionId: string
   sessionFile: string | null
@@ -347,7 +346,7 @@ interface EventRecord<T> {
   sequence: number
   eventId: string
   sessionId?: string
-  workspaceId?: string
+  workspacePath?: string
   timestamp: string
   type: string
   payload: T
@@ -904,7 +903,7 @@ git grep "createOpencodeClient" -- packages/app/src
 ### 19.1 文件
 
 - 文件树只使用 workspace-relative path
-- 目录缓存按 workspaceId 隔离
+- 目录缓存按 canonical workspace path 隔离
 - 文件读取支持文本、图片和二进制提示
 - 编辑器接入 PUT + ETag
 - stale revision 提供 reload、compare、overwrite 选择

@@ -18,7 +18,6 @@ describe("searchFilesByName", () => {
   writeFileSync(path.join(root, "node_modules", "pkg", "hello.ts"), "skip\n")
 
   const ws: WorkspaceRecord = {
-    id: "w",
     displayName: "t",
     canonicalRoot: root,
     createdAt: new Date().toISOString(),

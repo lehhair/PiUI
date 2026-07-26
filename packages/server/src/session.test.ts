@@ -65,7 +65,7 @@ describe("session mock snapshot (no LLM)", () => {
     try {
       const res = await json(port, "POST", "/api/v1/dev/mock-chat")
       assert.equal(res.status, 201)
-      assert.ok(res.data.workspace.id)
+      assert.ok(res.data.workspace.path)
       assert.ok(res.data.snapshot.timeline.length >= 2)
     } finally {
       await close()
@@ -316,10 +316,10 @@ describe("session mock snapshot (no LLM)", () => {
     try {
       const ws = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
       assert.equal(ws.status, 201)
-      const workspaceId = ws.data.workspace.id as string
+      const workspacePath = ws.data.workspace.path as string
 
       const created = await json(port, "POST", "/api/v1/sessions", {
-        workspaceId,
+        workspacePath,
         title: "demo",
         seedMock: true,
       })
@@ -327,6 +327,7 @@ describe("session mock snapshot (no LLM)", () => {
       const snap = created.data.snapshot
       assert.equal(snap.protocolVersion, 1)
       assert.equal(snap.session.driverId, "pi")
+      assert.equal(snap.session.directory, path.resolve(root))
       assert.ok(Array.isArray(snap.timeline))
       assert.ok(snap.timeline.length >= 2)
       assert.equal(snap.timeline[0].type, "user")
@@ -355,7 +356,7 @@ describe("session mock snapshot (no LLM)", () => {
     try {
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
       const created = await json(port, "POST", "/api/v1/sessions", {
-        workspaceId: workspace.data.workspace.id,
+        workspacePath: workspace.data.workspace.path,
       })
       assert.equal(created.status, 201, JSON.stringify(created.data))
       const sourceId = created.data.snapshot.session.id as string
@@ -435,7 +436,7 @@ describe("session mock snapshot (no LLM)", () => {
 
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
       const created = await json(port, "POST", "/api/v1/sessions", {
-        workspaceId: workspace.data.workspace.id,
+        workspacePath: workspace.data.workspace.path,
       })
       const sessionId = created.data.snapshot.session.id as string
 
@@ -589,8 +590,9 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(capabilities["models.manage"].limits.extensionProviders, true)
 
       const workspace = await json(port, "POST", "/api/v1/workspaces", { rootPath: root })
-      const workspaceId = workspace.data.workspace.id as string
-      const created = await json(port, "POST", "/api/v1/sessions", { workspaceId })
+      const workspacePath = workspace.data.workspace.path as string
+      const encodedWorkspace = encodeURIComponent(workspacePath)
+      const created = await json(port, "POST", "/api/v1/sessions", { workspacePath })
       const sessionId = created.data.session.id as string
 
       const models = await json(port, "GET", `/api/v1/sessions/${sessionId}/models`)
@@ -662,7 +664,7 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(runtimeState.data.runtime.retryAttempt, 0)
       assert.equal(runtimeState.data.runtime.pendingMessageCount, 0)
 
-      const settings = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/pi-settings`)
+      const settings = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/pi-settings`)
       assert.equal(settings.status, 200)
       assert.equal(settings.data.workspacePath, root)
       // Raw scope objects must not cross the worker boundary; only key names do.
@@ -670,13 +672,13 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(settings.data.project, undefined)
       assert.deepEqual(settings.data.globalKeys, [])
       assert.deepEqual(settings.data.projectKeys, [])
-      const patched = await json(port, "PATCH", `/api/v1/workspaces/${workspaceId}/pi-settings`, {
+      const patched = await json(port, "PATCH", `/api/v1/workspaces/${encodedWorkspace}/pi-settings`, {
         defaultThinkingLevel: "high",
       })
       assert.equal(patched.status, 200)
       assert.equal(patched.data.effective.defaultThinkingLevel, "high")
 
-      const trust = await json(port, "PUT", `/api/v1/workspaces/${workspaceId}/trust`, { decision: true })
+      const trust = await json(port, "PUT", `/api/v1/workspaces/${encodedWorkspace}/trust`, { decision: true })
       assert.equal(trust.status, 200)
       assert.equal(trust.data.trusted, true)
 
@@ -705,18 +707,18 @@ describe("session mock snapshot (no LLM)", () => {
       const auth = await json(port, "POST", "/api/v1/providers/fixture/auth-flows", { type: "api_key" })
       assert.deepEqual(auth, { status: 202, data: { flowId: "fixture-auth-flow" } })
 
-      const packages = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages`)
+      const packages = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/packages`)
       assert.deepEqual(packages, { status: 200, data: { packages: [] } })
-      const resolved = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages/resolved`)
+      const resolved = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/packages/resolved`)
       assert.deepEqual(resolved.data, { extensions: [], skills: [], prompts: [], themes: [] })
       const resolvedSources = await json(
         port,
         "POST",
-        `/api/v1/workspaces/${workspaceId}/packages/resolve-extension-sources`,
+        `/api/v1/workspaces/${encodedWorkspace}/packages/resolve-extension-sources`,
         { sources: ["./fixture-package"], temporary: true },
       )
       assert.deepEqual(resolvedSources.data, { extensions: [], skills: [], prompts: [], themes: [] })
-      const sourceChanged = await json(port, "POST", `/api/v1/workspaces/${workspaceId}/packages/sources`, {
+      const sourceChanged = await json(port, "POST", `/api/v1/workspaces/${encodedWorkspace}/packages/sources`, {
         source: "./fixture-package",
         local: true,
       })
@@ -724,15 +726,15 @@ describe("session mock snapshot (no LLM)", () => {
       const installedPath = await json(
         port,
         "GET",
-        `/api/v1/workspaces/${workspaceId}/packages/installed-path?source=x&scope=user`,
+        `/api/v1/workspaces/${encodedWorkspace}/packages/installed-path?source=x&scope=user`,
       )
       assert.equal(installedPath.data.path, "/fixture/package")
-      const updates = await json(port, "GET", `/api/v1/workspaces/${workspaceId}/packages/updates`)
+      const updates = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/packages/updates`)
       assert.deepEqual(updates.data.updates, [])
       const installed = await json(
         port,
         "POST",
-        `/api/v1/workspaces/${workspaceId}/commands/packages/install`,
+        `/api/v1/workspaces/${encodedWorkspace}/commands/packages/install`,
         { source: "./fixture-package", local: true, commandId: "r6-package" },
       )
       assert.deepEqual(installed, {

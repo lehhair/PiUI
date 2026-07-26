@@ -18,7 +18,7 @@ import {
   type PiSessionBackend,
   type SessionRegistryOptions,
 } from "./session-registry.ts"
-import { WorkspaceStore } from "./workspace-store.ts"
+import { WorkspaceStore, type WorkspaceRecord } from "./workspace-store.ts"
 import { bindEventHub, EventHub } from "./event-hub.ts"
 import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode, type DriverMode } from "@piui/pi-worker"
@@ -31,13 +31,11 @@ import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
 
 function sessionSummary(
   s: AppSession,
-  store: WorkspaceStore,
   state?: ReturnType<SessionRegistry["snapshot"]>["session"]["state"],
 ) {
   return {
     id: s.id,
-    workspaceId: s.workspaceId,
-    directory: store.get(s.workspaceId)?.canonicalRoot,
+    directory: s.cwd,
     state,
     title: s.title,
     createdAt: s.createdAt,
@@ -174,7 +172,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     eventHub.publish({
       type: "session.snapshot",
       sessionId: session.id,
-      workspaceId: session.workspaceId,
+      workspacePath: session.cwd,
       reason: "command",
       payload: sessions.snapshot(session),
     })
@@ -183,20 +181,20 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
     eventHub.publish({
       type: "session.updated",
       sessionId: session.id,
-      workspaceId: session.workspaceId,
-      payload: sessionSummary(session, store, sessions.snapshot(session).session.state),
+      workspacePath: session.cwd,
+      payload: sessionSummary(session, sessions.snapshot(session).session.state),
     })
   }
-  let defaultWorkspaceId: string | null = null
+  let defaultWorkspacePath: string | null = null
   const ensureDefaultWorkspace = async (): Promise<string> => {
-    if (defaultWorkspaceId && store.get(defaultWorkspaceId)) return defaultWorkspaceId
+    if (defaultWorkspacePath && store.find(defaultWorkspacePath)) return defaultWorkspacePath
     const { mkdtempSync } = await import("node:fs")
     const { tmpdir } = await import("node:os")
     const path = await import("node:path")
     const root = mkdtempSync(path.join(tmpdir(), "piui-default-"))
-    const rec = store.register(root, "piui-default")
-    defaultWorkspaceId = rec.id
-    return rec.id
+    const rec = store.resolve(root, "piui-default")
+    defaultWorkspacePath = rec.canonicalRoot
+    return rec.canonicalRoot
   }
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
   const server = createServer(async (req, res) => {
@@ -260,17 +258,17 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       // Dev helper: one-shot mock chat (no LLM). Creates temp workspace + seeded session.
       if (method === "POST" && p === "/api/v1/dev/mock-chat") {
-        const workspaceId = await ensureDefaultWorkspace()
+        const workspacePath = await ensureDefaultWorkspace()
         // seedMock only applies in mock driver; real pi starts empty
-        const s = await sessions.create(workspaceId, {
+        const s = await sessions.create(workspacePath, {
           title: sessions.getDriver() === "mock" ? "Mock chat" : "New chat",
           seedMock: sessions.getDriver() === "mock",
         })
         publishSessionUpdated(s)
-        const rec = store.get(workspaceId)!
+        const rec = store.resolve(workspacePath)
         return sendJson(res, 201, {
           workspace: {
-            id: rec.id,
+            path: rec.canonicalRoot,
             displayName: rec.displayName,
             createdAt: rec.createdAt,
             lastOpenedAt: rec.lastOpenedAt,
@@ -544,9 +542,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       const workspaceSettings = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/pi-settings$/)
       if (workspaceSettings && (method === "GET" || method === "PATCH")) {
-        const workspaceId = decodeURIComponent(workspaceSettings[1])
+        const workspacePath = decodeURIComponent(workspaceSettings[1])
         try {
-          if (method === "GET") return sendJson(res, 200, await sessions.getSettings(workspaceId))
+          if (method === "GET") return sendJson(res, 200, await sessions.getSettings(workspacePath))
           const raw = await readBody(req)
           let patch: Record<string, unknown>
           try {
@@ -557,7 +555,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
             return sendProblem(res, 400, "INVALID_REQUEST", "settings patch must be an object")
           }
-          const result = await sessions.patchSettings(workspaceId, patch)
+          const result = await sessions.patchSettings(workspacePath, patch)
           return sendJson(res, 200, result)
         } catch (error) {
           return handleSessionCmdError(res, error)
@@ -566,9 +564,9 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       const workspaceTrust = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/trust$/)
       if (workspaceTrust && (method === "GET" || method === "PUT")) {
-        const workspaceId = decodeURIComponent(workspaceTrust[1])
+        const workspacePath = decodeURIComponent(workspaceTrust[1])
         try {
-          if (method === "GET") return sendJson(res, 200, await sessions.getProjectTrust(workspaceId))
+          if (method === "GET") return sendJson(res, 200, await sessions.getProjectTrust(workspacePath))
           const raw = await readBody(req)
           let body: { decision?: boolean | null }
           try {
@@ -579,7 +577,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           if (!("decision" in body) || (body.decision !== true && body.decision !== false && body.decision !== null)) {
             return sendProblem(res, 400, "INVALID_REQUEST", "decision must be true, false, or null")
           }
-          return sendJson(res, 200, await sessions.setProjectTrust(workspaceId, body.decision))
+          return sendJson(res, 200, await sessions.setProjectTrust(workspacePath, body.decision))
         } catch (error) {
           return handleSessionCmdError(res, error)
         }
@@ -690,7 +688,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         /^\/api\/v1\/workspaces\/([^/]+)\/commands\/packages\/(install|remove|update)$/,
       )
       if (method === "POST" && workspacePackageCommand) {
-        const workspaceId = decodeURIComponent(workspacePackageCommand[1])
+        const workspacePath = decodeURIComponent(workspacePackageCommand[1])
         const action = workspacePackageCommand[2] as "install" | "remove" | "update"
         const body = await readCommandBody<{ source?: string; local?: boolean; persist?: boolean }>(req)
         if ((action === "install" || action === "remove") && !body.source?.trim()) {
@@ -699,7 +697,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const commandId = resolveCommandId(req, body)
         try {
           const packages = await sessions.managePackage(
-            workspaceId,
+            workspacePath,
             commandId,
             action,
             body.source?.trim(),
@@ -713,12 +711,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       }
 
       if (method === "GET" && p === "/api/v1/sessions") {
-        const workspaceId = url.searchParams.get("workspaceId") ?? undefined
+        const workspacePath = url.searchParams.get("workspacePath") ?? undefined
         try {
-          const list = (await sessions.list(workspaceId))
+          const list = (await sessions.list(workspacePath))
             .slice()
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-            .map(session => sessionSummary(session, store, sessions.snapshot(session).session.state))
+            .map(session => sessionSummary(session, sessions.snapshot(session).session.state))
           return sendJson(res, 200, { sessions: list })
         } catch (e) {
           return handleSessionCmdError(res, e)
@@ -727,21 +725,21 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       if (method === "POST" && p === "/api/v1/sessions") {
         const raw = await readBody(req)
-        let body: { workspaceId?: string; title?: string; seedMock?: boolean }
+        let body: { workspacePath?: string; title?: string; seedMock?: boolean }
         try {
-          body = JSON.parse(raw || "{}") as { workspaceId?: string; title?: string; seedMock?: boolean }
+          body = JSON.parse(raw || "{}") as { workspacePath?: string; title?: string; seedMock?: boolean }
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
         try {
-          const workspaceId = body.workspaceId || (await ensureDefaultWorkspace())
-          const s = await sessions.create(workspaceId, {
+          const workspacePath = body.workspacePath || (await ensureDefaultWorkspace())
+          const s = await sessions.create(workspacePath, {
             title: body.title,
             seedMock: body.seedMock === true,
           })
           publishSessionUpdated(s)
           return sendJson(res, 201, {
-            session: sessionSummary(s, store, sessions.snapshot(s).session.state),
+            session: sessionSummary(s, sessions.snapshot(s).session.state),
             snapshot: sessions.snapshot(s),
             driver: sessions.getDriver(),
           })
@@ -1178,8 +1176,8 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
               type: "resources.reload",
               concurrency: "idle-only",
               sessionId: id,
-              workspaceId: session.workspaceId,
-              payload: { workspaceId: session.workspaceId },
+              workspacePath: session.cwd,
+              payload: { workspacePath: session.cwd },
             },
             () => sessions.reloadResources(id, commandId),
           )
@@ -1913,11 +1911,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       }
 
       if (method === "GET" && p === "/api/v1/workspaces/default") {
-        const id = await ensureDefaultWorkspace()
-        const rec = store.get(id)!
+        const rec = store.resolve(await ensureDefaultWorkspace())
         return sendJson(res, 200, {
           workspace: {
-            id: rec.id,
+            path: rec.canonicalRoot,
             displayName: rec.displayName,
             createdAt: rec.createdAt,
             lastOpenedAt: rec.lastOpenedAt,
@@ -1937,10 +1934,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           return sendProblem(res, 400, "INVALID_REQUEST", "rootPath required")
         }
         try {
-          const rec = store.register(body.rootPath, body.displayName)
+          const rec = store.resolve(body.rootPath, body.displayName)
           return sendJson(res, 201, {
             workspace: {
-              id: rec.id,
+              path: rec.canonicalRoot,
               displayName: rec.displayName,
               createdAt: rec.createdAt,
               lastOpenedAt: rec.lastOpenedAt,
@@ -1954,15 +1951,23 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       const wsMatch = p.match(/^\/api\/v1\/workspaces\/([^/]+)(?:\/(.*))?$/)
       if (wsMatch) {
-        const wsId = decodeURIComponent(wsMatch[1])
+        // A workspace is addressed by its path, URL-encoded so it stays one segment.
         const rest = wsMatch[2] ?? ""
-        const ws = store.get(wsId)
-        if (!ws) return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
+        let ws: WorkspaceRecord
+        try {
+          ws = store.resolve(decodeURIComponent(wsMatch[1]))
+        } catch (e) {
+          const code = (e as { code?: string }).code
+          if (code === "WORKSPACE_NOT_FOUND") {
+            return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
+          }
+          return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
+        }
 
         if (method === "GET" && rest === "") {
           return sendJson(res, 200, {
             workspace: {
-              id: ws.id,
+              path: ws.canonicalRoot,
               displayName: ws.displayName,
               createdAt: ws.createdAt,
               lastOpenedAt: ws.lastOpenedAt,

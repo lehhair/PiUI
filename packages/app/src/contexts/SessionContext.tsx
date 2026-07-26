@@ -2,11 +2,10 @@ import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } fro
 import type { SessionListParams, UiSession } from '../types/session'
 import {
   createPiSession,
-  createWorkspace,
   deletePiSession,
   isPiServerUp,
   listPiSessions,
-  resolveWorkspaceId,
+  resolveWorkspacePath,
 } from '../pi/sessionApi'
 import { toUiSession, snapshotToUiSession } from '../pi/sessionModel'
 import { applySnapshotToUi } from '../pi/applySnapshot'
@@ -52,9 +51,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // PiUI never falls back to the legacy SDK when its server is unavailable.
         if (await isPiServerUp()) {
           const directory = currentDirectory?.trim()
-          const workspaceId = directory ? await resolveWorkspaceId(directory) : null
-          let list = await listPiSessions(workspaceId ?? undefined)
-          if (workspaceId) list = list.filter(session => session.workspaceId === workspaceId)
+          const workspacePath = directory ? await resolveWorkspacePath(directory) : null
+          let list = await listPiSessions(workspacePath ?? undefined)
           if (search) {
             const q = search.toLowerCase()
             list = list.filter(s => (s.title || '').toLowerCase().includes(q))
@@ -162,16 +160,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const createSession = useCallback(
     async (title?: string) => {
       if (await isPiServerUp()) {
-        let workspaceId: string | undefined
+        let workspacePath: string | undefined
         const dir = currentDirectory?.trim()
         if (dir && (/^[a-zA-Z]:[\\/]/.test(dir) || dir.startsWith('/'))) {
-          const { workspace } = await createWorkspace(dir)
-          workspaceId = workspace.id
+          workspacePath = dir
         }
         const { summary, snapshot } = await createPiSession({
           title,
           seedMock: false,
-          workspaceId,
+          workspacePath,
         })
         applySnapshotToUi(snapshot)
         const session = snapshotToUiSession(snapshot, dir || undefined)

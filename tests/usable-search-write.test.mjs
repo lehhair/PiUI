@@ -48,21 +48,22 @@ describe("usable search + write", () => {
       body: JSON.stringify({ rootPath: wsRoot }),
     })
     const { workspace } = await reg.json()
+    const workspacePath = encodeURIComponent(workspace.path)
 
     const search = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/search/files?q=note`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/search/files?q=note`,
     )
     assert.equal(search.status, 200)
     const found = await search.json()
     assert.ok(found.paths.some(p => p.includes("note.md")))
 
     const read = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/file?path=src/note.md`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/file?path=src/note.md`,
     )
     const before = await read.json()
 
     const put = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/file?path=src/note.md`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/file?path=src/note.md`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -73,7 +74,7 @@ describe("usable search + write", () => {
     assert.equal(readFileSync(path.join(wsRoot, "src", "note.md"), "utf8"), "v2\n")
 
     const stale = await fetch(
-      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspace.id}/file?path=src/note.md`,
+      `http://127.0.0.1:${PORT}/api/v1/workspaces/${workspacePath}/file?path=src/note.md`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
