@@ -11,6 +11,10 @@ import { dirname, join } from "node:path"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PORT = 18787
+// The server requires a local token, so pin one instead of reading whatever
+// this machine happens to have persisted.
+const TOKEN = "mvp-loop-test-token"
+const authHeaders = { authorization: `Bearer ${TOKEN}` }
 
 describe("mvp chat loop", () => {
   let child
@@ -24,7 +28,7 @@ describe("mvp chat loop", () => {
       ["--import", "tsx", "packages/server/src/index.ts"],
       {
         cwd: root,
-        env: { ...process.env, PIUI_PORT: String(PORT) },
+        env: { ...process.env, PIUI_PORT: String(PORT), PIUI_AUTH_TOKEN: TOKEN },
         stdio: ["ignore", "pipe", "pipe"],
       },
     )
@@ -32,7 +36,7 @@ describe("mvp chat loop", () => {
     let ready = false
     for (let i = 0; i < 40; i++) {
       try {
-        const h = await fetch(`http://127.0.0.1:${PORT}/api/v1/health`)
+        const h = await fetch(`http://127.0.0.1:${PORT}/api/v1/health`, { headers: authHeaders })
         if (h.ok) {
           ready = true
           break
@@ -44,7 +48,7 @@ describe("mvp chat loop", () => {
     }
     assert.ok(ready, "server did not start")
 
-    const seed = await fetch(`http://127.0.0.1:${PORT}/api/v1/dev/mock-chat`, { method: "POST" })
+    const seed = await fetch(`http://127.0.0.1:${PORT}/api/v1/dev/mock-chat`, { method: "POST", headers: authHeaders })
     assert.equal(seed.status, 201)
     const seeded = await seed.json()
     const sessionId = seeded.snapshot.session.id
@@ -54,7 +58,7 @@ describe("mvp chat loop", () => {
       `http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/commands/prompt`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify({ text: "mvp hello" }),
       },
     )
@@ -63,7 +67,7 @@ describe("mvp chat loop", () => {
     assert.equal(accepted.accepted, true)
     let body
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const snapshot = await fetch(`http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/snapshot`)
+      const snapshot = await fetch(`http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/snapshot`, { headers: authHeaders })
       body = await snapshot.json()
       if (body.timeline.length > before) break
       await new Promise(resolve => setTimeout(resolve, 10))

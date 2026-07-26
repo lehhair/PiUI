@@ -23,8 +23,8 @@ async function listen(server: ReturnType<typeof createAppServer>) {
 
 describe("event websocket", () => {
   it("receives snapshot events during streamed prompt", async () => {
-    const server = createAppServer()
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null })
+    attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     const events: string[] = []
     let ws: WebSocket | undefined
@@ -74,8 +74,8 @@ describe("event websocket", () => {
     const cursor = eventHub.getCursor()
     eventHub.publish({ type: "replay-two", payload: 2 })
     eventHub.publish({ type: "replay-three", payload: 3 })
-    const server = createAppServer({ eventHub })
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null, eventHub })
+    attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     const ws = new WebSocket(
       `ws://127.0.0.1:${port}/api/v1/events?cursorEpoch=${encodeURIComponent(cursor.epoch)}&cursorSequence=${cursor.sequence}`,
@@ -111,8 +111,8 @@ describe("event websocket", () => {
     eventHub.publishV2(one, "command.updated", { commandId: "one-command", sessionId: "one", status: "running" })
     eventHub.publishV2(two, "command.updated", { commandId: "two-command", sessionId: "two", status: "running" })
 
-    const server = createAppServer({ eventHub })
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null, eventHub })
+    attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
     try {
@@ -151,8 +151,8 @@ describe("event websocket", () => {
   it("requests resync only for v2 streams with missing cursors", async () => {
     const eventHub = new EventHub()
     const session = { kind: "session" as const, id: "session-1" }
-    const server = createAppServer({ eventHub })
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null, eventHub })
+    attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
     try {
@@ -178,8 +178,8 @@ describe("event websocket", () => {
   })
 
   it("rejects non-local browser origins", async () => {
-    const server = createAppServer()
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null })
+    attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     try {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, {
@@ -194,16 +194,19 @@ describe("event websocket", () => {
   })
 
   it("requires the configured token", async () => {
-    const previous = process.env.PIUI_AUTH_TOKEN
-    process.env.PIUI_AUTH_TOKEN = "test-token"
-    const server = createAppServer()
-    attachEventWebSocket(server)
+    const server = createAppServer({ authToken: "test-token" })
+    attachEventWebSocket(server, { authToken: "test-token" })
     const { port, close } = await listen(server)
     try {
       const rejected = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
       const rejection = await new Promise<Error>(resolve => rejected.on("error", resolve))
       assert.match(rejection.message, /Unexpected server response: 403/)
 
+      const wrongToken = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=nope`)
+      const wrongRejection = await new Promise<Error>(resolve => wrongToken.on("error", resolve))
+      assert.match(wrongRejection.message, /Unexpected server response: 403/)
+
+      // Browsers cannot set handshake headers, so the query token is supported.
       const accepted = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=test-token`)
       await new Promise<void>((resolve, reject) => {
         accepted.on("open", resolve)
@@ -212,14 +215,12 @@ describe("event websocket", () => {
       accepted.close()
     } finally {
       await close()
-      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
-      else process.env.PIUI_AUTH_TOKEN = previous
     }
   })
 
   it("terminates connected clients during event server shutdown", async () => {
-    const server = createAppServer()
-    const eventServer = attachEventWebSocket(server)
+    const server = createAppServer({ authToken: null })
+    const eventServer = attachEventWebSocket(server, { authToken: null })
     const { port, close } = await listen(server)
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
     await new Promise<void>((resolve, reject) => {

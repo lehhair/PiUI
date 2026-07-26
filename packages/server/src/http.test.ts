@@ -42,7 +42,7 @@ describe("http phase1", () => {
   })
 
   it("health", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const { status, data } = await json(port, "GET", "/api/v1/health")
@@ -68,7 +68,7 @@ describe("http phase1", () => {
   it("scans only the requested workspace catalog", async () => {
     let scopedCwd: string | undefined
     let globalScans = 0
-    const server = createAppServer({
+    const server = createAppServer({ authToken: null,
       driver: "pi",
       piBackend: {
         list: async cwd => {
@@ -103,7 +103,7 @@ describe("http phase1", () => {
   })
 
   it("default workspace + local CORS preflight", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const origin = "http://localhost:5173"
@@ -121,7 +121,7 @@ describe("http phase1", () => {
   })
 
   it("rejects non-local browser origins", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces/default`, {
@@ -134,9 +134,7 @@ describe("http phase1", () => {
   })
 
   it("requires the configured bearer token", async () => {
-    const previous = process.env.PIUI_AUTH_TOKEN
-    process.env.PIUI_AUTH_TOKEN = "test-token"
-    const server = createAppServer()
+    const server = createAppServer({ authToken: "test-token" })
     const { port, close } = await listen(server)
     try {
       const missing = await fetch(`http://127.0.0.1:${port}/api/v1/health`)
@@ -145,19 +143,22 @@ describe("http phase1", () => {
       const command = await fetch(`http://127.0.0.1:${port}/api/v1/commands/private-command`)
       assert.equal(command.status, 401)
 
+      const wrong = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+        headers: { authorization: "Bearer nope" },
+      })
+      assert.equal(wrong.status, 401)
+
       const accepted = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
         headers: { authorization: "Bearer test-token" },
       })
       assert.equal(accepted.status, 200)
     } finally {
       await close()
-      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
-      else process.env.PIUI_AUTH_TOKEN = previous
     }
   })
 
   it("rejects request bodies over the configured limit", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces`, {
@@ -172,7 +173,7 @@ describe("http phase1", () => {
   })
 
   it("register workspace, list and read files safely", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/workspaces", {
@@ -221,7 +222,7 @@ describe("http phase1", () => {
   })
 
   it("accepts a commandId from either the header or the body", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "command ids" })
@@ -262,7 +263,7 @@ describe("http phase1", () => {
   })
 
   it("rejects malformed json instead of dropping the payload", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "bad json" })
@@ -291,7 +292,7 @@ describe("http phase1", () => {
   })
 
   it("reports method mismatches as 405 with an Allow header", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/commands/anything`, { method: "POST" })
@@ -308,9 +309,7 @@ describe("http phase1", () => {
   })
 
   it("separates unauthorized from forbidden", async () => {
-    const previous = process.env.PIUI_AUTH_TOKEN
-    process.env.PIUI_AUTH_TOKEN = "test-token"
-    const server = createAppServer()
+    const server = createAppServer({ authToken: "test-token" })
     const { port, close } = await listen(server)
     try {
       const unauthorized = await json(port, "GET", "/api/v1/health")
@@ -324,13 +323,11 @@ describe("http phase1", () => {
       assert.equal((await forbidden.json()).code, "FORBIDDEN")
     } finally {
       await close()
-      if (previous === undefined) delete process.env.PIUI_AUTH_TOKEN
-      else process.env.PIUI_AUTH_TOKEN = previous
     }
   })
 
   it("allows the methods and headers the client needs", async () => {
-    const server = createAppServer()
+    const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
@@ -351,7 +348,7 @@ describe("http phase1", () => {
     let release!: () => void
     const cleanup = new Promise<void>(resolve => { release = resolve })
     let closed = false
-    const server = createAppServer({
+    const server = createAppServer({ authToken: null,
       driver: "pi",
       piBackend: {
         listAll: async () => [],
@@ -376,7 +373,7 @@ describe("http phase1", () => {
 
   it("starts backend cleanup while an HTTP request is still open", async () => {
     let disposed = false
-    const server = createAppServer({
+    const server = createAppServer({ authToken: null,
       driver: "pi",
       piBackend: {
         listAll: async () => [],

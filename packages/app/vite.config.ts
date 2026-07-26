@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { bundledLanguagesInfo } from 'shiki/langs'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
@@ -23,6 +25,24 @@ function katexWoff2Only() {
         '',
       )
     },
+  }
+}
+
+/**
+ * The dev server proxies to the PiUI backend, which requires a local token.
+ * Reading it here keeps the secret in Node: the browser never receives it, so
+ * page scripts cannot exfiltrate it. Re-read per request so restarting the
+ * backend does not require restarting Vite.
+ */
+function readBackendToken(): string | undefined {
+  const configured = process.env.PIUI_AUTH_TOKEN?.trim()
+  if (configured) return configured
+  const dataDir = process.env.PIUI_DATA_DIR?.trim()
+  const file = join(dataDir ? resolve(dataDir) : join(homedir(), '.piui'), 'auth-token')
+  try {
+    return readFileSync(file, 'utf-8').trim() || undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -74,6 +94,20 @@ export default defineConfig({
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
         ws: true,
+        configure(proxy) {
+          proxy.on('proxyReq', proxyReq => {
+            if (proxyReq.getHeader('authorization')) return
+            const token = readBackendToken()
+            if (token) proxyReq.setHeader('authorization', `Bearer ${token}`)
+          })
+          // WebSocket handshakes cannot carry headers from the browser, so the
+          // token is attached on the upgrade request instead.
+          proxy.on('proxyReqWs', proxyReq => {
+            if (proxyReq.getHeader('authorization')) return
+            const token = readBackendToken()
+            if (token) proxyReq.setHeader('authorization', `Bearer ${token}`)
+          })
+        },
       },
     },
   },
