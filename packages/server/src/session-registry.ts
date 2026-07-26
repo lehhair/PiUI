@@ -119,9 +119,12 @@ export interface PiSessionBackend {
 
 const DISCOVERY_TTL_MS = 5_000
 /** Each attached runtime is its own process holding ~130MB, so idle ones are
- *  released. Reattaching is cheap while a warm worker is available. */
-const DEFAULT_IDLE_RUNTIME_TIMEOUT_MS = 15 * 60_000
-const DEFAULT_IDLE_SWEEP_INTERVAL_MS = 60_000
+ *  released. Reclaiming this eagerly is fine because reattaching costs ~0.12s
+ *  while a warm worker is available, and switching between sessions is far
+ *  slower than the pool refills. */
+const DEFAULT_IDLE_RUNTIME_TIMEOUT_MS = 2 * 60_000
+/** Sweeping well below the timeout keeps the actual reclaim close to it. */
+const DEFAULT_IDLE_SWEEP_INTERVAL_MS = 30_000
 
 export interface SessionRegistryOptions {
   /** Set to 0 to keep every attached runtime alive. */
