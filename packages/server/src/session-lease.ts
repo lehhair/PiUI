@@ -4,8 +4,14 @@ import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-const PORT_BASE = 49_152
-const PORT_COUNT = 65_535 - PORT_BASE + 1
+/**
+ * Leases hold real listening ports, so the range must avoid the ports the OS
+ * hands out for outbound sockets: Windows uses 49152-65535 and Linux commonly
+ * uses 32768-60999. Overlapping them made a busy machine report a session as
+ * locked when an unrelated client socket happened to take the port first.
+ */
+const PORT_BASE = 20_000
+const PORT_COUNT = 12_000
 
 export interface SessionLease {
   key: string

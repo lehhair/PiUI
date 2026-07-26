@@ -36,12 +36,16 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
       "session.delete": capability(true, "session"),
       "session.name": capability(true, "session"),
       "session.tree": capability(true, "session", undefined, { rawEntries: nativePi, runtimeInspection: nativePi }),
-      "session.navigate": capability(true, "session", undefined, { branchSummary: nativePi }),
-      "session.fork": capability(true, "session"),
-      "session.clone": capability(true, "session"),
+      // Navigation and every replacement path need a bound Pi runtime, so they
+      // must not advertise themselves under the mock driver.
+      "session.navigate": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
+        branchSummary: nativePi,
+      }),
+      "session.fork": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
+      "session.clone": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "session.new": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "session.switch": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
-      "session.import": capability(true, "session"),
+      "session.import": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime"),
       "session.export": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
         html: true,
         jsonl: true,

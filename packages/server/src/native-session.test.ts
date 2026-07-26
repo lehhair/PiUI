@@ -605,4 +605,93 @@ describe("native Pi session discovery", () => {
     secondState()
     assert.equal(replacement.sequence, replacementSequence + 1)
   })
+
+  it("coalesces resource events across attached sessions and reports trust detachment", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-resources-"))
+    const resourceListeners: Array<() => void> = []
+    const makeRuntime = (id: string): PiSessionRuntime => ({
+      getSessionId: () => id,
+      getSessionFile: () => path.join(cwd, `${id}.jsonl`),
+      getSessionName: () => id,
+      getProjection: () => createProjectionState(),
+      getEntries: () => [],
+      getTree: () => [],
+      getLeafId: () => undefined,
+      getRuntimeUiState: () => undefined,
+      getModel: () => undefined,
+      getThinkingLevel: () => "medium",
+      getAvailableThinkingLevels: () => ["off", "medium"],
+      isStreaming: () => false,
+      // Every runtime reload notifies the registry, which is the source of the
+      // duplicate events this test pins down.
+      onResourcesChanged: (listener: () => void) => {
+        resourceListeners.push(listener)
+        return () => undefined
+      },
+      reload: async () => { for (const listener of resourceListeners) listener() },
+      dispose: async () => undefined,
+    } as unknown as PiSessionRuntime)
+
+    const sessionIds = ["res-a", "res-b", "res-c"]
+    const runtimes = new Map(sessionIds.map(id => [id, makeRuntime(id)]))
+    const backend: PiSessionBackend = {
+      listAll: async () => sessionIds.map(id => ({
+        id,
+        path: path.join(cwd, `${id}.jsonl`),
+        cwd,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      })),
+      open: async (_cwd, sessionFile) => {
+        const id = path.basename(String(sessionFile), ".jsonl")
+        return runtimes.get(id)!
+      },
+      patchSettings: async () => ({
+        workspacePath: cwd,
+        projectTrusted: true,
+        globalKeys: [],
+        projectKeys: [],
+        effective: {},
+        errors: [],
+      }),
+      setProjectTrust: async () => ({
+        workspacePath: cwd,
+        required: true,
+        decision: true,
+        defaultDecision: "ask" as const,
+        trusted: true,
+      }),
+    }
+    const hub = new EventHub()
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend, hub)
+    const events: Array<{ type: string; revision?: string }> = []
+    hub.subscribeV2(event => {
+      if (event.type === "resources.updated") {
+        events.push({ type: event.type, revision: (event.payload as { revision: string }).revision })
+      } else if (event.type === "workspace.sessions.updated" || event.type === "session.snapshot.updated") {
+        events.push({ type: event.type })
+      }
+    })
+
+    const listed = await registry.list()
+    const workspaceId = listed[0]!.workspaceId
+    for (const id of sessionIds) await registry.attach(id)
+
+    events.length = 0
+    await registry.patchSettings(workspaceId, { quietStartup: true })
+    const resourceEvents = events.filter(event => event.type === "resources.updated")
+    assert.equal(resourceEvents.length, 1, `expected one coalesced event, got ${resourceEvents.length}`)
+    assert.equal(new Set(resourceEvents.map(event => event.revision)).size, 1)
+
+    events.length = 0
+    await registry.setProjectTrust(workspaceId, true)
+    // Trust changes detach every runtime, so clients must be told.
+    assert.equal(events.filter(event => event.type === "session.snapshot.updated").length, sessionIds.length)
+    assert.equal(events.some(event => event.type === "workspace.sessions.updated"), true)
+    for (const id of sessionIds) assert.equal((await registry.find(id))?.real, undefined)
+
+    rmSync(cwd, { recursive: true, force: true })
+  })
 })

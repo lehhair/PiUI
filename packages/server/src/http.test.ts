@@ -56,7 +56,10 @@ describe("http phase1", () => {
       assert.equal(data.protocolV2.capabilities.capabilities["session.open"].enabled, true)
       assert.equal(data.protocolV2.capabilities.capabilities["session.delete"].enabled, true)
       assert.equal(data.protocolV2.capabilities.capabilities["session.tree"].enabled, true)
-      assert.equal(data.protocolV2.capabilities.capabilities["session.fork"].enabled, true)
+      // The mock driver has no Pi runtime, so replacement stays disabled and
+      // the manifest has to say so instead of advertising a call that throws.
+      assert.equal(data.protocolV2.capabilities.capabilities["session.fork"].enabled, false)
+      assert.equal(data.protocolV2.capabilities.capabilities["session.navigate"].enabled, false)
     } finally {
       await close()
     }
