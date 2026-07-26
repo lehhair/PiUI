@@ -658,11 +658,15 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       if (method === "GET" && p === "/api/v1/sessions") {
         const workspaceId = url.searchParams.get("workspaceId") ?? undefined
-        const list = (await sessions.list(workspaceId))
-          .slice()
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-          .map(session => sessionSummary(session, store, sessions.snapshot(session).session.state))
-        return sendJson(res, 200, { sessions: list })
+        try {
+          const list = (await sessions.list(workspaceId))
+            .slice()
+            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+            .map(session => sessionSummary(session, store, sessions.snapshot(session).session.state))
+          return sendJson(res, 200, { sessions: list })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
       }
 
       if (method === "POST" && p === "/api/v1/sessions") {
@@ -686,21 +690,21 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
             driver: sessions.getDriver(),
           })
         } catch (e) {
-          const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
-          if (code === "WORKSPACE_NOT_FOUND") {
-            return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
-          }
-          return sendProblem(res, 400, "INVALID_REQUEST", e instanceof Error ? e.message : String(e))
+          return handleSessionCmdError(res, e)
         }
       }
 
       const sessionSnap = p.match(/^\/api\/v1\/sessions\/([^/]+)\/snapshot$/)
       if (method === "GET" && sessionSnap) {
         const id = decodeURIComponent(sessionSnap[1])
-        const s = await sessions.find(id)
-        if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        const attached = await sessions.attach(id)
-        return sendJson(res, 200, sessions.snapshot(attached))
+        try {
+          const s = await sessions.find(id)
+          if (!s) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+          const attached = await sessions.attach(id)
+          return sendJson(res, 200, sessions.snapshot(attached))
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
       }
 
       const sessionModels = p.match(/^\/api\/v1\/sessions\/([^/]+)\/models$/)
@@ -862,21 +866,25 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const id = decodeURIComponent(sessionOnly[1])
         const session = await sessions.find(id)
         if (!session) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
-        const submitted = sessionExecutor.submit(
-          {
-            protocolVersion: 2,
-            commandId,
-            type: "session.delete",
-            concurrency: "idle-only",
-            sessionId: id,
-            payload: { durable: true },
-          },
-          () => sessions.delete(id),
-        )
-        await submitted.promise
-        publishSessionUpdated(session)
-        return sendJson(res, 200, { ok: true, id, commandId, command: submitted.record })
+        try {
+          const commandId = req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.delete",
+              concurrency: "idle-only",
+              sessionId: id,
+              payload: { durable: true },
+            },
+            () => sessions.delete(id),
+          )
+          await submitted.promise
+          publishSessionUpdated(session)
+          return sendJson(res, 200, { ok: true, id, commandId, command: submitted.record })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
       }
 
       const sessionPrompt = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/(prompt|steer|follow-up)$/)
@@ -1002,30 +1010,34 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const raw = await readBody(req)
         let body: { commandId?: string } = {}
         try { body = JSON.parse(raw || "{}") as { commandId?: string } } catch { /* empty ok */ }
-        const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
-        const submitted = sessionExecutor.submit(
-          {
-            protocolVersion: 2,
+        try {
+          const commandId = body.commandId || req.headers["x-command-id"]?.toString() || randomUUID()
+          const submitted = sessionExecutor.submit(
+            {
+              protocolVersion: 2,
+              commandId,
+              type: "session.abort",
+              concurrency: "run-control",
+              sessionId: id,
+              payload: {},
+            },
+            () => sessions.abort(id),
+          )
+          const result = await submitted.promise
+          if (!result) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
+          publishSessionSnapshot(result.session)
+          publishSessionUpdated(result.session)
+          return sendJson(res, 200, {
             commandId,
-            type: "session.abort",
-            concurrency: "run-control",
-            sessionId: id,
-            payload: {},
-          },
-          () => sessions.abort(id),
-        )
-        const result = await submitted.promise
-        if (!result) return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
-        publishSessionSnapshot(result.session)
-        publishSessionUpdated(result.session)
-        return sendJson(res, 200, {
-          commandId,
-          accepted: true,
-          reused: submitted.reused,
-          command: submitted.record,
-          cleared: result.cleared,
-          snapshot: sessions.snapshot(result.session),
-        })
+            accepted: true,
+            reused: submitted.reused,
+            command: submitted.record,
+            cleared: result.cleared,
+            snapshot: sessions.snapshot(result.session),
+          })
+        } catch (e) {
+          return handleSessionCmdError(res, e)
+        }
       }
 
       const sessionBash = p.match(/^\/api\/v1\/sessions\/([^/]+)\/commands\/bash$/)

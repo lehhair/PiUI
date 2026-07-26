@@ -437,8 +437,44 @@ process.on("message", request => {
     }
   } else if (command.type === "dispose") {
     result = { type: "ok" }
+  } else if (
+    command.type === "respondExtensionUi" ||
+    command.type === "setExtensionEditorState" ||
+    command.type === "respondProviderAuth" ||
+    command.type === "cancelProviderAuth" ||
+    command.type === "logoutProvider"
+  ) {
+    // The real worker acknowledges these without returning session state.
+    result = { type: "ok" }
+  } else if (command.type === "cycleModel") {
+    const ids = ["fixture-model", "fixture-model-2"]
+    const next = ids[(ids.indexOf(model?.id ?? ids[0]) + 1) % ids.length]
+    model = { provider: "fixture", id: next, displayName: next }
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "sendCustomMessage") {
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (
+    command.type === "abortBash" ||
+    command.type === "abortBranchSummary" ||
+    command.type === "abortRetry" ||
+    command.type === "initializeExtensions" ||
+    command.type === "reload"
+  ) {
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
   } else {
-    result = { type: "session", session: session ?? snapshot() }
+    // Fail loudly: a silent fallback would let a new command pass its tests
+    // here while behaving differently against the real worker.
+    process.send?.({
+      kind: "response",
+      id: request.id,
+      generation,
+      ok: false,
+      error: { code: "WORKER_PROTOCOL_MISMATCH", message: `fixture has no branch for ${command.type}` },
+    })
+    return
   }
   process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
   if (command.type === "dispose") {

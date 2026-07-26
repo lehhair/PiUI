@@ -161,6 +161,9 @@ export class SessionRegistry {
     this.driver = driver
   }
 
+  private resourceEventCoalescing = 0
+  private readonly coalescedResourceWorkspaces = new Set<string>()
+
   getDriver(): DriverMode {
     return this.driver
   }
@@ -204,10 +207,9 @@ export class SessionRegistry {
     const backend = await this.getBackend()
     if (!backend.patchSettings) throw unsupportedRuntimeOperation("settings")
     const result = await backend.patchSettings(workspace.canonicalRoot, patch)
-    await Promise.all([...this.byId.values()]
+    await this.withCoalescedResourceEvents(workspaceId, () => Promise.all([...this.byId.values()]
       .filter(session => session.workspaceId === workspaceId && session.real)
-      .map(session => this.reloadResources(session.id, false)))
-    this.publishResourcesUpdated(workspaceId)
+      .map(session => this.reloadResources(session.id, false))))
     return result
   }
 
@@ -225,13 +227,33 @@ export class SessionRegistry {
     const backend = await this.getBackend()
     if (!backend.setProjectTrust) throw unsupportedRuntimeOperation("project trust")
     const result = await backend.setProjectTrust(workspace.canonicalRoot, decision)
+    const detached: AppSession[] = []
     for (const session of [...this.byId.values()].filter(value => value.workspaceId === workspaceId && value.real)) {
       const runtime = session.real
       this.unbindRuntime(session)
       session.real = undefined
       session.workerGeneration = undefined
       if (runtime) await this.disposeRuntime(runtime)
+      this.touch(session)
+      detached.push(session)
     }
+    // Trust changes force every runtime to reload extensions, so clients must
+    // learn the sessions detached instead of keeping a stale attached state.
+    for (const session of detached) {
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    }
+    if (detached.length > 0) {
+      this.eventHub?.publishV2(
+        { kind: "workspace", id: workspaceId },
+        "workspace.sessions.updated",
+        { workspaceId },
+      )
+    }
+    this.publishResourcesUpdated(workspaceId)
     return result
   }
 
@@ -450,10 +472,13 @@ export class SessionRegistry {
     } finally {
       this.packageCommandWorkspaces.delete(commandId)
     }
-    await Promise.all([...this.byId.values()]
-      .filter(session => session.workspaceId === workspaceId && session.real)
-      .map(session => this.reloadResources(session.id, false)))
-    this.publishResourcesUpdated(workspaceId, commandId)
+    await this.withCoalescedResourceEvents(
+      workspaceId,
+      () => Promise.all([...this.byId.values()]
+        .filter(session => session.workspaceId === workspaceId && session.real)
+        .map(session => this.reloadResources(session.id, false))),
+      commandId,
+    )
     return packages
   }
 
@@ -485,10 +510,9 @@ export class SessionRegistry {
     const backend = await this.getBackend()
     if (!backend.changePackageSource) throw unsupportedRuntimeOperation("package settings")
     const result = await backend.changePackageSource(workspace.canonicalRoot, source, operation, local)
-    await Promise.all([...this.byId.values()]
+    await this.withCoalescedResourceEvents(workspaceId, () => Promise.all([...this.byId.values()]
       .filter(session => session.workspaceId === workspaceId && session.real)
-      .map(session => this.reloadResources(session.id, false)))
-    this.publishResourcesUpdated(workspaceId)
+      .map(session => this.reloadResources(session.id, false))))
     return result
   }
 
@@ -1749,11 +1773,40 @@ export class SessionRegistry {
   }
 
   private publishResourcesUpdated(workspaceId: string, revision: string = randomUUID()): void {
+    if (this.resourceEventCoalescing > 0) {
+      this.coalescedResourceWorkspaces.add(workspaceId)
+      return
+    }
     this.eventHub?.publishV2(
       { kind: "resources", id: workspaceId },
       "resources.updated",
       { workspaceId, revision },
     )
+  }
+
+  /**
+   * Reloading resources for N attached sessions makes each runtime emit its own
+   * resourcesChanged event. Without coalescing a single settings change would
+   * publish N+1 events carrying different revisions.
+   */
+  private async withCoalescedResourceEvents<T>(
+    workspaceId: string,
+    run: () => Promise<T>,
+    revision: string = randomUUID(),
+  ): Promise<T> {
+    this.resourceEventCoalescing += 1
+    try {
+      return await run()
+    } finally {
+      this.resourceEventCoalescing -= 1
+      if (this.resourceEventCoalescing === 0) {
+        const pending = [...this.coalescedResourceWorkspaces]
+        this.coalescedResourceWorkspaces.clear()
+        for (const pendingWorkspaceId of new Set([workspaceId, ...pending])) {
+          this.publishResourcesUpdated(pendingWorkspaceId, revision)
+        }
+      }
+    }
   }
 
   private async getBackend(): Promise<PiSessionBackend> {
