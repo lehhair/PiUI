@@ -310,6 +310,38 @@ describe('useChatSession handleCommand', () => {
     expect(commandResult).toBe(true)
   })
 
+  it('forwards attachments to Pi prompt', async () => {
+    promptSessionMock.mockResolvedValue({ accepted: true })
+    const attachment = {
+      id: 'image-1',
+      type: 'file' as const,
+      displayName: 'screen.png',
+      mime: 'image/png',
+      url: 'data:image/png;base64,iVBORw0KGgo=',
+    }
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      expect(await result.current.handleSend('Inspect this', [attachment])).toBe(true)
+    })
+
+    expect(promptSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      'Inspect this',
+      expect.objectContaining({ attachments: [attachment] }),
+    )
+  })
+
   it('forks a Pi user entry before the message and navigates only this pane to the target', async () => {
     const sourceSnapshot = { session: { id: 'session-1' } }
     const targetSnapshot = { session: { id: 'session-2' } }
@@ -367,7 +399,7 @@ describe('useChatSession handleCommand', () => {
     untrackPiSession('session-1')
   })
 
-  it('restores text in the submitting pane when an accepted Pi command fails asynchronously', async () => {
+  it('restores text and attachments when an accepted Pi command fails asynchronously', async () => {
     trackPiSession('session-1', 'workspace-1')
     promptSessionMock.mockResolvedValue({ accepted: true })
     const { result } = renderHook(() =>
@@ -382,11 +414,23 @@ describe('useChatSession handleCommand', () => {
       }),
     )
 
+    const attachment = {
+      id: 'image-rollback',
+      type: 'file' as const,
+      displayName: 'screen.png',
+      mime: 'image/png',
+      url: 'data:image/png;base64,iVBORw0KGgo=',
+    }
     await act(async () => {
-      await result.current.handleSend('keep this correction', [], {})
+      await result.current.handleSend('keep this correction', [attachment], { variant: 'high' })
     })
     const commandId = promptSessionMock.mock.calls[0]?.[2]?.commandId
     expect(commandId).toBeTruthy()
+    expect(promptSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      'keep this correction',
+      expect.objectContaining({ thinkingLevel: 'high' }),
+    )
 
     act(() => {
       window.dispatchEvent(new CustomEvent('piui:command-updated', {
@@ -402,6 +446,7 @@ describe('useChatSession handleCommand', () => {
     })
 
     expect(result.current.restoredContent?.text).toBe('keep this correction')
+    expect(result.current.restoredContent?.attachments).toEqual([attachment])
     expect(errorHandlerMock).toHaveBeenCalled()
     untrackPiSession('session-1')
   })

@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto"
 import { realpathSync, statSync } from "node:fs"
-import { unlink } from "node:fs/promises"
+import { mkdir, unlink } from "node:fs/promises"
 import path from "node:path"
 import type {
   CompactionCommandResultV1,
+  BashCommandResultV2,
   PiNavigationResultV1,
   PiSessionEntryV1,
   PiSessionTreeNodeV1,
   QueueDeliveryModeV1,
+  SessionAttachmentV2,
   SessionReplacementResultV1,
+  SessionExportResultV2,
   SessionSnapshotV1,
   TimelineItemV1,
 } from "@piui/protocol"
@@ -25,6 +28,8 @@ import {
 } from "@piui/pi-worker"
 import type { WorkspaceStore } from "./workspace-store.ts"
 import type { EventHub } from "./event-hub.ts"
+import { preparePromptInput } from "./prompt-attachments.ts"
+import { resolveWorkspacePath } from "./path-safety.ts"
 
 export interface AppSession {
   id: string
@@ -202,14 +207,26 @@ export class SessionRegistry {
     opts?: {
       stream?: boolean
       onTick?: (session: AppSession) => void
+      onMetadataChange?: (session: AppSession) => void
       delayMs?: number
       model?: { provider?: string; id?: string }
+      thinkingLevel?: string
+      attachments?: SessionAttachmentV2[]
     },
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    const trimmed = text.trim()
-    if (!trimmed) {
+    const workspace = this.workspaces.get(session.workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
+    const prepared = preparePromptInput(workspace.canonicalRoot, text, opts?.attachments)
+    const trimmed = prepared.text.trim()
+    if (!trimmed && prepared.images.length === 0) {
       throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    }
+    if (!session.real && prepared.images.length > 0) throw unsupportedRuntimeOperation("image attachments")
+    if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
+      session.title = (trimmed || "Image attachment").slice(0, 48)
+      this.touch(session)
+      opts?.onMetadataChange?.(session)
     }
 
     if (session.real) {
@@ -219,7 +236,10 @@ export class SessionRegistry {
         if (opts?.model?.provider && opts.model.id) {
           await runtime.setModel(opts.model.provider, opts.model.id)
         }
-        await runtime.prompt(trimmed)
+        if (opts?.thinkingLevel) {
+          await runtime.setThinkingLevel(opts.thinkingLevel)
+        }
+        await runtime.prompt(trimmed, prepared.images)
       } catch (e) {
         if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
         const msg = e instanceof Error ? e.message : String(e)
@@ -230,9 +250,6 @@ export class SessionRegistry {
       session.projection = runtime.getProjection()
       session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
       session.title = runtime.getSessionName() ?? session.title
-      if (session.title === "New chat" || session.title === "Mock session" || session.title === "Mock chat") {
-        session.title = trimmed.slice(0, 48)
-      }
       session.sequence += 1
       session.updatedAt = new Date().toISOString()
       opts?.onTick?.(session)
@@ -255,26 +272,35 @@ export class SessionRegistry {
       opts?.onTick?.(session)
       if (delay > 0) await new Promise(r => setTimeout(r, delay))
     }
-    if (session.title === "Mock session" || session.title === "Mock chat" || session.title === "New chat") {
-      session.title = trimmed.slice(0, 48)
-    }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     opts?.onTick?.(session)
     return session
   }
 
-  async deliverControl(sessionId: string, text: string, delivery: "steer" | "followUp"): Promise<AppSession> {
+  async deliverControl(
+    sessionId: string,
+    text: string,
+    delivery: "steer" | "followUp",
+    attachments?: SessionAttachmentV2[],
+  ): Promise<AppSession> {
     const session = await this.attach(sessionId)
-    const trimmed = text.trim()
-    if (!trimmed) throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    const workspace = this.workspaces.get(session.workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" as const })
+    const prepared = preparePromptInput(workspace.canonicalRoot, text, attachments)
+    const trimmed = prepared.text.trim()
+    if (!trimmed && prepared.images.length === 0) {
+      throw Object.assign(new Error("empty prompt"), { code: "INVALID_REQUEST" as const })
+    }
     const runtime = session.real
     if (!runtime) throw unsupportedRuntimeOperation(delivery)
     await this.runBoundRuntimeCommand(
       session,
       runtime,
       session.workerGeneration,
-      () => delivery === "steer" ? runtime.steer(trimmed) : runtime.followUp(trimmed),
+      () => delivery === "steer"
+        ? runtime.steer(trimmed, prepared.images)
+        : runtime.followUp(trimmed, prepared.images),
     )
     this.touch(session)
     return session
@@ -297,6 +323,79 @@ export class SessionRegistry {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     return { session, cleared }
+  }
+
+  async executeBash(
+    sessionId: string,
+    command: string,
+    excludeFromContext = false,
+  ): Promise<BashCommandResultV2> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("user bash")
+    const result = await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => runtime.executeBash(command, excludeFromContext),
+    )
+    session.projection = runtime.getProjection()
+    this.touch(session)
+    return {
+      output: result.output,
+      exitCode: result.exitCode,
+      cancelled: result.cancelled,
+      truncated: result.truncated,
+      fullOutputAvailable: Boolean(result.fullOutputPath),
+    }
+  }
+
+  async abortBash(sessionId: string): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("abort bash")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.abortBash())
+    this.touch(session)
+    return session
+  }
+
+  async exportSession(
+    sessionId: string,
+    format: "html" | "jsonl",
+    outputPath?: string,
+  ): Promise<SessionExportResultV2> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("session export")
+    const workspace = this.workspaces.get(session.workspaceId)
+    if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+    const safeId = session.id.replace(/[^A-Za-z0-9._-]/g, "-")
+    const relative = outputPath?.trim() || `pi-session-${safeId}.${format}`
+    const resolved = resolveWorkspacePath(workspace.canonicalRoot, relative)
+    if (resolved.exists && statSync(resolved.absolute).isDirectory()) {
+      throw Object.assign(new Error("export path must be a file"), { code: "INVALID_REQUEST" })
+    }
+    await mkdir(path.dirname(resolved.absolute), { recursive: true })
+    await this.runBoundRuntimeCommand(
+      session,
+      runtime,
+      session.workerGeneration,
+      () => format === "html" ? runtime.exportHtml(resolved.absolute) : runtime.exportJsonl(resolved.absolute),
+    )
+    return { format, path: resolved.relative }
+  }
+
+  async reloadResources(sessionId: string): Promise<AppSession> {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw unsupportedRuntimeOperation("resource reload")
+    await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.reload())
+    session.projection = runtime.getProjection()
+    session.nativeEntries = runtime.getEntries()
+    session.nativeTree = runtime.getTree()
+    session.nativeLeafId = runtime.getLeafId()
+    this.touch(session)
+    return session
   }
 
   async setModel(sessionId: string, provider: string, modelId: string): Promise<AppSession> {

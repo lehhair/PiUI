@@ -70,7 +70,7 @@ export async function listModelsForUi(
         supportsAudio: false,
         supportsVideo: false,
         supportsToolcall: true,
-        variants: [],
+        variants: m.thinkingLevels,
       }
     })
     if (models.length === 0) {

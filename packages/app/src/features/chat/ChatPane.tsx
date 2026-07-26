@@ -262,7 +262,6 @@ export const ChatPane = memo(function ChatPane({
   const {
     messages,
     isStreaming, // session busy（statusMap busy/retry || message streaming）
-    canUndo,
     canRedo,
     redoSteps,
     revertedContent,
@@ -294,7 +293,6 @@ export const ChatPane = memo(function ChatPane({
     handleSend,
     handleAbort,
     handleCommand,
-    handleUndoWithAnimation,
     handleRedoWithAnimation,
     handleForkMessage,
     handleNewSession,
@@ -843,9 +841,7 @@ export const ChatPane = memo(function ChatPane({
                 onOpenSettings={onOpenSettings}
                 hasMoreHistory={hasMoreHistory}
                 onLoadMore={loadMoreHistory}
-                onUndo={handleUndoWithAnimation}
                 onFork={capabilities.fork ? handleForkMessage : undefined}
-                canUndo={canUndo}
                 registerMessage={registerMessage}
                 retryStatus={retryStatus}
                 bottomPadding={inputBoxHeight}
@@ -896,7 +892,7 @@ export const ChatPane = memo(function ChatPane({
           selectedAgent={selectedAgent}
           onAgentChange={handleAgentChange}
           variants={currentModel?.variants ?? []}
-          selectedVariant={selectedVariant}
+          selectedVariant={selectedVariant ?? piRuntime?.thinkingLevel}
           onVariantChange={handleVariantChange}
           fileCapabilities={
             currentModel

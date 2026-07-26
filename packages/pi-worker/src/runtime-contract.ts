@@ -1,5 +1,6 @@
 import type { ProjectionDelta, ProjectionState } from "./projection.js"
 import type { PiCommandInfo, PiRuntimeUiState, PiSkillInfo } from "./real-session.js"
+import type { PiBashResult, PiImageInput } from "./worker-protocol.js"
 import type {
   CompactionCommandResultV1,
   PiNavigationResultV1,
@@ -41,6 +42,11 @@ export interface PiSessionRuntime {
   }): void | Promise<void>
   clearQueue(): { steering: string[]; followUp: string[] } | Promise<{ steering: string[]; followUp: string[] }>
   setActiveTools(toolNames: string[]): void | Promise<void>
+  executeBash(command: string, excludeFromContext?: boolean): Promise<PiBashResult>
+  abortBash(): void | Promise<void>
+  exportHtml(outputPath: string): Promise<string>
+  exportJsonl(outputPath: string): string | Promise<string>
+  reload(): Promise<void>
   navigateTree(
     entryId: string,
     options?: {
@@ -55,9 +61,9 @@ export interface PiSessionRuntime {
   fork(entryId: string, position: "before" | "at"): Promise<SessionReplacementResultV1>
   clone(entryId?: string): Promise<SessionReplacementResultV1>
   importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1>
-  prompt(text: string): Promise<void>
-  steer(text: string): Promise<void>
-  followUp(text: string): Promise<void>
+  prompt(text: string, images?: PiImageInput[]): Promise<void>
+  steer(text: string, images?: PiImageInput[]): Promise<void>
+  followUp(text: string, images?: PiImageInput[]): Promise<void>
   abort(): Promise<{ steering: string[]; followUp: string[] }>
   listSkills(): PiSkillInfo[] | Promise<PiSkillInfo[]>
   listCommands(): PiCommandInfo[] | Promise<PiCommandInfo[]>

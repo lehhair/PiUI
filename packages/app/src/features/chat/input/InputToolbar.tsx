@@ -470,16 +470,6 @@ export function InputToolbar({
                   handleMenuKeyDown(event, variantMenuRef.current, () => setVariantMenuOpen(false), variantTriggerRef.current)
                 }
               >
-                <MenuItem
-                  label={t('inputToolbar.default')}
-                  icon={<ThinkingIcon />}
-                  selected={!selectedVariant}
-                  selectionRole="menuitemradio"
-                  onClick={() => {
-                    onVariantChange?.(undefined)
-                    closeMenuToComposer(() => setVariantMenuOpen(false))
-                  }}
-                />
                 {variants.map(variant => (
                   <MenuItem
                     key={variant}

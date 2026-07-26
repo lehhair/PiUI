@@ -5,7 +5,6 @@ export interface PiCapabilities {
   pty: boolean
   share: boolean
   fork: boolean
-  undo: boolean
   sessionTree: boolean
   sessionNavigate: boolean
   sessionDelete: boolean
@@ -30,7 +29,6 @@ const unavailable: PiCapabilities = {
   pty: false,
   share: false,
   fork: false,
-  undo: false,
   sessionTree: false,
   sessionNavigate: false,
   sessionDelete: false,
@@ -65,7 +63,6 @@ export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
     pty: enabled("pty"),
     share: enabled("session.share"),
     fork: enabled("session.fork"),
-    undo: enabled("session.navigate"),
     sessionTree: enabled("session.tree"),
     sessionNavigate: enabled("session.navigate"),
     sessionDelete: enabled("session.delete"),

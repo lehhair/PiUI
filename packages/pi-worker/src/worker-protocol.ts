@@ -34,10 +34,25 @@ export interface PiModelInfo {
   contextLimit: number
   outputLimit: number
   supportsReasoning: boolean
+  thinkingLevels: string[]
   supportsImages: boolean
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 4 as const
+export interface PiImageInput {
+  type: "image"
+  data: string
+  mimeType: string
+}
+
+export interface PiBashResult {
+  output: string
+  exitCode?: number
+  cancelled: boolean
+  truncated: boolean
+  fullOutputPath?: string
+}
+
+export const PI_WORKER_PROTOCOL_VERSION = 5 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -57,6 +72,9 @@ export type PiWorkerCapability =
   | "runtime.import"
   | "runtime.skills"
   | "runtime.commands"
+  | "runtime.bash"
+  | "runtime.export"
+  | "runtime.reload"
 
 export interface WorkerHello {
   kind: "hello"
@@ -73,9 +91,9 @@ export type WorkerCommand =
   | { type: "listAll" }
   | { type: "listModels" }
   | { type: "open"; cwd: string; sessionFile?: string }
-  | { type: "prompt"; text: string }
-  | { type: "steer"; text: string }
-  | { type: "followUp"; text: string }
+  | { type: "prompt"; text: string; images?: PiImageInput[] }
+  | { type: "steer"; text: string; images?: PiImageInput[] }
+  | { type: "followUp"; text: string; images?: PiImageInput[] }
   | { type: "abort" }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinkingLevel"; level: string }
@@ -92,6 +110,11 @@ export type WorkerCommand =
     }
   | { type: "clearQueue" }
   | { type: "setActiveTools"; toolNames: string[] }
+  | { type: "executeBash"; command: string; excludeFromContext?: boolean }
+  | { type: "abortBash" }
+  | { type: "exportHtml"; outputPath: string }
+  | { type: "exportJsonl"; outputPath: string }
+  | { type: "reload" }
   | {
       type: "navigateTree"
       entryId: string
@@ -122,6 +145,8 @@ export type WorkerResult =
   | { type: "session"; session: WorkerSessionWire }
   | { type: "skills"; skills: PiSkillInfo[] }
   | { type: "commands"; commands: PiCommandInfo[] }
+  | { type: "bash"; result: PiBashResult; session: WorkerSessionWire }
+  | { type: "export"; format: "html" | "jsonl"; path: string }
   | ({ type: "navigation"; session: WorkerSessionWire } & PiNavigationResultV1)
   | { type: "compaction"; compaction: CompactionCommandResultV1; session: WorkerSessionWire }
   | { type: "queue"; steering: string[]; followUp: string[]; session: WorkerSessionWire }

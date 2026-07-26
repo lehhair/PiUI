@@ -11,6 +11,8 @@ let followUpMode = "one-at-a-time"
 let autoCompaction = true
 let autoRetry = true
 let activeTools = ["read"]
+let thinkingLevel = "medium"
+let model
 let isCompacting = false
 let pendingCompaction
 const generation = "fixture-generation"
@@ -21,7 +23,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 4,
+  workerProtocolVersion: 5,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -43,13 +45,16 @@ process.send?.({
     "runtime.import",
     "runtime.skills",
     "runtime.commands",
+    "runtime.bash",
+    "runtime.export",
+    "runtime.reload",
   ],
 })
 
 function state() {
   return {
-    thinkingLevel: "medium",
-    availableThinkingLevels: ["off", "medium"],
+    thinkingLevel,
+    availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
     isStreaming: false,
     isCompacting,
     isIdle: !isCompacting,
@@ -69,7 +74,7 @@ function state() {
       { name: "bash", description: "Run commands", source: "builtin" },
     ],
     activeTools,
-    model: undefined,
+    model,
     supportsThinking: true,
   }
 }
@@ -124,7 +129,7 @@ process.on("message", request => {
       }],
     }
   } else if (command.type === "listModels") {
-    result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, supportsImages: false }] }
+    result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, thinkingLevels: ["off"], supportsImages: false }] }
   } else if (command.type === "open") {
     if (command.cwd.includes("hang-open")) return
     runtimeCwd = command.cwd
@@ -183,6 +188,14 @@ process.on("message", request => {
     session = { ...(session ?? snapshot()), projection }
     process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
     result = { type: "session", session }
+  } else if (command.type === "setThinkingLevel") {
+    thinkingLevel = command.level
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
+  } else if (command.type === "setModel") {
+    model = { provider: command.provider, id: command.modelId, displayName: command.modelId }
+    session = { ...(session ?? snapshot()), state: state() }
+    result = { type: "session", session }
   } else if (command.type === "compact") {
     if (command.instructions === "wait-for-abort") {
       isCompacting = true
@@ -234,6 +247,23 @@ process.on("message", request => {
     activeTools = command.toolNames
     session = { ...(session ?? snapshot()), state: state() }
     result = { type: "session", session }
+  } else if (command.type === "executeBash") {
+    result = {
+      type: "bash",
+      result: {
+        output: `fixture bash: ${command.command}`,
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+      },
+      session: session ?? snapshot(),
+    }
+  } else if (command.type === "exportHtml" || command.type === "exportJsonl") {
+    result = {
+      type: "export",
+      format: command.type === "exportHtml" ? "html" : "jsonl",
+      path: command.outputPath,
+    }
   } else if (command.type === "clearQueue") {
     const cleared = { steering, followUp }
     steering = []
