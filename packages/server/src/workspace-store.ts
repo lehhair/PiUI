@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { existsSync, realpathSync, statSync } from "node:fs"
 import path from "node:path"
 import type { WorkspaceDtoV1 } from "@piui/protocol"
@@ -11,7 +11,17 @@ export interface WorkspaceRecord {
   lastOpenedAt: string
 }
 
-/** In-memory Phase 1 store. SQLite comes later. */
+/**
+ * Workspaces are a PiUI concept: Pi only reports a session's `cwd`. Deriving
+ * the id from that path rather than minting a random one keeps it stable
+ * across restarts, so identifiers held by clients stay valid and separate
+ * server processes agree without sharing state.
+ */
+export function workspaceIdFor(canonicalRoot: string, platform = process.platform): string {
+  return createHash("sha256").update(workspacePathKey(canonicalRoot, platform)).digest("hex").slice(0, 32)
+}
+
+/** Metadata is still in-memory; only the identity is durable. */
 export class WorkspaceStore {
   private readonly byId = new Map<string, WorkspaceRecord>()
   private readonly byRoot = new Map<string, string>()
@@ -47,7 +57,7 @@ export class WorkspaceStore {
     }
     const now = new Date().toISOString()
     const rec: WorkspaceRecord = {
-      id: randomUUID(),
+      id: workspaceIdFor(abs),
       displayName: displayName?.trim() || path.basename(abs) || abs,
       canonicalRoot: abs,
       createdAt: now,
