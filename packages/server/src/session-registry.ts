@@ -149,7 +149,9 @@ export class SessionRegistry {
   private providerAuthBackend?: PiSessionBackend
   private providerAuthUnsubscribe?: () => void
   private packageProgressUnsubscribe?: () => void
-  private readonly packageCommandWorkspaces = new Map<string, string>()
+  /** Keyed by a server-generated progress id, because the client-supplied
+   *  commandId is not unique across workspaces. */
+  private readonly packageCommandWorkspaces = new Map<string, { workspaceId: string; commandId: string }>()
 
   constructor(
     private readonly workspaces: WorkspaceStore,
@@ -327,6 +329,7 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.logoutRuntimeProvider!(providerId),
     )
+    this.publishProviderAuthUpdated(providerId, false, session.id)
   }
 
   async inspectSessionModelRuntime(sessionId: string): Promise<PiModelRuntimeSnapshotV1> {
@@ -348,6 +351,7 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.setSessionRuntimeApiKey!(providerId, apiKey),
     )
+    this.publishProviderAuthUpdated(providerId, true, session.id)
   }
 
   async removeSessionRuntimeApiKey(sessionId: string, providerId: string): Promise<void> {
@@ -360,6 +364,7 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.removeSessionRuntimeApiKey!(providerId),
     )
+    this.publishProviderAuthUpdated(providerId, false, session.id)
   }
 
   async reloadSessionModelRuntime(sessionId: string): Promise<void> {
@@ -408,10 +413,16 @@ export class SessionRegistry {
     const backend = await this.getBackend()
     if (!backend.logoutProvider) throw unsupportedRuntimeOperation("provider authentication")
     await backend.logoutProvider(providerId)
+    this.publishProviderAuthUpdated(providerId, false)
+  }
+
+  /** Credential changes are invisible to clients unless the matching global
+   *  provider or session stream reports the resulting auth state. */
+  private publishProviderAuthUpdated(providerId: string, authenticated: boolean, sessionId?: string): void {
     this.eventHub?.publishV2(
-      { kind: "provider", id: providerId },
+      sessionId ? { kind: "session", id: sessionId } : { kind: "provider", id: providerId },
       "provider.auth.updated",
-      { providerId, authenticated: false },
+      { providerId, authenticated, sessionId },
     )
   }
 
@@ -425,12 +436,14 @@ export class SessionRegistry {
     const backend = await this.getBackend()
     if (!backend.setRuntimeApiKey) throw unsupportedRuntimeOperation("runtime API keys")
     await backend.setRuntimeApiKey(providerId, apiKey)
+    this.publishProviderAuthUpdated(providerId, true)
   }
 
   async removeRuntimeApiKey(providerId: string): Promise<void> {
     const backend = await this.getBackend()
     if (!backend.removeRuntimeApiKey) throw unsupportedRuntimeOperation("runtime API keys")
     await backend.removeRuntimeApiKey(providerId)
+    this.publishProviderAuthUpdated(providerId, false)
   }
 
   async reloadModelRuntime(): Promise<void> {
@@ -465,12 +478,13 @@ export class SessionRegistry {
     if (!workspace) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
     const backend = await this.getBackend()
     if (!backend.managePackage) throw unsupportedRuntimeOperation("packages")
-    this.packageCommandWorkspaces.set(commandId, workspaceId)
+    const progressId = randomUUID()
+    this.packageCommandWorkspaces.set(progressId, { workspaceId, commandId })
     let packages: ConfiguredPackageV1[]
     try {
-      packages = await backend.managePackage(workspace.canonicalRoot, commandId, action, source, local, persist)
+      packages = await backend.managePackage(workspace.canonicalRoot, progressId, action, source, local, persist)
     } finally {
-      this.packageCommandWorkspaces.delete(commandId)
+      this.packageCommandWorkspaces.delete(progressId)
     }
     await this.withCoalescedResourceEvents(
       workspaceId,
@@ -1544,6 +1558,9 @@ export class SessionRegistry {
         "provider.auth.flow",
         event,
       )
+      if (event.type === "completed") {
+        this.publishProviderAuthUpdated(event.providerId, true, session.id)
+      }
     })
     const unsubscribeResourcesChanged = runtime.onResourcesChanged?.(() => {
       if (!this.isCurrentRuntime(session, runtime, generation)) return
@@ -1832,11 +1849,14 @@ export class SessionRegistry {
         }
       })
       this.packageProgressUnsubscribe = backend.onPackageProgress?.(event => {
-        const workspace = event.workspaceId ?? this.packageCommandWorkspaces.get(event.commandId)
+        // The worker echoes the server-generated progress id, so map it back to
+        // the workspace and the commandId the client actually submitted.
+        const tracked = this.packageCommandWorkspaces.get(event.commandId)
+        const workspace = tracked?.workspaceId ?? event.workspaceId
         this.eventHub?.publishV2(
           { kind: "resources", id: workspace ?? "global" },
           "packages.progress",
-          { ...event, workspaceId: workspace },
+          { ...event, commandId: tracked?.commandId ?? event.commandId, workspaceId: workspace },
         )
       })
     }
