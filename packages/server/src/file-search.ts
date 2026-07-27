@@ -1,194 +1,260 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
-import { resolveWorkspacePath, PathSafetyError } from "./path-safety.ts"
+import { readFile, readdir, stat } from "node:fs/promises"
+import path from "node:path"
+import type {
+  FileNameSearchResponseV1,
+  FileSearchStatsV1,
+  FileTextSearchResponseV1,
+  WorkspaceTextSearchMatchV1,
+} from "@piui/protocol"
 import type { WorkspaceRecord } from "./workspace-store.ts"
+import { resolveWorkspacePath } from "./path-safety.ts"
 
 const SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  ".next",
-  "coverage",
-  "__pycache__",
-  ".turbo",
-  "target",
+  "node_modules", ".git", "dist", "build", ".next", "coverage", "__pycache__", ".turbo", "target",
 ])
-
 const MAX_RESULTS = 200
-const MAX_VISIT = 20_000
+const MAX_VISIT = 50_000
 const MAX_TEXT_FILE_BYTES = 1024 * 1024
-const MAX_TEXT_TOTAL_BYTES = 20 * 1024 * 1024
+const MAX_TEXT_TOTAL_BYTES = 32 * 1024 * 1024
 
-export interface WorkspaceTextSearchMatch {
-  path: { text: string }
-  lines: { text: string }
-  line_number: number
-  absolute_offset: number
-  submatches: Array<{ start: number; end: number; match: { text: string } }>
-}
-
-export function searchFilesByName(
+export async function searchFilesByName(
   ws: WorkspaceRecord,
   query: string,
-  opts?: { type?: "file" | "directory"; limit?: number },
-): string[] {
-  const q = query.trim().toLowerCase()
-  if (!q) return []
-  const limit = Math.min(opts?.limit ?? 50, MAX_RESULTS)
-  const results: string[] = []
+  opts: { type?: "file" | "directory"; limit?: number; signal?: AbortSignal } = {},
+): Promise<FileNameSearchResponseV1> {
+  const started = performance.now()
+  const needle = query.trim().toLocaleLowerCase()
+  const limit = boundedLimit(opts.limit)
+  const paths: string[] = []
   let visited = 0
-
-  const root = resolveWorkspacePath(ws.canonicalRoot, "")
-  if (!root.exists) return []
-
-  const stack: string[] = [""]
-  while (stack.length > 0 && results.length < limit && visited < MAX_VISIT) {
-    const rel = stack.pop()!
-    let abs: string
-    try {
-      const r = resolveWorkspacePath(ws.canonicalRoot, rel)
-      if (!r.exists || r.restricted) continue
-      abs = r.absolute
-    } catch {
-      continue
-    }
-
-    let entries: string[]
-    try {
-      entries = readdirSync(abs)
-    } catch {
-      continue
-    }
-
-    for (const name of entries) {
-      if (results.length >= limit || visited >= MAX_VISIT) break
+  let scannedFiles = 0
+  let limitReason: FileSearchStatsV1["limitReason"]
+  if (needle) {
+    await walkWorkspace(ws, opts.signal, async entry => {
       visited++
-      if (name === "." || name === "..") continue
-      const childRel = rel ? `${rel}/${name}` : name
-      let st
-      try {
-        const child = resolveWorkspacePath(ws.canonicalRoot, childRel)
-        if (!child.exists || child.restricted) continue
-        st = statSync(child.absolute)
-      } catch (e) {
-        if (e instanceof PathSafetyError) continue
-        continue
+      if (!entry.isDirectory) scannedFiles++
+      if (entry.relative.toLocaleLowerCase().includes(needle) &&
+        (!opts.type || (opts.type === "directory") === entry.isDirectory)) {
+        paths.push(entry.relative)
       }
-
-      const isDir = st.isDirectory()
-      if (isDir && SKIP_DIRS.has(name)) continue
-
-      const match = name.toLowerCase().includes(q) || childRel.toLowerCase().includes(q)
-      if (match) {
-        if (!opts?.type || (opts.type === "directory" && isDir) || (opts.type === "file" && !isDir)) {
-          results.push(childRel.replace(/\\/g, "/"))
-        }
+      if (paths.length >= limit) {
+        limitReason = "results"
+        return false
       }
-      if (isDir) stack.push(childRel)
-    }
+      if (visited >= MAX_VISIT) {
+        limitReason = "entries"
+        return false
+      }
+      return true
+    })
   }
-
-  return results
+  return {
+    query,
+    paths,
+    stats: stats(started, visited, scannedFiles, 0, limitReason),
+  }
 }
 
-export function searchWorkspaceText(
+export async function searchWorkspaceText(
   ws: WorkspaceRecord,
   pattern: string,
-  opts?: { limit?: number },
-): WorkspaceTextSearchMatch[] {
+  opts: { limit?: number; signal?: AbortSignal } = {},
+): Promise<FileTextSearchResponseV1> {
+  const started = performance.now()
   const needle = pattern.trim()
-  if (!needle) return []
-
-  const normalizedNeedle = needle.toLowerCase()
-  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), MAX_RESULTS)
-  const results: WorkspaceTextSearchMatch[] = []
+  const limit = boundedLimit(opts.limit)
+  const matches: WorkspaceTextSearchMatchV1[] = []
   let visited = 0
-  let totalBytes = 0
+  let scannedFiles = 0
+  let scannedBytes = 0
+  let limitReason: FileSearchStatsV1["limitReason"]
+  if (needle) {
+    await walkWorkspace(ws, opts.signal, async entry => {
+      visited++
+      if (entry.isDirectory) {
+        if (visited >= MAX_VISIT) {
+          limitReason = "entries"
+          return false
+        }
+        return true
+      }
+      if (visited >= MAX_VISIT) {
+        limitReason = "entries"
+        return false
+      }
+      let fileStat
+      let safeAbsolute: string
+      try {
+        const resolved = resolveWorkspacePath(ws.canonicalRoot, entry.relative)
+        safeAbsolute = resolved.absolute
+        fileStat = await stat(safeAbsolute)
+      } catch {
+        return true
+      }
+      if (!fileStat.isFile() || fileStat.size > MAX_TEXT_FILE_BYTES) return true
+      if (scannedBytes + fileStat.size > MAX_TEXT_TOTAL_BYTES) {
+        limitReason = "bytes"
+        return false
+      }
+      let buffer: Buffer
+      try {
+        buffer = await readFile(safeAbsolute)
+      } catch {
+        return true
+      }
+      if (buffer.length > MAX_TEXT_FILE_BYTES || scannedBytes + buffer.length > MAX_TEXT_TOTAL_BYTES) {
+        limitReason = "bytes"
+        return false
+      }
+      try {
+        const verified = resolveWorkspacePath(ws.canonicalRoot, entry.relative)
+        if (verified.absolute !== safeAbsolute) return true
+      } catch {
+        return true
+      }
+      if (buffer.includes(0)) return true
+      try {
+        new TextDecoder("utf-8", { fatal: true }).decode(buffer)
+      } catch {
+        return true
+      }
+      scannedFiles++
+      scannedBytes += buffer.length
+      collectTextMatches(buffer.toString("utf8"), entry.relative, needle, matches, limit)
+      if (matches.length >= limit) {
+        limitReason = "results"
+        return false
+      }
+      return true
+    })
+  }
+  return {
+    query: pattern,
+    matches,
+    stats: stats(started, visited, scannedFiles, scannedBytes, limitReason),
+  }
+}
 
-  const root = resolveWorkspacePath(ws.canonicalRoot, "")
-  if (!root.exists) return []
+interface WalkEntry {
+  relative: string
+  absolute: string
+  isDirectory: boolean
+}
 
-  const stack: string[] = [""]
-  while (
-    stack.length > 0 &&
-    results.length < limit &&
-    visited < MAX_VISIT &&
-    totalBytes < MAX_TEXT_TOTAL_BYTES
-  ) {
-    const rel = stack.pop()!
-    let entries: string[]
+async function walkWorkspace(
+  ws: WorkspaceRecord,
+  signal: AbortSignal | undefined,
+  visit: (entry: WalkEntry) => boolean | Promise<boolean>,
+): Promise<void> {
+  const directories = [""]
+  while (directories.length > 0) {
+    throwIfAborted(signal)
+    const relativeDirectory = directories.pop()!
+    let absoluteDirectory: string
     try {
-      const resolved = resolveWorkspacePath(ws.canonicalRoot, rel)
-      if (!resolved.exists || resolved.restricted) continue
-      entries = readdirSync(resolved.absolute)
+      absoluteDirectory = resolveWorkspacePath(ws.canonicalRoot, relativeDirectory).absolute
     } catch {
       continue
     }
-
-    for (const name of entries) {
-      if (results.length >= limit || visited >= MAX_VISIT || totalBytes >= MAX_TEXT_TOTAL_BYTES) break
-      visited++
-      if (name === "." || name === "..") continue
-
-      const childRel = rel ? `${rel}/${name}` : name
-      let absolute: string
-      let stat
-      try {
-        const child = resolveWorkspacePath(ws.canonicalRoot, childRel)
-        if (!child.exists || child.restricted) continue
-        absolute = child.absolute
-        stat = statSync(absolute)
-      } catch (error) {
-        if (error instanceof PathSafetyError) continue
-        continue
-      }
-
-      if (stat.isDirectory()) {
-        if (!SKIP_DIRS.has(name)) stack.push(childRel)
-        continue
-      }
-      if (!stat.isFile() || stat.size > MAX_TEXT_FILE_BYTES) continue
-      if (totalBytes + stat.size > MAX_TEXT_TOTAL_BYTES) continue
-      totalBytes += stat.size
-
-      let buffer: Buffer
-      try {
-        buffer = readFileSync(absolute)
-      } catch {
-        continue
-      }
-      if (buffer.includes(0)) continue
-
-      const content = buffer.toString("utf8")
-      const lines = content.split(/\r?\n/)
-      let absoluteOffset = 0
-      for (let lineIndex = 0; lineIndex < lines.length && results.length < limit; lineIndex++) {
-        const line = lines[lineIndex]
-        const normalizedLine = line.toLowerCase()
-        const submatches: WorkspaceTextSearchMatch["submatches"] = []
-        let start = normalizedLine.indexOf(normalizedNeedle)
-        while (start >= 0) {
-          const end = start + needle.length
-          submatches.push({
-            start: Buffer.byteLength(line.slice(0, start), "utf8"),
-            end: Buffer.byteLength(line.slice(0, end), "utf8"),
-            match: { text: line.slice(start, end) },
-          })
-          start = normalizedLine.indexOf(normalizedNeedle, end)
-        }
-        if (submatches.length > 0) {
-          results.push({
-            path: { text: childRel.replace(/\\/g, "/") },
-            lines: { text: line },
-            line_number: lineIndex + 1,
-            absolute_offset: absoluteOffset,
-            submatches,
-          })
-        }
-        absoluteOffset += Buffer.byteLength(line, "utf8") + 1
-      }
+    let entries
+    try {
+      entries = await readdir(absoluteDirectory, { withFileTypes: true })
+    } catch {
+      continue
     }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    const childDirectories: string[] = []
+    for (const entry of entries) {
+      throwIfAborted(signal)
+      if (entry.isSymbolicLink()) continue
+      const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
+      const isDirectory = entry.isDirectory()
+      if (isDirectory && SKIP_DIRS.has(entry.name)) continue
+      if (!await visit({
+        relative,
+        absolute: path.join(absoluteDirectory, entry.name),
+        isDirectory,
+      })) return
+      if (isDirectory) childDirectories.push(relative)
+    }
+    for (let index = childDirectories.length - 1; index >= 0; index--) directories.push(childDirectories[index]!)
   }
+}
 
-  return results
+function collectTextMatches(
+  content: string,
+  relativePath: string,
+  needle: string,
+  results: WorkspaceTextSearchMatchV1[],
+  limit: number,
+): void {
+  const matcher = new RegExp(escapeRegExp(needle), "giu")
+  let charOffset = 0
+  let byteOffset = 0
+  let lineNumber = 1
+  while (charOffset <= content.length && results.length < limit) {
+    const newline = content.indexOf("\n", charOffset)
+    const end = newline < 0 ? content.length : newline
+    const rawLine = content.slice(charOffset, end)
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine
+    const submatches: WorkspaceTextSearchMatchV1["submatches"] = []
+    matcher.lastIndex = 0
+    for (const match of line.matchAll(matcher)) {
+      const start = match.index
+      const matchEnd = start + match[0].length
+      submatches.push({
+        start: Buffer.byteLength(line.slice(0, start), "utf8"),
+        end: Buffer.byteLength(line.slice(0, matchEnd), "utf8"),
+        match: { text: match[0] },
+      })
+    }
+    if (submatches.length > 0) {
+      results.push({
+        path: { text: relativePath },
+        lines: { text: line },
+        line_number: lineNumber,
+        absolute_offset: byteOffset,
+        submatches,
+      })
+    }
+    if (newline < 0) break
+    const consumed = content.slice(charOffset, newline + 1)
+    byteOffset += Buffer.byteLength(consumed, "utf8")
+    charOffset = newline + 1
+    lineNumber++
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function boundedLimit(value: number | undefined): number {
+  const limit = value ?? 50
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RESULTS) {
+    throw Object.assign(new Error(`limit must be an integer between 1 and ${MAX_RESULTS}`), { code: "INVALID_REQUEST" })
+  }
+  return limit
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  throw Object.assign(new Error("search cancelled"), { code: "REQUEST_ABORTED" })
+}
+
+function stats(
+  started: number,
+  visited: number,
+  scannedFiles: number,
+  scannedBytes: number,
+  limitReason: FileSearchStatsV1["limitReason"],
+): FileSearchStatsV1 {
+  return {
+    visited,
+    scannedFiles,
+    scannedBytes,
+    durationMs: Math.max(0, Math.round(performance.now() - started)),
+    truncated: limitReason !== undefined,
+    limitReason,
+  }
 }

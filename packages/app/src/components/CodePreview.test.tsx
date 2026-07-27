@@ -47,6 +47,24 @@ describe('CodePreview', () => {
     expect(container.querySelector('.cm-content')).toHaveAttribute('contenteditable', 'false')
   })
 
+  it('edits without recreating the CodeMirror view and reports changes', () => {
+    const onChange = vi.fn()
+    const { container, rerender } = render(
+      <CodePreview code="before" language="text" readOnly={false} onChange={onChange} />,
+    )
+    const editor = container.querySelector('.cm-editor')
+    const content = container.querySelector('.cm-content') as HTMLElement
+    expect(content).toHaveAttribute('contenteditable', 'true')
+    const view = EditorView.findFromDOM(editor as HTMLElement)
+    view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'after' } })
+    expect(onChange).toHaveBeenLastCalledWith('after')
+    onChange.mockClear()
+    rerender(<CodePreview code="server update" language="text" readOnly={false} onChange={onChange} />)
+    expect(container.querySelector('.cm-editor')).toBe(editor)
+    expect(screen.getByText('server update')).toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('opens CodeMirror search from the preview Ctrl+F fallback', () => {
     const { container } = render(<CodePreview code={'first line\nsecond line'} language="text" />)
 

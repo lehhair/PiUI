@@ -23,6 +23,11 @@ describe("normalizeRelativePath", () => {
     assert.throws(() => normalizeRelativePath("\\\\server\\share"), PathSafetyError)
   })
 
+  it("rejects Windows alternate data stream segments", () => {
+    assert.throws(() => normalizeRelativePath("file.txt:secret", "win32"), /alternate data streams/)
+    assert.equal(normalizeRelativePath("file.txt:secret", "linux"), "file.txt:secret")
+  })
+
   it("rejects escape via ..", () => {
     assert.throws(() => normalizeRelativePath(".."), PathSafetyError)
     assert.throws(() => normalizeRelativePath("a/../../b"), PathSafetyError)

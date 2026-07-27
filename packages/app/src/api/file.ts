@@ -5,18 +5,23 @@
 
 import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch } from './types'
 import {
+  createWorkspaceEntry,
+  deleteWorkspaceEntry,
   getWorkspaceGitStatus,
   listWorkspaceFiles,
   readWorkspaceFile,
+  moveWorkspaceEntry,
   resolveWorkspacePath,
   searchWorkspaceFiles,
   searchWorkspaceText,
+  writeWorkspaceFile,
 } from '../pi/sessionApi'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
 
 const rootDirectoryCache = new Map<string, { data: FileNode[]; expiresAt: number }>()
 const rootDirectoryInflight = new Map<string, Promise<FileNode[]>>()
+const rootDirectoryGeneration = new Map<string, number>()
 
 function isRootDirectoryPath(path: string): boolean {
   return path === '' || path === '.' || path === './'
@@ -100,12 +105,14 @@ export async function searchFiles(
     directory?: string
     type?: 'file' | 'directory'
     limit?: number
+    signal?: AbortSignal
   } = {},
 ): Promise<string[]> {
   const workspacePath = await requireWorkspacePath(options.directory)
   return searchWorkspaceFiles(workspacePath, query, {
     type: options.type,
     limit: options.limit,
+    ...(options.signal ? { signal: options.signal } : {}),
   })
 }
 
@@ -129,13 +136,16 @@ export async function listDirectory(path: string, directory?: string): Promise<F
     return inflight
   }
 
+  const generation = rootDirectoryGeneration.get(key) ?? 0
   const request = fetchDirectory(path === '' ? '.' : path, directory)
     .then(data => {
-      rootDirectoryCache.set(key, { data, expiresAt: Date.now() + ROOT_DIRECTORY_CACHE_TTL_MS })
+      if ((rootDirectoryGeneration.get(key) ?? 0) === generation) {
+        rootDirectoryCache.set(key, { data, expiresAt: Date.now() + ROOT_DIRECTORY_CACHE_TTL_MS })
+      }
       return data
     })
     .finally(() => {
-      rootDirectoryInflight.delete(key)
+      if (rootDirectoryInflight.get(key) === request) rootDirectoryInflight.delete(key)
     })
 
   rootDirectoryInflight.set(key, request)
@@ -153,29 +163,88 @@ export async function getFileContent(path: string, directory?: string): Promise<
   const workspacePath = await requireWorkspacePath(directory)
   const rel = toPiRelativePath(path, directory)
   const file = await readWorkspaceFile(workspacePath, rel)
-  return {
-    type: 'text',
+  const result: FileContent = {
+    type: file.type ?? (file.encoding === 'base64' ? 'binary' : 'text'),
     content: file.content,
     encoding: file.encoding,
   }
+  if (file.mimeType !== undefined) result.mimeType = file.mimeType
+  if (file.etag !== undefined) result.etag = file.etag
+  if (file.size !== undefined) result.size = file.size
+  return result
+}
+
+export async function saveFile(path: string, content: FileContent, directory?: string): Promise<FileContent> {
+  const workspacePath = await requireWorkspacePath(directory)
+  const relative = toPiRelativePath(path, directory)
+  const saved = await writeWorkspaceFile(
+    workspacePath,
+    relative,
+    content.content,
+    content.etag,
+    content.encoding === 'base64' ? 'base64' : 'utf-8',
+  )
+  invalidateWorkspaceFileCaches(directory)
+  return {
+    type: saved.type,
+    content: saved.content,
+    encoding: saved.encoding,
+    mimeType: saved.mimeType,
+    etag: saved.etag,
+    size: saved.size,
+  }
+}
+
+export async function createFile(path: string, directory?: string, content = ''): Promise<void> {
+  const workspacePath = await requireWorkspacePath(directory)
+  await createWorkspaceEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'file', content })
+  invalidateWorkspaceFileCaches(directory)
+}
+
+export async function createDirectory(path: string, directory?: string): Promise<void> {
+  const workspacePath = await requireWorkspacePath(directory)
+  await createWorkspaceEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'directory' })
+  invalidateWorkspaceFileCaches(directory)
+}
+
+export async function moveEntry(from: string, to: string, directory?: string): Promise<void> {
+  const workspacePath = await requireWorkspacePath(directory)
+  await moveWorkspaceEntry(workspacePath, {
+    from: toPiRelativePath(from, directory),
+    to: toPiRelativePath(to, directory),
+  })
+  invalidateWorkspaceFileCaches(directory)
+}
+
+export async function deleteEntry(path: string, directory?: string, recursive = false): Promise<void> {
+  const workspacePath = await requireWorkspacePath(directory)
+  await deleteWorkspaceEntry(workspacePath, toPiRelativePath(path, directory), recursive)
+  invalidateWorkspaceFileCaches(directory)
 }
 
 /**
  * 获取文件 git 状态
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
-  try {
-    const workspacePath = await requireWorkspacePath(directory)
-    const status = await getWorkspaceGitStatus(workspacePath)
-    return status.items.map(item => ({
-      path: item.path,
-      status: item.status,
-      added: item.added ?? 0,
-      removed: item.removed ?? 0,
-    }))
-  } catch {
-    return []
-  }
+  const workspacePath = await requireWorkspacePath(directory)
+  const status = await getWorkspaceGitStatus(workspacePath)
+  return status.items.map(item => ({
+    path: item.path,
+    status: item.status === 'added' || item.status === 'untracked' || item.status === 'copied'
+      ? 'added'
+      : item.status === 'deleted'
+        ? 'deleted'
+        : 'modified',
+    added: 0,
+    removed: 0,
+  }))
+}
+
+export function invalidateWorkspaceFileCaches(directory?: string): void {
+  const key = getRootDirectoryCacheKey(directory)
+  rootDirectoryCache.delete(key)
+  rootDirectoryInflight.delete(key)
+  rootDirectoryGeneration.set(key, (rootDirectoryGeneration.get(key) ?? 0) + 1)
 }
 
 /**
@@ -190,9 +259,11 @@ export async function searchSymbols(query: string, directory?: string): Promise<
 /**
  * 搜索文件正文内容
  */
-export async function searchText(pattern: string, directory?: string): Promise<TextSearchMatch[]> {
+export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<TextSearchMatch[]> {
   const workspacePath = await requireWorkspacePath(directory)
-  return searchWorkspaceText(workspacePath, pattern)
+  return signal
+    ? searchWorkspaceText(workspacePath, pattern, 50, signal)
+    : searchWorkspaceText(workspacePath, pattern)
 }
 
 /**

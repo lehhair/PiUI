@@ -15,6 +15,8 @@ interface CodePreviewProps {
   targetLine?: number | null
   targetKey?: string
   targetRanges?: readonly TargetLineRange[]
+  readOnly?: boolean
+  onChange?: (value: string) => void
 }
 
 export function CodePreview({
@@ -28,6 +30,8 @@ export function CodePreview({
   targetLine,
   targetKey,
   targetRanges,
+  readOnly = true,
+  onChange,
 }: CodePreviewProps) {
   const { codeWordWrap, codeFontScale } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const resolvedWordWrap = wordWrap ?? codeWordWrap
@@ -50,6 +54,8 @@ export function CodePreview({
       targetLine={targetLine}
       targetKey={targetKey}
       targetRanges={targetRanges}
+      readOnly={readOnly}
+      onChange={onChange}
     />
   )
 }

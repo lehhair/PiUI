@@ -10,11 +10,24 @@ import type {
   SessionAttachmentV2,
   SessionReplacementResultV1,
   SessionSnapshotV1,
+  FileCreateRequestV1,
+  FileListResponseV1,
+  FileMoveRequestV1,
+  FileOperationResponseV1,
+  FileReadResponseV1,
+  FileNameSearchResponseV1,
+  FileTextSearchResponseV1,
+  GitDiffModeV1,
+  GitDiffResponseV1,
+  GitFileDiffResponseV1,
+  GitInfoResponseV1,
+  GitStatusResponseV1,
 } from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
 import type { Attachment } from "../features/attachment/types"
-import { trackPiSession, untrackPiSession } from "./piSessionIndex"
+import { reconcilePiSessions, trackPiSession, trackPiWorkspace, untrackPiSession } from "./piSessionIndex"
 import { sessionProjectionStore } from "./sessionProjectionStore"
+import { extensionUiStore } from "./extensionUiStore"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 const rawFetch = globalThis.fetch.bind(globalThis)
@@ -98,6 +111,10 @@ export async function listPiSessions(workspacePath?: string): Promise<PiSessionS
   for (const s of data.sessions) {
     trackPiSession(s.id, s.directory)
   }
+  for (const removed of reconcilePiSessions(data.sessions.map(session => session.id), workspacePath)) {
+    sessionProjectionStore.clear(removed)
+    extensionUiStore.remove(removed)
+  }
   return data.sessions
 }
 
@@ -151,6 +168,12 @@ export async function deletePiSession(sessionId: string): Promise<{
 }
 
 let defaultWorkspacePromise: Promise<string | null> | null = null
+const workspaceResolutionPromises = new Map<string, Promise<string>>()
+
+export function resetWorkspaceResolutionCache(): void {
+  workspaceResolutionPromises.clear()
+  defaultWorkspacePromise = null
+}
 
 async function ensureDefaultWorkspacePath(): Promise<string | null> {
   if (!defaultWorkspacePromise) {
@@ -159,96 +182,130 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
         const res = await fetch(`${getApiBase()}/api/v1/workspaces/default`)
         if (!res.ok) return null
         const data = (await res.json()) as { workspace: { path: string } }
+        trackPiWorkspace(data.workspace.path)
         return data.workspace.path
       } catch {
         return null
-      } finally {
-        // allow retry later if failed
       }
     })()
   }
-  const workspacePath = await defaultWorkspacePromise
-  if (!workspacePath) defaultWorkspacePromise = null
-  return workspacePath
+  try {
+    return await defaultWorkspacePromise
+  } finally {
+    defaultWorkspacePromise = null
+  }
 }
 
 /** Return the selected absolute path, or ask the server for its default. */
 export async function resolveWorkspacePath(directory?: string): Promise<string | null> {
   if (directory) {
     if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
-      return directory
+      const key = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+      let pending = workspaceResolutionPromises.get(key)
+      if (!pending) {
+        pending = (async () => {
+          const res = await fetch(`${getApiBase()}/api/v1/workspaces`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ rootPath: directory }),
+          })
+          if (!res.ok) await throwPiApiError(res, "resolveWorkspacePath")
+          const workspacePath = ((await res.json()) as { workspace: { path: string } }).workspace.path
+          trackPiWorkspace(workspacePath)
+          return workspacePath
+        })().catch(error => {
+          workspaceResolutionPromises.delete(key)
+          throw error
+        })
+        workspaceResolutionPromises.set(key, pending)
+      }
+      return pending
     }
   }
   // empty / global mode: still allow file tree against default workspace
   return ensureDefaultWorkspacePath()
 }
 
-export async function listWorkspaceFiles(workspacePath: string, path = "") {
-  const q = new URLSearchParams()
-  if (path && path !== "." && path !== "./") q.set("path", path)
-  const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/files?${q}`,
-  )
-  if (!res.ok) throw new Error(`listWorkspaceFiles ${res.status}`)
-  return (await res.json()) as {
-    path: string
-    entries: Array<{
-      name: string
-      path: string
-      type: string
-      size?: number
-      mtimeMs?: number
-      restricted?: boolean
-    }>
+export async function listWorkspaceFiles(
+  workspacePath: string,
+  path = "",
+  signal?: AbortSignal,
+): Promise<FileListResponseV1> {
+  return listWorkspaceFilesAttempt(workspacePath, path, signal, true)
+}
+
+async function listWorkspaceFilesAttempt(
+  workspacePath: string,
+  path: string,
+  signal: AbortSignal | undefined,
+  allowRetry: boolean,
+): Promise<FileListResponseV1> {
+  const entries: FileListResponseV1["entries"] = []
+  let cursor: string | undefined
+  let page: FileListResponseV1 | undefined
+  do {
+    const q = new URLSearchParams({ limit: "2000" })
+    if (path && path !== "." && path !== "./") q.set("path", path)
+    if (cursor) q.set("cursor", cursor)
+    const res = await fetch(
+      `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/files?${q}`,
+      { signal },
+    )
+    if (!res.ok) {
+      if (res.status === 409 && allowRetry) {
+        const problem = await res.clone().json().catch(() => ({})) as { code?: string }
+        if (problem.code === "STALE_REVISION") return listWorkspaceFilesAttempt(workspacePath, path, signal, false)
+      }
+      await throwPiApiError(res, "listWorkspaceFiles")
+    }
+    page = (await res.json()) as FileListResponseV1
+    entries.push(...page.entries)
+    cursor = page.nextCursor
+  } while (cursor && entries.length < 20_000)
+  return {
+    path: page?.path ?? path,
+    entries,
+    total: page?.total ?? entries.length,
+    truncated: Boolean(cursor),
+    nextCursor: cursor,
   }
 }
 
-export async function readWorkspaceFile(workspacePath: string, path: string) {
+export async function readWorkspaceFile(workspacePath: string, path: string, signal?: AbortSignal): Promise<FileReadResponseV1> {
   const q = new URLSearchParams({ path })
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file?${q}`,
+    { signal },
   )
-  if (!res.ok) throw new Error(`readWorkspaceFile ${res.status}`)
-  return (await res.json()) as {
-    path: string
-    content: string
-    encoding: "utf-8"
-    size: number
-    etag: string
-  }
+  if (!res.ok) await throwPiApiError(res, "readWorkspaceFile")
+  return (await res.json()) as FileReadResponseV1
 }
 
 export async function searchWorkspaceFiles(
   workspacePath: string,
   query: string,
-  opts?: { type?: "file" | "directory"; limit?: number },
+  opts?: { type?: "file" | "directory"; limit?: number; signal?: AbortSignal },
 ): Promise<string[]> {
   const q = new URLSearchParams({ q: query })
   if (opts?.type) q.set("type", opts.type)
   if (opts?.limit) q.set("limit", String(opts.limit))
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/search/files?${q}`,
+    { signal: opts?.signal },
   )
-  if (!res.ok) throw new Error(`searchWorkspaceFiles ${res.status}`)
-  const data = (await res.json()) as { paths: string[] }
+  if (!res.ok) await throwPiApiError(res, "searchWorkspaceFiles")
+  const data = (await res.json()) as FileNameSearchResponseV1
   return data.paths
 }
 
-export async function searchWorkspaceText(workspacePath: string, pattern: string, limit = 50) {
+export async function searchWorkspaceText(workspacePath: string, pattern: string, limit = 50, signal?: AbortSignal) {
   const q = new URLSearchParams({ q: pattern, limit: String(limit) })
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/search/text?${q}`,
+    { signal },
   )
-  if (!res.ok) throw new Error(`searchWorkspaceText ${res.status}`)
-  const data = (await res.json()) as {
-    matches: Array<{
-      path: { text: string }
-      lines: { text: string }
-      line_number: number
-      absolute_offset: number
-      submatches: Array<{ start: number; end: number; match: { text: string } }>
-    }>
-  }
+  if (!res.ok) await throwPiApiError(res, "searchWorkspaceText")
+  const data = (await res.json()) as FileTextSearchResponseV1
   return data.matches
 }
 
@@ -257,7 +314,8 @@ export async function writeWorkspaceFile(
   path: string,
   content: string,
   ifMatch?: string,
-) {
+  encoding: "utf-8" | "base64" = "utf-8",
+): Promise<FileReadResponseV1> {
   const q = new URLSearchParams({ path })
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file?${q}`,
@@ -267,55 +325,105 @@ export async function writeWorkspaceFile(
         "content-type": "application/json",
         ...(ifMatch ? { "if-match": ifMatch } : {}),
       },
-      body: JSON.stringify({ content, ifMatch }),
+      body: JSON.stringify({ content, ifMatch, encoding }),
     },
   )
-  if (!res.ok) throw new Error(`writeWorkspaceFile ${res.status}`)
-  return (await res.json()) as {
-    path: string
-    content: string
-    encoding: "utf-8"
-    size: number
-    etag: string
-  }
+  if (!res.ok) await throwPiApiError(res, "writeWorkspaceFile")
+  return (await res.json()) as FileReadResponseV1
 }
 
-export async function getWorkspaceGitStatus(workspacePath: string) {
+export async function createWorkspaceEntry(
+  workspacePath: string,
+  request: FileCreateRequestV1,
+): Promise<FileOperationResponseV1 | FileReadResponseV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/files`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) await throwPiApiError(res, "createWorkspaceEntry")
+  return (await res.json()) as FileOperationResponseV1 | FileReadResponseV1
+}
+
+export async function moveWorkspaceEntry(workspacePath: string, request: FileMoveRequestV1): Promise<FileOperationResponseV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) await throwPiApiError(res, "moveWorkspaceEntry")
+  return (await res.json()) as FileOperationResponseV1
+}
+
+export async function deleteWorkspaceEntry(workspacePath: string, path: string, recursive = false): Promise<void> {
+  const q = new URLSearchParams({ path, recursive: String(recursive) })
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/file?${q}`, {
+    method: "DELETE",
+  })
+  if (!res.ok) await throwPiApiError(res, "deleteWorkspaceEntry")
+}
+
+async function throwPiApiError(response: Response, operation: string): Promise<never> {
+  let problem: { code?: string; message?: string; details?: unknown } = {}
+  try {
+    problem = await response.json() as typeof problem
+  } catch {
+    /* response has no structured problem */
+  }
+  throw Object.assign(new Error(problem.message || `${operation} failed with HTTP ${response.status}`), {
+    name: "PiApiError",
+    operation,
+    status: response.status,
+    code: problem.code,
+    details: problem.details,
+  })
+}
+
+export async function getWorkspaceGitStatus(workspacePath: string, signal?: AbortSignal): Promise<GitStatusResponseV1> {
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/status`,
+    { signal },
   )
-  if (!res.ok) throw new Error(`getWorkspaceGitStatus ${res.status}`)
-  return (await res.json()) as {
-    branch: string | null
-    ahead: number
-    behind: number
-    items: Array<{ path: string; status: string; added?: number; removed?: number }>
-  }
+  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitStatus")
+  return (await res.json()) as GitStatusResponseV1
 }
 
-export async function getWorkspaceGitInfo(workspacePath: string) {
+export async function getWorkspaceGitInfo(workspacePath: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/info`,
+    { signal },
   )
-  if (!res.ok) throw new Error(`getWorkspaceGitInfo ${res.status}`)
-  return (await res.json()) as {
-    branch: string | null
-    root: boolean
-    ahead: number
-    behind: number
-  }
+  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitInfo")
+  return (await res.json()) as GitInfoResponseV1
 }
 
-export async function getWorkspaceGitDiff(workspacePath: string, mode: "git" | "branch") {
+export async function getWorkspaceGitDiff(
+  workspacePath: string,
+  mode: GitDiffModeV1,
+  signal?: AbortSignal,
+): Promise<GitDiffResponseV1> {
   const q = new URLSearchParams({ mode })
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/diff?${q}`,
+    { signal },
   )
-  if (!res.ok) throw new Error(`getWorkspaceGitDiff ${res.status}`)
-  return (await res.json()) as {
-    mode: string
-    files: Array<{ file: string; status: string; additions: number; deletions: number }>
-  }
+  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitDiff")
+  return (await res.json()) as GitDiffResponseV1
+}
+
+export async function getWorkspaceGitFileDiff(
+  workspacePath: string,
+  mode: GitDiffModeV1,
+  path: string,
+  signal?: AbortSignal,
+): Promise<GitFileDiffResponseV1> {
+  const q = new URLSearchParams({ mode, path })
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/file-diff?${q}`,
+    { signal },
+  )
+  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitFileDiff")
+  return (await res.json()) as GitFileDiffResponseV1
 }
 
 export async function setSessionModel(sessionId: string, provider: string, modelId: string) {

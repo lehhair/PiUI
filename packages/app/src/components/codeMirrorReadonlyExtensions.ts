@@ -34,6 +34,7 @@ export function createReadonlyCodeMirrorExtensions({
   showLineNumbers = true,
   maxHeight,
   editable = true,
+  readOnly = true,
   lineNumberWidth,
   extraExtensions = [],
 }: {
@@ -42,12 +43,13 @@ export function createReadonlyCodeMirrorExtensions({
   showLineNumbers?: boolean
   maxHeight?: number
   editable?: boolean
+  readOnly?: boolean
   lineNumberWidth: number
   extraExtensions?: Extension[]
 }): Extension[] {
   const extensions: Extension[] = [
     EditorView.editable.of(editable),
-    EditorState.readOnly.of(true),
+    EditorState.readOnly.of(readOnly),
     highlightActiveLineGutter(),
     drawSelection(),
     keymap.of([...searchKeymap, ...defaultKeymap]),

@@ -5,10 +5,11 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { listDirectory, getFileContent, getFileStatus, getVcsDiff } from '../api'
+import { invalidateWorkspaceFileCaches, listDirectory, getFileContent, getFileStatus, getVcsDiff, saveFile } from '../api'
 import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
+import { resolveWorkspacePath } from '../pi/sessionApi'
 
 export interface FileTreeNode extends FileNode {
   children?: FileTreeNode[]
@@ -42,6 +43,7 @@ export interface UseFileExplorerResult {
   previewError: string | null
   loadPreview: (path: string) => Promise<void>
   clearPreview: () => void
+  savePreview: (path: string, text: string, etag?: string) => Promise<FileContent>
 
   // 文件状态
   fileStatus: Map<string, FileStatusItem>
@@ -58,6 +60,18 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const changeMode = useSessionChangeScope(sessionId ?? null)
   const directoryRef = useRef(directory)
   directoryRef.current = directory
+  const canonicalWorkspaceRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    canonicalWorkspaceRef.current = null
+    if (directory) {
+      void resolveWorkspacePath(directory).then(workspacePath => {
+        if (!cancelled) canonicalWorkspaceRef.current = workspacePath
+      }).catch(() => undefined)
+    }
+    return () => { cancelled = true }
+  }, [directory])
 
   // 文件树状态
   const [tree, setTree] = useState<FileTreeNode[]>([])
@@ -74,6 +88,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const [previewError, setPreviewError] = useState<string | null>(null)
   const previewCacheRef = useRef<Map<string, FileContent>>(new Map())
   const previewLoadIdRef = useRef(0)
+  const previewPathRef = useRef<string | null>(null)
 
   // 文件状态（git）
   const [fileStatus, setFileStatus] = useState<Map<string, FileStatusItem>>(new Map())
@@ -266,6 +281,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       if (!directory) return
 
       const loadId = ++previewLoadIdRef.current
+      previewPathRef.current = path
 
       setPreviewLoading(true)
       setPreviewError(null)
@@ -302,7 +318,18 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     setPreviewContent(null)
     setPreviewError(null)
     setPreviewLoading(false)
+    previewPathRef.current = null
   }, [])
+
+  const savePreview = useCallback(async (path: string, text: string, etag?: string) => {
+    if (!directory) throw new Error('No workspace is available')
+    const current = previewCacheRef.current.get(path) ?? previewContent
+    if (!current || current.type !== 'text') throw new Error('Only text files can be edited')
+    const saved = await saveFile(path, { ...current, content: text, etag: etag ?? current.etag }, directory)
+    previewCacheRef.current.set(path, saved)
+    if (previewPathRef.current === path) setPreviewContent(saved)
+    return saved
+  }, [directory, previewContent])
 
   // 刷新
   const refresh = useCallback(async () => {
@@ -322,6 +349,48 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
 
   // 自动刷新：session idle / 窗口聚焦 / SSE 重连
   useAutoRefresh(consumerId, sessionId ?? null, softRefresh, !!directory)
+
+  useEffect(() => {
+    if (!directory) return
+    const filesChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        workspacePath: string
+        changes: Array<{ path: string; type: 'file' | 'directory' }>
+        rescan: boolean
+      }>).detail
+      if (!detail) return
+      if (!canonicalWorkspaceRef.current || detail.workspacePath !== canonicalWorkspaceRef.current) return
+      invalidateWorkspaceFileCaches(directory)
+      previewCacheRef.current.clear()
+      if (detail.rescan || detail.changes.length === 0) {
+        void softRefresh()
+        const previewPath = previewPathRef.current
+        if (previewPath) void loadPreview(previewPath)
+        return
+      }
+      const parents = new Set(detail.changes.map(change => {
+        const separator = change.path.lastIndexOf('/')
+        return separator < 0 ? '' : change.path.slice(0, separator)
+      }))
+      if (parents.has('')) void loadRoot()
+      for (const parent of parents) {
+        if (parent && expandedPaths.has(parent)) void loadChildren(parent)
+      }
+      const previewPath = previewPathRef.current
+      if (previewPath && detail.changes.some(change => change.path === previewPath)) void loadPreview(previewPath)
+    }
+    const gitChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ workspacePath: string }>).detail
+      if (!canonicalWorkspaceRef.current || detail?.workspacePath !== canonicalWorkspaceRef.current) return
+      void loadStatuses()
+    }
+    window.addEventListener('piui:workspace-files-changed', filesChanged)
+    window.addEventListener('piui:workspace-git-updated', gitChanged)
+    return () => {
+      window.removeEventListener('piui:workspace-files-changed', filesChanged)
+      window.removeEventListener('piui:workspace-git-updated', gitChanged)
+    }
+  }, [directory, expandedPaths, loadChildren, loadPreview, loadRoot, loadStatuses, softRefresh])
 
   // 初始加载
   useEffect(() => {
@@ -378,6 +447,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewError,
     loadPreview,
     clearPreview,
+    savePreview,
     fileStatus,
     refresh,
     softRefresh,
@@ -463,7 +533,9 @@ function normalizePath(p: string): string {
 
 // Helper: 从 diff 推断文件状态（优先 status 字段，回退统计推断，最后 before/after 推断）
 function getFileStatusFromDiff(diff: FileDiff): 'added' | 'modified' | 'deleted' {
-  if (diff.status) return diff.status as 'added' | 'modified' | 'deleted'
+  if (diff.status === 'added' || diff.status === 'untracked' || diff.status === 'copied') return 'added'
+  if (diff.status === 'deleted') return 'deleted'
+  if (diff.status) return 'modified'
   if (diff.deletions === 0 && diff.additions > 0) return 'added'
   if (diff.additions === 0 && diff.deletions > 0) return 'deleted'
   // 旧版 before/after 兼容

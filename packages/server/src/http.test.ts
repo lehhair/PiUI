@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
 import { createServer } from "node:http"
 import { createConnection } from "node:net"
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
@@ -28,7 +29,8 @@ async function json(port: number, method: string, urlPath: string, body?: unknow
     headers: body ? { "content-type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
-  const data = await res.json()
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : null
   return { status: res.status, data }
 }
 
@@ -220,6 +222,118 @@ describe("http phase1", () => {
     }
   })
 
+  it("supports the complete remote file lifecycle and structured search metadata", async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "piui-http-files-"))
+    const server = createAppServer({ authToken: null })
+    const live = await listen(server)
+    try {
+      const createdWorkspace = await json(live.port, "POST", "/api/v1/workspaces", { rootPath: workspace })
+      const encoded = encodeURIComponent(createdWorkspace.data.workspace.path)
+      assert.equal((await json(live.port, "POST", `/api/v1/workspaces/${encoded}/files`, {
+        path: "src", type: "directory",
+      })).status, 201)
+      const created = await json(live.port, "POST", `/api/v1/workspaces/${encoded}/files`, {
+        path: "src/a.txt", type: "file", content: "hello remote",
+      })
+      assert.equal(created.status, 201)
+      assert.equal(created.data.type, "text")
+
+      const read = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/file?path=src%2Fa.txt`)
+      assert.equal(read.data.content, "hello remote")
+      const saved = await fetch(`http://127.0.0.1:${live.port}/api/v1/workspaces/${encoded}/file?path=src%2Fa.txt`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "if-match": read.data.etag },
+        body: JSON.stringify({ content: "updated" }),
+      })
+      assert.equal(saved.status, 200)
+      const stale = await fetch(`http://127.0.0.1:${live.port}/api/v1/workspaces/${encoded}/file?path=src%2Fa.txt`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "if-match": read.data.etag },
+        body: JSON.stringify({ content: "stale" }),
+      })
+      assert.equal(stale.status, 409)
+      assert.equal(((await stale.json()) as { code: string }).code, "STALE_REVISION")
+
+      const moved = await json(live.port, "PATCH", `/api/v1/workspaces/${encoded}/file`, {
+        from: "src/a.txt", to: "src/b.txt",
+      })
+      assert.equal(moved.data.path, "src/b.txt")
+      const listing = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/files?path=src&limit=1`)
+      assert.equal(listing.data.total, 1)
+      assert.equal(listing.data.truncated, false)
+      const names = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/search/files?q=b.txt`)
+      assert.deepEqual(names.data.paths, ["src/b.txt"])
+      assert.equal(names.data.stats.truncated, false)
+      const textSearch = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/search/text?q=updated`)
+      assert.equal(textSearch.data.matches[0].path.text, "src/b.txt")
+      assert.ok(textSearch.data.stats.scannedBytes > 0)
+
+      const removed = await fetch(
+        `http://127.0.0.1:${live.port}/api/v1/workspaces/${encoded}/file?path=src%2Fb.txt`,
+        { method: "DELETE" },
+      )
+      assert.equal(removed.status, 204)
+      assert.equal((await json(live.port, "DELETE", `/api/v1/workspaces/${encoded}/file?path=src&recursive=true`)).status, 204)
+    } finally {
+      await live.close()
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it("does not auto-register an arbitrary workspace through a read route", async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "piui-http-unregistered-"))
+    writeFileSync(path.join(workspace, "secret.txt"), "secret")
+    const server = createAppServer({ authToken: null })
+    const live = await listen(server)
+    try {
+      const response = await json(
+        live.port,
+        "GET",
+        `/api/v1/workspaces/${encodeURIComponent(workspace)}/file?path=secret.txt`,
+      )
+      assert.equal(response.status, 404)
+      assert.equal(response.data.code, "WORKSPACE_NOT_FOUND")
+    } finally {
+      await live.close()
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it("serves real Git status, list diff, and lazy file patches", async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "piui-http-git-"))
+    git(workspace, "init", "-b", "main")
+    git(workspace, "config", "user.name", "PiUI Test")
+    git(workspace, "config", "user.email", "piui@example.invalid")
+    writeFileSync(path.join(workspace, "tracked.txt"), "base\n")
+    git(workspace, "add", "tracked.txt")
+    git(workspace, "commit", "-m", "initial")
+    writeFileSync(path.join(workspace, "tracked.txt"), "base\nchanged\n")
+    const server = createAppServer({ authToken: null })
+    const live = await listen(server)
+    try {
+      const registered = await json(live.port, "POST", "/api/v1/workspaces", { rootPath: workspace })
+      const encoded = encodeURIComponent(registered.data.workspace.path)
+      const info = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/git/info`)
+      assert.equal(info.data.branch, "main")
+      assert.equal(info.data.defaultBranch, "main")
+      const status = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/git/status`)
+      assert.equal(status.data.items[0].status, "modified")
+      const diff = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/git/diff?mode=git`)
+      assert.equal(diff.data.files[0].status, "modified")
+      const file = await json(
+        live.port,
+        "GET",
+        `/api/v1/workspaces/${encoded}/git/file-diff?mode=git&path=tracked.txt`,
+      )
+      assert.match(file.data.patch, /^\+changed$/m)
+      const invalid = await json(live.port, "GET", `/api/v1/workspaces/${encoded}/git/diff?mode=anything`)
+      assert.equal(invalid.status, 400)
+    } finally {
+      await live.close()
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   it("accepts a commandId from either the header or the body", async () => {
     const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
@@ -398,3 +512,7 @@ describe("http phase1", () => {
     await closing
   })
 })
+
+function git(cwd: string, ...args: string[]): void {
+  execFileSync("git", args, { cwd, stdio: "ignore", windowsHide: true })
+}

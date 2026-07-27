@@ -3,18 +3,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFileExplorer } from './useFileExplorer'
 import { changeScopeStore } from '../store/changeScopeStore'
 
-const { listDirectory, getFileContent, getFileStatus, getVcsDiff } = vi.hoisted(() => ({
+const { listDirectory, getFileContent, getFileStatus, getVcsDiff, invalidateWorkspaceFileCaches, saveFile, resolveWorkspacePath } = vi.hoisted(() => ({
   listDirectory: vi.fn(),
   getFileContent: vi.fn(),
   getFileStatus: vi.fn(),
   getVcsDiff: vi.fn(),
+  invalidateWorkspaceFileCaches: vi.fn(),
+  saveFile: vi.fn(),
+  resolveWorkspacePath: vi.fn(async (directory?: string) => directory ?? null),
 }))
+
+vi.mock('../pi/sessionApi', () => ({ resolveWorkspacePath }))
 
 vi.mock('../api', () => ({
   listDirectory,
   getFileContent,
   getFileStatus,
   getVcsDiff,
+  invalidateWorkspaceFileCaches,
+  saveFile,
 }))
 
 describe('useFileExplorer change scope', () => {
@@ -175,5 +182,29 @@ describe('useFileExplorer change scope', () => {
 
     expect(result.current.tree[0]?.absolute).toBe('/repo-b/src')
     expect(result.current.tree[0]?.children?.map(child => child.path)).toEqual(['src/b.ts'])
+  })
+
+  it('refreshes an expanded parent and open preview after a workspace event', async () => {
+    listDirectory.mockImplementation(async (parentPath: string) => parentPath === ''
+      ? [{ name: 'src', path: 'src', absolute: '/repo/src', type: 'directory', ignored: false }]
+      : [{ name: 'a.ts', path: 'src/a.ts', absolute: '/repo/src/a.ts', type: 'file', ignored: false }])
+    getFileContent.mockResolvedValueOnce({ type: 'text', content: 'before' })
+      .mockResolvedValueOnce({ type: 'text', content: 'after' })
+    const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true }))
+    await waitFor(() => expect(result.current.tree[0]?.path).toBe('src'))
+    act(() => result.current.toggleExpand('src'))
+    await waitFor(() => expect(result.current.tree[0]?.children?.[0]?.path).toBe('src/a.ts'))
+    await act(() => result.current.loadPreview('src/a.ts'))
+    expect(result.current.previewContent?.content).toBe('before')
+
+    act(() => window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', {
+      detail: {
+        workspacePath: '/repo', revision: 1,
+        changes: [{ path: 'src/a.ts', kind: 'changed', type: 'file' }], rescan: false,
+      },
+    })))
+    await waitFor(() => expect(result.current.previewContent?.content).toBe('after'))
+    expect(invalidateWorkspaceFileCaches).toHaveBeenCalledWith('/repo')
+    expect(listDirectory.mock.calls.filter(call => call[0] === 'src').length).toBeGreaterThanOrEqual(2)
   })
 })

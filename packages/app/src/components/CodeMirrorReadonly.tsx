@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { EditorState, type Extension } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, type Extension } from '@codemirror/state'
 import { openSearchPanel } from '@codemirror/search'
 import { EditorView } from '@codemirror/view'
 import type { HighlightTokens } from '../hooks/useSyntaxHighlight'
@@ -28,10 +28,13 @@ interface CodeMirrorReadonlyProps {
   targetLine?: number | null
   targetKey?: string
   targetRanges?: readonly TargetLineRange[]
+  readOnly?: boolean
+  onChange?: (value: string) => void
 }
 
 const EMPTY_TARGET_RANGES: readonly TargetLineRange[] = []
 const EMPTY_EXTENSIONS: Extension[] = []
+const externalCodeUpdate = Annotation.define<boolean>()
 
 export function CodeMirrorReadonly({
   code,
@@ -49,11 +52,23 @@ export function CodeMirrorReadonly({
   targetLine,
   targetKey,
   targetRanges = EMPTY_TARGET_RANGES,
+  readOnly = true,
+  onChange,
 }: CodeMirrorReadonlyProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const initialCodeRef = useRef(code)
+  const initialTokensRef = useRef(tokensRef.current)
+  const initialOnChangeRef = useRef(onChange)
+  const changeCompartment = useMemo(() => new Compartment(), [])
   const constrainedHeight = maxHeight !== undefined
   const lineNumberWidth = useMemo(() => getLineNumberColumnWidth(getLineCount(code)), [code])
+
+  useLayoutEffect(() => {
+    initialCodeRef.current = code
+    initialTokensRef.current = tokensRef.current
+    initialOnChangeRef.current = onChange
+  }, [code, onChange, tokensRef])
 
   const extensions = useMemo(
     () =>
@@ -63,10 +78,11 @@ export function CodeMirrorReadonly({
         showLineNumbers,
         maxHeight,
         editable: !constrainedHeight,
+        readOnly,
         lineNumberWidth,
         extraExtensions,
       }),
-    [wordWrap, lineHeight, showLineNumbers, maxHeight, constrainedHeight, lineNumberWidth, extraExtensions],
+    [wordWrap, lineHeight, showLineNumbers, maxHeight, constrainedHeight, lineNumberWidth, extraExtensions, readOnly],
   )
 
   useLayoutEffect(() => {
@@ -75,17 +91,35 @@ export function CodeMirrorReadonly({
 
     const view = new EditorView({
       parent: host,
-      state: EditorState.create({ doc: code, extensions }),
+      state: EditorState.create({
+        doc: initialCodeRef.current,
+        extensions: [extensions, changeCompartment.of(changeListener(initialOnChangeRef.current))],
+      }),
     })
 
     viewRef.current = view
-    dispatchShikiTokens(view, tokensRef.current)
+    dispatchShikiTokens(view, initialTokensRef.current)
 
     return () => {
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
-  }, [code, extensions, tokensRef])
+  }, [changeCompartment, extensions])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: changeCompartment.reconfigure(changeListener(onChange)) })
+  }, [changeCompartment, onChange])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || view.state.doc.toString() === code) return
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: code },
+      annotations: externalCodeUpdate.of(true),
+    })
+  }, [code])
 
   useEffect(() => {
     const view = viewRef.current
@@ -154,4 +188,12 @@ export function CodeMirrorReadonly({
       <div ref={hostRef} className={constrainedHeight ? '' : 'h-full min-h-0'} />
     </div>
   )
+}
+
+function changeListener(onChange: ((value: string) => void) | undefined): Extension {
+  return EditorView.updateListener.of(update => {
+    if (update.docChanged && !update.transactions.some(transaction => transaction.annotation(externalCodeUpdate))) {
+      onChange?.(update.state.doc.toString())
+    }
+  })
 }

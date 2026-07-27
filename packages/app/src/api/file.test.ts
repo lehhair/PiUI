@@ -1,5 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getFileContent, getFileStatus, listDirectory, searchFiles, searchSymbols, searchText } from './file'
+import {
+  createDirectory,
+  createFile,
+  deleteEntry,
+  getFileContent,
+  getFileStatus,
+  listDirectory,
+  moveEntry,
+  saveFile,
+  searchFiles,
+  searchSymbols,
+  searchText,
+} from './file'
 
 const mocks = vi.hoisted(() => ({
   resolveWorkspacePath: vi.fn(),
@@ -8,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   searchWorkspaceFiles: vi.fn(),
   searchWorkspaceText: vi.fn(),
   getWorkspaceGitStatus: vi.fn(),
+  writeWorkspaceFile: vi.fn(),
+  createWorkspaceEntry: vi.fn(),
+  moveWorkspaceEntry: vi.fn(),
+  deleteWorkspaceEntry: vi.fn(),
 }))
 
 vi.mock('../pi/sessionApi', () => mocks)
@@ -81,5 +97,30 @@ describe('Pi workspace file API', () => {
       { path: 'src/app.ts', status: 'modified', added: 0, removed: 0 },
     ])
     await expect(searchSymbols('App', '/workspace')).rejects.toThrow('PiUI symbol search is not supported yet')
+  })
+
+  it('exposes save, create, move, and delete as usable workspace operations', async () => {
+    mocks.writeWorkspaceFile.mockResolvedValue({
+      type: 'text', content: 'saved', encoding: 'utf-8', mimeType: 'text/plain', etag: 'next', size: 5,
+    })
+    await expect(saveFile('src/a.txt', {
+      type: 'text', content: 'saved', encoding: 'utf-8', etag: 'old',
+    }, '/workspace')).resolves.toMatchObject({ content: 'saved', etag: 'next' })
+    expect(mocks.writeWorkspaceFile).toHaveBeenCalledWith('C:/workspace', 'src/a.txt', 'saved', 'old', 'utf-8')
+
+    await createFile('src/new.ts', '/workspace', 'export {}')
+    await createDirectory('src/nested', '/workspace')
+    await moveEntry('src/new.ts', 'src/nested/new.ts', '/workspace')
+    await deleteEntry('src/nested', '/workspace', true)
+    expect(mocks.createWorkspaceEntry).toHaveBeenNthCalledWith(1, 'C:/workspace', {
+      path: 'src/new.ts', type: 'file', content: 'export {}',
+    })
+    expect(mocks.createWorkspaceEntry).toHaveBeenNthCalledWith(2, 'C:/workspace', {
+      path: 'src/nested', type: 'directory',
+    })
+    expect(mocks.moveWorkspaceEntry).toHaveBeenCalledWith('C:/workspace', {
+      from: 'src/new.ts', to: 'src/nested/new.ts',
+    })
+    expect(mocks.deleteWorkspaceEntry).toHaveBeenCalledWith('C:/workspace', 'src/nested', true)
   })
 })

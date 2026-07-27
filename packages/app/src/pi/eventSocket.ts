@@ -16,6 +16,7 @@ import {
   fetchExtensionUiSnapshot,
   fetchSnapshot,
   setExtensionEditorState,
+  resetWorkspaceResolutionCache,
 } from "./sessionApi"
 import { applySnapshotToUi } from "./applySnapshot"
 import {
@@ -28,6 +29,8 @@ import { sessionProjectionStore } from "./sessionProjectionStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { configureSessionEditorDraftSync, setSessionEditorDraft } from "./sessionEditorDraftStore"
 import { notificationStore } from "../store/notificationStore"
+import { invalidateWorkspaceFileCaches } from "../api/file"
+import { notifyReconnected, notifySessionIdle } from "../hooks/useGlobalEvents"
 
 type Status = "idle" | "connecting" | "open" | "closed"
 
@@ -53,6 +56,8 @@ export class PiEventSocket {
   private status: Status = "idle"
   private statusListeners = new Set<(status: Status) => void>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private lastPongAt = 0
   private intentionalClose = false
   private legacyEpoch: string | null = null
   private legacySequence = 0
@@ -61,7 +66,9 @@ export class PiEventSocket {
   private cursorsV2: EventCursorMapV2 = {}
   private blockedStreamsV2 = new Set<string>()
   private resyncingStreamsV2 = new Map<string, Promise<void>>()
+  private replayRequestedStreamsV2 = new Set<string>()
   private unsubscribeSessionIndex: (() => void) | null = null
+  private openedBefore = false
 
   getStatus() {
     return this.status
@@ -96,9 +103,18 @@ export class PiEventSocket {
       this.ws = ws
       ws.onopen = () => {
         this.setStatus("open")
+        this.lastPongAt = Date.now()
+        this.startHeartbeat()
+        if (this.openedBefore) {
+          resetWorkspaceResolutionCache()
+          notifyReconnected()
+        }
         this.sendV2Subscription()
+        this.openedBefore = true
       }
       ws.onclose = () => {
+        this.stopHeartbeat()
+        this.replayRequestedStreamsV2.clear()
         this.ws = null
         this.setStatus("closed")
         if (!this.intentionalClose) this.scheduleReconnect()
@@ -121,6 +137,10 @@ export class PiEventSocket {
         cursor?: { epoch: string; sequence: number }
         streams?: Extract<EventServerMessageV2, { type: "resync_required" }>["streams"]
       }
+      if (message.type === "pong") {
+        this.lastPongAt = Date.now()
+        return
+      }
       if (message.channel === "event" && message.event?.protocolVersion === 2) {
         this.handleEventV2(message.event)
         return
@@ -130,9 +150,9 @@ export class PiEventSocket {
         return
       }
       if (message.channel === "control" && message.type === "resync_required" && message.streams) {
-        for (const [key, state] of Object.entries(message.streams)) {
-          if (state) void this.resyncStreamV2(key, state.cursor)
-        }
+        void Promise.all(Object.entries(message.streams).map(([key, state]) =>
+          state ? this.resyncStreamV2(key, state.cursor) : Promise.resolve(),
+        )).then(() => this.sendV2Subscription()).catch(() => this.ws?.close())
         return
       }
       if (message.channel === "control" && message.type === "resync_required") {
@@ -150,20 +170,23 @@ export class PiEventSocket {
 
   private handleEventV2(event: AnyEventEnvelopeV2): void {
     const key = eventStreamKeyV2(event.stream)
-    if (this.blockedStreamsV2.has(key)) return
     const cursor = this.cursorsV2[key]
+    if (this.blockedStreamsV2.has(key)) return
     if (!cursor || cursor.epoch !== event.cursor.epoch || event.cursor.sequence > cursor.sequence + 1) {
-      this.blockedStreamsV2.add(key)
-      this.sendV2Subscription([event.stream])
+      if (this.replayRequestedStreamsV2.has(key)) return
+      this.replayRequestedStreamsV2.add(key)
+      this.sendV2Subscription()
       return
     }
     if (event.cursor.sequence <= cursor.sequence) return
+    this.replayRequestedStreamsV2.delete(key)
 
     if (event.type === "session.snapshot.updated") {
       const snapshot = event.payload.snapshot
       if (snapshot.session.id !== event.payload.sessionId || snapshot.session.id !== event.stream.id) return
       trackPiSession(snapshot.session.id, snapshot.session.directory)
       applySnapshotToUi(snapshot, { activate: false })
+      if (snapshot.session.state === "idle") notifySessionIdle(snapshot.session.id)
     } else if (event.type === "session.timeline.delta") {
       if (event.payload.sessionId !== event.stream.id) return
       const snapshot = sessionProjectionStore.buildTimelineDelta(
@@ -186,6 +209,13 @@ export class PiEventSocket {
       return
     } else if (event.type === "workspace.sessions.updated") {
       window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
+    } else if (event.type === "workspace.files.changed") {
+      if (event.payload.workspacePath !== event.stream.id) return
+      invalidateWorkspaceFileCaches(event.payload.workspacePath)
+      window.dispatchEvent(new CustomEvent("piui:workspace-files-changed", { detail: event.payload }))
+    } else if (event.type === "workspace.git.updated") {
+      if (event.payload.workspacePath !== event.stream.id) return
+      window.dispatchEvent(new CustomEvent("piui:workspace-git-updated", { detail: event.payload }))
     } else if (event.type === "extension.ui.requested") {
       extensionUiStore.requestOpened(event.payload)
     } else if (event.type === "extension.ui.settled") {
@@ -259,19 +289,18 @@ export class PiEventSocket {
 
   private currentStreamsV2(): EventStreamRefV2[] {
     const ids = new Set([...listTrackedPiSessions(), ...sessionProjectionStore.getSessionIds()])
-    return [
-      { kind: "server", id: "server" },
-      ...listTrackedPiWorkspacePaths().map(path => ({ kind: "workspace" as const, id: path })),
-      ...[...ids].map(id => ({ kind: "session" as const, id })),
-    ]
+    const workspaces = listTrackedPiWorkspacePaths().map(path => ({ kind: "workspace" as const, id: path }))
+    const sessionLimit = Math.max(0, 255 - workspaces.length)
+    const sessions = [...ids].slice(-sessionLimit).map(id => ({ kind: "session" as const, id }))
+    return [{ kind: "server", id: "server" }, ...workspaces, ...sessions]
   }
 
-  private sendV2Subscription(streams = this.currentStreamsV2()): void {
+  private sendV2Subscription(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.protocol !== EVENT_WS_SUBPROTOCOL_V2) return
     this.ws.send(JSON.stringify({
       type: "subscribe",
       protocolVersion: 2,
-      streams,
+      streams: this.currentStreamsV2(),
       cursors: this.cursorsV2,
     }))
   }
@@ -294,10 +323,19 @@ export class PiEventSocket {
         extensionUiStore.replace(extensionUi)
       } else if (stream.kind === "server" || stream.kind === "workspace") {
         window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
+        if (stream.kind === "workspace") {
+          invalidateWorkspaceFileCaches(stream.id)
+          window.dispatchEvent(new CustomEvent("piui:workspace-files-changed", {
+            detail: { workspacePath: stream.id, revision: cursor.sequence, changes: [], rescan: true },
+          }))
+          window.dispatchEvent(new CustomEvent("piui:workspace-git-updated", {
+            detail: { workspacePath: stream.id, revision: cursor.sequence },
+          }))
+        }
       }
       this.cursorsV2[streamKey] = cursor
       this.blockedStreamsV2.delete(streamKey)
-      this.sendV2Subscription([stream])
+      this.replayRequestedStreamsV2.delete(streamKey)
     })().catch(() => {
       this.ws?.close()
     }).finally(() => {
@@ -326,10 +364,27 @@ export class PiEventSocket {
     if (this.reconnectTimer) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      void import("./serverMode").then(({ isPiServerReachable }) => {
-        if (isPiServerReachable()) this.connect()
-      })
+      this.connect()
     }, 1500)
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      const ws = this.ws
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      if (Date.now() - this.lastPongAt > 45_000) {
+        ws.close()
+        return
+      }
+      ws.send(JSON.stringify({ type: "ping", protocolVersion: 2 }))
+    }, 15_000)
+  }
+
+  private stopHeartbeat(): void {
+    if (!this.heartbeatTimer) return
+    clearInterval(this.heartbeatTimer)
+    this.heartbeatTimer = null
   }
 
   close() {
@@ -341,6 +396,7 @@ export class PiEventSocket {
     this.unsubscribeSessionIndex?.()
     this.unsubscribeSessionIndex = null
     configureSessionEditorDraftSync(undefined)
+    this.stopHeartbeat()
     this.ws?.close()
     this.ws = null
     this.setStatus("closed")
