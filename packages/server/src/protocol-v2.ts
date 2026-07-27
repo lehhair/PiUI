@@ -28,7 +28,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r11",
+    revision: "pi-0.81.1-r12",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -157,9 +157,52 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         refresh: nativePi,
         sessionScopedRuntime: nativePi,
       }),
-      "files.read": capability(true, "workspace"),
-      "files.write": capability(true, "workspace"),
-      "git.diff": capability(true, "workspace", undefined, { scopes: "git,branch" }),
+      "workspace.manage": capability(true, "server", undefined, {
+        canonicalPathIdentity: true,
+        explicitRegistration: true,
+      }),
+      "files.read": capability(true, "workspace", undefined, {
+        maxTextBytes: 2 * 1024 * 1024,
+        maxBinaryBytes: 8 * 1024 * 1024,
+        maxDirectoryPageSize: 2000,
+      }, {
+        list: { support: "rpc" },
+        read: { support: "rpc" },
+        readBinary: { support: "rpc" },
+      }),
+      "files.write": capability(true, "workspace", undefined, {
+        optimisticConcurrency: true,
+        atomicReplace: true,
+      }, {
+        write: { support: "rpc" },
+        create: { support: "rpc" },
+        move: { support: "rpc" },
+        delete: { support: "rpc" },
+      }),
+      "files.search": capability(true, "workspace", undefined, {
+        maxResults: 200,
+        maxVisitedEntries: 50_000,
+        maxScannedBytes: 32 * 1024 * 1024,
+        cancellable: true,
+      }, {
+        names: { support: "rpc" },
+        text: { support: "rpc" },
+      }),
+      "git.status": capability(true, "workspace", undefined, {
+        renameAware: true,
+        indexAndWorktree: true,
+      }),
+      "git.diff": capability(true, "workspace", undefined, {
+        scopes: "git,branch,staged,unstaged",
+        lazyFilePatch: true,
+        maxPatchBytes: 4 * 1024 * 1024,
+      }),
+      "events.workspace": capability(true, "workspace", undefined, {
+        batched: true,
+        maxChangesPerEvent: 512,
+        maxWatchedWorkspaces: 32,
+        fileAndGitInvalidation: true,
+      }),
     },
   }
 }

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FileExplorer } from './FileExplorer'
 import type { DesktopPlatform } from '../utils/tauri'
+import { FullscreenProvider } from '../contexts'
 
 const {
   useFileExplorerMock,
@@ -43,6 +44,14 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 
 vi.mock('../lib/internalDragCore', () => ({
   startInternalDrag: vi.fn(),
+  subscribeInternalDrag: () => () => {},
+  subscribeInternalDrop: () => () => {},
+  getInternalDragSnapshot: () => ({ isDragging: false, item: null, pointer: null }),
+}))
+
+vi.mock('./CodePreview', () => ({
+  CodePreview: ({ code, readOnly, onChange }: { code: string; readOnly?: boolean; onChange?: (value: string) => void }) =>
+    <textarea aria-label="code editor" value={code} readOnly={readOnly} onChange={event => onChange?.(event.target.value)} />,
 }))
 
 describe('FileExplorer', () => {
@@ -71,6 +80,7 @@ describe('FileExplorer', () => {
       previewError: null,
       loadPreview: vi.fn(),
       clearPreview: vi.fn(),
+      savePreview: vi.fn(),
       fileStatus: new Map(),
     })
   })
@@ -134,5 +144,29 @@ describe('FileExplorer', () => {
     await waitFor(() => {
       expect(revealItemInDirMock).toHaveBeenCalledWith('C:/repo/src/app.ts')
     })
+  })
+
+  it('edits and saves text with the loaded ETag', async () => {
+    const savePreview = vi.fn().mockResolvedValue({ type: 'text', content: 'updated', encoding: 'utf-8', etag: 'next' })
+    useFileExplorerMock.mockReturnValue({
+      ...useFileExplorerMock(),
+      previewContent: { type: 'text', content: 'base', encoding: 'utf-8', etag: 'base-etag' },
+      savePreview,
+    })
+    render(
+      <FullscreenProvider>
+        <FileExplorer
+          panelTabId="files-1"
+          directory="C:/repo"
+          previewFile={{ path: 'src/app.ts', name: 'app.ts' }}
+          previewFiles={[{ path: 'src/app.ts', name: 'app.ts' }]}
+          position="right"
+        />
+      </FullscreenProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'code editor' }), { target: { value: 'updated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(savePreview).toHaveBeenCalledWith('src/app.ts', 'updated', 'base-etag'))
   })
 })

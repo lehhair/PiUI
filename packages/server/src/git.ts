@@ -1,205 +1,480 @@
-/**
- * Safe git helpers — spawn only, no shell string concat.
- */
 import { spawn } from "node:child_process"
+import path from "node:path"
 import type {
   GitDiffItemV1,
+  GitDiffModeV1,
   GitDiffResponseV1,
+  GitFileDiffResponseV1,
+  GitFileStatusV1,
   GitInfoResponseV1,
   GitStatusItemV1,
   GitStatusResponseV1,
 } from "@piui/protocol"
+import { normalizeRelativePath } from "./path-safety.ts"
 
 const TIMEOUT_MS = 15_000
-const MAX_OUT = 2 * 1024 * 1024
+const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+const CACHE_MS = 250
+const MAX_CONCURRENT_GIT = 4
+const cache = new Map<string, { expiresAt: number; value: Promise<unknown> }>()
+const completedCache = new Map<string, { expiresAt: number; value: unknown }>()
+let activeGitCommands = 0
+const gitWaiters: Array<() => void> = []
 
-function runGit(cwd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
+interface GitResult {
+  code: number
+  stdout: Buffer
+  stderr: Buffer
+}
+
+function runGit(
+  cwd: string,
+  args: string[],
+  options: { signal?: AbortSignal; maxOutputBytes?: number } = {},
+): Promise<GitResult> {
+  return withGitSlot(options.signal, () => new Promise((resolve, reject) => {
+    const child = spawn("git", [
+      "--literal-pathspecs",
+      "-c", "core.fsmonitor=false",
+      "-c", "diff.external=",
+      "-c", "diff.trustExitCode=false",
+      ...args,
+    ], {
       cwd,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
+      env: safeGitEnv(),
     })
-    let stdout = ""
-    let stderr = ""
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    let stdoutBytes = 0
+    let stderrBytes = 0
     let settled = false
+    const maxOutput = options.maxOutputBytes ?? MAX_OUTPUT_BYTES
+    const finishError = (error: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      options.signal?.removeEventListener("abort", onAbort)
+      terminate(child)
+      reject(error)
+    }
+    const onAbort = () => finishError(Object.assign(new Error("git request cancelled"), { code: "REQUEST_ABORTED" }))
     const timer = setTimeout(() => {
-      child.kill("SIGTERM")
-      if (!settled) {
-        settled = true
-        reject(new Error("git timeout"))
-      }
+      finishError(Object.assign(new Error("git command timed out"), { code: "GIT_TIMEOUT" }))
     }, TIMEOUT_MS)
+    timer.unref()
+    options.signal?.addEventListener("abort", onAbort, { once: true })
+    if (options.signal?.aborted) return onAbort()
 
-    child.stdout.on("data", (c: Buffer) => {
-      if (stdout.length < MAX_OUT) stdout += c.toString("utf8")
-    })
-    child.stderr.on("data", (c: Buffer) => {
-      if (stderr.length < MAX_OUT) stderr += c.toString("utf8")
-    })
-    child.on("error", err => {
-      clearTimeout(timer)
-      if (!settled) {
-        settled = true
-        reject(err)
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.length
+      if (stdoutBytes > maxOutput) {
+        finishError(Object.assign(new Error("git output exceeded the remote API limit"), { code: "GIT_OUTPUT_LIMIT" }))
+        return
       }
+      stdout.push(chunk)
     })
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrBytes += chunk.length
+      if (stderrBytes <= maxOutput) stderr.push(chunk)
+    })
+    child.on("error", finishError)
     child.on("close", code => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      if (!settled) {
-        settled = true
-        resolve({ code: code ?? 1, stdout, stderr })
-      }
+      options.signal?.removeEventListener("abort", onAbort)
+      resolve({ code: code ?? 1, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) })
     })
-  })
+  }))
 }
 
-export async function isGitRepo(cwd: string): Promise<boolean> {
-  try {
-    const r = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"])
-    return r.code === 0 && r.stdout.trim() === "true"
-  } catch {
-    return false
-  }
+export async function isGitRepo(cwd: string, signal?: AbortSignal): Promise<boolean> {
+  const result = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"], { signal })
+  return result.code === 0 && text(result.stdout).trim() === "true"
 }
 
-export async function getGitInfo(cwd: string): Promise<GitInfoResponseV1> {
-  if (!(await isGitRepo(cwd))) {
-    return { branch: null, root: false, ahead: 0, behind: 0 }
-  }
-  const branchR = await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
-  const branch = branchR.code === 0 ? branchR.stdout.trim() || null : null
+export function getGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
+  return cachedResult(cwd, "info", signal, () => loadGitInfo(cwd, signal))
+}
+
+async function loadGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
+  if (!(await isGitRepo(cwd, signal))) return emptyInfo()
+  const [rootResult, branchResult, oidResult, upstreamResult, originHeadResult] = await Promise.all([
+    runGit(cwd, ["rev-parse", "--show-toplevel"], { signal }),
+    runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], { signal }),
+    runGit(cwd, ["rev-parse", "--verify", "HEAD"], { signal }),
+    runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { signal }),
+    runGit(cwd, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], { signal }),
+  ])
+  const symbolicBranch = successText(branchResult)
+  const headOid = successText(oidResult)
+  const upstream = successText(upstreamResult)
+  const detached = !symbolicBranch && Boolean(headOid)
+  const unborn = Boolean(symbolicBranch) && !headOid
+  const branch = symbolicBranch || (detached ? null : null)
+  let defaultBranch = successText(originHeadResult)?.replace(/^origin\//, "")
+  if (!defaultBranch) defaultBranch = await localDefaultBranch(cwd, signal)
+
   let ahead = 0
   let behind = 0
-  try {
-    const ab = await runGit(cwd, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-    if (ab.code === 0) {
-      const parts = ab.stdout.trim().split(/\s+/)
-      behind = Number(parts[0] || 0) || 0
-      ahead = Number(parts[1] || 0) || 0
+  if (upstream && headOid) {
+    const counts = await runGit(cwd, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`], { signal })
+    if (counts.code === 0) {
+      const [behindText, aheadText] = text(counts.stdout).trim().split(/\s+/)
+      behind = Number(behindText) || 0
+      ahead = Number(aheadText) || 0
     }
-  } catch {
-    /* no upstream */
   }
-  return { branch, root: true, ahead, behind }
+  return {
+    branch,
+    root: true,
+    rootPath: successText(rootResult),
+    headOid: headOid || undefined,
+    detached,
+    unborn,
+    upstream: upstream || undefined,
+    defaultBranch: defaultBranch || undefined,
+    ahead,
+    behind,
+  }
 }
 
-/** Parse porcelain v1 short status lines. */
 export function parsePorcelainStatus(stdout: string): GitStatusItemV1[] {
+  return stdout.includes("\0") ? parsePorcelainStatusZ(stdout) : parsePorcelainLines(stdout)
+}
+
+export function parsePorcelainStatusZ(stdout: string): GitStatusItemV1[] {
+  const records = stdout.split("\0")
   const items: GitStatusItemV1[] = []
-  for (const line of stdout.split("\n")) {
-    if (line.length < 4) continue
-    const xy = line.slice(0, 2)
-    let filePath = line.slice(3)
-    // rename: "R  old -> new"
-    if (filePath.includes(" -> ")) {
-      filePath = filePath.split(" -> ").pop()!.trim()
-    }
-    filePath = filePath.replace(/\\/g, "/").replace(/"/g, "")
-    if (!filePath) continue
-    items.push({ path: filePath, status: mapXy(xy) })
+  for (let index = 0; index < records.length;) {
+    const record = records[index++]
+    if (!record || record.length < 3) continue
+    const xy = record.slice(0, 2)
+    const path = normalizeGitPath(record.slice(3))
+    let oldPath: string | undefined
+    if (xy.includes("R") || xy.includes("C")) oldPath = normalizeGitPath(records[index++] ?? "")
+    if (path) items.push(statusItem(path, xy, oldPath))
   }
   return items
 }
 
-function mapXy(xy: string): GitStatusItemV1["status"] {
-  const x = xy[0] ?? " "
-  const y = xy[1] ?? " "
-  if (x === "?" || y === "?") return "added"
-  if (x === "A" || y === "A") return "added"
-  if (x === "D" || y === "D") return "deleted"
-  if (x === "M" || y === "M" || x === "R" || y === "R" || x === "C" || y === "C") return "modified"
-  if (x === "U" || y === "U") return "modified"
-  return "unknown"
+function parsePorcelainLines(stdout: string): GitStatusItemV1[] {
+  return stdout.split(/\r?\n/).flatMap(line => {
+    if (line.length < 4) return []
+    const xy = line.slice(0, 2)
+    const raw = line.slice(3)
+    const split = (xy.includes("R") || xy.includes("C")) ? raw.lastIndexOf(" -> ") : -1
+    const oldPath = split >= 0 ? normalizeGitPath(raw.slice(0, split)) : undefined
+    const filePath = normalizeGitPath(split >= 0 ? raw.slice(split + 4) : raw)
+    return filePath ? [statusItem(filePath, xy, oldPath)] : []
+  })
 }
 
-export async function getGitStatus(cwd: string): Promise<GitStatusResponseV1> {
-  const info = await getGitInfo(cwd)
-  if (!info.root) {
-    return { branch: null, ahead: 0, behind: 0, items: [] }
-  }
-  const r = await runGit(cwd, ["status", "--porcelain", "--untracked-files=all", "-z"])
-  if (r.code !== 0) {
-    // fallback non-null
-    const r2 = await runGit(cwd, ["status", "--porcelain", "--untracked-files=all"])
+export function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStatusResponseV1> {
+  const load = async () => {
+    const info = await getGitInfo(cwd, signal)
+    if (!info.root) return { branch: null, ahead: 0, behind: 0, items: [] }
+    const result = await runGit(cwd, ["status", "--porcelain=v1", "--untracked-files=all", "-z"], { signal })
+    assertGitSuccess(result, "git status")
     return {
       branch: info.branch,
       ahead: info.ahead,
       behind: info.behind,
-      items: parsePorcelainStatus(r2.stdout),
+      items: parsePorcelainStatusZ(text(result.stdout)),
     }
   }
-  // -z uses NUL separators; convert to lines for parser
-  const lines = r.stdout
-    .split("\0")
-    .filter(Boolean)
-    .map(entry => {
-      // entry like " M path" or "R  old" then next is new path for rename - simplified
-      if (entry.length >= 3) return entry.slice(0, 2) + " " + entry.slice(3)
-      return entry
+  return cachedResult(cwd, "status", signal, load)
+}
+
+export function getGitDiff(cwd: string, mode: GitDiffModeV1, signal?: AbortSignal): Promise<GitDiffResponseV1> {
+  const load = async () => {
+    const info = await getGitInfo(cwd, signal)
+    if (!info.root) return { mode, files: [] }
+    const comparison = await comparisonForMode(cwd, mode, info, signal)
+    const common = ["--no-ext-diff", "--no-textconv", ...comparison.args, "--"]
+    const [namesResult, numbersResult] = await Promise.all([
+      runGit(cwd, ["diff", "--name-status", "-z", "-M", ...common], { signal }),
+      runGit(cwd, ["diff", "--numstat", "-z", "-M", ...common], { signal }),
+    ])
+    assertGitSuccess(namesResult, "git diff --name-status")
+    assertGitSuccess(numbersResult, "git diff --numstat")
+    const files = combineDiff(text(namesResult.stdout), text(numbersResult.stdout))
+    if (mode === "git") {
+      const status = await getGitStatus(cwd, signal)
+      for (const item of status.items) {
+        if (item.status === "untracked" && !files.some(file => file.file === item.path)) {
+          files.push({ file: item.path, status: "untracked", additions: 0, deletions: 0, binary: false })
+        }
+      }
+    }
+    files.sort((a, b) => a.file.localeCompare(b.file))
+    return { mode, baseRef: comparison.baseRef, baseCommit: comparison.baseCommit, files }
+  }
+  return cachedResult(cwd, `diff:${mode}`, signal, load)
+}
+
+export async function getGitFileDiff(
+  cwd: string,
+  mode: GitDiffModeV1,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<GitFileDiffResponseV1> {
+  const relative = normalizeRelativePath(filePath)
+  if (!relative) throw Object.assign(new Error("file path required"), { code: "INVALID_REQUEST" })
+  const diff = await getGitDiff(cwd, mode, signal)
+  const item = diff.files.find(candidate => candidate.file === relative)
+  if (!item) throw Object.assign(new Error("file is not part of this diff"), { code: "NOT_FOUND" })
+  let result: GitResult
+  if (item.status === "untracked") {
+    result = await runGit(cwd, ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--", "/dev/null", relative], {
+      signal,
+      maxOutputBytes: MAX_OUTPUT_BYTES,
     })
-    .join("\n")
-  return {
-    branch: info.branch,
-    ahead: info.ahead,
-    behind: info.behind,
-    items: parsePorcelainStatus(lines),
-  }
-}
-
-export async function getGitDiff(cwd: string, mode: "git" | "branch"): Promise<GitDiffResponseV1> {
-  if (!(await isGitRepo(cwd))) return { mode, files: [] }
-
-  const args =
-    mode === "branch"
-      ? ["diff", "--numstat", "--no-ext-diff", "origin/HEAD...HEAD"]
-      : ["diff", "--numstat", "--no-ext-diff", "HEAD"]
-
-  // working tree vs index+HEAD for "git" mode: include unstaged + staged
-  const files: GitDiffItemV1[] = []
-  if (mode === "git") {
-    const unstaged = await runGit(cwd, ["diff", "--numstat", "--no-ext-diff"])
-    const staged = await runGit(cwd, ["diff", "--numstat", "--no-ext-diff", "--cached"])
-    const untracked = await runGit(cwd, ["ls-files", "--others", "--exclude-standard"])
-    mergeNumstat(files, unstaged.stdout)
-    mergeNumstat(files, staged.stdout)
-    for (const p of untracked.stdout.split("\n").map(s => s.trim()).filter(Boolean)) {
-      const path = p.replace(/\\/g, "/")
-      if (!files.some(f => f.file === path)) {
-        files.push({ file: path, status: "added", additions: 0, deletions: 0 })
-      }
-    }
+    if (result.code !== 0 && result.code !== 1) assertGitSuccess(result, "git diff --no-index")
   } else {
-    let r = await runGit(cwd, args)
-    if (r.code !== 0) {
-      // try main/master
-      r = await runGit(cwd, ["diff", "--numstat", "--no-ext-diff", "main...HEAD"])
-      if (r.code !== 0) {
-        r = await runGit(cwd, ["diff", "--numstat", "--no-ext-diff", "master...HEAD"])
-      }
-    }
-    mergeNumstat(files, r.stdout)
+    const info = await getGitInfo(cwd, signal)
+    const comparison = await comparisonForMode(cwd, mode, info, signal)
+    const paths = item.oldPath ? [item.oldPath, item.file] : [item.file]
+    result = await runGit(cwd, [
+      "diff", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "-M", ...comparison.args, "--", ...paths,
+    ], { signal, maxOutputBytes: MAX_OUTPUT_BYTES })
+    assertGitSuccess(result, "git file diff")
   }
-
-  return { mode, files }
+  const patch = text(result.stdout)
+  return { ...item, mode, patch, truncated: false, binary: item.binary || /Binary files .* differ/.test(patch) }
 }
 
-function mergeNumstat(files: GitDiffItemV1[], stdout: string) {
-  for (const line of stdout.split("\n")) {
-    const m = line.trim().match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
-    if (!m) continue
-    const additions = m[1] === "-" ? 0 : Number(m[1])
-    const deletions = m[2] === "-" ? 0 : Number(m[2])
-    const file = m[3].replace(/\\/g, "/")
-    const existing = files.find(f => f.file === file)
-    if (existing) {
-      existing.additions += additions
-      existing.deletions += deletions
+export function invalidateGitCache(cwd?: string): void {
+  if (!cwd) {
+    cache.clear()
+    completedCache.clear()
+    return
+  }
+  const prefix = `${path.resolve(cwd)}\0`
+  for (const key of cache.keys()) if (key.startsWith(prefix)) cache.delete(key)
+  for (const key of completedCache.keys()) if (key.startsWith(prefix)) completedCache.delete(key)
+}
+
+function combineDiff(nameStatus: string, numstat: string): GitDiffItemV1[] {
+  const numbers = parseNumstatZ(numstat)
+  return parseNameStatusZ(nameStatus).map(item => {
+    const number = numbers.get(item.file)
+    return {
+      ...item,
+      additions: number?.additions ?? 0,
+      deletions: number?.deletions ?? 0,
+      binary: number?.binary ?? false,
+    }
+  })
+}
+
+function parseNameStatusZ(stdout: string): Array<Pick<GitDiffItemV1, "file" | "oldPath" | "status">> {
+  const tokens = stdout.split("\0")
+  const items: Array<Pick<GitDiffItemV1, "file" | "oldPath" | "status">> = []
+  for (let index = 0; index < tokens.length;) {
+    const code = tokens[index++]
+    if (!code) continue
+    const kind = code[0] ?? "M"
+    if (kind === "R" || kind === "C") {
+      const oldPath = normalizeGitPath(tokens[index++] ?? "")
+      const file = normalizeGitPath(tokens[index++] ?? "")
+      if (file) items.push({ file, oldPath: oldPath || undefined, status: kind === "R" ? "renamed" : "copied" })
       continue
     }
-    let status: GitDiffItemV1["status"] = "modified"
-    if (additions > 0 && deletions === 0) status = "added"
-    if (additions === 0 && deletions > 0) status = "deleted"
-    files.push({ file, status, additions, deletions })
+    const file = normalizeGitPath(tokens[index++] ?? "")
+    if (file) items.push({ file, status: diffStatus(kind) })
+  }
+  return items
+}
+
+export function parseNumstatZ(stdout: string): Map<string, { additions: number; deletions: number; binary: boolean }> {
+  const tokens = stdout.split("\0")
+  const result = new Map<string, { additions: number; deletions: number; binary: boolean }>()
+  for (let index = 0; index < tokens.length;) {
+    const token = tokens[index++]
+    if (!token) continue
+    const firstTab = token.indexOf("\t")
+    const secondTab = firstTab < 0 ? -1 : token.indexOf("\t", firstTab + 1)
+    if (firstTab < 0 || secondTab < 0) continue
+    const added = token.slice(0, firstTab)
+    const deleted = token.slice(firstTab + 1, secondTab)
+    const filePart = token.slice(secondTab + 1)
+    let file = filePart
+    if (!filePart) {
+      index++ // old path for rename/copy
+      file = tokens[index++] ?? ""
+    }
+    file = normalizeGitPath(file)
+    if (!file) continue
+    result.set(file, {
+      additions: added === "-" ? 0 : Number(added) || 0,
+      deletions: deleted === "-" ? 0 : Number(deleted) || 0,
+      binary: added === "-" || deleted === "-",
+    })
+  }
+  return result
+}
+
+async function comparisonForMode(
+  cwd: string,
+  mode: GitDiffModeV1,
+  info: GitInfoResponseV1,
+  signal?: AbortSignal,
+): Promise<{ args: string[]; baseRef?: string; baseCommit?: string }> {
+  if (mode === "staged") return { args: ["--cached"] }
+  if (mode === "unstaged") return { args: [] }
+  if (mode === "git") return info.unborn ? { args: ["--cached"] } : { args: ["HEAD"], baseRef: "HEAD", baseCommit: info.headOid }
+  let baseRef: string | undefined
+  if (info.defaultBranch) {
+    for (const candidate of [`refs/remotes/origin/${info.defaultBranch}`, `refs/heads/${info.defaultBranch}`]) {
+      const exists = await runGit(cwd, ["show-ref", "--verify", "--quiet", candidate], { signal })
+      if (exists.code === 0) {
+        baseRef = candidate
+        break
+      }
+    }
+  }
+  baseRef ??= info.upstream
+  if (!baseRef) throw Object.assign(new Error("no upstream or default branch is available for comparison"), { code: "GIT_BASE_NOT_FOUND" })
+  const mergeBase = await runGit(cwd, ["merge-base", baseRef, "HEAD"], { signal })
+  assertGitSuccess(mergeBase, "git merge-base")
+  const baseCommit = successText(mergeBase)
+  return { args: [`${baseRef}...HEAD`], baseRef, baseCommit: baseCommit || undefined }
+}
+
+function statusItem(filePath: string, xy: string, oldPath?: string): GitStatusItemV1 {
+  const indexStatus = xy[0] ?? " "
+  const worktreeStatus = xy[1] ?? " "
+  return {
+    path: filePath,
+    oldPath,
+    status: statusFromXy(xy),
+    indexStatus,
+    worktreeStatus,
+    staged: indexStatus !== " " && indexStatus !== "?",
+    unstaged: worktreeStatus !== " ",
+  }
+}
+
+function statusFromXy(xy: string): GitFileStatusV1 {
+  if (xy === "??") return "untracked"
+  if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(xy)) return "conflicted"
+  if (xy.includes("R")) return "renamed"
+  if (xy.includes("C")) return "copied"
+  if (xy.includes("A")) return "added"
+  if (xy.includes("D")) return "deleted"
+  if (xy.includes("M") || xy.includes("T")) return "modified"
+  return "unknown"
+}
+
+function diffStatus(code: string): GitDiffItemV1["status"] {
+  if (code === "A") return "added"
+  if (code === "D") return "deleted"
+  return "modified"
+}
+
+function normalizeGitPath(value: string): string {
+  return value.replace(/\\/g, "/")
+}
+
+function safeGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (key === "GIT_DIR" || key === "GIT_WORK_TREE" || key === "GIT_INDEX_FILE" || key.startsWith("GIT_CONFIG_")) {
+      delete env[key]
+    }
+  }
+  env.GIT_OPTIONAL_LOCKS = "0"
+  env.GIT_TERMINAL_PROMPT = "0"
+  env.LC_ALL = "C.UTF-8"
+  return env
+}
+
+function terminate(child: ReturnType<typeof spawn>): void {
+  child.kill("SIGTERM")
+  const force = setTimeout(() => child.kill("SIGKILL"), 1000)
+  force.unref()
+  child.once("close", () => clearTimeout(force))
+}
+
+function assertGitSuccess(result: GitResult, operation: string): void {
+  if (result.code === 0) return
+  const message = text(result.stderr).trim() || `${operation} failed with exit code ${result.code}`
+  throw Object.assign(new Error(message), { code: "GIT_FAILED" })
+}
+
+function text(buffer: Buffer): string {
+  return buffer.toString("utf8")
+}
+
+function successText(result: GitResult): string | undefined {
+  return result.code === 0 ? text(result.stdout).trim() || undefined : undefined
+}
+
+async function localDefaultBranch(cwd: string, signal?: AbortSignal): Promise<string | undefined> {
+  for (const branch of ["main", "master"]) {
+    const result = await runGit(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { signal })
+    if (result.code === 0) return branch
+  }
+  return undefined
+}
+
+function emptyInfo(): GitInfoResponseV1 {
+  return { branch: null, root: false, detached: false, unborn: false, ahead: 0, behind: 0 }
+}
+
+function cached<T>(cwd: string, operation: string, load: () => Promise<T>): Promise<T> {
+  const key = `${path.resolve(cwd)}\0${operation}`
+  const existing = cache.get(key)
+  if (existing && existing.expiresAt > Date.now()) return existing.value as Promise<T>
+  const value = load().catch(error => {
+    if (cache.get(key)?.value === value) cache.delete(key)
+    throw error
+  })
+  cache.set(key, { expiresAt: Date.now() + CACHE_MS, value })
+  return value
+}
+
+function cachedResult<T>(
+  cwd: string,
+  operation: string,
+  signal: AbortSignal | undefined,
+  load: () => Promise<T>,
+): Promise<T> {
+  const key = `${path.resolve(cwd)}\0${operation}`
+  const completed = completedCache.get(key)
+  if (completed && completed.expiresAt > Date.now()) return Promise.resolve(completed.value as T)
+  const store = () => load().then(value => {
+    completedCache.set(key, { expiresAt: Date.now() + CACHE_MS, value })
+    return value
+  })
+  return signal ? store() : cached(cwd, operation, store)
+}
+
+async function withGitSlot<T>(signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
+  if (activeGitCommands >= MAX_CONCURRENT_GIT) {
+    await new Promise<void>((resolve, reject) => {
+      const wake = () => {
+        signal?.removeEventListener("abort", abort)
+        resolve()
+      }
+      const abort = () => {
+        const index = gitWaiters.indexOf(wake)
+        if (index >= 0) gitWaiters.splice(index, 1)
+        reject(Object.assign(new Error("git request cancelled"), { code: "REQUEST_ABORTED" }))
+      }
+      gitWaiters.push(wake)
+      signal?.addEventListener("abort", abort, { once: true })
+      if (signal?.aborted) abort()
+    })
+  }
+  activeGitCommands++
+  try {
+    return await operation()
+  } finally {
+    activeGitCommands--
+    gitWaiters.shift()?.()
   }
 }

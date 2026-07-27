@@ -47,6 +47,17 @@ export interface EventPayloadsV2 {
   "session.runtime.crashed": { sessionId: string; workerGeneration?: string; message: string }
   "session.native.event": { sessionId: string; event: unknown }
   "workspace.sessions.updated": { workspacePath?: string; sessionId?: string }
+  "workspace.files.changed": {
+    workspacePath: string
+    revision: number
+    changes: Array<{
+      path: string
+      kind: "created" | "changed" | "deleted"
+      type: "file" | "directory"
+    }>
+    rescan: boolean
+  }
+  "workspace.git.updated": { workspacePath: string; revision: number }
   "command.updated": {
     commandId: string
     sessionId?: string

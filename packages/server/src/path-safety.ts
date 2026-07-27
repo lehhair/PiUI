@@ -19,11 +19,11 @@ const ABSOLUTE_WIN = /^[a-zA-Z]:[\\/]/
 const UNC = /^[\\/]{2}/
 
 /** Reject absolute, drive, UNC, NUL, empty. Normalize relative segments. */
-export function normalizeRelativePath(input: string): string {
+export function normalizeRelativePath(input: string, platform = process.platform): string {
   if (input == null || typeof input !== "string") {
     throw new PathSafetyError("INVALID_REQUEST", "path required")
   }
-  let p = input.replace(/\\/g, "/").trim()
+  let p = input.replace(/\\/g, "/")
   if (p === "") return ""
   if (p.includes("\0")) {
     throw new PathSafetyError("INVALID_REQUEST", "NUL in path")
@@ -36,6 +36,9 @@ export function normalizeRelativePath(input: string): string {
   const parts = p.split("/").filter(seg => seg !== "" && seg !== ".")
   const out: string[] = []
   for (const seg of parts) {
+    if (platform === "win32" && seg.includes(":")) {
+      throw new PathSafetyError("INVALID_REQUEST", "Windows alternate data streams are not allowed")
+    }
     if (seg === "..") {
       if (out.length === 0) {
         throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "path escapes workspace via ..")

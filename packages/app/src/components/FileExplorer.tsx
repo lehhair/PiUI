@@ -19,6 +19,8 @@ import {
   MaximizeIcon,
   SearchIcon,
   CloseIcon,
+  CheckIcon,
+  PencilIcon,
 } from './Icons'
 import { CodePreview } from './CodePreview'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
@@ -173,6 +175,7 @@ export const FileExplorer = memo(function FileExplorer({
     previewError,
     loadPreview,
     clearPreview,
+    savePreview,
     fileStatus,
     refresh,
   } = useFileExplorer({ directory, autoLoad: true, sessionId: sessionId || undefined, consumerId: `file-explorer-${panelTabId}` })
@@ -292,6 +295,7 @@ export const FileExplorer = memo(function FileExplorer({
     }
 
     const requestId = ++searchRequestIdRef.current
+    const controller = new AbortController()
     const timer = window.setTimeout(() => {
       setSearchLoading(true)
       setSearchResults([])
@@ -307,12 +311,13 @@ export const FileExplorer = memo(function FileExplorer({
       }
 
       // 文件名搜索（失败静默，不阻断内容搜索）
-      searchFiles(trimmedSearchQuery, { directory, limit: 50 })
+      searchFiles(trimmedSearchQuery, { directory, limit: 50, signal: controller.signal })
         .then(paths => {
           if (requestId !== searchRequestIdRef.current) return
           setFileResults(paths)
         })
-        .catch(() => {
+        .catch(err => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
           // 文件名搜索失败不报错
         })
         .finally(() => {
@@ -321,12 +326,13 @@ export const FileExplorer = memo(function FileExplorer({
         })
 
       // 内容搜索
-      searchText(trimmedSearchQuery, directory)
+      searchText(trimmedSearchQuery, directory, controller.signal)
         .then(results => {
           if (requestId !== searchRequestIdRef.current) return
           setSearchResults(results)
         })
         .catch(err => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
           if (requestId !== searchRequestIdRef.current) return
           setSearchResults([])
           setSearchError(err instanceof Error ? err.message : t('fileExplorer.textSearchFailed'))
@@ -339,6 +345,7 @@ export const FileExplorer = memo(function FileExplorer({
 
     return () => {
       window.clearTimeout(timer)
+      controller.abort()
     }
   }, [directory, trimmedSearchQuery, t])
 
@@ -529,6 +536,7 @@ export const FileExplorer = memo(function FileExplorer({
       {showPreview && (
         <div className="flex-1 flex flex-col min-h-0" style={{ minHeight: MIN_PREVIEW_HEIGHT }}>
           <FilePreview
+            key={`${directory ?? ''}\0${previewFile?.path ?? 'file-preview'}`}
             previewFiles={previewFiles}
             path={previewFile?.path ?? null}
             targetLine={previewFile?.targetLine}
@@ -543,6 +551,7 @@ export const FileExplorer = memo(function FileExplorer({
             onReorderPreview={handleReorderPreviewTabs}
             isResizing={isAnyResizing}
             directory={directory}
+            onSave={savePreview}
           />
         </div>
       )}
@@ -849,6 +858,7 @@ interface FilePreviewProps {
   onReorderPreview: (draggedPath: string, targetPath: string) => void
   isResizing?: boolean
   directory?: string
+  onSave: (path: string, text: string, etag?: string) => Promise<FileContent>
 }
 
 function FilePreview({
@@ -866,13 +876,58 @@ function FilePreview({
   onReorderPreview,
   isResizing = false,
   directory,
+  onSave,
 }: FilePreviewProps) {
   const { t } = useTranslation(['components', 'common'])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [editEtag, setEditEtag] = useState<string | undefined>()
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
   const language = path ? detectLanguage(path) : 'text'
+
+  const beginEditing = useCallback(() => {
+    if (!content || content.type !== 'text') return
+    setDraft(content.encoding === 'base64' ? decodeBase64Text(content.content) : content.content)
+    setSaveError(null)
+    setEditEtag(content.etag)
+    setIsEditing(true)
+  }, [content])
+
+  const cancelEditing = useCallback(() => {
+    setIsEditing(false)
+    setSaveError(null)
+  }, [])
+
+  const saveEditing = useCallback(async () => {
+    if (!path || isSaving) return
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await onSave(path, draft, editEtag)
+      setIsEditing(false)
+    } catch (saveFailure) {
+      setSaveError(saveFailure instanceof Error ? saveFailure.message : 'Failed to save file')
+    } finally {
+      setIsSaving(false)
+    }
+  }, [draft, editEtag, isSaving, onSave, path])
+  const originalText = content?.type === 'text'
+    ? (content.encoding === 'base64' ? decodeBase64Text(content.content) : content.content)
+    : ''
+  const isDirty = isEditing && draft !== originalText
+  const confirmDiscard = useCallback(() => !isDirty || window.confirm('Discard unsaved changes?'), [isDirty])
+
+  useEffect(() => {
+    if (!isDirty) return
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault() }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [isDirty])
 
   // 下载当前文件
   const handleDownload = useCallback(() => {
@@ -1068,14 +1123,42 @@ function FilePreview({
         items={previewTabItems}
         activeId={path}
         closeAllTitle={t('common:closeAllTabs')}
-        onActivate={onActivatePreview}
-        onClose={onClosePreview}
-        onCloseAll={onClose}
+        onActivate={nextPath => { if (confirmDiscard()) onActivatePreview(nextPath) }}
+        onClose={closePath => { if (confirmDiscard()) onClosePreview(closePath) }}
+        onCloseAll={() => { if (confirmDiscard()) onClose() }}
         onReorder={onReorderPreview}
         tabWidthClassName="w-auto max-w-none min-w-max"
         rightActions={
           content ? (
             <>
+              {content.type === 'text' && (isEditing ? (
+                <>
+                  <button
+                    onClick={() => void saveEditing()}
+                    disabled={isSaving}
+                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                    title={t('common:save')}
+                  >
+                    <CheckIcon size={12} />
+                  </button>
+                  <button
+                    onClick={cancelEditing}
+                    disabled={isSaving}
+                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                    title={t('common:cancel')}
+                  >
+                    <CloseIcon size={12} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={beginEditing}
+                  className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
+                  title="Edit"
+                >
+                  <PencilIcon size={12} />
+                </button>
+              ))}
               <button
                 onClick={openFullscreen}
                 className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
@@ -1105,6 +1188,17 @@ function FilePreview({
           <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
             <AlertCircleIcon size={16} />
             <span className="text-center">{error}</span>
+          </div>
+        ) : isEditing ? (
+          <div className="min-h-full flex flex-col">
+            {saveError && <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)]">{saveError}</div>}
+            <CodePreview
+              code={draft}
+              language={language || 'text'}
+              isResizing={isResizing}
+              readOnly={false}
+              onChange={setDraft}
+            />
           </div>
         ) : displayContent?.type === 'media' ? (
           <MediaPreview

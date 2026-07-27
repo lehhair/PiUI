@@ -33,6 +33,16 @@ export function registerSessionConsumer(
   return () => sessionConsumers.delete(consumerId)
 }
 
+export function notifySessionIdle(sessionId: string): void {
+  for (const consumer of sessionConsumers.values()) {
+    if (consumer.sessionId === sessionId) consumer.callbacks.onSessionIdle?.(sessionId)
+  }
+}
+
+export function notifyReconnected(): void {
+  for (const consumer of sessionConsumers.values()) consumer.callbacks.onReconnected?.('network')
+}
+
 export function updateConsumerSessionId(consumerId: string, sessionId: string | null) {
   const consumer = sessionConsumers.get(consumerId)
   if (consumer) consumer.sessionId = sessionId

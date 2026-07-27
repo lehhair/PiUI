@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import path from "node:path"
 import {
   PROTOCOL_VERSION,
   problem,
@@ -7,9 +8,19 @@ import {
   type ExtensionUiDialogResponseV1,
   type HealthResponseV1,
   type SessionAttachmentV2,
+  type FileCreateRequestV1,
+  type FileMoveRequestV1,
+  type FileWriteRequestV1,
   type WorkspaceCreateRequestV1,
 } from "@piui/protocol"
-import { listFiles, readFileText, writeFileText } from "./files.ts"
+import {
+  createWorkspaceEntry,
+  deleteWorkspaceEntry,
+  listFiles,
+  moveWorkspaceEntry,
+  readFileContent,
+  writeFileContent,
+} from "./files.ts"
 import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
 import { PathSafetyError } from "./path-safety.ts"
 import {
@@ -20,7 +31,7 @@ import {
 } from "./session-registry.ts"
 import { WorkspaceStore, type WorkspaceRecord } from "./workspace-store.ts"
 import { bindEventHub, EventHub } from "./event-hub.ts"
-import { getGitDiff, getGitInfo, getGitStatus } from "./git.ts"
+import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./git.ts"
 import { getDriverMode, type DriverMode } from "@piui/pi-worker"
 import { listModelsForUi } from "./models.ts"
 import { MAX_JSON_BODY_BYTES, MAX_PROMPT_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
@@ -28,6 +39,7 @@ import { resolveAuthToken } from "./auth-token.ts"
 import { SessionExecutor } from "./session-executor.ts"
 import { randomUUID } from "node:crypto"
 import { createProtocolHandshakeV2 } from "./protocol-v2.ts"
+import { WorkspaceWatcher } from "./workspace-watcher.ts"
 
 function sessionSummary(
   s: AppSession,
@@ -117,6 +129,15 @@ function sendMethodNotAllowed(res: ServerResponse, allowed: string) {
   return sendProblem(res, 405, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 
+function requestAbortController(req: IncomingMessage, res: ServerResponse): AbortController {
+  const controller = new AbortController()
+  req.once("aborted", () => controller.abort())
+  res.once("close", () => {
+    if (!res.writableEnded) controller.abort()
+  })
+  return controller
+}
+
 function parseUrl(req: IncomingMessage) {
   const host = req.headers.host ?? "127.0.0.1"
   return new URL(req.url ?? "/", `http://${host}`)
@@ -150,6 +171,7 @@ function positiveEnvMs(value: string | undefined): number | undefined {
 export function createAppServer(options: CreateAppServerOptions = {}) {
   const store = new WorkspaceStore()
   const eventHub = options.eventHub ?? new EventHub()
+  const workspaceWatcher = new WorkspaceWatcher(eventHub)
   const sessionExecutor = new SessionExecutor(command => {
     eventHub.publish({
       type: "command.updated",
@@ -1922,6 +1944,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
       if (method === "GET" && p === "/api/v1/workspaces/default") {
         const rec = store.resolve(await ensureDefaultWorkspace())
+        workspaceWatcher.watch(rec)
         return sendJson(res, 200, {
           workspace: {
             path: rec.canonicalRoot,
@@ -1943,8 +1966,12 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         if (!body.rootPath || typeof body.rootPath !== "string") {
           return sendProblem(res, 400, "INVALID_REQUEST", "rootPath required")
         }
+        if (!path.isAbsolute(body.rootPath)) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "rootPath must be absolute on the server host")
+        }
         try {
           const rec = store.resolve(body.rootPath, body.displayName)
+          workspaceWatcher.watch(rec)
           return sendJson(res, 201, {
             workspace: {
               path: rec.canonicalRoot,
@@ -1965,7 +1992,11 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         const rest = wsMatch[2] ?? ""
         let ws: WorkspaceRecord
         try {
-          ws = store.resolve(decodeURIComponent(wsMatch[1]))
+          const requestedPath = decodeURIComponent(wsMatch[1])
+          const known = store.find(requestedPath)
+          if (!known) throw Object.assign(new Error("workspace not registered"), { code: "WORKSPACE_NOT_FOUND" })
+          ws = known
+          workspaceWatcher.watch(ws)
         } catch (e) {
           const code = (e as { code?: string }).code
           if (code === "WORKSPACE_NOT_FOUND") {
@@ -1988,7 +2019,45 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         if (method === "GET" && rest === "files") {
           const rel = url.searchParams.get("path") ?? ""
           try {
-            return sendJson(res, 200, listFiles(ws, rel))
+            const rawLimit = url.searchParams.get("limit")
+            const limit = rawLimit === null ? undefined : Number(rawLimit)
+            if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 2000)) {
+              return sendProblem(res, 400, "INVALID_REQUEST", "limit must be an integer between 1 and 2000")
+            }
+            return sendJson(res, 200, await listFiles(ws, rel, {
+              cursor: url.searchParams.get("cursor") ?? undefined,
+              limit,
+            }))
+          } catch (e) {
+            return handlePathError(res, e)
+          }
+        }
+
+        if (method === "POST" && rest === "files") {
+          const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
+          let body: FileCreateRequestV1
+          try {
+            body = JSON.parse(raw || "{}") as FileCreateRequestV1
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (typeof body.path !== "string" || (body.type !== "file" && body.type !== "directory")) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "path and a valid type are required")
+          }
+          if (body.content !== undefined && typeof body.content !== "string") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "content must be a string")
+          }
+          if (body.encoding !== undefined && body.encoding !== "utf-8" && body.encoding !== "base64") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "encoding must be utf-8 or base64")
+          }
+          if (body.overwrite !== undefined && typeof body.overwrite !== "boolean") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "overwrite must be a boolean")
+          }
+          if (body.type === "directory" && (body.content !== undefined || body.encoding !== undefined)) {
+            return sendProblem(res, 400, "INVALID_REQUEST", "directories do not accept content or encoding")
+          }
+          try {
+            return sendJson(res, 201, await createWorkspaceEntry(ws, body.path, body.type, body))
           } catch (e) {
             return handlePathError(res, e)
           }
@@ -1998,7 +2067,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           const rel = url.searchParams.get("path") ?? ""
           if (!rel) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
           try {
-            return sendJson(res, 200, readFileText(ws, rel))
+            return sendJson(res, 200, await readFileContent(ws, rel))
           } catch (e) {
             return handlePathError(res, e)
           }
@@ -2007,19 +2076,28 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         if (method === "PUT" && rest === "file") {
           const rel = url.searchParams.get("path") ?? ""
           if (!rel) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
-          const raw = await readBody(req)
-          let body: { content?: string; ifMatch?: string }
+          const raw = await readBody(req, MAX_PROMPT_BODY_BYTES)
+          let body: FileWriteRequestV1
           try {
-            body = JSON.parse(raw || "{}") as { content?: string; ifMatch?: string }
+            body = JSON.parse(raw || "{}") as FileWriteRequestV1
           } catch {
             return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
           }
           if (typeof body.content !== "string") {
             return sendProblem(res, 400, "INVALID_REQUEST", "content required")
           }
+          if (body.ifMatch !== undefined && typeof body.ifMatch !== "string") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "ifMatch must be a string")
+          }
           try {
-            const ifMatch = body.ifMatch ?? (req.headers["if-match"] as string | undefined)
-            return sendJson(res, 200, writeFileText(ws, rel, body.content, { ifMatch }))
+            if (body.encoding !== undefined && body.encoding !== "utf-8" && body.encoding !== "base64") {
+              return sendProblem(res, 400, "INVALID_REQUEST", "encoding must be utf-8 or base64")
+            }
+            const ifMatch = (req.headers["if-match"] as string | undefined) ?? body.ifMatch
+            return sendJson(res, 200, await writeFileContent(ws, rel, body.content, {
+              ifMatch,
+              encoding: body.encoding,
+            }))
           } catch (e) {
             if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "STALE_REVISION") {
               return sendProblem(res, 409, "STALE_REVISION", e instanceof Error ? e.message : String(e))
@@ -2028,16 +2106,55 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           }
         }
 
+        if (method === "PATCH" && rest === "file") {
+          const raw = await readBody(req)
+          let body: FileMoveRequestV1
+          try {
+            body = JSON.parse(raw || "{}") as FileMoveRequestV1
+          } catch {
+            return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
+          }
+          if (typeof body.from !== "string" || typeof body.to !== "string") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "from and to are required")
+          }
+          if (body.overwrite !== undefined && typeof body.overwrite !== "boolean") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "overwrite must be a boolean")
+          }
+          try {
+            return sendJson(res, 200, await moveWorkspaceEntry(ws, body.from, body.to, body.overwrite === true))
+          } catch (e) {
+            return handlePathError(res, e)
+          }
+        }
+
+        if (method === "DELETE" && rest === "file") {
+          const rel = url.searchParams.get("path") ?? ""
+          if (!rel) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
+          const recursive = url.searchParams.get("recursive") === "true"
+          try {
+            await deleteWorkspaceEntry(ws, rel, recursive)
+            res.writeHead(204)
+            return res.end()
+          } catch (e) {
+            return handlePathError(res, e)
+          }
+        }
+
         if (method === "GET" && rest === "search/files") {
           const q = url.searchParams.get("q") ?? ""
           const type = url.searchParams.get("type")
           const limit = Number(url.searchParams.get("limit") ?? 50)
+          if (type !== null && type !== "directory" && type !== "file") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "type must be file or directory")
+          }
+          const controller = requestAbortController(req, res)
           try {
-            const paths = searchFilesByName(ws, q, {
-              type: type === "directory" || type === "file" ? type : undefined,
+            const result = await searchFilesByName(ws, q, {
+              type: type ?? undefined,
               limit: Number.isFinite(limit) ? limit : 50,
+              signal: controller.signal,
             })
-            return sendJson(res, 200, { query: q, paths })
+            return sendJson(res, 200, result)
           } catch (e) {
             return handlePathError(res, e)
           }
@@ -2046,42 +2163,70 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         if (method === "GET" && rest === "search/text") {
           const q = url.searchParams.get("q") ?? ""
           const limit = Number(url.searchParams.get("limit") ?? 50)
+          const controller = requestAbortController(req, res)
           try {
-            const matches = searchWorkspaceText(ws, q, {
+            const result = await searchWorkspaceText(ws, q, {
               limit: Number.isFinite(limit) ? limit : 50,
+              signal: controller.signal,
             })
-            return sendJson(res, 200, { query: q, matches })
+            return sendJson(res, 200, result)
           } catch (e) {
             return handlePathError(res, e)
           }
         }
 
         if (method === "GET" && rest === "git/status") {
+          const controller = requestAbortController(req, res)
           try {
-            return sendJson(res, 200, await getGitStatus(ws.canonicalRoot))
+            return sendJson(res, 200, await getGitStatus(ws.canonicalRoot, controller.signal))
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            return sendProblem(res, 500, "INTERNAL", msg)
+            return handleGitError(res, e)
           }
         }
 
         if (method === "GET" && rest === "git/info") {
+          const controller = requestAbortController(req, res)
           try {
-            return sendJson(res, 200, await getGitInfo(ws.canonicalRoot))
+            return sendJson(res, 200, await getGitInfo(ws.canonicalRoot, controller.signal))
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            return sendProblem(res, 500, "INTERNAL", msg)
+            return handleGitError(res, e)
           }
         }
 
         if (method === "GET" && rest === "git/diff") {
-          const mode = url.searchParams.get("mode") === "branch" ? "branch" : "git"
-          try {
-            return sendJson(res, 200, await getGitDiff(ws.canonicalRoot, mode))
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            return sendProblem(res, 500, "INTERNAL", msg)
+          const mode = url.searchParams.get("mode") ?? "git"
+          if (mode !== "git" && mode !== "branch" && mode !== "staged" && mode !== "unstaged") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "mode must be git, branch, staged, or unstaged")
           }
+          const controller = requestAbortController(req, res)
+          try {
+            return sendJson(res, 200, await getGitDiff(ws.canonicalRoot, mode, controller.signal))
+          } catch (e) {
+            return handleGitError(res, e)
+          }
+        }
+
+        if (method === "GET" && rest === "git/file-diff") {
+          const mode = url.searchParams.get("mode") ?? "git"
+          const file = url.searchParams.get("path") ?? ""
+          if (mode !== "git" && mode !== "branch" && mode !== "staged" && mode !== "unstaged") {
+            return sendProblem(res, 400, "INVALID_REQUEST", "mode must be git, branch, staged, or unstaged")
+          }
+          if (!file) return sendProblem(res, 400, "INVALID_REQUEST", "path query required")
+          const controller = requestAbortController(req, res)
+          try {
+            return sendJson(res, 200, await getGitFileDiff(ws.canonicalRoot, mode, file, controller.signal))
+          } catch (e) {
+            return handleGitError(res, e)
+          }
+        }
+
+        if (rest === "") return sendMethodNotAllowed(res, "GET")
+        if (rest === "files") return sendMethodNotAllowed(res, "GET, POST")
+        if (rest === "file") return sendMethodNotAllowed(res, "GET, PUT, PATCH, DELETE")
+        if (rest === "search/files" || rest === "search/text" || rest === "git/status" ||
+          rest === "git/info" || rest === "git/diff" || rest === "git/file-diff") {
+          return sendMethodNotAllowed(res, "GET")
         }
       }
 
@@ -2112,6 +2257,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         closeHttpServer(error => (error ? reject(error) : resolve()))
       }),
       sessions.dispose(),
+      workspaceWatcher.dispose(),
     ]).then(() => undefined)
     void closePromise.then(
       () => callback?.(),
@@ -2174,7 +2320,7 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
 function handlePathError(res: ServerResponse, e: unknown) {
   if (e instanceof PathSafetyError) {
     const status =
-      e.code === "INVALID_REQUEST" ? 400 : e.code === "SYMLINK_ESCAPE" ? 403 : 403
+      e.code === "INVALID_REQUEST" ? 400 : e.code === "FILE_TOO_LARGE" ? 413 : 403
     return sendProblem(res, status, e.code, e.message)
   }
   if (e && typeof e === "object" && "code" in e) {
@@ -2182,7 +2328,34 @@ function handlePathError(res: ServerResponse, e: unknown) {
     if (code === "FILE_TOO_LARGE") {
       return sendProblem(res, 413, "FILE_TOO_LARGE", e instanceof Error ? e.message : String(e))
     }
+    if (code === "STALE_REVISION" || code === "FILE_CONFLICT") {
+      return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))
+    }
+    if (code === "ENOENT") return sendProblem(res, 404, "NOT_FOUND", e instanceof Error ? e.message : String(e))
+    if (code === "EACCES" || code === "EPERM") {
+      return sendProblem(res, 403, "FORBIDDEN", e instanceof Error ? e.message : String(e))
+    }
+    if (code === "EBUSY" || code === "EEXIST" || code === "ENOTEMPTY") {
+      return sendProblem(res, 409, "FILE_CONFLICT", e instanceof Error ? e.message : String(e))
+    }
+    if (code === "ENOSPC" || code === "EIO" || code === "EMFILE" || code === "ENFILE") {
+      return sendProblem(res, 503, "INTERNAL", e instanceof Error ? e.message : String(e))
+    }
   }
   const msg = e instanceof Error ? e.message : String(e)
-  return sendProblem(res, 400, "INVALID_REQUEST", msg)
+  return sendProblem(res, 500, "INTERNAL", msg)
+}
+
+function handleGitError(res: ServerResponse, error: unknown) {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code: string }).code)
+    : "GIT_FAILED"
+  const message = error instanceof Error ? error.message : String(error)
+  if (code === "NOT_FOUND") return sendProblem(res, 404, "NOT_FOUND", message)
+  if (code === "INVALID_REQUEST") return sendProblem(res, 400, "INVALID_REQUEST", message)
+  if (code === "GIT_BASE_NOT_FOUND") return sendProblem(res, 409, "GIT_BASE_NOT_FOUND", message)
+  if (code === "GIT_OUTPUT_LIMIT") return sendProblem(res, 413, "GIT_OUTPUT_LIMIT", message)
+  if (code === "GIT_TIMEOUT") return sendProblem(res, 504, "GIT_TIMEOUT", message)
+  if (code === "REQUEST_ABORTED") return sendProblem(res, 499, "GIT_FAILED", message)
+  return sendProblem(res, 500, "GIT_FAILED", message)
 }

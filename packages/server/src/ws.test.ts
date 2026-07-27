@@ -5,6 +5,9 @@ import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
 import { WebSocket } from "ws"
 import { EventHub } from "./event-hub.ts"
 import { EVENT_WS_SUBPROTOCOL_V2, eventStreamKeyV2 } from "@piui/protocol"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 
 async function listen(server: ReturnType<typeof createAppServer>) {
   await new Promise<void>((resolve, reject) => {
@@ -174,6 +177,55 @@ describe("event websocket", () => {
     } finally {
       ws.close()
       await close()
+    }
+  })
+
+  it("streams real external workspace file changes after cursor setup", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-files-"))
+    const server = createAppServer({ authToken: null })
+    attachEventWebSocket(server, { authToken: null })
+    const { port, close } = await listen(server)
+    const registered = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rootPath: root }),
+    }).then(response => response.json()) as { workspace: { path: string } }
+    const stream = { kind: "workspace" as const, id: registered.workspace.path }
+    const key = eventStreamKeyV2(stream)
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
+    try {
+      const changed = await new Promise<{ path: string }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("workspace event timeout")), 5000)
+        ws.on("open", () => {
+          ws.send(JSON.stringify({ type: "subscribe", protocolVersion: 2, streams: [stream], cursors: {} }))
+        })
+        ws.on("message", raw => {
+          const message = JSON.parse(String(raw)) as {
+            channel?: string
+            streams?: Record<string, { cursor: { epoch: string; sequence: number } }>
+            event?: { type?: string; payload?: { changes?: Array<{ path: string }> } }
+          }
+          const cursor = message.streams?.[key]?.cursor
+          if (message.channel === "control" && cursor) {
+            ws.send(JSON.stringify({
+              type: "subscribe", protocolVersion: 2, streams: [stream], cursors: { [key]: cursor },
+            }))
+            setTimeout(() => writeFileSync(path.join(root, "external.txt"), "changed"), 250)
+            return
+          }
+          const change = message.event?.payload?.changes?.[0]
+          if (message.channel === "event" && message.event?.type === "workspace.files.changed" && change) {
+            clearTimeout(timer)
+            resolve(change)
+          }
+        })
+        ws.on("error", reject)
+      })
+      assert.equal(changed.path, "external.txt")
+    } finally {
+      ws.close()
+      await close()
+      rmSync(root, { recursive: true, force: true })
     }
   })
 

@@ -166,6 +166,10 @@ describe("PiEventSocket", () => {
     await vi.waitFor(() => {
       expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "resynced" })
     })
+    const resubscribe = JSON.parse(ws?.sent.at(-1) ?? "{}") as { streams?: Array<{ kind: string; id: string }> }
+    expect(resubscribe.streams).toContainEqual({ kind: "server", id: "server" })
+    expect(resubscribe.streams).toContainEqual({ kind: "workspace", id: "/workspace" })
+    expect(resubscribe.streams).toContainEqual({ kind: "session", id: "active" })
 
     ws?.onmessage?.({
       data: JSON.stringify({ channel: "event", event: envelopeV2(1, snapshot("active", 3, "live")) }),
@@ -174,7 +178,7 @@ describe("PiEventSocket", () => {
     socket.close()
   })
 
-  it("does not apply a gapped v2 event before stream replay", async () => {
+  it("recovers a gapped v2 stream from ordered replay", async () => {
     applySnapshotToUi(snapshot("active", 1, "base"))
     fetchSnapshot.mockResolvedValue(snapshot("active", 2, "resynced"))
     const socket = new PiEventSocket()
@@ -194,8 +198,79 @@ describe("PiEventSocket", () => {
     ws?.onmessage?.({
       data: JSON.stringify({ channel: "event", event: envelopeV2(3, snapshot("active", 3, "must-not-apply")) }),
     })
+    const subscriptionsAfterGap = ws?.sent.length
+    ws?.onmessage?.({
+      data: JSON.stringify({ channel: "event", event: envelopeV2(4, snapshot("active", 4, "also-gapped")) }),
+    })
+    expect(ws?.sent.length).toBe(subscriptionsAfterGap)
     expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "resynced" })
     expect(ws?.sent.some(raw => JSON.parse(raw).cursors?.[key]?.sequence === 0)).toBe(true)
+
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(1, snapshot("active", 3, "replay-1")) }) })
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(2, snapshot("active", 4, "replay-2")) }) })
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(3, snapshot("active", 5, "replay-3")) }) })
+    expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "replay-3" })
+    socket.close()
+  })
+
+  it("delivers workspace file and Git invalidation events", async () => {
+    applySnapshotToUi(snapshot("active", 1, "base"))
+    const socket = new PiEventSocket()
+    socket.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws?.onopen?.()
+    const workspaceKey = eventStreamKeyV2({ kind: "workspace", id: "/workspace" })
+    ws?.onmessage?.({
+      data: JSON.stringify({
+        channel: "control",
+        type: "resync_required",
+        streams: { [workspaceKey]: { cursor: { epoch: "workspace-epoch", sequence: 0 }, reason: "missing_cursor" } },
+      }),
+    })
+    await vi.waitFor(() => expect(JSON.parse(ws?.sent.at(-1) ?? "{}").cursors?.[workspaceKey]?.sequence).toBe(0))
+
+    const fileListener = vi.fn()
+    const gitListener = vi.fn()
+    window.addEventListener("piui:workspace-files-changed", fileListener)
+    window.addEventListener("piui:workspace-git-updated", gitListener)
+    ws?.onmessage?.({
+      data: JSON.stringify({
+        channel: "event",
+        event: {
+          protocolVersion: 2,
+          stream: { kind: "workspace", id: "/workspace" },
+          cursor: { epoch: "workspace-epoch", sequence: 1 },
+          eventId: "file-1",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          type: "workspace.files.changed",
+          payload: {
+            workspacePath: "/workspace",
+            revision: 1,
+            changes: [{ path: "src/app.ts", kind: "changed", type: "file" }],
+            rescan: false,
+          },
+        },
+      }),
+    })
+    ws?.onmessage?.({
+      data: JSON.stringify({
+        channel: "event",
+        event: {
+          protocolVersion: 2,
+          stream: { kind: "workspace", id: "/workspace" },
+          cursor: { epoch: "workspace-epoch", sequence: 2 },
+          eventId: "git-2",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          type: "workspace.git.updated",
+          payload: { workspacePath: "/workspace", revision: 1 },
+        },
+      }),
+    })
+    expect(fileListener).toHaveBeenCalledTimes(1)
+    expect((fileListener.mock.calls[0]?.[0] as CustomEvent).detail.changes[0].path).toBe("src/app.ts")
+    expect(gitListener).toHaveBeenCalledTimes(1)
+    window.removeEventListener("piui:workspace-files-changed", fileListener)
+    window.removeEventListener("piui:workspace-git-updated", gitListener)
     socket.close()
   })
 })

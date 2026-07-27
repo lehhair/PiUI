@@ -2,10 +2,19 @@ export type FileNodeType = 'file' | 'directory'
 export interface FileNode { name: string; path: string; absolute: string; type: FileNodeType; ignored?: boolean }
 export interface PatchHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }
 export interface FilePatch { hunks: PatchHunk[] }
-export interface FileContent { type: 'text' | 'binary'; content: string; encoding?: string; patch?: FilePatch; mimeType?: string }
+export interface FileContent {
+  type: 'text' | 'binary'
+  content: string
+  encoding?: string
+  patch?: FilePatch
+  mimeType?: string
+  etag?: string
+  size?: number
+}
 export interface FileStatusItem { path: string; status: string; added?: number; removed?: number }
 export interface FileDiff {
   file: string
+  oldPath?: string
   before?: string
   after?: string
   additions: number
@@ -13,6 +22,7 @@ export interface FileDiff {
   diff?: string
   patch?: string
   status?: string
+  binary?: boolean
 }
 
 export function normalizeFileDiffs(

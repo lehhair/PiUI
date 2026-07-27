@@ -12,7 +12,8 @@ import { getMaterialIconUrl } from '../utils/materialIcons'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { ViewModeSwitch } from './FullscreenViewer'
 import { getCurrentProject } from '../api/client'
-import { getVcsDiff, getVcsInfo } from '../api/vcs'
+import { getVcsDiff, getVcsFileDiff, getVcsInfo } from '../api/vcs'
+import { resolveWorkspacePath } from '../pi/sessionApi'
 import type { ApiProject, FileDiff, VcsDiffMode, VcsInfo } from '../api/types'
 import { detectLanguage } from '../utils/languageUtils'
 import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
@@ -107,9 +108,23 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   // 展开的目录
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; file: string } | null>(null)
+  const canonicalWorkspaceRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    canonicalWorkspaceRef.current = null
+    if (directory) {
+      void resolveWorkspacePath(directory).then(workspacePath => {
+        if (!cancelled) canonicalWorkspaceRef.current = workspacePath
+      }).catch(() => undefined)
+    }
+    return () => { cancelled = true }
+  }, [directory])
 
   const projectRequestIdRef = useRef(0)
   const diffRequestIdRef = useRef({ git: 0, branch: 0, session: 0, turn: 0 })
+  const diffAbortRef = useRef<Partial<Record<ChangeMode, AbortController>>>({})
+  const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openDiffFilesRef = useRef<string[]>([])
   const selectedFileRef = useRef<string | null>(null)
   const changeMenuTriggerRef = useRef<HTMLButtonElement>(null)
@@ -355,12 +370,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       if (!options?.force && loadedModes[mode]) return
 
       const requestId = ++diffRequestIdRef.current[mode]
+      diffAbortRef.current[mode]?.abort()
+      const controller = new AbortController()
+      diffAbortRef.current[mode] = controller
       setLoadingModes(prev => ({ ...prev, [mode]: true }))
       setError(null)
 
       try {
-        let data: FileDiff[]
-        data = await getVcsDiff(mode as VcsDiffMode, directory)
+        const data: FileDiff[] = await getVcsDiff(mode as VcsDiffMode, directory, controller.signal)
 
         if (requestId !== diffRequestIdRef.current[mode]) return
 
@@ -383,6 +400,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         if (requestId === diffRequestIdRef.current[mode]) {
           setLoadingModes(prev => ({ ...prev, [mode]: false }))
         }
+        if (diffAbortRef.current[mode] === controller) delete diffAbortRef.current[mode]
       }
     },
     [directory, loadedModes, project, sessionId, t],
@@ -409,6 +427,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     setMountedPreviewFiles(new Set())
     setExpandedDirs(new Set())
     setChangeMenuOpen(false)
+    for (const controller of Object.values(diffAbortRef.current)) controller?.abort()
+    diffAbortRef.current = {}
     resetSplitHeight()
 
     void loadProjectState()
@@ -449,6 +469,27 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   // 自动刷新：session idle / 窗口聚焦 / SSE 重连
   useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId)
+
+  useEffect(() => {
+    const onGitChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ workspacePath: string }>).detail
+      if (!canonicalWorkspaceRef.current || detail?.workspacePath !== canonicalWorkspaceRef.current) return
+      setLoadedModes(prev => ({ ...prev, git: false, branch: false }))
+      if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current)
+      gitRefreshTimerRef.current = setTimeout(() => {
+        gitRefreshTimerRef.current = null
+        void handleRefresh()
+      }, 250)
+    }
+    window.addEventListener('piui:workspace-git-updated', onGitChanged)
+    return () => {
+      window.removeEventListener('piui:workspace-git-updated', onGitChanged)
+      if (gitRefreshTimerRef.current) {
+        clearTimeout(gitRefreshTimerRef.current)
+        gitRefreshTimerRef.current = null
+      }
+    }
+  }, [handleRefresh])
 
   // 选中文件
   const handleSelectFile = useCallback((file: string) => {
@@ -546,6 +587,24 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   // 获取选中的 diff 数据
   const selectedDiff = selectedFile ? diffs.find(d => d.file === selectedFile) : null
+  useEffect(() => {
+    if (!selectedFile || selectedDiff?.patch !== undefined || selectedDiff?.binary ||
+      (selectedDiff?.before !== undefined && selectedDiff.after !== undefined)) return
+    if (changeMode !== 'git' && changeMode !== 'branch') return
+    const controller = new AbortController()
+    const listRequestId = diffRequestIdRef.current[changeMode]
+    void getVcsFileDiff(changeMode, selectedFile, directory, controller.signal)
+      .then(loaded => {
+        if (controller.signal.aborted || diffRequestIdRef.current[changeMode] !== listRequestId) return
+        const apply = (items: FileDiff[]) => items.map(item => item.file === loaded.file ? { ...item, ...loaded } : item)
+        if (changeMode === 'git') setGitDiffs(apply)
+        else setBranchDiffs(apply)
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) sessionErrorHandler('load file diff', error)
+      })
+    return () => controller.abort()
+  }, [changeMode, directory, selectedDiff?.before, selectedDiff?.after, selectedDiff?.binary, selectedDiff?.patch, selectedFile])
   const previewDiffs = useMemo(
     () =>
       openDiffFiles
@@ -939,10 +998,11 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
   const language = detectLanguage(diff.file) || 'text'
   // 优先用 patch 提取 before/after，回退到直接的 before/after 字段（旧版后端兼容）
   const { before, after } = useMemo(() => {
+    if (diff.binary) return { before: '', after: 'Binary file changed' }
     if (diff.patch) return extractContentFromUnifiedDiff(diff.patch)
     if (diff.before !== undefined && diff.after !== undefined) return { before: diff.before, after: diff.after }
     return { before: '', after: '' }
-  }, [diff.patch, diff.before, diff.after])
+  }, [diff.binary, diff.patch, diff.before, diff.after])
   const diffViewerData = useDiffViewerData(before, after, language, isResizing)
   const { t } = useTranslation(['components', 'common'])
   const [fullscreenViewMode, setFullscreenViewMode] = useState<ViewMode>(viewMode)
@@ -1038,7 +1098,9 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
 type FileStatus = 'added' | 'modified' | 'deleted'
 
 function getFileStatus(diff: FileDiff): FileStatus {
-  if (diff.status) return diff.status as FileStatus
+  if (diff.status === 'added' || diff.status === 'untracked' || diff.status === 'copied') return 'added'
+  if (diff.status === 'deleted') return 'deleted'
+  if (diff.status) return 'modified'
   if (diff.deletions === 0 && diff.additions > 0) return 'added'
   if (diff.additions === 0 && diff.deletions > 0) return 'deleted'
   // 旧版 before/after 兼容

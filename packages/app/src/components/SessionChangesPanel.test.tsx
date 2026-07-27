@@ -5,10 +5,11 @@ import { changeScopeStore } from '../store/changeScopeStore'
 import { layoutStore } from '../store/layoutStore'
 import { FullscreenProvider } from '../contexts'
 
-const { getCurrentProject, getVcsInfo, getVcsDiff } = vi.hoisted(() => ({
+const { getCurrentProject, getVcsInfo, getVcsDiff, getVcsFileDiff } = vi.hoisted(() => ({
   getCurrentProject: vi.fn(),
   getVcsInfo: vi.fn(),
   getVcsDiff: vi.fn(),
+  getVcsFileDiff: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -18,7 +19,10 @@ vi.mock('../api/client', () => ({
 vi.mock('../api/vcs', () => ({
   getVcsInfo,
   getVcsDiff,
+  getVcsFileDiff,
 }))
+
+vi.mock('../pi/sessionApi', () => ({ resolveWorkspacePath: async (directory?: string) => directory ?? null }))
 
 vi.mock('./DiffViewer', () => ({
   DiffViewer: () => <div data-testid="diff-viewer">diff viewer</div>,
@@ -60,6 +64,12 @@ describe('SessionChangesPanel', () => {
       branch: 'feature/test',
       default_branch: 'main',
     })
+    getVcsFileDiff.mockImplementation(async (_mode, file) => ({
+      file,
+      additions: 1,
+      deletions: 1,
+      patch: `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-old\n+new\n`,
+    }))
     getVcsDiff.mockImplementation(async mode => {
       if (mode === 'branch') {
         return [
@@ -99,7 +109,7 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo')
+    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo', expect.any(AbortSignal))
     expect(screen.getByText('1f')).toBeInTheDocument()
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
@@ -152,7 +162,7 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getVcsDiff).toHaveBeenCalledWith('branch', '/repo')
+    expect(getVcsDiff).toHaveBeenCalledWith('branch', '/repo', expect.any(AbortSignal))
     expect(changeScopeStore.getMode('session-1')).toBe('branch')
     expect(screen.getAllByText('branch.ts').length).toBeGreaterThan(0)
   })
