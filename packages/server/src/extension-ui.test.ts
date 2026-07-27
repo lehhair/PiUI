@@ -72,13 +72,26 @@ describe("SessionRegistry extension UI", () => {
     }
     const workspaces = new WorkspaceStore()
     const workspace = workspaces.resolve(process.cwd())
-    const registry = new SessionRegistry(workspaces, "pi", backend, new EventHub())
+    const eventHub = new EventHub()
+    const eventTypes: string[] = []
+    eventHub.subscribeV2(event => eventTypes.push(event.type))
+    const registry = new SessionRegistry(workspaces, "pi", backend, eventHub)
 
     const session = await registry.create(workspace.canonicalRoot)
     const pending = registry.extensionUiSnapshot(session.id)
     assert.equal(pending?.pending[0]?.title, "Mode")
-    await registry.respondExtensionUi(session.id, "request-1", { value: "plan" }, "generation-1")
+    const response = await registry.respondExtensionUi(session.id, "request-1", { value: "plan" }, "generation-1")
+    assert.equal(response.alreadySettled, false)
     assert.equal(registry.extensionUiSnapshot(session.id)?.pending.length, 0)
+    assert.equal(eventTypes.includes("extension.ui.settled"), true)
+    assert.equal(
+      (await registry.respondExtensionUi(session.id, "request-1", { value: "plan" }, "generation-1")).alreadySettled,
+      true,
+    )
+    await assert.rejects(
+      registry.respondExtensionUi(session.id, "request-1", { value: "build" }, "generation-1"),
+      error => (error as { code?: string }).code === "RESPONSE_CONFLICT",
+    )
 
     await registry.setExtensionEditorState(session.id, "draft")
     assert.equal(editorText, "draft")

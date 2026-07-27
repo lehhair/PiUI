@@ -4,6 +4,8 @@
  */
 
 import type {
+  ExtensionUiDialogResponseV1,
+  ExtensionUiSnapshotV1,
   CommandRecordV2,
   SessionAttachmentV2,
   SessionReplacementResultV1,
@@ -584,6 +586,40 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`)
   if (!res.ok) throw new Error(`fetchSnapshot ${res.status}`)
   return (await res.json()) as SessionSnapshotV1
+}
+
+export async function fetchExtensionUiSnapshot(sessionId: string): Promise<ExtensionUiSnapshotV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/extension-ui`)
+  if (!res.ok) throw new Error(`fetchExtensionUiSnapshot ${res.status}`)
+  return (await res.json()) as ExtensionUiSnapshotV1
+}
+
+export async function respondExtensionUi(
+  sessionId: string,
+  requestId: string,
+  response: ExtensionUiDialogResponseV1,
+  workerGeneration?: string,
+): Promise<{ accepted: true; alreadySettled: boolean }> {
+  const res = await fetch(
+    `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/extension-ui/requests/${encodeURIComponent(requestId)}/response`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...response, workerGeneration }),
+    },
+  )
+  if (!res.ok) throw new Error(`respondExtensionUi ${res.status}`)
+  return (await res.json()) as { accepted: true; alreadySettled: boolean }
+}
+
+export async function setExtensionEditorState(sessionId: string, editorText: string): Promise<ExtensionUiSnapshotV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/extension-ui`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ editorText }),
+  })
+  if (!res.ok) throw new Error(`setExtensionEditorState ${res.status}`)
+  return (await res.json()) as ExtensionUiSnapshotV1
 }
 
 export function serializeSessionAttachments(attachments: Attachment[]): SessionAttachmentV2[] {

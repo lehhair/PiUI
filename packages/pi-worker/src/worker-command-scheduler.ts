@@ -2,6 +2,10 @@ import type { WorkerCommand, WorkerRequest, WorkerResult } from "./worker-protoc
 
 function canRunConcurrently(command: WorkerCommand, active: WorkerCommand | undefined): boolean {
   switch (command.type) {
+    case "prompt":
+      // Pi resolves extension slash commands before checking the streaming
+      // guard, so these must reach AgentSession immediately during a turn.
+      return active?.type === "prompt" && /^\/[^\s/]+(?:\s|$)/.test(command.text)
     case "steer":
     case "followUp":
     case "abort":

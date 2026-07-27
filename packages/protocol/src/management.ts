@@ -1,3 +1,55 @@
+export interface PiSettingsEffectiveV1 {
+  lastChangelogVersion?: string
+  sessionDir?: string
+  defaultProvider?: string
+  defaultModel?: string
+  defaultThinkingLevel?: PiThinkingLevelV1
+  transport: PiTransportV1
+  steeringMode: "all" | "one-at-a-time"
+  followUpMode: "all" | "one-at-a-time"
+  theme?: string
+  compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number }
+  branchSummary: { reserveTokens: number; skipPrompt: boolean }
+  retry: { enabled: boolean; maxRetries: number; baseDelayMs: number }
+  providerRetry: { timeoutMs?: number; maxRetries?: number; maxRetryDelayMs: number }
+  httpIdleTimeoutMs: number
+  websocketConnectTimeoutMs?: number
+  externalEditor?: string
+  hideThinkingBlock: boolean
+  showCacheMissNotices: boolean
+  shellPath?: string
+  shellCommandPrefix?: string
+  quietStartup: boolean
+  defaultProjectTrust: "always" | "never" | "ask"
+  npmCommand?: string[]
+  enableAnalytics: boolean
+  trackingId?: string
+  enableInstallTelemetry: boolean
+  collapseChangelog: boolean
+  enableSkillCommands: boolean
+  packages: PiPackageSourceV1[]
+  extensionPaths: string[]
+  skillPaths: string[]
+  promptTemplatePaths: string[]
+  themePaths: string[]
+  showImages: boolean
+  imageWidthCells: number
+  imageAutoResize: boolean
+  blockImages: boolean
+  enabledModels?: string[]
+  thinkingBudgets?: { minimal?: number; low?: number; medium?: number; high?: number }
+  doubleEscapeAction: "fork" | "tree" | "none"
+  treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all"
+  clearOnShrink: boolean
+  showTerminalProgress: boolean
+  showHardwareCursor: boolean
+  editorPaddingX: number
+  outputPad: 0 | 1
+  autocompleteMaxVisible: number
+  codeBlockIndent: string
+  warnings: { anthropicExtraUsage?: boolean }
+}
+
 export interface PiSettingsSnapshotV1 {
   workspacePath: string
   projectTrusted: boolean
@@ -5,7 +57,7 @@ export interface PiSettingsSnapshotV1 {
    *  Pi preserves unknown user-authored keys that may hold credentials. */
   globalKeys: string[]
   projectKeys: string[]
-  effective: Record<string, unknown>
+  effective: PiSettingsEffectiveV1
   errors: Array<{ scope: "global" | "project"; message: string }>
 }
 
@@ -18,7 +70,70 @@ export interface ProjectTrustV1 {
   trusted: boolean
 }
 
-export type PiSettingsPatchV1 = Record<string, unknown>
+export type PiThinkingLevelV1 = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+export type PiTransportV1 = "auto" | "sse" | "websocket" | "websocket-cached"
+
+export type PiPackageSourceV1 = string | {
+  source: string
+  autoload?: boolean
+  extensions?: string[]
+  skills?: string[]
+  prompts?: string[]
+  themes?: string[]
+}
+
+/** Every serializable setting for which Pi 0.81.1 exposes a persistent setter. */
+export interface PiSettingsPatchV1 {
+  lastChangelogVersion?: string
+  defaultProvider?: string
+  defaultModel?: string
+  defaultModelAndProvider?: { provider: string; model: string }
+  steeringMode?: "all" | "one-at-a-time"
+  followUpMode?: "all" | "one-at-a-time"
+  theme?: string
+  defaultThinkingLevel?: PiThinkingLevelV1
+  transport?: PiTransportV1
+  compactionEnabled?: boolean
+  retryEnabled?: boolean
+  httpIdleTimeoutMs?: number
+  hideThinkingBlock?: boolean
+  showCacheMissNotices?: boolean
+  quietStartup?: boolean
+  shellPath?: string | null
+  shellCommandPrefix?: string | null
+  defaultProjectTrust?: "always" | "never" | "ask"
+  npmCommand?: string[] | null
+  collapseChangelog?: boolean
+  enableInstallTelemetry?: boolean
+  enableAnalytics?: boolean
+  packages?: PiPackageSourceV1[]
+  projectPackages?: PiPackageSourceV1[]
+  extensionPaths?: string[]
+  projectExtensionPaths?: string[]
+  skillPaths?: string[]
+  projectSkillPaths?: string[]
+  promptTemplatePaths?: string[]
+  projectPromptTemplatePaths?: string[]
+  themePaths?: string[]
+  projectThemePaths?: string[]
+  enableSkillCommands?: boolean
+  showImages?: boolean
+  imageWidthCells?: number
+  imageAutoResize?: boolean
+  blockImages?: boolean
+  enabledModels?: string[] | null
+  doubleEscapeAction?: "fork" | "tree" | "none"
+  treeFilterMode?: "default" | "no-tools" | "user-only" | "labeled-only" | "all"
+  clearOnShrink?: boolean
+  showTerminalProgress?: boolean
+  showHardwareCursor?: boolean
+  editorPaddingX?: number
+  outputPad?: 0 | 1
+  autocompleteMaxVisible?: number
+  warnings?: { anthropicExtraUsage?: boolean }
+}
+
+export type PackageResolveMissingActionV1 = "install" | "skip" | "error"
 
 export interface ProviderAuthInfoV1 {
   id: string

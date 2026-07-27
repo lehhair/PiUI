@@ -595,13 +595,13 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       const workspacePackageResolved = p.match(/^\/api\/v1\/workspaces\/([^/]+)\/packages\/resolved$/)
       if (method === "GET" && workspacePackageResolved) {
         const missingAction = url.searchParams.get("missingAction")
-        if (missingAction && missingAction !== "skip" && missingAction !== "error") {
-          return sendProblem(res, 400, "INVALID_REQUEST", "missingAction must be skip or error")
+        if (missingAction && missingAction !== "install" && missingAction !== "skip" && missingAction !== "error") {
+          return sendProblem(res, 400, "INVALID_REQUEST", "missingAction must be install, skip, or error")
         }
         try {
           return sendJson(res, 200, await sessions.resolvePackages(
             decodeURIComponent(workspacePackageResolved[1]),
-            (missingAction || undefined) as "skip" | "error" | undefined,
+            (missingAction || undefined) as "install" | "skip" | "error" | undefined,
           ))
         } catch (error) {
           return handleSessionCmdError(res, error)
@@ -888,28 +888,35 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         } catch {
           return sendProblem(res, 400, "INVALID_REQUEST", "invalid json")
         }
+        const responseFields = ["cancelled", "confirmed", "value"].filter(key => key in body)
+        if (responseFields.length !== 1) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "response requires exactly one of cancelled, confirmed, or value")
+        }
+        if (body.responseId !== undefined && (typeof body.responseId !== "string" || !body.responseId)) {
+          return sendProblem(res, 400, "INVALID_REQUEST", "responseId must be a non-empty string")
+        }
         let response: ExtensionUiDialogResponseV1
         if ("cancelled" in body) {
           if (body.cancelled !== true) {
             return sendProblem(res, 400, "INVALID_REQUEST", "cancelled must be true when present")
           }
-          response = { cancelled: true }
+          response = { cancelled: true, responseId: body.responseId }
         } else if ("confirmed" in body) {
           if (typeof body.confirmed !== "boolean") {
             return sendProblem(res, 400, "INVALID_REQUEST", "confirmed must be a boolean")
           }
-          response = { confirmed: body.confirmed }
+          response = { confirmed: body.confirmed, responseId: body.responseId }
         } else if ("value" in body) {
           if (typeof body.value !== "string") {
             return sendProblem(res, 400, "INVALID_REQUEST", "value must be a string")
           }
-          response = { value: body.value }
+          response = { value: body.value, responseId: body.responseId }
         } else {
           return sendProblem(res, 400, "INVALID_REQUEST", "response requires cancelled, confirmed, or value")
         }
         try {
-          await sessions.respondExtensionUi(sessionId, requestId, response, body.workerGeneration)
-          return sendJson(res, 200, { requestId, accepted: true })
+          const result = await sessions.respondExtensionUi(sessionId, requestId, response, body.workerGeneration)
+          return sendJson(res, 200, { requestId, accepted: true, ...result })
         } catch (error) {
           return handleSessionCmdError(res, error)
         }
@@ -952,6 +959,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
           model?: { provider?: string; id?: string }
           thinkingLevel?: string
           attachments?: SessionAttachmentV2[]
+          expandPromptTemplates?: boolean
         }>(req, MAX_PROMPT_BODY_BYTES)
         try {
           const knownSession = await sessions.find(id)
@@ -965,7 +973,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                   protocolVersion: 2,
                   commandId,
                   type: "session.prompt",
-                  concurrency: "idle-only",
+                  concurrency: /^\/[^\s/]+(?:\s|$)/.test(body.text ?? "") ? "run-control" : "idle-only",
                   sessionId: id,
                   payload: {
                     text: body.text ?? "",
@@ -974,6 +982,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                       : undefined,
                     thinkingLevel: body.thinkingLevel,
                     attachments: body.attachments,
+                    expandPromptTemplates: body.expandPromptTemplates,
                   },
                 },
                 () => sessions.prompt(id, body.text ?? "", {
@@ -981,6 +990,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
                   model: body.model,
                   thinkingLevel: body.thinkingLevel,
                   attachments: body.attachments,
+                  expandPromptTemplates: body.expandPromptTemplates,
                   onTick: publishSessionSnapshot,
                   onMetadataChange: session => {
                     publishSessionSnapshot(session)
@@ -2135,7 +2145,7 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   if (code === "NOT_FOUND") {
     return sendProblem(res, 404, code, e instanceof Error ? e.message : String(e))
   }
-  if (code === "EXTENSION_UI_CANCELLED") {
+  if (code === "EXTENSION_UI_CANCELLED" || code === "RESPONSE_CONFLICT") {
     return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))
   }
   if (code === "PATH_OUTSIDE_WORKSPACE" || code === "SYMLINK_ESCAPE") {

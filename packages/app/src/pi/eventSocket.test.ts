@@ -3,6 +3,7 @@ import {
   eventStreamKeyV2,
   type EventEnvelopeV1,
   type EventEnvelopeV2,
+  type ExtensionUiSnapshotV1,
   type SessionSnapshotV1,
 } from "@piui/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -11,13 +12,14 @@ import { PiEventSocket } from "./eventSocket"
 import { clearPiSessionIndex } from "./piSessionIndex"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 
-const { fetchSnapshot } = vi.hoisted(() => ({
+const { fetchSnapshot, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
   fetchSnapshot: vi.fn<(id: string) => Promise<SessionSnapshotV1>>(),
+  fetchExtensionUiSnapshot: vi.fn<(id: string) => Promise<ExtensionUiSnapshotV1>>(),
 }))
 
 vi.mock("./sessionApi", async importOriginal => {
   const original = await importOriginal<typeof import("./sessionApi")>()
-  return { ...original, fetchSnapshot }
+  return { ...original, fetchSnapshot, fetchExtensionUiSnapshot }
 })
 
 class FakeWebSocket {
@@ -103,6 +105,19 @@ describe("PiEventSocket", () => {
     FakeWebSocket.instances = []
     fetchSnapshot.mockReset()
     fetchSnapshot.mockRejectedValue(new Error("not available in unit test"))
+    fetchExtensionUiSnapshot.mockReset()
+    fetchExtensionUiSnapshot.mockImplementation(async sessionId => ({
+      sessionId,
+      state: {
+        revision: 0,
+        statuses: {},
+        workingVisible: true,
+        widgets: {},
+        editorText: "",
+        toolsExpanded: false,
+      },
+      pending: [],
+    }))
     vi.stubGlobal("WebSocket", FakeWebSocket)
   })
 

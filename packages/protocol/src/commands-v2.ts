@@ -27,6 +27,7 @@ export interface CommandPayloadsV2 {
     attachments?: SessionAttachmentV2[]
     model?: { provider: string; modelId: string }
     thinkingLevel?: string
+    expandPromptTemplates?: boolean
   }
   "session.steer": { text: string; attachments?: SessionAttachmentV2[] }
   "session.followUp": { text: string; attachments?: SessionAttachmentV2[] }
@@ -88,7 +89,6 @@ export interface CommandPayloadsV2 {
   "session.switch": { targetSessionId: string }
   "session.import": { inputPath: string; cwdOverride?: string }
   "session.delete": { durable: true }
-  "extension.ui.respond": { requestId: string; value?: unknown; cancelled?: boolean }
   "resources.reload": { workspacePath?: string }
 }
 

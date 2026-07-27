@@ -68,7 +68,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 7 as const
+export const PI_WORKER_PROTOCOL_VERSION = 8 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -112,7 +112,7 @@ export type WorkerCommand =
   | { type: "listAll" }
   | { type: "listModels" }
   | { type: "open"; cwd: string; sessionFile?: string }
-  | { type: "prompt"; text: string; images?: PiImageInput[] }
+  | { type: "prompt"; text: string; images?: PiImageInput[]; expandPromptTemplates?: boolean }
   | { type: "steer"; text: string; images?: PiImageInput[] }
   | { type: "followUp"; text: string; images?: PiImageInput[] }
   | { type: "abort" }
@@ -185,7 +185,7 @@ export type WorkerCommand =
       local?: boolean
       persist?: boolean
     }
-  | { type: "resolvePackages"; cwd: string; missingAction?: "skip" | "error" }
+  | { type: "resolvePackages"; cwd: string; missingAction?: "install" | "skip" | "error" }
   | { type: "resolveExtensionSources"; cwd: string; sources: string[]; local?: boolean; temporary?: boolean }
   | { type: "changePackageSource"; cwd: string; source: string; operation: "add" | "remove"; local?: boolean }
   | { type: "getInstalledPackagePath"; cwd: string; source: string; scope: "user" | "project" }
@@ -253,6 +253,34 @@ export type WorkerResponse =
   | { kind: "response"; id: string; generation: string; ok: true; result: WorkerResult }
   | { kind: "response"; id: string; generation: string; ok: false; error: { code: string; message: string } }
 
+export type WorkerHostCall =
+  | {
+      type: "extensionReplacement.reserve"
+      reservationId: string
+      sourceSessionId: string
+      operation: "new" | "fork" | "clone" | "switch" | "import"
+      targetSessionFile?: string
+    }
+  | {
+      type: "extensionReplacement.commit"
+      reservationId: string
+      replacement: SessionReplacementResultV1
+      session: WorkerSessionWire
+    }
+  | { type: "extensionReplacement.abort"; reservationId: string }
+  | { type: "extensionShutdown"; sessionId: string }
+
+export interface WorkerHostCallMessage {
+  kind: "hostCall"
+  id: string
+  generation: string
+  call: WorkerHostCall
+}
+
+export type WorkerHostReply =
+  | { kind: "hostReply"; id: string; generation: string; ok: true }
+  | { kind: "hostReply"; id: string; generation: string; ok: false; error: { code: string; message: string } }
+
 export type WorkerIpcEvent =
   | { kind: "event"; generation: string; type: "projection"; projection: ProjectionWire }
   | { kind: "event"; generation: string; type: "projectionDelta"; projection: ProjectionWire }
@@ -269,4 +297,5 @@ export interface WorkerHeartbeat {
   timestamp: number
 }
 
-export type WorkerMessage = WorkerHello | WorkerResponse | WorkerIpcEvent | WorkerHeartbeat
+export type WorkerMessage = WorkerHello | WorkerResponse | WorkerIpcEvent | WorkerHeartbeat | WorkerHostCallMessage
+export type WorkerParentMessage = WorkerRequest | WorkerHostReply

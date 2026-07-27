@@ -19,11 +19,13 @@ import type {
 export interface PiSessionRuntime {
   getWorkerGeneration?(): string | undefined
   onCrash?(listener: (error: Error) => void): () => void
+  onClose?(listener: () => void): () => void
   onState(listener: (state: PiRuntimeUiState) => void): () => void
   onProjection(listener: (projection: ProjectionState) => void): () => void
   onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void
   onNativeEvent?(listener: (event: unknown) => void): () => void
   onResourcesChanged?(listener: () => void): () => void
+  onSessionReplacement?(listener: (replacement: SessionReplacementResultV1) => void | Promise<void>): () => void
   listRuntimeProviders?(): Promise<import("@piui/protocol").ProviderAuthInfoV1[]>
   startRuntimeProviderAuth?(providerId: string, authType: "api_key" | "oauth"): Promise<string>
   respondRuntimeProviderAuth?(flowId: string, promptId: string, value: string): Promise<void>
@@ -109,7 +111,7 @@ export interface PiSessionRuntime {
   newSession(parentSession?: string): Promise<SessionReplacementResultV1>
   switchSession(sessionPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1>
   importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1>
-  prompt(text: string, images?: PiImageInput[]): Promise<void>
+  prompt(text: string, images?: PiImageInput[], options?: { expandPromptTemplates?: boolean }): Promise<void>
   steer(text: string, images?: PiImageInput[]): Promise<void>
   followUp(text: string, images?: PiImageInput[]): Promise<void>
   abort(): Promise<{ steering: string[]; followUp: string[] }>

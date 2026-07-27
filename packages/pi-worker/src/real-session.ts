@@ -14,6 +14,9 @@ import {
   SessionManager,
   SettingsManager,
   hasTrustRequiringProjectResources,
+  type LoadExtensionsResult,
+  type ProjectTrustContext,
+  type ProjectTrustEventResult,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type SessionEntry,
@@ -28,6 +31,7 @@ import type {
   PiToolInfoV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
+  PiPackageSourceV1,
   ProjectTrustV1,
   ContextUsageV1,
   SessionStatsV1,
@@ -111,19 +115,35 @@ export interface PiSessionInfo {
   firstMessage: string
 }
 
+export interface ExtensionHostActions {
+  reserveReplacement(request: {
+    reservationId: string
+    sourceSessionId: string
+    operation: "new" | "fork" | "switch"
+    targetSessionFile?: string
+  }): Promise<void>
+  commitReplacement(reservationId: string, replacement: SessionReplacementResultV1): Promise<void>
+  abortReplacement(reservationId: string): Promise<void>
+  requestShutdown(sessionId: string): void
+}
+
 function extensionBindings(
   uiContext: ExtensionUiBridge["context"],
   runtime: AgentSessionRuntime,
   navigateTree: RealPiSession["navigateTree"],
   reload: RealPiSession["reload"],
+  hostActions?: ExtensionHostActions,
 ) {
   return {
     mode: "rpc" as const,
     uiContext,
     commandContextActions: {
       waitForIdle: () => runtime.session.waitForIdle(),
-      newSession: () => unsupportedExtensionSessionReplacement("newSession"),
-      fork: () => unsupportedExtensionSessionReplacement("fork"),
+      newSession: (options?: Parameters<AgentSessionRuntime["newSession"]>[0]) =>
+        runExtensionReplacement(runtime, hostActions, "new", undefined, () =>
+        runtime.newSession(options)),
+      fork: (entryId: string, options?: Parameters<AgentSessionRuntime["fork"]>[1]) =>
+        runExtensionReplacement(runtime, hostActions, "fork", undefined, () => runtime.fork(entryId, options)),
       navigateTree: async (entryId: string, options?: {
         summarize?: boolean
         customInstructions?: string
@@ -133,47 +153,91 @@ function extensionBindings(
         const result = await navigateTree(entryId, options)
         return { cancelled: result.cancelled }
       },
-      switchSession: () => unsupportedExtensionSessionReplacement("switchSession"),
+      switchSession: (sessionPath: string, options?: Parameters<AgentSessionRuntime["switchSession"]>[1]) =>
+        runExtensionReplacement(runtime, hostActions, "switch", sessionPath, () =>
+          runtime.switchSession(sessionPath, options)),
       reload,
     },
     abortHandler: () => { void runtime.session.abort() },
-    shutdownHandler: () => {
-      throw Object.assign(new Error("Extension-requested host shutdown is not available in the remote worker"), {
-        code: "CAPABILITY_DISABLED",
-      })
-    },
+    shutdownHandler: () => hostActions
+      ? hostActions.requestShutdown(runtime.session.sessionManager.getSessionId())
+      : unsupportedExtensionHostAction("shutdown"),
     onError: (error: { extensionPath: string; event: string; error: string }) => {
       console.error(`[piui-worker] extension error (${error.event}) ${error.extensionPath}: ${error.error}`)
     },
   }
 }
 
-function unsupportedExtensionSessionReplacement(action: string): Promise<never> {
-  return Promise.reject(Object.assign(
-    new Error(`Extension command context ${action} requires host coordination unavailable in Pi SDK 0.81.1`),
-    { code: "CAPABILITY_DISABLED" },
-  ))
+async function runExtensionReplacement(
+  runtime: AgentSessionRuntime,
+  hostActions: ExtensionHostActions | undefined,
+  operation: "new" | "fork" | "switch",
+  targetSessionFile: string | undefined,
+  replace: () => Promise<{ cancelled: boolean }>,
+): Promise<{ cancelled: boolean }> {
+  if (!hostActions) return unsupportedExtensionHostAction(operation)
+  const sourceSessionId = runtime.session.sessionManager.getSessionId()
+  const reservationId = randomUUID()
+  await hostActions.reserveReplacement({ reservationId, sourceSessionId, operation, targetSessionFile })
+  try {
+    const result = await replace()
+    if (result.cancelled) {
+      await hostActions.abortReplacement(reservationId)
+      return result
+    }
+    const replacement: SessionReplacementResultV1 = {
+      operation,
+      sourceSessionId,
+      targetSessionId: runtime.session.sessionManager.getSessionId(),
+      targetSessionFile: runtime.session.sessionManager.getSessionFile(),
+      targetCwd: runtime.session.sessionManager.getCwd(),
+      cancelled: false,
+    }
+    await hostActions.commitReplacement(reservationId, replacement)
+    return result
+  } catch (error) {
+    await hostActions.abortReplacement(reservationId).catch(() => undefined)
+    throw error
+  }
+}
+
+function unsupportedExtensionHostAction(action: string): never {
+  throw Object.assign(new Error(`Extension command context ${action} requires a coordinated PiUI host`), {
+    code: "CAPABILITY_DISABLED",
+  })
 }
 
 export interface RealPiSessionOpenOptions {
   agentDir?: string
   createRuntime?: CreateAgentSessionRuntimeFactory
   createSessionManager?: (cwd: string, sessionFile?: string) => SessionManager
+  hostActions?: ExtensionHostActions
 }
 
 const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
+  agentDir,
   sessionManager,
   sessionStartEvent,
 }) => {
-  const agentDir = getAgentDir()
   const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-  const required = hasTrustRequiringProjectResources(cwd)
-  const savedDecision = new ProjectTrustStore(agentDir).get(cwd)
-  const defaultTrust = globalSettings.getDefaultProjectTrust()
-  const projectTrusted = !required || (savedDecision ?? defaultTrust === "always")
-  const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted })
-  const services = await createAgentSessionServices({ cwd, agentDir, settingsManager })
+  const trustDiagnostics: string[] = []
+  const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+  const services = await createAgentSessionServices({
+    cwd,
+    agentDir,
+    settingsManager,
+    resourceLoaderReloadOptions: {
+      resolveProjectTrust: ({ extensionsResult }) => resolveProjectTrustForRpc({
+        cwd,
+        agentDir,
+        extensionsResult,
+        defaultDecision: globalSettings.getDefaultProjectTrust(),
+        onError: message => trustDiagnostics.push(message),
+      }),
+    },
+  })
+  services.diagnostics.push(...trustDiagnostics.map(message => ({ type: "warning" as const, message })))
   return {
     ...(await createAgentSessionFromServices({
       services,
@@ -185,12 +249,55 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   }
 }
 
-function settingsForWorkspace(cwd: string): { manager: SettingsManager; trusted: boolean } {
-  const trust = RealPiSession.getProjectTrust(cwd)
+function settingsForWorkspace(cwd: string, agentDir = getAgentDir()): { manager: SettingsManager; trusted: boolean } {
+  const trust = RealPiSession.getProjectTrust(cwd, agentDir)
   return {
-    manager: SettingsManager.create(cwd, getAgentDir(), { projectTrusted: trust.trusted }),
+    manager: SettingsManager.create(cwd, agentDir, { projectTrusted: trust.trusted }),
     trusted: trust.trusted,
   }
+}
+
+async function resolveProjectTrustForRpc(options: {
+  cwd: string
+  agentDir: string
+  extensionsResult: LoadExtensionsResult
+  defaultDecision: "always" | "never" | "ask"
+  onError: (message: string) => void
+}): Promise<boolean> {
+  if (!hasTrustRequiringProjectResources(options.cwd)) return true
+  const context: ProjectTrustContext = {
+    cwd: options.cwd,
+    mode: "rpc",
+    hasUI: false,
+    ui: {
+      select: async () => undefined,
+      confirm: async () => false,
+      input: async () => undefined,
+      notify: () => {},
+    },
+  }
+  for (const extension of options.extensionsResult.extensions) {
+    for (const handler of extension.handlers.get("project_trust") ?? []) {
+      try {
+        const result = await handler({ type: "project_trust", cwd: options.cwd }, context) as ProjectTrustEventResult
+        if (!result || result.trusted === "undecided") continue
+        const trusted = result.trusted === "yes"
+        if (result.remember === true) new ProjectTrustStore(options.agentDir).set(options.cwd, trusted)
+        return trusted
+      } catch (error) {
+        options.onError(`Extension "${extension.path}" project_trust error: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+  const saved = new ProjectTrustStore(options.agentDir).get(options.cwd)
+  if (saved !== null) return saved
+  return options.defaultDecision === "always"
+}
+
+function configuredSessionDir(cwd: string, agentDir = getAgentDir()): string | undefined {
+  const envSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR?.trim()
+  if (envSessionDir) return resolveUserPath(envSessionDir)
+  return SettingsManager.create(cwd, agentDir, { projectTrusted: false }).getSessionDir()
 }
 
 function packageManagerForWorkspace(cwd: string): DefaultPackageManager {
@@ -276,14 +383,14 @@ function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1):
     else if (key === "lastChangelogVersion") manager.setLastChangelogVersion(expectString(key, value))
     else if (key === "defaultProvider") manager.setDefaultProvider(expectString(key, value))
     else if (key === "defaultModel") manager.setDefaultModel(expectString(key, value))
-    else if (key === "defaultThinkingLevel") manager.setDefaultThinkingLevel(expectEnum(key, value, ["off", "minimal", "low", "medium", "high", "xhigh"]))
-    else if (key === "transport") manager.setTransport(expectEnum(key, value, ["auto", "sse", "websocket"]))
+    else if (key === "defaultThinkingLevel") manager.setDefaultThinkingLevel(expectEnum(key, value, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]))
+    else if (key === "transport") manager.setTransport(expectEnum(key, value, ["auto", "sse", "websocket", "websocket-cached"]))
     else if (key === "steeringMode") manager.setSteeringMode(expectEnum(key, value, ["all", "one-at-a-time"]))
     else if (key === "followUpMode") manager.setFollowUpMode(expectEnum(key, value, ["all", "one-at-a-time"]))
     else if (key === "theme") manager.setTheme(expectString(key, value))
     else if (key === "compactionEnabled") manager.setCompactionEnabled(expectBoolean(key, value))
     else if (key === "retryEnabled") manager.setRetryEnabled(expectBoolean(key, value))
-    else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNumber(key, value))
+    else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNonNegativeNumber(key, value))
     else if (key === "hideThinkingBlock") manager.setHideThinkingBlock(expectBoolean(key, value))
     else if (key === "showCacheMissNotices") manager.setShowCacheMissNotices(expectBoolean(key, value))
     else if (key === "shellPath") manager.setShellPath(expectOptionalString(key, value))
@@ -295,8 +402,8 @@ function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1):
     else if (key === "enableInstallTelemetry") manager.setEnableInstallTelemetry(expectBoolean(key, value))
     else if (key === "collapseChangelog") manager.setCollapseChangelog(expectBoolean(key, value))
     else if (key === "enableSkillCommands") manager.setEnableSkillCommands(expectBoolean(key, value))
-    else if (key === "packages") manager.setPackages(expectArray(key, value) as never)
-    else if (key === "projectPackages") manager.setProjectPackages(expectArray(key, value) as never)
+    else if (key === "packages") manager.setPackages(expectPackageSources(key, value))
+    else if (key === "projectPackages") manager.setProjectPackages(expectPackageSources(key, value))
     else if (key === "extensionPaths") manager.setExtensionPaths(expectStringArray(key, value))
     else if (key === "projectExtensionPaths") manager.setProjectExtensionPaths(expectStringArray(key, value))
     else if (key === "skillPaths") manager.setSkillPaths(expectStringArray(key, value))
@@ -318,7 +425,7 @@ function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1):
     else if (key === "editorPaddingX") manager.setEditorPaddingX(expectNumber(key, value))
     else if (key === "outputPad") manager.setOutputPad(expectOutputPad(key, value))
     else if (key === "autocompleteMaxVisible") manager.setAutocompleteMaxVisible(expectNumber(key, value))
-    else if (key === "warnings") manager.setWarnings(expectRecord(key, value) as never)
+    else if (key === "warnings") manager.setWarnings(expectWarnings(key, value))
     else throw Object.assign(new Error(`unsupported Pi setting: ${key}`), { code: "INVALID_REQUEST" })
   }
 }
@@ -343,6 +450,12 @@ function expectNumber(key: string, value: unknown): number {
   return value
 }
 
+function expectNonNegativeNumber(key: string, value: unknown): number {
+  const result = expectNumber(key, value)
+  if (result < 0) throw invalidSetting(key)
+  return result
+}
+
 function expectEnum<T extends string>(key: string, value: unknown, values: readonly T[]): T {
   if (typeof value !== "string" || !values.includes(value as T)) throw invalidSetting(key)
   return value as T
@@ -365,9 +478,30 @@ function expectRecord(key: string, value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function expectArray(key: string, value: unknown): unknown[] {
+function expectPackageSources(key: string, value: unknown): PiPackageSourceV1[] {
   if (!Array.isArray(value)) throw invalidSetting(key)
-  return value
+  for (const item of value) {
+    if (typeof item === "string") continue
+    const source = expectRecord(key, item)
+    if (typeof source.source !== "string" || !source.source) throw invalidSetting(key)
+    if (source.autoload !== undefined && typeof source.autoload !== "boolean") throw invalidSetting(key)
+    for (const field of ["extensions", "skills", "prompts", "themes"] as const) {
+      if (source[field] !== undefined) expectStringArray(key, source[field])
+    }
+    if (Object.keys(source).some(field => !["source", "autoload", "extensions", "skills", "prompts", "themes"].includes(field))) {
+      throw invalidSetting(key)
+    }
+  }
+  return value as PiPackageSourceV1[]
+}
+
+function expectWarnings(key: string, value: unknown): { anthropicExtraUsage?: boolean } {
+  const warnings = expectRecord(key, value)
+  if (Object.keys(warnings).some(field => field !== "anthropicExtraUsage")) throw invalidSetting(key)
+  if (warnings.anthropicExtraUsage !== undefined && typeof warnings.anthropicExtraUsage !== "boolean") {
+    throw invalidSetting(key)
+  }
+  return warnings as { anthropicExtraUsage?: boolean }
 }
 
 function expectOutputPad(key: string, value: unknown): 0 | 1 {
@@ -400,7 +534,7 @@ export class RealPiSession {
     operation: { type: "none" },
   }
 
-  private constructor(runtime: AgentSessionRuntime) {
+  private constructor(runtime: AgentSessionRuntime, private readonly hostActions?: ExtensionHostActions) {
     this.runtime = runtime
     this.extensionUi = new ExtensionUiBridge(
       () => this.runtime.session.sessionManager.getSessionId(),
@@ -529,8 +663,12 @@ export class RealPiSession {
     if (sessionFile && !existsSync(sessionFile)) {
       throw Object.assign(new Error("Pi session file no longer exists"), { code: "SESSION_FILE_NOT_FOUND" })
     }
+    const agentDir = options.agentDir ?? getAgentDir()
+    const sessionDir = configuredSessionDir(cwd, agentDir)
     const sessionManager = options.createSessionManager?.(cwd, sessionFile) ??
-      (sessionFile ? SessionManager.open(sessionFile) : SessionManager.create(cwd))
+      (sessionFile
+        ? sessionDir ? SessionManager.open(sessionFile, sessionDir) : SessionManager.open(sessionFile)
+        : SessionManager.create(cwd, sessionDir))
     if (sessionFile && pathKey(sessionManager.getCwd()) !== pathKey(cwd)) {
       throw Object.assign(new Error("Pi session workspace does not match the selected workspace"), {
         code: "SESSION_WORKSPACE_MISMATCH",
@@ -539,11 +677,11 @@ export class RealPiSession {
     const projection = sessionFile ? projectNativeBranch(sessionManager.getBranch()) : undefined
     const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime, {
       cwd: sessionManager.getCwd(),
-      agentDir: options.agentDir ?? getAgentDir(),
+      agentDir,
       sessionManager,
     })
 
-    const result = new RealPiSession(runtime)
+    const result = new RealPiSession(runtime, options.hostActions)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
       result.extensionUi.cancelAll("session_replaced")
@@ -554,6 +692,7 @@ export class RealPiSession {
           result.runtime,
           result.navigateTree.bind(result),
           result.reload.bind(result),
+          result.hostActions,
         ))
       }
       result.bindStateEvents()
@@ -569,6 +708,7 @@ export class RealPiSession {
       this.runtime,
       this.navigateTree.bind(this),
       this.reload.bind(this),
+      this.hostActions,
     ))
     this.extensionsInitialized = true
   }
@@ -585,12 +725,12 @@ export class RealPiSession {
     this.extensionUi.setEditorState(text)
   }
 
-  static async list(cwd: string): Promise<PiSessionInfo[]> {
-    return (await SessionManager.list(cwd)).map(sessionInfo)
+  static async list(cwd: string, agentDir = getAgentDir()): Promise<PiSessionInfo[]> {
+    return (await SessionManager.list(cwd, configuredSessionDir(cwd, agentDir))).map(sessionInfo)
   }
 
-  static async listAll(): Promise<PiSessionInfo[]> {
-    return (await SessionManager.listAll()).map(sessionInfo)
+  static async listAll(agentDir = getAgentDir()): Promise<PiSessionInfo[]> {
+    return (await SessionManager.listAll(configuredSessionDir(process.cwd(), agentDir))).map(sessionInfo)
   }
 
   static async listModels(): Promise<PiModelInfo[]> {
@@ -598,20 +738,23 @@ export class RealPiSession {
     return (await runtime.getAvailable()).map(modelInfo)
   }
 
-  static getSettings(cwd: string): PiSettingsSnapshotV1 {
-    const { manager, trusted } = settingsForWorkspace(cwd)
+  static getSettings(cwd: string, agentDir = getAgentDir()): PiSettingsSnapshotV1 {
+    const { manager, trusted } = settingsForWorkspace(cwd, agentDir)
     return settingsSnapshot(cwd, manager, trusted)
   }
 
-  static async patchSettings(cwd: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
-    const { manager, trusted } = settingsForWorkspace(cwd)
+  static async patchSettings(
+    cwd: string,
+    patch: PiSettingsPatchV1,
+    agentDir = getAgentDir(),
+  ): Promise<PiSettingsSnapshotV1> {
+    const { manager, trusted } = settingsForWorkspace(cwd, agentDir)
     applySettingsPatch(manager, patch)
     await manager.flush()
     return settingsSnapshot(cwd, manager, trusted)
   }
 
-  static getProjectTrust(cwd: string): ProjectTrustV1 {
-    const agentDir = getAgentDir()
+  static getProjectTrust(cwd: string, agentDir = getAgentDir()): ProjectTrustV1 {
     const store = new ProjectTrustStore(agentDir)
     const entry = store.getEntry(cwd)
     const manager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
@@ -668,7 +811,7 @@ export class RealPiSession {
 
   static async resolvePackages(
     cwd: string,
-    missingAction: "skip" | "error" = "skip",
+    missingAction: "install" | "skip" | "error" = "skip",
   ): Promise<ResolvedPackageResourcesV1> {
     const packages = packageManagerForWorkspace(cwd)
     return packages.resolve(async () => missingAction)
@@ -1348,10 +1491,18 @@ export class RealPiSession {
     this.emitState()
   }
 
-  async prompt(text: string, images?: PiImageInput[]): Promise<void> {
+  async prompt(
+    text: string,
+    images?: PiImageInput[],
+    options: { expandPromptTemplates?: boolean } = {},
+  ): Promise<void> {
     try {
       this.assertImageSupport(images)
-      await this.runtime.session.prompt(text, images?.length ? { images } : undefined)
+      await this.runtime.session.prompt(text, {
+        images: images?.length ? images : undefined,
+        expandPromptTemplates: options.expandPromptTemplates,
+        source: "rpc",
+      })
     } finally {
       this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
       this.emitProjection()

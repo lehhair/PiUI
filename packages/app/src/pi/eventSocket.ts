@@ -10,7 +10,13 @@ import {
   type EventStreamRefV2,
   type SessionSnapshotV1,
 } from "@piui/protocol"
-import { getApiBase, getPiAuthToken, fetchSnapshot } from "./sessionApi"
+import {
+  getApiBase,
+  getPiAuthToken,
+  fetchExtensionUiSnapshot,
+  fetchSnapshot,
+  setExtensionEditorState,
+} from "./sessionApi"
 import { applySnapshotToUi } from "./applySnapshot"
 import {
   listTrackedPiSessions,
@@ -19,6 +25,9 @@ import {
   trackPiSession,
 } from "./piSessionIndex"
 import { sessionProjectionStore } from "./sessionProjectionStore"
+import { extensionUiStore } from "./extensionUiStore"
+import { configureSessionEditorDraftSync, setSessionEditorDraft } from "./sessionEditorDraftStore"
+import { notificationStore } from "../store/notificationStore"
 
 type Status = "idle" | "connecting" | "open" | "closed"
 
@@ -75,6 +84,10 @@ export class PiEventSocket {
     this.intentionalClose = false
     this.setStatus("connecting")
     this.unsubscribeSessionIndex ??= subscribePiSessionIndex(() => this.sendV2Subscription())
+    configureSessionEditorDraftSync((sessionId, text) => {
+      if (!listTrackedPiSessions().includes(sessionId)) return
+      return setExtensionEditorState(sessionId, text).then(snapshot => extensionUiStore.replace(snapshot))
+    })
     try {
       const legacyCursor = this.legacyEpoch
         ? { epoch: this.legacyEpoch, sequence: this.legacySequence }
@@ -173,6 +186,25 @@ export class PiEventSocket {
       return
     } else if (event.type === "workspace.sessions.updated") {
       window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
+    } else if (event.type === "extension.ui.requested") {
+      extensionUiStore.requestOpened(event.payload)
+    } else if (event.type === "extension.ui.settled") {
+      extensionUiStore.requestSettled(event.payload.sessionId, event.payload.requestId)
+    } else if (event.type === "extension.ui.cancelled") {
+      extensionUiStore.requestSettled(event.stream.id, event.payload.requestId)
+    } else if (event.type === "extension.ui.state.updated") {
+      extensionUiStore.stateUpdated(event.payload.sessionId, event.payload.state)
+    } else if (event.type === "extension.ui.editor.command") {
+      extensionUiStore.editorCommand(event.payload.sessionId, event.payload.command)
+      const editorText = extensionUiStore.getSnapshot().sessions[event.payload.sessionId]?.state.editorText ?? ""
+      setSessionEditorDraft(event.payload.sessionId, editorText, { sync: false })
+    } else if (event.type === "extension.ui.notified") {
+      notificationStore.push(
+        event.payload.notifyType === "error" ? "error" : "completed",
+        "Extension",
+        event.payload.message,
+        event.payload.sessionId,
+      )
     } else if (
       event.type === "command.updated" &&
       event.payload.sessionId &&
@@ -254,7 +286,12 @@ export class PiEventSocket {
 
     const pending = (async () => {
       if (stream.kind === "session") {
-        applySnapshotToUi(await fetchSnapshot(stream.id), { activate: false })
+        const [snapshot, extensionUi] = await Promise.all([
+          fetchSnapshot(stream.id),
+          fetchExtensionUiSnapshot(stream.id),
+        ])
+        applySnapshotToUi(snapshot, { activate: false })
+        extensionUiStore.replace(extensionUi)
       } else if (stream.kind === "server" || stream.kind === "workspace") {
         window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
       }
@@ -303,6 +340,7 @@ export class PiEventSocket {
     }
     this.unsubscribeSessionIndex?.()
     this.unsubscribeSessionIndex = null
+    configureSessionEditorDraftSync(undefined)
     this.ws?.close()
     this.ws = null
     this.setStatus("closed")

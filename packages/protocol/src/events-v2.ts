@@ -5,6 +5,7 @@ import type {
   ExtensionUiEditorCommandV1,
   ExtensionUiStatePatchV1,
   ExtensionUiStateV1,
+  ExtensionUiSettlementReasonV1,
 } from "./extension-ui.js"
 import type { PackageProgressV1, ProviderAuthEventV1 } from "./management.js"
 
@@ -56,6 +57,11 @@ export interface EventPayloadsV2 {
   }
   "extension.ui.requested": ExtensionUiDialogRequestV1
   "extension.ui.cancelled": { requestId: string; reason: string }
+  "extension.ui.settled": {
+    requestId: string
+    sessionId: string
+    reason: ExtensionUiSettlementReasonV1
+  }
   "extension.ui.state.updated": { sessionId: string; patch: ExtensionUiStatePatchV1; state: ExtensionUiStateV1 }
   "extension.ui.notified": { sessionId: string; message: string; notifyType?: "info" | "warning" | "error" }
   "extension.ui.editor.command": { sessionId: string; command: ExtensionUiEditorCommandV1 }

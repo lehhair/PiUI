@@ -711,6 +711,12 @@ describe("session mock snapshot (no LLM)", () => {
       assert.deepEqual(packages, { status: 200, data: { packages: [] } })
       const resolved = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/packages/resolved`)
       assert.deepEqual(resolved.data, { extensions: [], skills: [], prompts: [], themes: [] })
+      const resolvedWithInstall = await json(
+        port,
+        "GET",
+        `/api/v1/workspaces/${encodedWorkspace}/packages/resolved?missingAction=install`,
+      )
+      assert.equal(resolvedWithInstall.status, 200)
       const resolvedSources = await json(
         port,
         "POST",

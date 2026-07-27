@@ -12,6 +12,9 @@ import {
   type ProjectionWire,
   type WorkerCommand,
   type WorkerMessage,
+  type WorkerHostCall,
+  type WorkerHostReply,
+  type WorkerParentMessage,
   type WorkerRequest,
   type WorkerResult,
   type WorkerSessionWire,
@@ -24,6 +27,11 @@ let unsubscribeNativeEvent: (() => void) | undefined
 let unsubscribeResourcesChanged: (() => void) | undefined
 let unsubscribeExtensionUi: (() => void) | undefined
 const workerGeneration = randomUUID()
+const pendingHostCalls = new Map<string, {
+  resolve: () => void
+  reject: (error: Error) => void
+  timer: NodeJS.Timeout
+}>()
 const providerAuth = new ProviderAuthHost(() => {
   const sessionRuntime = runtime as (PiSessionRuntime & { getModelRuntime?: () => ModelRuntime }) | undefined
   return sessionRuntime?.getModelRuntime ? Promise.resolve(sessionRuntime.getModelRuntime()) : ModelRuntime.create()
@@ -67,6 +75,25 @@ const workerCapabilities: PiWorkerCapability[] = [
 
 function send(message: WorkerMessage): void {
   process.send?.(message)
+}
+
+function callHost(call: WorkerHostCall): Promise<void> {
+  const id = randomUUID()
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingHostCalls.delete(id)
+      reject(Object.assign(new Error("PiUI host call timed out"), { code: "HOST_CALL_TIMEOUT" }))
+    }, 15_000)
+    timer.unref()
+    pendingHostCalls.set(id, { resolve, reject, timer })
+    process.send?.({ kind: "hostCall", id, generation: workerGeneration, call }, error => {
+      if (!error) return
+      const pending = pendingHostCalls.get(id)
+      if (pending) clearTimeout(pending.timer)
+      pendingHostCalls.delete(id)
+      reject(error)
+    })
+  })
 }
 
 function projectionWire(value: ProjectionWire = requireRuntime().getProjection()): ProjectionWire {
@@ -175,7 +202,26 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "packageUpdates", updates: await RealPiSession.checkPackageUpdates(command.cwd) }
     case "open": {
       if (runtime) throw Object.assign(new Error("Pi runtime is already open"), { code: "RUNTIME_ALREADY_OPEN" })
-      runtime = await RealPiSession.open(command.cwd, command.sessionFile)
+      runtime = await RealPiSession.open(command.cwd, command.sessionFile, {
+        hostActions: {
+          reserveReplacement: request => callHost({ type: "extensionReplacement.reserve", ...request }),
+          commitReplacement: (reservationId, replacement) => {
+            providerAuth.resetRuntime()
+            return callHost({
+              type: "extensionReplacement.commit",
+              reservationId,
+              replacement,
+              session: sessionWire(),
+            })
+          },
+          abortReplacement: reservationId => callHost({ type: "extensionReplacement.abort", reservationId }),
+          requestShutdown: sessionId => {
+            void callHost({ type: "extensionShutdown", sessionId }).catch(error => {
+              console.error(`[piui-worker] extension shutdown request failed: ${error instanceof Error ? error.message : String(error)}`)
+            })
+          },
+        },
+      })
       unsubscribeState = runtime.onState(state => send({
         kind: "event",
         generation: workerGeneration,
@@ -208,7 +254,9 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "session", session: sessionWire() }
     }
     case "prompt": {
-      await requireRuntime().prompt(command.text, command.images)
+      await requireRuntime().prompt(command.text, command.images, {
+        expandPromptTemplates: command.expandPromptTemplates,
+      })
       return { type: "session", session: sessionWire() }
     }
     case "steer":
@@ -391,7 +439,18 @@ const schedule = createWorkerCommandScheduler(request => {
 })
 
 process.on("message", (value: unknown) => {
-  const request = value as WorkerRequest
+  const message = value as WorkerParentMessage
+  if (message?.kind === "hostReply") {
+    const reply = message as WorkerHostReply
+    const pending = pendingHostCalls.get(reply.id)
+    if (!pending || reply.generation !== workerGeneration) return
+    pendingHostCalls.delete(reply.id)
+    clearTimeout(pending.timer)
+    if (reply.ok) pending.resolve()
+    else pending.reject(Object.assign(new Error(reply.error.message), { code: reply.error.code }))
+    return
+  }
+  const request = message as WorkerRequest
   if (!request || request.kind !== "request" || typeof request.id !== "string") return
   if (request.generation !== workerGeneration) {
     send({
@@ -435,5 +494,10 @@ send({
 
 process.on("disconnect", () => {
   clearInterval(heartbeatTimer)
+  for (const pending of pendingHostCalls.values()) {
+    clearTimeout(pending.timer)
+    pending.reject(new Error("PiUI host disconnected"))
+  }
+  pendingHostCalls.clear()
   void (runtime?.dispose() ?? Promise.resolve()).finally(() => process.exit(0))
 })

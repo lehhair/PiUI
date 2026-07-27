@@ -1,4 +1,4 @@
-import { getPiWorkerEntryUrl, type PiModelInfo, type PiSessionInfo } from "@piui/pi-worker"
+import { getPiWorkerEntryUrl, type PiModelInfo, type PiSessionInfo, type WorkerHostCall } from "@piui/pi-worker"
 import type {
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
@@ -17,7 +17,11 @@ import {
   type PiWorkerClientOptions,
   type PiWorkerHost,
 } from "./pi-worker-client.ts"
-import { SessionLeaseManager, type SessionLease } from "./session-lease.ts"
+import {
+  SessionLeaseManager,
+  type SessionLease,
+  type SessionReplacementReservation,
+} from "./session-lease.ts"
 
 export interface RuntimeSupervisorOptions {
   workerEntry?: URL
@@ -161,7 +165,7 @@ export class RuntimeSupervisor {
     return this.runCatalog(catalog => catalog.managePackage(cwd, commandId, action, source, local, persist))
   }
 
-  resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
+  resolvePackages(cwd: string, missingAction?: "install" | "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
     return this.runCatalog(catalog => catalog.resolvePackages(cwd, missingAction))
   }
 
@@ -227,12 +231,51 @@ export class RuntimeSupervisor {
         throw new Error("Runtime supervisor is disposed")
       }
       const release = once(() => lease?.release())
+      const reservations = new Map<string, SessionReplacementReservation>()
+      runtime.setHostCallHandler(async (call: WorkerHostCall) => {
+        if (call.type === "extensionReplacement.reserve") {
+          if (call.sourceSessionId !== runtime.getSessionId()) {
+            throw Object.assign(new Error("Extension replacement source no longer owns the runtime"), {
+              code: "RUNTIME_REPLACED",
+            })
+          }
+          if (reservations.has(call.reservationId)) return
+          if (!lease?.reserveReplacement) {
+            throw Object.assign(new Error("Runtime lease manager cannot reserve replacements"), {
+              code: "CAPABILITY_DISABLED",
+            })
+          }
+          reservations.set(
+            call.reservationId,
+            await lease.reserveReplacement(call.targetSessionFile),
+          )
+          return
+        }
+        if (call.type === "extensionReplacement.commit") {
+          const reservation = reservations.get(call.reservationId)
+          if (!reservation) throw Object.assign(new Error("Replacement reservation not found"), { code: "INTERNAL" })
+          await reservation.commit(call.replacement.targetSessionFile, call.replacement.targetSessionId)
+          reservations.delete(call.reservationId)
+          return
+        }
+        if (call.type === "extensionReplacement.abort") {
+          reservations.get(call.reservationId)?.rollback()
+          reservations.delete(call.reservationId)
+          return
+        }
+        if (call.type === "extensionShutdown") {
+          if (call.sessionId !== runtime.getSessionId()) return
+          setImmediate(() => { void runtime.dispose() })
+        }
+      })
       runtime.setReplacementHandler(async replacement => {
         if (replacement.cancelled) return
         await lease?.replace(replacement.targetSessionFile, replacement.targetSessionId)
       })
       runtime.onClose(() => {
         this.active.delete(runtime)
+        for (const reservation of reservations.values()) reservation.rollback()
+        reservations.clear()
         release()
       })
       this.active.add(runtime)

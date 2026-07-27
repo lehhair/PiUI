@@ -41,6 +41,7 @@ import {
   type ProjectionState,
   type WorkerCommand,
   type WorkerHello,
+  type WorkerHostCall,
   type WorkerMessage,
   type WorkerResult,
   type WorkerSessionWire,
@@ -87,7 +88,7 @@ export interface PiWorkerCatalog {
     local?: boolean,
     persist?: boolean,
   ): Promise<ConfiguredPackageV1[]>
-  resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1>
+  resolvePackages(cwd: string, missingAction?: "install" | "skip" | "error"): Promise<ResolvedPackageResourcesV1>
   resolveExtensionSources(
     cwd: string,
     sources: string[],
@@ -124,11 +125,15 @@ export class PiWorkerSession implements PiSessionRuntime {
   private readonly resourceListeners = new Set<() => void>()
   private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
   private readonly packageProgressListeners = new Set<(event: PackageProgressV1) => void>()
+  private readonly sessionReplacementListeners = new Set<(
+    replacement: SessionReplacementResultV1,
+  ) => void | Promise<void>>()
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
   private projection: ProjectionState = restoreProjection([])
   private replacementHandler?: (replacement: SessionReplacementResultV1) => void | Promise<void>
+  private hostCallHandler?: (call: WorkerHostCall) => void | Promise<void>
   private disposed = false
   private disposing = false
   private disposePromise?: Promise<void>
@@ -436,7 +441,7 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   private async resolveCatalogPackages(
     cwd: string,
-    missingAction?: "skip" | "error",
+    missingAction?: "install" | "skip" | "error",
   ): Promise<ResolvedPackageResourcesV1> {
     const result = await this.request({ type: "resolvePackages", cwd, missingAction })
     if (result.type !== "packageResources") throw new Error(`unexpected Pi worker result: ${result.type}`)
@@ -691,27 +696,27 @@ export class PiWorkerSession implements PiSessionRuntime {
   }
 
   async fork(entryId: string, position: "before" | "at"): Promise<SessionReplacementResultV1> {
-    return this.applyReplacement(await this.request({ type: "fork", entryId, position }))
+    return this.requestReplacement("fork", undefined, { type: "fork", entryId, position })
   }
 
   async clone(entryId?: string): Promise<SessionReplacementResultV1> {
-    return this.applyReplacement(await this.request({ type: "clone", entryId }))
+    return this.requestReplacement("clone", undefined, { type: "clone", entryId })
   }
 
   async newSession(parentSession?: string): Promise<SessionReplacementResultV1> {
-    return this.applyReplacement(await this.request({ type: "newSession", parentSession }))
+    return this.requestReplacement("new", undefined, { type: "newSession", parentSession })
   }
 
   async switchSession(sessionPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
-    return this.applyReplacement(await this.request({ type: "switchSession", sessionPath, cwdOverride }))
+    return this.requestReplacement("switch", sessionPath, { type: "switchSession", sessionPath, cwdOverride })
   }
 
   async importSession(inputPath: string, cwdOverride?: string): Promise<SessionReplacementResultV1> {
-    return this.applyReplacement(await this.request({ type: "importSession", inputPath, cwdOverride }))
+    return this.requestReplacement("import", undefined, { type: "importSession", inputPath, cwdOverride })
   }
 
-  async prompt(text: string, images?: PiImageInput[]): Promise<void> {
-    this.applySession(expectSession(await this.request({ type: "prompt", text, images })))
+  async prompt(text: string, images?: PiImageInput[], options?: { expandPromptTemplates?: boolean }): Promise<void> {
+    this.applySession(expectSession(await this.request({ type: "prompt", text, images, ...options })))
   }
 
   async steer(text: string, images?: PiImageInput[]): Promise<void> {
@@ -792,6 +797,17 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   setReplacementHandler(handler: (replacement: SessionReplacementResultV1) => void | Promise<void>): void {
     this.replacementHandler = handler
+  }
+
+  setHostCallHandler(handler: (call: WorkerHostCall) => void | Promise<void>): void {
+    this.hostCallHandler = handler
+  }
+
+  onSessionReplacement(
+    listener: (replacement: SessionReplacementResultV1) => void | Promise<void>,
+  ): () => void {
+    this.sessionReplacementListeners.add(listener)
+    return () => this.sessionReplacementListeners.delete(listener)
   }
 
   private async applyReplacement(result: WorkerResult): Promise<SessionReplacementResultV1> {
@@ -916,6 +932,10 @@ export class PiWorkerSession implements PiSessionRuntime {
       else pending.reject(Object.assign(new Error(message.error.message), { code: message.error.code }))
       return
     }
+    if (message.kind === "hostCall") {
+      void this.handleHostCall(message.id, message.call)
+      return
+    }
     if (message.type === "projection") {
       this.projection = restoreProjection(message.projection.timeline, message.projection.isStreaming)
       for (const listener of this.projectionListeners) listener(this.projection)
@@ -980,6 +1000,80 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
     this.runtimeState = message.state
     for (const listener of this.stateListeners) listener(message.state)
+  }
+
+  private async requestReplacement(
+    operation: "new" | "fork" | "clone" | "switch" | "import",
+    targetSessionFile: string | undefined,
+    command: Extract<WorkerCommand, { type: "fork" | "clone" | "newSession" | "switchSession" | "importSession" }>,
+  ): Promise<SessionReplacementResultV1> {
+    if (!this.hostCallHandler) return this.applyReplacement(await this.request(command))
+    const reservationId = randomUUID()
+    await this.hostCallHandler({
+      type: "extensionReplacement.reserve",
+      reservationId,
+      sourceSessionId: this.getSessionId(),
+      operation,
+      targetSessionFile,
+    })
+    try {
+      const result = await this.request(command)
+      if (result.type !== "replacement") throw new Error(`unexpected Pi worker result: ${result.type}`)
+      if (result.replacement.cancelled) {
+        await this.hostCallHandler({ type: "extensionReplacement.abort", reservationId })
+        return result.replacement
+      }
+      try {
+        await this.hostCallHandler({
+          type: "extensionReplacement.commit",
+          reservationId,
+          replacement: { ...result.replacement, operation },
+          session: result.session,
+        })
+      } catch (error) {
+        const failure = Object.assign(new Error("Pi session replacement lease transfer failed", { cause: error }), {
+          code: "SESSION_REPLACEMENT_COMMIT_FAILED",
+        })
+        void this.dispose()
+        throw failure
+      }
+      this.applySession(result.session)
+      return { ...result.replacement, operation }
+    } catch (error) {
+      await Promise.resolve(this.hostCallHandler({ type: "extensionReplacement.abort", reservationId })).catch(() => undefined)
+      throw error
+    }
+  }
+
+  private async handleHostCall(id: string, call: WorkerHostCall): Promise<void> {
+    try {
+      if (!this.hostCallHandler) {
+        throw Object.assign(new Error("Pi worker host calls are not configured"), { code: "CAPABILITY_DISABLED" })
+      }
+      await this.hostCallHandler(call)
+      if (call.type === "extensionReplacement.commit") {
+        this.applySession(call.session)
+        for (const listener of this.sessionReplacementListeners) await listener(call.replacement)
+      }
+      this.child.send({
+        kind: "hostReply",
+        id,
+        generation: this.workerHello!.generation,
+        ok: true,
+      })
+    } catch (error) {
+      this.child.send({
+        kind: "hostReply",
+        id,
+        generation: this.workerHello!.generation,
+        ok: false,
+        error: {
+          code: error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+      if (call.type === "extensionReplacement.commit") void this.dispose()
+    }
   }
 
   private applySession(session: WorkerSessionWire): void {
