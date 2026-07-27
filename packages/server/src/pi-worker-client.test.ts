@@ -18,7 +18,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 7)
+      assert.equal(hello.workerProtocolVersion, 8)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -111,6 +111,26 @@ describe("PiWorkerSession IPC", () => {
       // session, so this only succeeds when the client tracks the replacement.
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
     } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("coordinates an extension replacement through host calls", async () => {
+    const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
+    const calls: string[] = []
+    const replacements: string[] = []
+    runtime.setHostCallHandler(call => { calls.push(call.type) })
+    const unsubscribe = runtime.onSessionReplacement(replacement => {
+      replacements.push(replacement.targetSessionId)
+    })
+    try {
+      await runtime.prompt("extension-new-session")
+      assert.deepEqual(calls, ["extensionReplacement.reserve", "extensionReplacement.commit"])
+      assert.deepEqual(replacements, [runtime.getSessionId()])
+      assert.match(runtime.getSessionId(), /^fixture-extension-/)
+      assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
+    } finally {
+      unsubscribe()
       await runtime.dispose()
     }
   })

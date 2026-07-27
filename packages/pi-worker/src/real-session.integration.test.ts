@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -16,6 +16,137 @@ import {
 import { RealPiSession } from "./real-session.ts"
 
 describe("RealPiSession with the Pi SDK", () => {
+  it("uses the configured sessionDir for creation and discovery", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-session-dir-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    const sessionDir = path.join(root, "sessions")
+    mkdirSync(cwd)
+    mkdirSync(agentDir)
+    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ sessionDir }))
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = agentDir
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      assert.equal(path.dirname(session.getSessionFile()!), sessionDir)
+      const discoverable = SessionManager.create(cwd, sessionDir)
+      discoverable.appendMessage({ role: "user", content: "persist", timestamp: Date.now() })
+      const { fauxAssistantMessage } = await loadPiAiFromPinnedSdk()
+      discoverable.appendMessage(fauxAssistantMessage("persisted"))
+      assert.equal(existsSync(discoverable.getSessionFile()!), true)
+      assert.equal((await SessionManager.list(cwd, sessionDir)).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal((await RealPiSession.list(cwd, agentDir)).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal(SettingsManager.create(process.cwd(), agentDir).getSessionDir(), sessionDir)
+      assert.equal((await RealPiSession.listAll(agentDir)).some(item => item.id === discoverable.getSessionId()), true)
+      await session.dispose()
+      session = await RealPiSession.open(cwd, discoverable.getSessionFile(), { agentDir })
+      const replacement = await session.newSession()
+      assert.equal(path.dirname(replacement.targetSessionFile!), sessionDir)
+    } finally {
+      await session?.dispose()
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("prefers the Pi session directory environment override", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-session-dir-env-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    const sessionDir = path.join(root, "environment-sessions")
+    mkdirSync(cwd)
+    mkdirSync(agentDir)
+    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ sessionDir: path.join(root, "settings-sessions") }))
+    const previous = process.env.PI_CODING_AGENT_SESSION_DIR
+    process.env.PI_CODING_AGENT_SESSION_DIR = sessionDir
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      assert.equal(path.dirname(session.getSessionFile()!), sessionDir)
+    } finally {
+      await session?.dispose()
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR
+      else process.env.PI_CODING_AGENT_SESSION_DIR = previous
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("validates and persists every extended settings value", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-settings-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    mkdirSync(cwd)
+    mkdirSync(agentDir)
+    try {
+      const result = await RealPiSession.patchSettings(cwd, {
+        defaultThinkingLevel: "max",
+        transport: "websocket-cached",
+        httpIdleTimeoutMs: 1234,
+        shellPath: null,
+        packages: [
+          "npm:plain-package",
+          { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
+        ],
+        warnings: { anthropicExtraUsage: false },
+      }, agentDir)
+      assert.equal(result.effective.defaultThinkingLevel, "max")
+      assert.equal(result.effective.transport, "websocket-cached")
+      assert.equal(result.effective.httpIdleTimeoutMs, 1234)
+      assert.deepEqual(result.effective.packages, [
+        "npm:plain-package",
+        { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
+      ])
+
+      await assert.rejects(
+        RealPiSession.patchSettings(cwd, { packages: [{ source: "x", unknown: true }] } as never, agentDir),
+        /invalid Pi setting: packages/,
+      )
+      await assert.rejects(
+        RealPiSession.patchSettings(cwd, { warnings: { anthropicExtraUsage: "yes" } } as never, agentDir),
+        /invalid Pi setting: warnings/,
+      )
+      await assert.rejects(
+        RealPiSession.patchSettings(cwd, { httpIdleTimeoutMs: -1 }, agentDir),
+        /invalid Pi setting: httpIdleTimeoutMs/,
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("lets global extensions decide project trust before project resources load", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-project-trust-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    const projectExtensions = path.join(cwd, ".pi", "extensions")
+    mkdirSync(projectExtensions, { recursive: true })
+    mkdirSync(agentDir)
+    const trustExtension = path.join(root, "trust-extension.js")
+    writeFileSync(trustExtension, `
+export default function (pi) {
+  pi.on("project_trust", () => ({ trusted: "yes", remember: true }))
+}
+`)
+    writeFileSync(path.join(projectExtensions, "trusted-command.js"), `
+export default function (pi) {
+  pi.registerCommand("trusted-project-command", { description: "trusted", handler: async () => {} })
+}
+`)
+    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ extensions: [trustExtension] }))
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      await session.initializeExtensions()
+      assert.equal((await session.listCommands()).some(command => command.name === "trusted-project-command"), true)
+      assert.equal(new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).get(cwd), true)
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("projects an offline faux-provider turn without user configuration", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-sdk-"))
     const { fauxAssistantMessage, fauxProvider, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()

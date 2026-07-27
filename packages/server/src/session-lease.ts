@@ -12,12 +12,20 @@ import path from "node:path"
  */
 const PORT_BASE = 20_000
 const PORT_COUNT = 12_000
+const ALLOCATION_PORT_BASE = 18_000
+const ALLOCATION_PORT_COUNT = 2_000
 
 export interface SessionLease {
   key: string
   refresh(sessionFile?: string, sessionId?: string): Promise<void>
   replace(sessionFile?: string, sessionId?: string): Promise<void>
+  reserveReplacement?(targetSessionFile?: string): Promise<SessionReplacementReservation>
   release(): void
+}
+
+export interface SessionReplacementReservation {
+  commit(sessionFile?: string, sessionId?: string): Promise<void>
+  rollback(): void
 }
 
 export class SessionLeaseManager {
@@ -28,14 +36,24 @@ export class SessionLeaseManager {
 
   async acquire(sessionFile: string, sessionId?: string): Promise<SessionLease> {
     if (this.disposed) throw new Error("Session lease manager is disposed")
+    const allocationLock = await this.acquireAllocationLock()
+    try {
+      return await this.acquireWhileLocked(sessionFile, sessionId)
+    } finally {
+      allocationLock.close()
+    }
+  }
+
+  private async acquireWhileLocked(sessionFile: string, sessionId?: string): Promise<SessionLease> {
     const keys = leaseKeys(sessionFile, sessionId)
     const servers = new Map<number, Server>()
     let currentSessionFile: string | undefined = sessionFile
     let currentSessionId: string | undefined = sessionId
     let released = false
     let refreshPromise: Promise<void> | undefined
+    let replacementReservation: { lock: Server; addedPorts: number[] } | undefined
 
-    const acquireKeys = async (nextSessionFile = currentSessionFile, nextSessionId = currentSessionId): Promise<void> => {
+    const acquireKeys = async (nextSessionFile = currentSessionFile, nextSessionId = currentSessionId): Promise<number[]> => {
       const added: number[] = []
       try {
         for (const port of leasePorts(this.namespace, leaseKeys(nextSessionFile, nextSessionId))) {
@@ -58,6 +76,7 @@ export class SessionLeaseManager {
         }
         throw error
       }
+      return added
     }
     await acquireKeys()
     const lease: SessionLease = {
@@ -82,9 +101,52 @@ export class SessionLeaseManager {
         currentSessionFile = nextSessionFile
         currentSessionId = nextSessionId
       },
+      reserveReplacement: async targetSessionFile => {
+        if (released) throw new Error("Session lease is released")
+        if (replacementReservation) throw new Error("Session replacement is already reserved")
+        const lock = await this.acquireAllocationLock()
+        let addedPorts: number[] = []
+        try {
+          if (targetSessionFile) addedPorts = await acquireKeys(targetSessionFile, undefined)
+        } catch (error) {
+          lock.close()
+          throw error
+        }
+        replacementReservation = { lock, addedPorts }
+        let settled = false
+        return {
+          commit: async (nextSessionFile, nextSessionId) => {
+            if (settled || replacementReservation?.lock !== lock) throw new Error("Replacement reservation is settled")
+            await acquireKeys(nextSessionFile, nextSessionId)
+            const targetPorts = new Set(leasePorts(this.namespace, leaseKeys(nextSessionFile, nextSessionId)))
+            for (const [port, server] of servers) {
+              if (targetPorts.has(port)) continue
+              server.close()
+              servers.delete(port)
+            }
+            currentSessionFile = nextSessionFile
+            currentSessionId = nextSessionId
+            settled = true
+            replacementReservation = undefined
+            lock.close()
+          },
+          rollback: () => {
+            if (settled || replacementReservation?.lock !== lock) return
+            settled = true
+            for (const port of addedPorts) {
+              servers.get(port)?.close()
+              servers.delete(port)
+            }
+            replacementReservation = undefined
+            lock.close()
+          },
+        }
+      },
       release: () => {
         if (released) return
         released = true
+        replacementReservation?.lock.close()
+        replacementReservation = undefined
         this.held.delete(lease)
         for (const server of servers.values()) server.close()
         servers.clear()
@@ -96,6 +158,26 @@ export class SessionLeaseManager {
     }
     this.held.add(lease)
     return lease
+  }
+
+  private async acquireAllocationLock(timeoutMs = 15_000): Promise<Server> {
+    const digest = createHash("sha256").update(`${this.namespace}\0allocation:global`).digest()
+    const port = ALLOCATION_PORT_BASE + (digest.readUInt16BE(0) % ALLOCATION_PORT_COUNT)
+    const deadline = Date.now() + timeoutMs
+    while (!this.disposed) {
+      const server = createServer(socket => socket.destroy())
+      server.unref()
+      if (await tryListen(server, port) === "listening") return server
+      server.close()
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error("Timed out waiting for the Pi session allocation lock"), {
+          code: "SESSION_BUSY",
+          retryable: true,
+        })
+      }
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    throw new Error("Session lease manager is disposed")
   }
 
   dispose(): void {

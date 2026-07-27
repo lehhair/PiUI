@@ -16,6 +16,8 @@ let model
 let isCompacting = false
 let pendingCompaction
 const generation = "fixture-generation"
+const pendingHostCalls = new Map()
+let hostCallSequence = 0
 const heartbeatIntervalMs = 20
 const heartbeatTimer = setInterval(() => {
   process.send?.({ kind: "heartbeat", generation, timestamp: Date.now() })
@@ -23,7 +25,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 7,
+  workerProtocolVersion: 8,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -110,7 +112,23 @@ function snapshot(sessionId = "fixture-session", sessionFile = "/fixture/session
   }
 }
 
-process.on("message", request => {
+function callHost(call) {
+  const id = `fixture-host-${++hostCallSequence}`
+  return new Promise((resolve, reject) => {
+    pendingHostCalls.set(id, { resolve, reject })
+    process.send?.({ kind: "hostCall", id, generation, call })
+  })
+}
+
+process.on("message", async request => {
+  if (request?.kind === "hostReply") {
+    const pending = pendingHostCalls.get(request.id)
+    if (!pending) return
+    pendingHostCalls.delete(request.id)
+    if (request.ok) pending.resolve()
+    else pending.reject(Object.assign(new Error(request.error.message), { code: request.error.code }))
+    return
+  }
   if (request.generation !== generation) {
     process.send?.({
       kind: "response",
@@ -220,6 +238,36 @@ process.on("message", request => {
       }, 120)
       return
     }
+    if (command.text === "extension-new-session") {
+      const source = session ?? snapshot()
+      const reservationId = `fixture-reservation-${replacementCount + 1}`
+      await callHost({
+        type: "extensionReplacement.reserve",
+        reservationId,
+        sourceSessionId: source.sessionId,
+        operation: "new",
+      })
+      replacementCount += 1
+      session = snapshot(
+        `fixture-extension-${replacementCount}`,
+        path.join(runtimeCwd, `extension-${replacementCount}.jsonl`),
+      )
+      const replacement = {
+        operation: "new",
+        sourceSessionId: source.sessionId,
+        targetSessionId: session.sessionId,
+        targetSessionFile: session.sessionFile,
+        targetCwd: runtimeCwd,
+        cancelled: false,
+      }
+      await callHost({
+        type: "extensionReplacement.commit",
+        reservationId,
+        replacement,
+        session,
+      })
+      result = { type: "session", session }
+    } else
     if (command.text === "stale") {
       process.send?.({
         kind: "event",

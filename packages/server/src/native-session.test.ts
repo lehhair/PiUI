@@ -497,6 +497,136 @@ describe("native Pi session discovery", () => {
     ])
   })
 
+  it("detaches a runtime after an extension requests graceful shutdown", async () => {
+    let close: (() => void) | undefined
+    const projection = createProjectionState()
+    const runtime = {
+      getWorkerGeneration: () => "graceful-generation",
+      onClose: (listener: () => void) => {
+        close = listener
+        return () => { close = undefined }
+      },
+      getSessionId: () => "pi-graceful-id",
+      getSessionFile: () => path.join(root, "graceful.jsonl"),
+      getSessionName: () => "Graceful session",
+      getProjection: () => projection,
+      getRuntimeUiState: () => ({
+        thinkingLevel: "off", availableThinkingLevels: ["off"], isStreaming: false,
+        isCompacting: false, retryAttempt: 0, queue: { steering: [], followUp: [] }, activeTools: [],
+      }),
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => null,
+      getEntries: () => [],
+      getTree: () => [],
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-graceful-id",
+        path: path.join(root, "graceful.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 0,
+        firstMessage: "",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+    const session = await registry.attach("pi-graceful-id")
+    assert.ok(close)
+    close()
+    assert.equal(session.real, undefined)
+    assert.equal(session.workerGeneration, undefined)
+    assert.equal(registry.snapshot(session).runtime.attached, false)
+  })
+
+  it("moves a runtime when an extension replaces its session during a prompt", async () => {
+    const sourceId = "pi-extension-source"
+    const targetId = "pi-extension-target"
+    const sourceFile = path.join(root, "extension-source.jsonl")
+    const targetFile = path.join(root, "extension-target.jsonl")
+    let currentId = sourceId
+    let currentFile = sourceFile
+    let onReplacement: ((replacement: import("@piui/protocol").SessionReplacementResultV1) => Promise<void>) | undefined
+    const projection = createProjectionState()
+    const runtime = {
+      getWorkerGeneration: () => "extension-replacement-generation",
+      getSessionId: () => currentId,
+      getSessionFile: () => currentFile,
+      getSessionName: () => "Extension target",
+      getProjection: () => projection,
+      getRuntimeUiState: () => ({
+        thinkingLevel: "off",
+        availableThinkingLevels: ["off"],
+        isStreaming: false,
+        isCompacting: false,
+        isIdle: true,
+        isBashRunning: false,
+        hasPendingBashMessages: false,
+        isRetrying: false,
+        retryAttempt: 0,
+        pendingMessageCount: 0,
+        queue: { steering: [], followUp: [], steeringMode: "all", followUpMode: "all" },
+        retry: { phase: "idle", autoEnabled: true },
+        compaction: { autoEnabled: true, operation: { type: "none" } },
+        tools: [],
+        activeTools: [],
+        supportsThinking: false,
+        scopedModels: [],
+      }),
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => null,
+      getEntries: () => [],
+      getTree: () => [],
+      onSessionReplacement: (listener: typeof onReplacement) => {
+        onReplacement = listener
+        return () => { onReplacement = undefined }
+      },
+      prompt: async () => {
+        currentId = targetId
+        currentFile = targetFile
+        await onReplacement?.({
+          operation: "new",
+          sourceSessionId: sourceId,
+          targetSessionId: targetId,
+          targetSessionFile: targetFile,
+          targetCwd: root,
+          cancelled: false,
+        })
+      },
+      dispose: async () => {},
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: sourceId,
+        path: sourceFile,
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 1,
+        firstMessage: "extension command",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+    await registry.attach(sourceId)
+
+    const target = await registry.prompt(sourceId, "/new-from-extension")
+    assert.equal(target.id, targetId)
+    assert.equal(target.real, runtime)
+    assert.equal(target.sessionFile, targetFile)
+    assert.equal(registry.get(sourceId)?.real, undefined)
+    assert.equal(registry.get(targetId)?.real, runtime)
+  })
+
   it("rejects delayed callbacks from a crashed worker generation", async () => {
     const initialProjection = createProjectionState()
     let staleProjection = initialProjection
@@ -653,7 +783,7 @@ describe("native Pi session discovery", () => {
         projectTrusted: true,
         globalKeys: [],
         projectKeys: [],
-        effective: {},
+        effective: {} as never,
         errors: [],
       }),
       setProjectTrust: async () => ({

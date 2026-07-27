@@ -10,6 +10,7 @@ import type {
   ExtensionUiSnapshotV1,
   ExtensionUiStatePatchV1,
   ExtensionUiStateV1,
+  ExtensionUiSettlementReasonV1,
   PiNavigationResultV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
@@ -100,7 +101,7 @@ export interface PiSessionBackend {
     local?: boolean,
     persist?: boolean,
   ): Promise<ConfiguredPackageV1[]>
-  resolvePackages?(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1>
+  resolvePackages?(cwd: string, missingAction?: "install" | "skip" | "error"): Promise<ResolvedPackageResourcesV1>
   resolveExtensionSources?(
     cwd: string,
     sources: string[],
@@ -141,6 +142,7 @@ function emptyExtensionUiState(): ExtensionUiStateV1 {
     workingVisible: true,
     widgets: {},
     editorText: "",
+    toolsExpanded: false,
   }
 }
 
@@ -153,7 +155,21 @@ export class SessionRegistry {
   private readonly deleting = new Set<string>()
   private readonly runtimeDisposals = new WeakMap<PiSessionRuntime, Promise<void>>()
   private readonly extensionInitializations = new WeakMap<PiSessionRuntime, Promise<void>>()
+  private readonly extensionReplacements = new WeakMap<PiSessionRuntime, {
+    sourceId: string
+    target: AppSession
+    replacement: SessionReplacementResultV1
+  }>()
   private readonly extensionUiPending = new Map<string, ExtensionUiDialogRequestV1>()
+  private readonly extensionUiSettled = new Map<string, {
+    sessionId: string
+    response?: ExtensionUiDialogResponseV1
+    reason: ExtensionUiSettlementReasonV1
+  }>()
+  private readonly extensionUiResponsesInFlight = new Map<string, {
+    fingerprint: string
+    promise: Promise<{ alreadySettled: boolean }>
+  }>()
   private readonly extensionUiStates = new Map<string, ExtensionUiStateV1>()
   private readonly runtimeBindings = new Map<string, {
     runtime: PiSessionRuntime
@@ -516,7 +532,7 @@ export class SessionRegistry {
     return packages
   }
 
-  async resolvePackages(cwd: string, missingAction?: "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
+  async resolvePackages(cwd: string, missingAction?: "install" | "skip" | "error"): Promise<ResolvedPackageResourcesV1> {
     const workspace = this.workspaces.resolve(cwd)
     const backend = await this.getBackend()
     if (!backend.resolvePackages) throw unsupportedRuntimeOperation("package resolution")
@@ -575,10 +591,11 @@ export class SessionRegistry {
     if (!this.byId.has(sessionId)) return undefined
     return {
       sessionId,
+      workerGeneration: this.byId.get(sessionId)?.workerGeneration,
       state: structuredClone(this.extensionUiStates.get(sessionId) ?? emptyExtensionUiState()),
       pending: [...this.extensionUiPending.values()]
         .filter(request => request.sessionId === sessionId)
-        .map(request => ({ ...request, options: request.options ? [...request.options] : undefined })),
+        .map(request => structuredClone(request)),
     }
   }
 
@@ -587,9 +604,46 @@ export class SessionRegistry {
     requestId: string,
     response: ExtensionUiDialogResponseV1,
     workerGeneration?: string,
-  ): Promise<void> {
+  ): Promise<{ alreadySettled: boolean }> {
+    const fingerprint = JSON.stringify({ sessionId, response, workerGeneration })
+    const inFlight = this.extensionUiResponsesInFlight.get(requestId)
+    if (inFlight) {
+      if (inFlight.fingerprint !== fingerprint) {
+        throw Object.assign(new Error("extension UI response conflicts with an in-flight response"), {
+          code: "RESPONSE_CONFLICT",
+        })
+      }
+      await inFlight.promise
+      return { alreadySettled: true }
+    }
+    const promise = this.performRespondExtensionUi(sessionId, requestId, response, workerGeneration)
+    this.extensionUiResponsesInFlight.set(requestId, { fingerprint, promise })
+    try {
+      return await promise
+    } finally {
+      if (this.extensionUiResponsesInFlight.get(requestId)?.promise === promise) {
+        this.extensionUiResponsesInFlight.delete(requestId)
+      }
+    }
+  }
+
+  private async performRespondExtensionUi(
+    sessionId: string,
+    requestId: string,
+    response: ExtensionUiDialogResponseV1,
+    workerGeneration?: string,
+  ): Promise<{ alreadySettled: boolean }> {
     const request = this.extensionUiPending.get(requestId)
     if (!request || request.sessionId !== sessionId) {
+      const settled = this.extensionUiSettled.get(requestId)
+      if (settled?.sessionId === sessionId) {
+        if (!settled.response || JSON.stringify(settled.response) === JSON.stringify(response)) {
+          return { alreadySettled: true }
+        }
+        throw Object.assign(new Error("extension UI response conflicts with the settled response"), {
+          code: "RESPONSE_CONFLICT",
+        })
+      }
       throw Object.assign(new Error("extension UI request not found"), { code: "NOT_FOUND" })
     }
     if (workerGeneration && request.workerGeneration !== workerGeneration) {
@@ -617,11 +671,24 @@ export class SessionRegistry {
     if (!runtime.respondExtensionUi) throw unsupportedRuntimeOperation("extension UI response")
     await runtime.respondExtensionUi(requestId, response)
     this.extensionUiPending.delete(requestId)
-    this.eventHub?.publishV2(
-      { kind: "session", id: sessionId },
-      "extension.ui.cancelled",
-      { requestId, reason: "responded" },
+    const newlySettled = this.rememberExtensionUiSettlement(
+      requestId,
+      sessionId,
+      "cancelled" in response ? "user_cancelled" : "submitted",
+      response,
     )
+    if (newlySettled) {
+      this.eventHub?.publishV2(
+        { kind: "session", id: sessionId },
+        "extension.ui.settled",
+        {
+          requestId,
+          sessionId,
+          reason: "cancelled" in response ? "user_cancelled" : "submitted",
+        },
+      )
+    }
+    return { alreadySettled: false }
   }
 
   async setExtensionEditorState(sessionId: string, text: string): Promise<void> {
@@ -735,6 +802,7 @@ export class SessionRegistry {
       model?: { provider?: string; id?: string }
       thinkingLevel?: string
       attachments?: SessionAttachmentV2[]
+      expandPromptTemplates?: boolean
     },
   ): Promise<AppSession> {
     const session = await this.attach(sessionId)
@@ -761,7 +829,9 @@ export class SessionRegistry {
           if (opts?.thinkingLevel) {
             await runtime.setThinkingLevel(opts.thinkingLevel)
           }
-          return runtime.prompt(trimmed, prepared.images)
+          return runtime.prompt(trimmed, prepared.images, {
+            expandPromptTemplates: opts?.expandPromptTemplates,
+          })
         })
       } catch (e) {
         if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
@@ -769,7 +839,14 @@ export class SessionRegistry {
         const code = e && typeof e === "object" && "code" in e ? String(e.code) : "INTERNAL"
         throw Object.assign(new Error(msg), { code })
       }
-      if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+      const extensionReplacement = this.extensionReplacements.get(runtime)
+      if (!this.isCurrentRuntime(session, runtime, generation)) {
+        if (extensionReplacement?.sourceId === session.id) {
+          this.extensionReplacements.delete(runtime)
+          return extensionReplacement.target
+        }
+        throw runtimeReplacedError()
+      }
       session.projection = runtime.getProjection()
       session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
       session.title = runtime.getSessionName() ?? session.title
@@ -1590,13 +1667,15 @@ export class SessionRegistry {
         )
         return
       }
-      if (event.type === "cancelled") {
+      if (event.type === "settled") {
         this.extensionUiPending.delete(event.requestId)
-        this.eventHub?.publishV2(
-          { kind: "session", id: session.id },
-          "extension.ui.cancelled",
-          { requestId: event.requestId, reason: event.reason },
-        )
+        if (this.rememberExtensionUiSettlement(event.requestId, session.id, event.reason)) {
+          this.eventHub?.publishV2(
+            { kind: "session", id: session.id },
+            "extension.ui.settled",
+            { requestId: event.requestId, sessionId: session.id, reason: event.reason },
+          )
+        }
         return
       }
       if (event.type === "state") {
@@ -1616,10 +1695,40 @@ export class SessionRegistry {
         )
         return
       }
+      const editorState = this.extensionUiStates.get(session.id) ?? emptyExtensionUiState()
+      const editorText = event.command.kind === "set"
+        ? event.command.text
+        : editorState.editorText + event.command.text
+      this.extensionUiStates.set(session.id, {
+        ...editorState,
+        revision: editorState.revision + 1,
+        editorText,
+      })
       this.eventHub?.publishV2(
         { kind: "session", id: session.id },
         "extension.ui.editor.command",
         { sessionId: session.id, command: event.command },
+      )
+    })
+    const unsubscribeSessionReplacement = runtime.onSessionReplacement?.(async replacement => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+      const result = await this.commitReplacement(
+        session,
+        runtime,
+        session.projection,
+        generation,
+        replacement,
+        { existingTargetId: replacement.operation === "switch" ? replacement.targetSessionId : undefined },
+      )
+      this.extensionReplacements.set(runtime, {
+        sourceId: session.id,
+        target: result.target,
+        replacement,
+      })
+      this.eventHub?.publishV2(
+        { kind: "workspace", id: result.target.cwd },
+        "workspace.sessions.updated",
+        { workspacePath: result.target.cwd, sessionId: result.target.id },
       )
     })
     const unsubscribeCrash = runtime.onCrash?.(error => {
@@ -1652,6 +1761,21 @@ export class SessionRegistry {
       )
       this.onRuntimeCrash?.(session.id, generation, error)
     })
+    const unsubscribeClose = runtime.onClose?.(() => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      this.runtimeBindings.delete(session.id)
+      binding.unsubscribe()
+      this.closeExtensionUi(session.id, "runtime_disposed", generation)
+      session.real = undefined
+      session.workerGeneration = undefined
+      session.projection = { ...session.projection, isStreaming: false }
+      this.touch(session)
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    })
     binding.unsubscribe = () => {
       unsubscribeState?.()
       unsubscribeProjection?.()
@@ -1660,7 +1784,9 @@ export class SessionRegistry {
       unsubscribeProviderAuth?.()
       unsubscribeResourcesChanged?.()
       unsubscribeExtensionUi?.()
+      unsubscribeSessionReplacement?.()
       unsubscribeCrash?.()
+      unsubscribeClose?.()
     }
     const initialization = runtime.initializeExtensions?.() ?? Promise.resolve()
     this.extensionInitializations.set(runtime, initialization)
@@ -1692,8 +1818,12 @@ export class SessionRegistry {
       if (!patch.lines) delete widgets[patch.key]
       else widgets[patch.key] = { lines: [...patch.lines], placement: patch.placement ?? "aboveEditor" }
       next = { ...next, widgets }
-    } else {
+    } else if (patch.kind === "title") {
       next = { ...next, title: patch.title }
+    } else if (patch.kind === "theme") {
+      next = { ...next, themeName: patch.name }
+    } else {
+      next = { ...next, toolsExpanded: patch.expanded }
     }
     this.extensionUiStates.set(sessionId, next)
     return structuredClone(next)
@@ -1723,7 +1853,8 @@ export class SessionRegistry {
       if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
       throw error
     }
-    if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
+    if (!this.isCurrentRuntime(session, runtime, generation) &&
+      this.extensionReplacements.get(runtime)?.sourceId !== session.id) throw runtimeReplacedError()
     return result
   }
 
@@ -1789,21 +1920,48 @@ export class SessionRegistry {
     if (!binding) return
     this.runtimeBindings.delete(session.id)
     binding.unsubscribe()
-    this.closeExtensionUi(session.id, "runtime_replaced", session.workerGeneration)
+    this.closeExtensionUi(session.id, "session_replaced", session.workerGeneration)
   }
 
-  private closeExtensionUi(sessionId: string, reason: string, generation?: string): void {
+  private closeExtensionUi(
+    sessionId: string,
+    reason: ExtensionUiSettlementReasonV1,
+    generation?: string,
+  ): void {
     for (const [requestId, request] of this.extensionUiPending) {
       if (request.sessionId !== sessionId) continue
       if (generation && request.workerGeneration !== generation) continue
       this.extensionUiPending.delete(requestId)
-      this.eventHub?.publishV2(
-        { kind: "session", id: sessionId },
-        "extension.ui.cancelled",
-        { requestId, reason },
-      )
+      if (this.rememberExtensionUiSettlement(requestId, sessionId, reason)) {
+        this.eventHub?.publishV2(
+          { kind: "session", id: sessionId },
+          "extension.ui.settled",
+          { requestId, sessionId, reason },
+        )
+      }
     }
     this.extensionUiStates.delete(sessionId)
+  }
+
+  private rememberExtensionUiSettlement(
+    requestId: string,
+    sessionId: string,
+    reason: ExtensionUiSettlementReasonV1,
+    response?: ExtensionUiDialogResponseV1,
+  ): boolean {
+    const previous = this.extensionUiSettled.get(requestId)
+    this.extensionUiSettled.delete(requestId)
+    this.extensionUiSettled.set(requestId, {
+      sessionId,
+      reason,
+      response: response ?? previous?.response,
+    })
+    while (this.extensionUiSettled.size > 256) {
+      const oldest = this.extensionUiSettled.keys().next().value as string | undefined
+      if (!oldest) break
+      this.extensionUiSettled.delete(oldest)
+    }
+    return previous === undefined
   }
 
   private disposeRuntime(runtime: PiSessionRuntime): Promise<void> {

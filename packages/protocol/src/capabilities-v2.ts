@@ -1,3 +1,5 @@
+import type { ExtensionUiMethodCapabilityV1 } from "./extension-ui.js"
+
 export const PI_CAPABILITY_IDS = [
   "session.list",
   "session.create",
@@ -49,6 +51,7 @@ export interface CapabilityDescriptorV2 {
   scope: CapabilityScopeV2
   reason?: string
   limits?: Record<string, string | number | boolean>
+  methods?: Record<string, ExtensionUiMethodCapabilityV1>
 }
 
 export interface CapabilityManifestV2 {

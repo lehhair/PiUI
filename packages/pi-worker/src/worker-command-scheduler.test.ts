@@ -56,6 +56,27 @@ describe("createWorkerCommandScheduler", () => {
     await prompt
   })
 
+  it("runs extension slash commands immediately during a prompt", async () => {
+    const gate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async ({ command }) => {
+      started.push(command.type === "prompt" ? command.text : command.type)
+      if (command.type === "prompt" && command.text === "hello") await gate.promise
+      return { type: "ok" }
+    })
+
+    const prompt = schedule(request({ type: "prompt", text: "hello" }))
+    await Promise.resolve()
+    await schedule(request({ type: "prompt", text: "/extension-command now" }))
+    const ordinary = schedule(request({ type: "prompt", text: "second turn" }))
+    await Promise.resolve()
+    assert.deepEqual(started, ["hello", "/extension-command now"])
+
+    gate.resolve()
+    await Promise.all([prompt, ordinary])
+    assert.deepEqual(started, ["hello", "/extension-command now", "second turn"])
+  })
+
   it("queues a user message that starts its own turn and lets queued delivery through", async () => {
     const gate = deferred()
     const started: string[] = []

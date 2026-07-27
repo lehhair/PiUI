@@ -143,6 +143,61 @@ describe("SessionLeaseManager", () => {
       second.dispose()
     }
   })
+
+  it("reserves a replacement target before releasing the source", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-replacement-test-"))
+    roots.push(root)
+    const sourceFile = path.join(root, "source.jsonl")
+    const targetFile = path.join(root, "target.jsonl")
+    const first = new SessionLeaseManager(root)
+    const second = new SessionLeaseManager(root)
+    try {
+      const lease = await first.acquire(sourceFile, "source-id")
+      const reservation = await lease.reserveReplacement!(targetFile)
+      await reservation.commit(targetFile, "target-id")
+      const sourceLease = await second.acquire(sourceFile, "source-id")
+      sourceLease.release()
+      await assert.rejects(second.acquire(targetFile, "target-id"), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      lease.release()
+    } finally {
+      first.dispose()
+      second.dispose()
+    }
+  })
+
+  it("rolls a replacement reservation back without dropping the source", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-rollback-test-"))
+    roots.push(root)
+    const sourceFile = path.join(root, "source.jsonl")
+    const targetFile = path.join(root, "target.jsonl")
+    const first = new SessionLeaseManager(root)
+    const second = new SessionLeaseManager(root)
+    try {
+      const lease = await first.acquire(sourceFile)
+      const reservation = await lease.reserveReplacement!(targetFile)
+      let acquired = false
+      const pendingTarget = second.acquire(targetFile).then(value => {
+        acquired = true
+        return value
+      })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      assert.equal(acquired, false, "attach must wait while replacement identity is unknown")
+      reservation.rollback()
+      const targetLease = await pendingTarget
+      targetLease.release()
+      await assert.rejects(second.acquire(sourceFile), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      lease.release()
+    } finally {
+      first.dispose()
+      second.dispose()
+    }
+  })
 })
 
 function startLeaseProcess(namespace: string, sessionFile: string): ChildProcess {

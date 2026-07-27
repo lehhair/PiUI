@@ -211,6 +211,7 @@ export interface PiSessionTreeNodeV1 {
 }
 
 export interface SessionReplacementResultV1 {
+  operation?: "new" | "fork" | "clone" | "switch" | "import"
   sourceSessionId: string
   targetSessionId: string
   targetSessionFile?: string

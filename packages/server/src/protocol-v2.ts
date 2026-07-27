@@ -15,8 +15,9 @@ function capability(
   scope: CapabilityDescriptorV2["scope"],
   reason?: string,
   limits?: CapabilityDescriptorV2["limits"],
+  methods?: CapabilityDescriptorV2["methods"],
 ): CapabilityDescriptorV2 {
-  return { enabled, version: 1, scope, reason, limits }
+  return { enabled, version: 1, scope, reason, limits, methods }
 }
 
 export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): CapabilityManifestV2 {
@@ -27,7 +28,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r10",
+    revision: "pi-0.81.1-r11",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -85,18 +86,47 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         customEntries: true,
         waitForIdle: true,
         handlerInspection: true,
-        sessionReplacementContext: false,
-        shutdownContext: false,
+        sessionReplacementContext: true,
+        shutdownContext: true,
+        browserShortcutInvocation: false,
+        tuiRendererTransport: false,
       }),
       "extension.ui": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
-        supportedMethods: [
-          "select", "confirm", "input", "editor", "notify", "setStatus", "setWorkingMessage",
-          "setWorkingVisible", "setWorkingIndicator", "setHiddenThinkingLabel", "setWidget:string[]",
-          "setTitle", "setEditorText", "pasteToEditor", "getEditorText",
-        ].join(","),
-        unsupportedMethods: [
-          "custom", "setHeader", "setFooter", "setEditorComponent", "addAutocompleteProvider", "onTerminalInput",
-        ].join(","),
+        maxPendingDialogs: 32,
+        maxTextCharacters: 262144,
+        maxTitleCharacters: 4096,
+        maxDialogOptions: 200,
+        maxWidgetLines: 500,
+      }, {
+        select: { support: "rpc" },
+        confirm: { support: "rpc" },
+        input: { support: "rpc" },
+        editor: { support: "rpc" },
+        notify: { support: "rpc" },
+        setStatus: { support: "rpc" },
+        setWorkingMessage: { support: "web-equivalent" },
+        setWorkingVisible: { support: "web-equivalent" },
+        setWorkingIndicator: { support: "web-equivalent" },
+        setHiddenThinkingLabel: { support: "web-equivalent" },
+        "setWidget:string[]": { support: "rpc" },
+        setTitle: { support: "rpc" },
+        setEditorText: { support: "rpc" },
+        pasteToEditor: { support: "rpc" },
+        getEditorText: { support: "rpc", reason: "Returns the last editor text acknowledged by the host" },
+        "setTheme:string": { support: "web-equivalent" },
+        getToolsExpanded: { support: "web-equivalent" },
+        setToolsExpanded: { support: "web-equivalent" },
+        onTerminalInput: { support: "tui-only", reason: "Terminal byte input has no browser equivalent" },
+        "setWidget:component": { support: "tui-only", reason: "TUI component factories are not serializable" },
+        setHeader: { support: "tui-only" },
+        setFooter: { support: "tui-only" },
+        custom: { support: "tui-only" },
+        addAutocompleteProvider: { support: "tui-only" },
+        setEditorComponent: { support: "tui-only" },
+        getEditorComponent: { support: "tui-only" },
+        theme: { support: "tui-only" },
+        getAllThemes: { support: "tui-only" },
+        getTheme: { support: "tui-only" },
       }),
       "resources.reload": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
         inspect: true,

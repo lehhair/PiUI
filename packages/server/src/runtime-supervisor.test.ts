@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
@@ -101,6 +101,134 @@ describe("RuntimeSupervisor", () => {
     }
   })
 
+  it("reserves and commits a replacement initiated inside an extension command", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-extension-replacement-"))
+    roots.push(root)
+    const lockRoot = path.join(root, "locks")
+    const sourceFile = path.join(root, "source.jsonl")
+    const first = new RuntimeSupervisor({ workerEntry: fixture, leases: new SessionLeaseManager(lockRoot) })
+    const second = new RuntimeSupervisor({ workerEntry: fixture, leases: new SessionLeaseManager(lockRoot) })
+    try {
+      const runtime = await first.open(root, sourceFile)
+      await runtime.prompt("extension-new-session")
+      const targetFile = runtime.getSessionFile()
+      assert.ok(targetFile)
+      const sourceRuntime = await second.open(root, sourceFile)
+      await assert.rejects(second.open(root, targetFile), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      await sourceRuntime.dispose()
+      await runtime.dispose()
+    } finally {
+      await first.dispose()
+      await second.dispose()
+    }
+  })
+
+  it("runs Pi extension ctx.newSession through the coordinated host", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-real-extension-replacement-"))
+    roots.push(root)
+    const agentDir = path.join(root, "agent")
+    const workspace = path.join(root, "workspace")
+    const extensionPath = path.join(root, "replacement-extension.js")
+    writeFileSync(extensionPath, `
+let withSessionRan = false
+let forkEntry
+export default function (pi) {
+  pi.registerCommand("replacement-test", {
+    description: "exercise remote replacement",
+    handler: async (_args, ctx) => {
+      await ctx.newSession({
+        setup: async session => {
+          session.appendSessionInfo("Extension replacement target")
+          session.appendMessage({ role: "user", content: "fork seed", timestamp: Date.now() })
+          forkEntry = session.appendMessage({
+            role: "assistant",
+            content: [{ type: "text", text: "seeded" }],
+            api: "anthropic-messages",
+            provider: "fixture",
+            model: "fixture",
+            usage: {
+              input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+            },
+            stopReason: "stop",
+            timestamp: Date.now()
+          })
+        },
+        withSession: async () => { withSessionRan = true }
+      })
+    }
+  })
+  pi.registerCommand("fork-test", {
+    description: "exercise extension fork",
+    handler: async (_args, ctx) => {
+      if (!withSessionRan) throw new Error("withSession did not run")
+      if (!forkEntry) throw new Error("missing fork entry")
+      await ctx.fork(forkEntry, { position: "at" })
+    }
+  })
+  pi.registerCommand("switch-test", {
+    description: "exercise extension switch",
+    handler: async (args, ctx) => { await ctx.switchSession(args.trim()) }
+  })
+  pi.registerCommand("shutdown-test", {
+    description: "exercise extension shutdown",
+    handler: async (_args, ctx) => { ctx.shutdown() }
+  })
+  pi.registerCommand("dialog-test", {
+    description: "exercise extension dialog",
+    handler: async (_args, ctx) => {
+      if (await ctx.ui.confirm("Confirm action", "Continue?")) {
+        ctx.ui.setStatus("dialog-test", "confirmed")
+      }
+    }
+  })
+}
+`)
+    mkdirSync(agentDir)
+    mkdirSync(workspace)
+    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ extensions: [extensionPath] }))
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = agentDir
+    const supervisor = new RuntimeSupervisor({ leases: new SessionLeaseManager(path.join(root, "locks")) })
+    try {
+      const runtime = await supervisor.open(workspace)
+      await runtime.initializeExtensions()
+      const sourceId = runtime.getSessionId()
+      await runtime.prompt("/replacement-test")
+      assert.notEqual(runtime.getSessionId(), sourceId)
+      assert.equal(runtime.getSessionName(), "Extension replacement target")
+      const newSessionId = runtime.getSessionId()
+      const newSessionFile = runtime.getSessionFile()
+      assert.ok(newSessionFile)
+      await runtime.prompt("/fork-test")
+      assert.notEqual(runtime.getSessionId(), newSessionId)
+      await runtime.prompt(`/switch-test ${newSessionFile}`)
+      assert.equal(runtime.getSessionId(), newSessionId)
+      let dialogConfirmed = false
+      const unsubscribeUi = runtime.onExtensionUi(event => {
+        if (event.type === "requested" && event.request.kind === "confirm") {
+          void runtime.respondExtensionUi(event.request.requestId, { confirmed: true })
+        }
+        if (event.type === "state" && event.patch.kind === "status" && event.patch.text === "confirmed") {
+          dialogConfirmed = true
+        }
+      })
+      await runtime.prompt("/dialog-test")
+      unsubscribeUi()
+      assert.equal(dialogConfirmed, true)
+      const closed = new Promise<void>(resolve => runtime.onClose(resolve))
+      await runtime.prompt("/shutdown-test")
+      await closed
+    } finally {
+      await supervisor.dispose()
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir
+    }
+  })
+
   it("disposes a replaced worker when the target lease cannot be acquired", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-supervisor-fork-fail-"))
     roots.push(root)
@@ -114,6 +242,12 @@ describe("RuntimeSupervisor", () => {
           replace: async () => {
             throw Object.assign(new Error("target is busy"), { code: "SESSION_BUSY" })
           },
+          reserveReplacement: async () => ({
+            commit: async () => {
+              throw Object.assign(new Error("target is busy"), { code: "SESSION_BUSY" })
+            },
+            rollback: () => {},
+          }),
           release: () => { released = true },
         }),
         dispose: () => undefined,
