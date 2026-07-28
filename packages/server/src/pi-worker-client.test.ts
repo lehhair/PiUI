@@ -19,7 +19,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 14)
+      assert.equal(hello.workerProtocolVersion, 15)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -54,8 +54,12 @@ describe("PiWorkerSession IPC", () => {
       assert.equal((await runtime.listSkills())[0]?.name, "fixture-skill")
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
       const nativeEvents: unknown[] = []
+      const nativeEventMeta: unknown[] = []
       const nativeHeads: unknown[] = []
-      const unsubscribeNative = runtime.onNativeEvent(event => { nativeEvents.push(event) })
+      const unsubscribeNative = runtime.onNativeEvent((event, meta) => {
+        nativeEvents.push(event)
+        nativeEventMeta.push(meta)
+      })
       const unsubscribeNativeHead = runtime.onNativeHead(native => { nativeHeads.push(native) })
       await runtime.prompt("hello", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
       unsubscribeNative()
@@ -70,11 +74,24 @@ describe("PiWorkerSession IPC", () => {
           { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
         ], metadata: { nested: { preserved: true } } } },
       ])
+      assert.deepEqual(nativeEventMeta, [
+        {
+          position: { epoch: "fixture-native-events", sequence: 1 },
+          liveMessage: { id: "prompt-user", revision: 1 },
+        },
+        {
+          position: { epoch: "fixture-native-events", sequence: 2 },
+          liveMessage: { id: "prompt-user", revision: 2 },
+        },
+      ])
       assert.equal(nativeHeads.length, 1)
       let nativePage = await runtime.getNativeEntriesPage(undefined, 50, 1_000_000)
       assert.equal(nativePage.items[0]?.type, "message")
       const branchPage = await runtime.getNativeBranchPage(undefined, 50, 1_000_000)
       assert.deepEqual(branchPage.items, nativePage.items.slice(0, 1))
+      assert.deepEqual(branchPage.checkpoint, {
+        position: { epoch: "fixture-native-events", sequence: 2 },
+      })
       assert.deepEqual(nativePage.items[0]?.futureField, {
         unknown: [1, "two", false, null],
       })
@@ -152,18 +169,22 @@ describe("PiWorkerSession IPC", () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     const calls: string[] = []
     const replacements: string[] = []
+    const nativeEvents: unknown[] = []
     runtime.setHostCallHandler(call => { calls.push(call.type) })
     const unsubscribe = runtime.onSessionReplacement(replacement => {
       replacements.push(replacement.targetSessionId)
     })
+    const unsubscribeNative = runtime.onNativeEvent(event => { nativeEvents.push(event) })
     try {
       await runtime.prompt("extension-new-session")
       assert.deepEqual(calls, ["extensionReplacement.reserve", "extensionReplacement.commit"])
       assert.deepEqual(replacements, [runtime.getSessionId()])
+      assert.equal(nativeEvents.some(event => JSON.stringify(event).includes("target before commit")), false)
       assert.match(runtime.getSessionId(), /^fixture-extension-/)
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
     } finally {
       unsubscribe()
+      unsubscribeNative()
       await runtime.dispose()
     }
   })
@@ -172,10 +193,18 @@ describe("PiWorkerSession IPC", () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     try {
       const events: unknown[] = []
-      const unsubscribe = runtime.onNativeEvent(event => { events.push(event) })
+      const metadata: unknown[] = []
+      const unsubscribe = runtime.onNativeEvent((event, meta) => {
+        events.push(event)
+        metadata.push(meta)
+      })
       await runtime.prompt("reconcile")
       unsubscribe()
       assert.deepEqual(events, [{ type: "message_end", message: { role: "user", content: "reconcile" } }])
+      assert.deepEqual(metadata, [{
+        position: { epoch: "fixture-native-events", sequence: 1 },
+        liveMessage: { id: "reconcile", revision: 1 },
+      }])
     } finally {
       await runtime.dispose()
     }

@@ -207,7 +207,7 @@ export class PiEventSocket {
       if (snapshot.session.state === "idle") notifySessionIdle(snapshot.session.id)
     } else if (event.type === "session.native.event") {
       if (event.payload.sessionId !== event.stream.id) return
-      applyPiNativeEventToUi(event.payload.sessionId, event.payload.event)
+      applyPiNativeEventToUi(event.payload.sessionId, event.payload.event, event.payload.meta)
     } else if (event.type === "session.runtime.replaced" || event.type === "session.runtime.crashed") {
       this.blockedStreamsV2.add(key)
       void this.resyncStreamV2(key, event.cursor)

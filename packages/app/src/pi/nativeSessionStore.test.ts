@@ -1,4 +1,4 @@
-import type { PiNativeEntriesPageV1, SessionSnapshotV1 } from "@piui/protocol"
+import type { PiNativeEntriesPageV1, PiNativeEventMetaV1, SessionSnapshotV1 } from "@piui/protocol"
 import { beforeEach, describe, expect, it } from "vitest"
 import { nativeSessionStore } from "./nativeSessionStore"
 
@@ -45,8 +45,16 @@ function page(items: PiNativeEntriesPageV1["items"], hasMore = false, beforeCurs
   return {
     head: snapshot().native,
     items,
+    checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
     hasMore,
     beforeCursor,
+  }
+}
+
+function meta(sequence: number, id = "live-1", revision = sequence): PiNativeEventMetaV1 {
+  return {
+    position: { epoch: "worker-epoch", sequence },
+    liveMessage: { id, revision },
   }
 }
 
@@ -89,15 +97,16 @@ describe("nativeSessionStore", () => {
     nativeSessionStore.applyNativeEvent("s1", {
       type: "message_start",
       message: { role: "assistant", content: [{ type: "text", text: "par" }] },
-    })
+    }, meta(1, "assistant", 1))
     nativeSessionStore.applyNativeEvent("s1", {
       type: "message_update",
       message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
-    })
+    }, meta(2, "assistant", 2))
     expect(nativeSessionStore.getActiveBranch("s1").at(-1)?.message).toMatchObject({ role: "assistant" })
     expect(nativeSessionStore.getStreamingEntryIds("s1").size).toBe(1)
 
     const updated = snapshot("s1", 2, "a-persisted")
+    updated.runtime.isStreaming = true
     nativeSessionStore.replace(updated)
     nativeSessionStore.replaceFirstPage("s1", {
       head: updated.native,
@@ -105,6 +114,7 @@ describe("nativeSessionStore", () => {
         { type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } },
         { type: "message", id: "a-persisted", parentId: "u-root", message: { role: "assistant", content: "complete" } },
       ],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 3 } },
       hasMore: false,
     })
     expect(nativeSessionStore.getActiveBranch("s1").map(entry => entry.id)).toEqual(["u-root", "a-persisted"])
@@ -118,23 +128,25 @@ describe("nativeSessionStore", () => {
     nativeSessionStore.replaceFirstPage("s1", {
       head: running.native,
       items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
       hasMore: false,
     })
     nativeSessionStore.applyNativeEvent("s1", {
       type: "message_start",
       message: { role: "assistant", content: [{ type: "text", text: "par" }] },
-    })
+    }, meta(1, "assistant", 1))
 
     nativeSessionStore.replaceFirstPage("s1", {
       head: running.native,
       items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
       hasMore: false,
     })
     expect(nativeSessionStore.getStreamingEntryIds("s1").size).toBe(1)
     expect(nativeSessionStore.applyNativeEvent("s1", {
       type: "message_update",
       message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
-    })).toBe(true)
+    }, meta(2, "assistant", 2))).toBe(true)
     expect(nativeSessionStore.getActiveBranch("s1").at(-1)?.message).toMatchObject({
       content: [{ type: "text", text: "partial" }],
     })
@@ -147,7 +159,15 @@ describe("nativeSessionStore", () => {
     nativeSessionStore.replaceFirstPage("s1", {
       head: running.native,
       items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
-      liveMessage: { role: "assistant", content: [{ type: "text", text: "already streaming" }] },
+      checkpoint: {
+        position: { epoch: "worker-epoch", sequence: 2 },
+        liveMessage: {
+          id: "assistant",
+          revision: 2,
+          phase: "streaming",
+          message: { role: "assistant", content: [{ type: "text", text: "already streaming" }] },
+        },
+      },
       hasMore: false,
     })
 
@@ -155,6 +175,151 @@ describe("nativeSessionStore", () => {
     expect(live?.parentId).toBe("u-root")
     expect(live?.message).toMatchObject({ role: "assistant" })
     expect(nativeSessionStore.getStreamingEntryIds("s1").has(String(live?.id))).toBe(true)
+    expect(nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    }, meta(1, "assistant", 1))).toBe(false)
+    expect(nativeSessionStore.applyNativeEvent("s1", { type: "agent_settled" }, {
+      position: { epoch: "worker-epoch", sequence: 2 },
+    })).toBe(false)
+    expect(nativeSessionStore.getActiveBranch("s1")).toHaveLength(2)
+    expect(nativeSessionStore.getNativeEventStreaming("s1")).toBe(true)
+  })
+
+  it("uses the accepted page leaf when the branch is newer than the snapshot", () => {
+    const olderSnapshot = snapshot("s1", 1, "a-old")
+    nativeSessionStore.replace(olderSnapshot)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: { ...olderSnapshot.native, revision: 2, leafId: "a-new", entryCount: 4 },
+      items: [
+        { type: "message", id: "u-old", parentId: null, message: { role: "user", content: "old" } },
+        { type: "message", id: "a-old", parentId: "u-old", message: { role: "assistant", content: "old" } },
+        { type: "message", id: "u-new", parentId: "a-old", message: { role: "user", content: "new" } },
+        { type: "message", id: "a-new", parentId: "u-new", message: { role: "assistant", content: "new" } },
+      ],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 4 } },
+      hasMore: false,
+    })
+
+    expect(nativeSessionStore.getActiveBranch("s1").map(entry => entry.id)).toEqual([
+      "u-old", "a-old", "u-new", "a-new",
+    ])
+  })
+
+  it("does not revive an older live checkpoint from an out-of-order branch response", () => {
+    const running = snapshot("s1", 1, "u-root")
+    running.runtime.isStreaming = true
+    nativeSessionStore.replace(running)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
+      hasMore: false,
+    })
+    nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_start",
+      message: { role: "assistant", content: [{ type: "text", text: "current" }] },
+    }, meta(5, "current-live", 1))
+
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: {
+        position: { epoch: "worker-epoch", sequence: 3 },
+        liveMessage: {
+          id: "old-live",
+          revision: 3,
+          phase: "streaming",
+          message: { role: "assistant", content: [{ type: "text", text: "stale" }] },
+        },
+      },
+      hasMore: false,
+    })
+
+    const branch = nativeSessionStore.getActiveBranch("s1")
+    expect(branch).toHaveLength(2)
+    expect(branch.at(-1)?.message).toMatchObject({ content: [{ text: "current" }] })
+  })
+
+  it("keeps a settled transient when an older page arrives afterward", () => {
+    const running = snapshot("s1", 1, "u-root")
+    running.runtime.isStreaming = true
+    nativeSessionStore.replace(running)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
+      hasMore: false,
+    })
+    nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_end",
+      message: { role: "assistant", content: "complete" },
+    }, meta(6, "answer", 6))
+    nativeSessionStore.applyNativeEvent("s1", { type: "agent_settled" }, {
+      position: { epoch: "worker-epoch", sequence: 10 },
+    })
+
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      checkpoint: {
+        position: { epoch: "worker-epoch", sequence: 8 },
+        liveMessage: {
+          id: "answer",
+          revision: 6,
+          phase: "persisting",
+          message: { role: "assistant", content: "complete" },
+        },
+      },
+      hasMore: false,
+    })
+
+    expect(nativeSessionStore.getActiveBranch("s1").at(-1)?.message).toMatchObject({ content: "complete" })
+  })
+
+  it("does not let an older history page lower the latest branch revision", () => {
+    const initial = snapshot("s1", 1, "a1")
+    nativeSessionStore.replace(initial)
+    expect(nativeSessionStore.replaceFirstPage("s1", {
+      head: { ...initial.native, revision: 3, leafId: "a3" },
+      items: [{ type: "message", id: "a3", parentId: null, message: { role: "assistant", content: "newest" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 3 } },
+      hasMore: true,
+      beforeCursor: "older",
+    })).toBe(true)
+    nativeSessionStore.appendOlderPage("s1", {
+      head: { ...initial.native, revision: 1 },
+      items: [{ type: "message", id: "a1", parentId: null, message: { role: "assistant", content: "old" } }],
+      hasMore: false,
+    })
+
+    expect(nativeSessionStore.replaceFirstPage("s1", {
+      head: { ...initial.native, revision: 2, leafId: "a2" },
+      items: [{ type: "message", id: "a2", parentId: null, message: { role: "assistant", content: "stale" } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 2 } },
+      hasMore: false,
+    })).toBe(false)
+    expect(nativeSessionStore.getActiveBranch("s1").at(-1)?.id).toBe("a3")
+  })
+
+  it("clears transient tool execution state after an idle branch refresh", () => {
+    const idle = snapshot("s1", 1, "a1")
+    nativeSessionStore.replace(idle)
+    nativeSessionStore.applyNativeEvent("s1", {
+      type: "tool_execution_end",
+      toolCallId: "tool-1",
+      result: { content: "done" },
+      isError: false,
+    }, { position: { epoch: "worker-epoch", sequence: 3 } })
+    expect(nativeSessionStore.getLiveTools("s1").size).toBe(1)
+
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: idle.native,
+      items: [{ type: "message", id: "a1", parentId: null, message: { role: "assistant", content: [] } }],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 4 } },
+      hasMore: false,
+    })
+    expect(nativeSessionStore.getLiveTools("s1").size).toBe(0)
   })
 
   it("retains loaded history when a later first page contains only the new turn", () => {
@@ -168,6 +333,7 @@ describe("nativeSessionStore", () => {
         { type: "label", id: "label-1", targetId: "a-old" },
         { type: "session_info", id: "info-1" },
       ],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
       hasMore: false,
     })
 
@@ -179,6 +345,7 @@ describe("nativeSessionStore", () => {
         { type: "message", id: "u-new", parentId: "a-old", message: { role: "user", content: "new" } },
         { type: "message", id: "a-new", parentId: "u-new", message: { role: "assistant", content: "answer" } },
       ],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 4 } },
       hasMore: false,
     })
 
@@ -195,7 +362,7 @@ describe("nativeSessionStore", () => {
     nativeSessionStore.applyNativeEvent("s1", {
       type: "message_start",
       message: { role: "user", content: "new" },
-    })
+    }, meta(1, "user", 1))
 
     expect(nativeSessionStore.hasDisconnectedTransientBranch("s1")).toBe(true)
   })

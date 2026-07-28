@@ -56,7 +56,7 @@ describe("createWorkerCommandScheduler", () => {
     await prompt
   })
 
-  it("reads native session state while a prompt is streaming", async () => {
+  it("reads only the bounded native branch while a prompt is streaming", async () => {
     const gate = deferred()
     const started: string[] = []
     const schedule = createWorkerCommandScheduler(async ({ command }) => {
@@ -68,12 +68,17 @@ describe("createWorkerCommandScheduler", () => {
     const prompt = schedule(request({ type: "prompt", text: "hello" }))
     await Promise.resolve()
     await schedule(request({ type: "getNativeBranchPage", limit: 50, maxBytes: 1_000_000 }))
-    await schedule(request({ type: "getNativeEntriesPage", limit: 50, maxBytes: 1_000_000 }))
-    await schedule(request({ type: "getNativeTree" }))
-    assert.deepEqual(started, ["prompt", "getNativeBranchPage", "getNativeEntriesPage", "getNativeTree"])
+    const entries = schedule(request({ type: "getNativeEntriesPage", limit: 50, maxBytes: 1_000_000 }))
+    const tree = schedule(request({ type: "getNativeTree" }))
+    const image = schedule(request({ type: "getNativeImageAttachment", entryId: "entry", blockIndex: 0 }))
+    await Promise.resolve()
+    assert.deepEqual(started, ["prompt", "getNativeBranchPage"])
 
     gate.resolve()
-    await prompt
+    await Promise.all([prompt, entries, tree, image])
+    assert.deepEqual(started, [
+      "prompt", "getNativeBranchPage", "getNativeEntriesPage", "getNativeTree", "getNativeImageAttachment",
+    ])
   })
 
   it("runs extension slash commands immediately during a prompt", async () => {

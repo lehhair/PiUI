@@ -1561,7 +1561,7 @@ export class SessionRegistry {
         initialState = false
         return
       }
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       session.sequence += 1
       session.updatedAt = new Date().toISOString()
       this.eventHub?.publishV2(
@@ -1570,16 +1570,16 @@ export class SessionRegistry {
         { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
       )
     })
-    const unsubscribeNativeEvent = runtime.onNativeEvent?.(event => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+    const unsubscribeNativeEvent = runtime.onNativeEvent?.((event, meta) => {
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       this.eventHub?.publishV2(
         { kind: "session", id: session.id },
         "session.native.event",
-        { sessionId: session.id, event },
+        { sessionId: session.id, event, meta },
       )
     })
     const unsubscribeProviderAuth = runtime.onProviderAuth?.(event => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       this.eventHub?.publishV2(
         { kind: "session", id: session.id },
         "provider.auth.flow",
@@ -1590,11 +1590,11 @@ export class SessionRegistry {
       }
     })
     const unsubscribeResourcesChanged = runtime.onResourcesChanged?.(() => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       this.publishResourcesUpdated(session.cwd)
     })
     const unsubscribeExtensionUi = runtime.onExtensionUi?.(event => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       if (event.type === "requested") {
         const request = {
           ...event.request,
@@ -1653,7 +1653,7 @@ export class SessionRegistry {
       )
     })
     const unsubscribeNativeHead = runtime.onNativeHead?.(native => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       session.nativeHead = native
       this.touch(session)
       this.eventHub?.publishV2(
@@ -1733,7 +1733,7 @@ export class SessionRegistry {
     const initialization = runtime.initializeExtensions?.() ?? Promise.resolve()
     this.extensionInitializations.set(runtime, initialization)
     void initialization.catch(error => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      if (!this.isCurrentSessionRuntime(session, runtime, generation)) return
       session.runtimeError = error instanceof Error ? error.message : String(error)
       this.touch(session)
     })
@@ -1778,6 +1778,14 @@ export class SessionRegistry {
   ): boolean {
     return session.real === runtime && session.workerGeneration === generation &&
       this.runtimeBindings.get(session.id)?.runtime === runtime
+  }
+
+  private isCurrentSessionRuntime(
+    session: AppSession,
+    runtime: PiSessionRuntime,
+    generation: string | undefined,
+  ): boolean {
+    return this.isCurrentRuntime(session, runtime, generation) && runtime.getSessionId() === session.driverSessionId
   }
 
   private async runBoundRuntimeCommand<T>(
@@ -1912,7 +1920,14 @@ export class SessionRegistry {
       id = typeof entry.parentId === "string" ? entry.parentId : null
     }
     branch.reverse()
-    return nativeEntriesPageFromEntries(head, branch, { cursor, limit, maxBytes }, entry => entry)
+    return nativeEntriesPageFromEntries(head, branch, {
+      cursor,
+      limit,
+      maxBytes,
+      checkpoint: cursor ? undefined : {
+        position: { epoch: session.epoch, sequence: session.sequence },
+      },
+    }, entry => entry)
   }
 
   async getNativeTree(sessionId: string) {

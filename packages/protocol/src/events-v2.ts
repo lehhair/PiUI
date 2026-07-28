@@ -1,5 +1,5 @@
 import type { CommandStatusV2, CommandTypeV2 } from "./commands-v2.js"
-import type { PiNativeJsonValueV1, SessionSnapshotV1 } from "./session.js"
+import type { PiNativeEventMetaV1, PiNativeJsonValueV1, SessionSnapshotV1 } from "./session.js"
 import type {
   ExtensionUiDialogRequestV1,
   ExtensionUiEditorCommandV1,
@@ -37,7 +37,7 @@ export interface EventPayloadsV2 {
   }
   "session.runtime.replaced": { sessionId: string; workerGeneration: string }
   "session.runtime.crashed": { sessionId: string; workerGeneration?: string; message: string }
-  "session.native.event": { sessionId: string; event: PiNativeJsonValueV1 }
+  "session.native.event": { sessionId: string; event: PiNativeJsonValueV1; meta: PiNativeEventMetaV1 }
   "workspace.sessions.updated": { workspacePath?: string; sessionId?: string }
   "workspace.files.changed": {
     workspacePath: string

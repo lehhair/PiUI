@@ -41,6 +41,7 @@ describe("Pi prompt UI roundtrip", () => {
         { type: "message", id: "u1", parentId: null, message: { role: "user", content: "q" } },
         { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: "r" } },
       ],
+      checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
       hasMore: false,
     } })
     expect(isPiSession("sess-rt")).toBe(true)

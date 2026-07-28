@@ -27,6 +27,8 @@ import type {
   CompactionStateV1,
   PiNativeJsonValueV1,
   PiNativeSessionEnvelopeV1,
+  PiNativeEventMetaV1,
+  PiNativeLiveMessageV1,
   PiToolInfoV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
@@ -488,16 +490,26 @@ function invalidSetting(key: string): Error {
   return Object.assign(new Error(`invalid Pi setting: ${key}`), { code: "INVALID_REQUEST" })
 }
 
+interface LiveMessageCheckpoint {
+  value: PiNativeLiveMessageV1
+  messageIdentity: unknown
+  entriesBeforeEnd: number
+  provisional: boolean
+}
+
 export class RealPiSession {
   private runtime: AgentSessionRuntime
   private readonly extensionUi: ExtensionUiBridge
   private extensionsInitialized = false
   private stateUnsub: (() => void) | null = null
   private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
-  private nativeEventListeners = new Set<(event: PiNativeJsonValueV1) => void>()
+  private nativeEventListeners = new Set<(event: PiNativeJsonValueV1, meta: PiNativeEventMetaV1) => void>()
   private nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
   private nativeRevision = 1
   private nativeFingerprint = ""
+  private nativeEventEpoch = randomUUID()
+  private nativeEventSequence = 0
+  private liveMessage?: LiveMessageCheckpoint
   private resourceListeners = new Set<() => void>()
   /** last known runtime flags from events */
   private isCompactingFlag = false
@@ -526,7 +538,8 @@ export class RealPiSession {
       if (nativeEvent === undefined) {
         throw Object.assign(new Error("Pi native event is not JSON serializable"), { code: "NATIVE_EVENT_NOT_JSON" })
       }
-      for (const listener of this.nativeEventListeners) listener(nativeEvent)
+      const meta = this.captureNativeEvent(event, nativeEvent)
+      for (const listener of this.nativeEventListeners) listener(nativeEvent, meta)
       this.emitNativeEnvelopeIfChanged()
 
       if (event.type === "compaction_start") {
@@ -599,11 +612,81 @@ export class RealPiSession {
       if (isRuntimeStateEvent(event.type)) this.emitState()
       if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
         queueMicrotask(() => {
+          this.clearPersistedLiveMessage()
           this.emitNativeEnvelopeIfChanged()
           this.emitState()
         })
       }
     })
+  }
+
+  private captureNativeEvent(
+    event: { type: string; message?: unknown },
+    nativeEvent: PiNativeJsonValueV1,
+  ): PiNativeEventMetaV1 {
+    const position = { epoch: this.nativeEventEpoch, sequence: ++this.nativeEventSequence }
+    const nativeMessage = isNativeJsonObject(nativeEvent) ? nativeEvent.message : undefined
+    const nativeRole = isNativeJsonObject(nativeMessage) ? nativeMessage.role : undefined
+    const current = this.liveMessage
+    const trackedMessage = nativeRole === "user" || nativeRole === "assistant" || nativeRole === "toolResult"
+    if (trackedMessage && (event.type === "message_start" || event.type === "message_update" || event.type === "message_end")) {
+      const isStart = event.type === "message_start"
+      const currentRole = isNativeJsonObject(current?.value.message) ? current.value.message.role : undefined
+      const reusedCheckpoint = current && currentRole === nativeRole && current.value.phase === "streaming" &&
+        (current.provisional || !isStart)
+      this.liveMessage = {
+        value: {
+          id: reusedCheckpoint ? current.value.id : randomUUID(),
+          revision: reusedCheckpoint ? current.value.revision + 1 : 1,
+          phase: event.type === "message_end" ? "persisting" : "streaming",
+          message: nativeMessage ?? null,
+        },
+        messageIdentity: event.message,
+        entriesBeforeEnd: event.type === "message_end"
+          ? this.runtime.session.sessionManager.getEntries().length
+          : current?.entriesBeforeEnd ?? this.runtime.session.sessionManager.getEntries().length,
+        provisional: false,
+      }
+    }
+    return {
+      position,
+      liveMessage: this.liveMessage
+        ? { id: this.liveMessage.value.id, revision: this.liveMessage.value.revision }
+        : undefined,
+    }
+  }
+
+  private syncLiveMessageFromAgentState(): void {
+    const messageIdentity = this.runtime.session.agent.state.streamingMessage
+    const message = toNativeJsonValue(messageIdentity)
+    const role = isNativeJsonObject(message) ? message.role : undefined
+    if (!messageIdentity || !isNativeJsonObject(message) ||
+      (role !== "user" && role !== "assistant" && role !== "toolResult")) return
+    const current = this.liveMessage
+    if (current?.value.phase === "persisting") return
+    const currentRole = isNativeJsonObject(current?.value.message) ? current.value.message.role : undefined
+    const reusedCheckpoint = current && currentRole === role && current.value.phase === "streaming" ? current : undefined
+    if (reusedCheckpoint && JSON.stringify(reusedCheckpoint.value.message) === JSON.stringify(message)) return
+    this.liveMessage = {
+      value: {
+        id: reusedCheckpoint?.value.id ?? randomUUID(),
+        revision: reusedCheckpoint ? reusedCheckpoint.value.revision + 1 : 1,
+        phase: "streaming",
+        message,
+      },
+      messageIdentity,
+      entriesBeforeEnd: this.runtime.session.sessionManager.getEntries().length,
+      provisional: true,
+    }
+  }
+
+  private clearPersistedLiveMessage(): void {
+    const checkpoint = this.liveMessage
+    if (!checkpoint || checkpoint.value.phase !== "persisting") return
+    const persisted = this.runtime.session.sessionManager.getEntries()
+      .slice(checkpoint.entriesBeforeEnd)
+      .some(entry => entry.type === "message" && entry.message === checkpoint.messageIdentity)
+    if (persisted && this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
   }
 
   private detachSessionSubscriptions(): void {
@@ -619,6 +702,9 @@ export class RealPiSession {
       autoEnabled: this.runtime.session.autoCompactionEnabled,
       operation: { type: "none" },
     }
+    this.nativeEventEpoch = randomUUID()
+    this.nativeEventSequence = 0
+    this.liveMessage = undefined
   }
 
   static async open(
@@ -821,7 +907,7 @@ export class RealPiSession {
     return () => this.stateListeners.delete(listener)
   }
 
-  onNativeEvent(listener: (event: PiNativeJsonValueV1) => void): () => void {
+  onNativeEvent(listener: (event: PiNativeJsonValueV1, meta: PiNativeEventMetaV1) => void): () => void {
     this.nativeEventListeners.add(listener)
     return () => this.nativeEventListeners.delete(listener)
   }
@@ -909,11 +995,16 @@ export class RealPiSession {
 
   getNativeBranchPage(cursor: string | undefined, limit: number, maxBytes: number) {
     const manager = this.runtime.session.sessionManager
-    const liveMessage = toNativeJsonValue(this.runtime.session.agent.state.streamingMessage)
+    this.syncLiveMessageFromAgentState()
+    this.clearPersistedLiveMessage()
+    const checkpoint = cursor ? undefined : {
+      position: { epoch: this.nativeEventEpoch, sequence: this.nativeEventSequence },
+      liveMessage: this.liveMessage?.value,
+    }
     return nativeEntriesPageFromEntries(
       this.getNativeHead(),
       manager.getBranch(),
-      { cursor, limit, maxBytes, liveMessage },
+      { cursor, limit, maxBytes, checkpoint },
       toNativeJsonObject,
     )
   }

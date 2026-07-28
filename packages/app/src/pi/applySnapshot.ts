@@ -1,4 +1,4 @@
-import type { PiNativeEntriesPageV1, SessionSnapshotV1 } from "@piui/protocol"
+import type { PiNativeEntriesPageV1, PiNativeEventMetaV1, SessionSnapshotV1 } from "@piui/protocol"
 import { messageStore } from "../store/messageStore"
 import { activeSessionStore } from "../store/activeSessionStore"
 import { nativeSessionStore } from "./nativeSessionStore"
@@ -128,8 +128,8 @@ export function appendPiNativeEntriesPageToUi(sessionId: string, page: PiNativeE
   return applied
 }
 
-export function applyPiNativeEventToUi(sessionId: string, event: unknown): boolean {
-  const applied = nativeSessionStore.applyNativeEvent(sessionId, event)
+export function applyPiNativeEventToUi(sessionId: string, event: unknown, meta: PiNativeEventMetaV1): boolean {
+  const applied = nativeSessionStore.applyNativeEvent(sessionId, event, meta)
   if (applied) {
     publishNativeLiveMessages(sessionId)
     if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId) &&

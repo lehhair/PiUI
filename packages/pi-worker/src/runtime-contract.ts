@@ -10,6 +10,7 @@ import type {
   PiNativeJsonValueV1,
   PiNativeSessionHeadV1,
   PiNativeEntriesPageV1,
+  PiNativeEventMetaV1,
   PiResourceSnapshotV1,
   PiResourceExtensionPathsV1,
   PiRuntimeInspectionV1,
@@ -22,7 +23,7 @@ export interface PiSessionRuntime {
   onCrash?(listener: (error: Error) => void): () => void
   onClose?(listener: () => void): () => void
   onState(listener: (state: PiRuntimeUiState) => void): () => void
-  onNativeEvent?(listener: (event: PiNativeJsonValueV1) => void): () => void
+  onNativeEvent?(listener: (event: PiNativeJsonValueV1, meta: PiNativeEventMetaV1) => void): () => void
   onNativeHead?(listener: (native: PiNativeSessionHeadV1) => void): () => void
   onResourcesChanged?(listener: () => void): () => void
   onSessionReplacement?(listener: (replacement: SessionReplacementResultV1) => void | Promise<void>): () => void

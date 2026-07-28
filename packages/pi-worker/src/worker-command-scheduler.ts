@@ -13,10 +13,7 @@ function canRunConcurrently(command: WorkerCommand, active: WorkerCommand | unde
     case "setQueueModes":
     case "clearQueue":
       return active?.type === "prompt"
-    case "getNativeEntriesPage":
     case "getNativeBranchPage":
-    case "getNativeTree":
-    case "getNativeImageAttachment":
       return active?.type === "prompt"
     case "abortCompaction":
       return active?.type === "compact"

@@ -369,6 +369,193 @@ export default function (pi) {
     }
   })
 
+  it("keeps a live checkpoint while an extension settles message_end", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-settlement-"))
+    let session: RealPiSession | undefined
+    let release!: () => void
+    try {
+      const opened = await openOfflineSession(cwd, {
+        provider: "piui-faux-live-settlement",
+        api: "piui-faux-live-settlement",
+        models: [{ id: "live-1", contextWindow: 4096, maxTokens: 256 }],
+      }, {
+        compaction: { enabled: false },
+        retry: { enabled: false },
+      }, api => [api.fauxAssistantMessage("settled answer")])
+      session = opened.session
+      await session.initializeExtensions()
+
+      const runner = (session as unknown as {
+        runtime: { session: { _extensionRunner?: { emitMessageEnd: (event: unknown) => Promise<unknown> } } }
+      }).runtime.session._extensionRunner
+      assert.ok(runner)
+      const originalEmitMessageEnd = runner.emitMessageEnd.bind(runner)
+      let markBlocked!: () => void
+      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      runner.emitMessageEnd = async event => {
+        const message = event && typeof event === "object" && "message" in event
+          ? (event as { message?: { role?: unknown } }).message
+          : undefined
+        if (message?.role === "user") {
+          markBlocked()
+          await gate
+        }
+        return originalEmitMessageEnd(event)
+      }
+
+      const prompt = session.prompt("hold user settlement")
+      await blocked
+      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      assert.equal(during.items.some(entry => nativeRole(entry) === "user"), false)
+      assert.equal(during.checkpoint?.liveMessage?.phase, "streaming")
+      const live = during.checkpoint?.liveMessage?.message
+      assert.ok(live && typeof live === "object" && !Array.isArray(live))
+      assert.equal(live.role, "user")
+
+      release()
+      await prompt
+      const settled = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      assert.equal(settled.checkpoint?.liveMessage, undefined)
+      assert.ok(settled.items.some(entry => nativeRole(entry) === "user"))
+      assert.ok(settled.items.some(entry => nativeRole(entry) === "assistant"))
+      const latest = session.getNativeBranchPage(undefined, 1, 32 * 1024 * 1024)
+      assert.ok(latest.beforeCursor)
+      assert.ok(latest.checkpoint)
+      const older = session.getNativeBranchPage(latest.beforeCursor, 1, 32 * 1024 * 1024)
+      assert.equal(older.checkpoint, undefined)
+      await session.sendCustomMessage("fixture.custom", [{ type: "text", text: "custom" }], { display: true })
+      assert.equal(session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024).checkpoint?.liveMessage, undefined)
+    } finally {
+      release?.()
+      await session?.dispose()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("samples the native streaming message while a message_start extension is blocked", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-start-"))
+    let session: RealPiSession | undefined
+    let release!: () => void
+    try {
+      const opened = await openOfflineSession(cwd, {
+        provider: "piui-faux-live-start",
+        api: "piui-faux-live-start",
+        models: [{ id: "live-start-1", contextWindow: 4096, maxTokens: 256 }],
+      }, {
+        compaction: { enabled: false },
+        retry: { enabled: false },
+      }, api => [api.fauxAssistantMessage("answer")])
+      session = opened.session
+      await session.initializeExtensions()
+      const runner = (session as unknown as {
+        runtime: { session: { _extensionRunner?: { emit: (event: { type?: string }) => Promise<unknown> } } }
+      }).runtime.session._extensionRunner
+      assert.ok(runner)
+      const originalEmit = runner.emit.bind(runner)
+      let markBlocked!: () => void
+      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      let held = false
+      runner.emit = async event => {
+        if (!held && event.type === "message_start") {
+          held = true
+          markBlocked()
+          await gate
+        }
+        return originalEmit(event)
+      }
+      const eventLiveIds: string[] = []
+      const off = session.onNativeEvent((event, meta) => {
+        if (event && typeof event === "object" && !Array.isArray(event) && event.type === "message_start" && meta.liveMessage) {
+          eventLiveIds.push(meta.liveMessage.id)
+        }
+      })
+
+      const prompt = session.prompt("blocked start")
+      await blocked
+      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const provisionalId = during.checkpoint?.liveMessage?.id
+      assert.ok(provisionalId)
+      const provisional = during.checkpoint?.liveMessage?.message
+      assert.ok(provisional && typeof provisional === "object" && !Array.isArray(provisional))
+      assert.equal(provisional.role, "user")
+
+      release()
+      await prompt
+      off()
+      assert.equal(eventLiveIds[0], provisionalId)
+    } finally {
+      release?.()
+      await session?.dispose()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps the live id while a message_update extension is blocked", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-update-"))
+    let session: RealPiSession | undefined
+    let release!: () => void
+    try {
+      const answer = "streaming answer ".repeat(20)
+      const opened = await openOfflineSession(cwd, {
+        provider: "piui-faux-live-update",
+        api: "piui-faux-live-update",
+        models: [{ id: "live-update-1", contextWindow: 4096, maxTokens: 256 }],
+        tokensPerSecond: 200,
+        tokenSize: { min: 1, max: 1 },
+      }, {
+        compaction: { enabled: false },
+        retry: { enabled: false },
+      }, api => [api.fauxAssistantMessage(answer)])
+      session = opened.session
+      await session.initializeExtensions()
+      const runner = (session as unknown as {
+        runtime: { session: { _extensionRunner?: { emit: (event: { type?: string }) => Promise<unknown> } } }
+      }).runtime.session._extensionRunner
+      assert.ok(runner)
+      const originalEmit = runner.emit.bind(runner)
+      let markBlocked!: () => void
+      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      let held = false
+      runner.emit = async event => {
+        if (!held && event.type === "message_update") {
+          held = true
+          markBlocked()
+          await gate
+        }
+        return originalEmit(event)
+      }
+      let assistantStartId: string | undefined
+      let assistantUpdateId: string | undefined
+      const off = session.onNativeEvent((event, meta) => {
+        if (!event || typeof event !== "object" || Array.isArray(event)) return
+        const message = event.message
+        if (!message || typeof message !== "object" || Array.isArray(message) || message.role !== "assistant") return
+        if (event.type === "message_start") assistantStartId = meta.liveMessage?.id
+        if (event.type === "message_update") assistantUpdateId = meta.liveMessage?.id
+      })
+
+      const prompt = session.prompt("blocked update")
+      await blocked
+      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const provisionalId = during.checkpoint?.liveMessage?.id
+      assert.ok(assistantStartId)
+      assert.equal(provisionalId, assistantStartId)
+      assert.ok((during.checkpoint?.liveMessage?.revision ?? 0) > 1)
+
+      release()
+      await prompt
+      off()
+      assert.equal(assistantUpdateId, assistantStartId)
+    } finally {
+      release?.()
+      await session?.dispose()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("keeps steer and follow-up in independent native queues during a streamed turn", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-control-"))
     const slowText = "streaming content ".repeat(12)
@@ -409,10 +596,11 @@ export default function (pi) {
       const prompt = session.prompt("initial")
       await partialStarted
       const livePage = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
-      assert.ok(livePage.liveMessage && typeof livePage.liveMessage === "object" && !Array.isArray(livePage.liveMessage))
-      assert.equal(livePage.liveMessage.role, "assistant")
-      assert.ok(nativeContentText(livePage.liveMessage.content).length > 0)
-      assert.ok(nativeContentText(livePage.liveMessage.content).length < slowText.length)
+      const liveMessage = livePage.checkpoint?.liveMessage?.message
+      assert.ok(liveMessage && typeof liveMessage === "object" && !Array.isArray(liveMessage))
+      assert.equal(liveMessage.role, "assistant")
+      assert.ok(nativeContentText(liveMessage.content).length > 0)
+      assert.ok(nativeContentText(liveMessage.content).length < slowText.length)
       await session.steer("steer now")
       await session.followUp("follow up later")
       assert.deepEqual(session.getRuntimeUiState().queue.steering, ["steer now"])

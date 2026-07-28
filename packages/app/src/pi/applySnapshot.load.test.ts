@@ -33,6 +33,7 @@ const snapshot = {
 const page: PiNativeEntriesPageV1 = {
   head: snapshot.native,
   items: [{ type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: 'hello' } }],
+  checkpoint: { position: { epoch: 'worker-epoch', sequence: 0 } },
   hasMore: false,
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import type { PiNativeSessionEnvelopeV1 } from "@piui/protocol"
-import { nativeEntriesPage, nativeImageAttachment } from "@piui/pi-worker"
+import { nativeEntriesPage, nativeEntriesPageFromEntries, nativeImageAttachment } from "@piui/pi-worker"
 
 function envelope(count = 120): PiNativeSessionEnvelopeV1 {
   return {
@@ -66,6 +66,27 @@ describe("native pagination", () => {
     )
     const bounded = nativeEntriesPage(native, { limit: 10, maxBytes: 1_500 })
     assert.ok(Buffer.byteLength(JSON.stringify(bounded), "utf8") <= 1_500)
+  })
+
+  it("counts the latest branch checkpoint against the byte limit", () => {
+    const native = envelope(1)
+    const head = nativeEntriesPage(native, { limit: 1, maxBytes: 1_000_000 }).head
+    assert.throws(
+      () => nativeEntriesPageFromEntries(head, native.entries, {
+        limit: 1,
+        maxBytes: 512,
+        checkpoint: {
+          position: { epoch: "worker-events", sequence: 3 },
+          liveMessage: {
+            id: "live",
+            revision: 3,
+            phase: "streaming",
+            message: { role: "assistant", content: "x".repeat(1_000) },
+          },
+        },
+      }, entry => entry),
+      error => (error as { code?: string }).code === "FILE_TOO_LARGE",
+    )
   })
 
   it("returns the exact decoded image block and immutable ETag", () => {

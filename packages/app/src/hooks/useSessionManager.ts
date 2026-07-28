@@ -66,7 +66,6 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
       const existingState = messageStore.getSessionState(sid)
       const hasExistingMessages = existingState && existingState.messages.length > 0
-      nativeSessionStore.activate(sid)
       const cached = nativeSessionStore.getSnapshot(sid)
       if (cached && hasExistingMessages && nativeSessionStore.hasNativePage(sid) && !force) {
         messageStore.updateSessionMetadata(sid, { loadState: 'loaded', title: cached.session.title })
@@ -75,7 +74,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       }
       messageStore.setLoadState(sid, 'loading')
       try {
-        await loadPiSessionToUi(sid)
+        await loadPiSessionToUi(sid, { activate: false })
         if (isStale()) return
         if (!force) onLoadComplete?.()
       } catch (error) {
@@ -166,6 +165,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   // 这里不再写任何“全局当前 session”状态。
   useEffect(() => {
     if (sessionId) {
+      nativeSessionStore.activate(sessionId)
       const cached = messageStore.getSessionState(sessionId)
       const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale &&
         cached.messages.length > 0 && nativeSessionStore.hasNativePage(sessionId)

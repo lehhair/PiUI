@@ -1,4 +1,9 @@
-import type { PiNativeEntriesPageV1, SessionSnapshotV1 } from "@piui/protocol"
+import type {
+  PiNativeEntriesPageV1,
+  PiNativeEventMetaV1,
+  PiNativeEventPositionV1,
+  SessionSnapshotV1,
+} from "@piui/protocol"
 import type { NativeToolExecution, PiNativeEntry } from "./nativeEntriesToMessages"
 
 type Listener = () => void
@@ -10,11 +15,20 @@ interface NativeSessionState {
   pageLoaded: boolean
   pageEpoch?: string
   pageRevision?: number
-  transient: PiNativeEntry[]
+  pageLeafId?: string | null
+  transient: TransientNativeEntry[]
   streamingEntryIds: Set<string>
   liveTools: Map<string, NativeToolExecution>
   nativeEventStreaming?: boolean
-  transientCounter: number
+  checkpointPosition?: PiNativeEventPositionV1
+}
+
+interface TransientNativeEntry {
+  entry: PiNativeEntry
+  liveId: string
+  liveRevision: number
+  phase: "streaming" | "persisting"
+  position: PiNativeEventPositionV1
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -45,7 +59,6 @@ class NativeSessionStore {
         transient: [],
         streamingEntryIds: new Set(),
         liveTools: new Map(),
-        transientCounter: 0,
       }
       this.native.set(sessionId, state)
     }
@@ -67,11 +80,13 @@ class NativeSessionStore {
     const state = this.native.get(sessionId)
     if (!snapshot || !state) return []
     const all = new Map(state.entries)
-    for (const entry of state.transient) {
+    for (const { entry } of state.transient) {
       if (typeof entry.id === "string") all.set(entry.id, entry)
     }
-    const transientLeaf = state.transient.at(-1)?.id
-    let id = typeof transientLeaf === "string" ? transientLeaf : snapshot.native.leafId
+    const transientLeaf = state.transient.at(-1)?.entry.id
+    let id = typeof transientLeaf === "string"
+      ? transientLeaf
+      : state.pageLoaded ? state.pageLeafId ?? null : snapshot.native.leafId
     const branch: PiNativeEntry[] = []
     const visited = new Set<string>()
     while (id && !visited.has(id)) {
@@ -93,13 +108,13 @@ class NativeSessionStore {
   }
 
   getTransientEntryIds(sessionId: string): ReadonlySet<string> {
-    return new Set(this.native.get(sessionId)?.transient.flatMap(entry =>
+    return new Set(this.native.get(sessionId)?.transient.flatMap(({ entry }) =>
       typeof entry.id === "string" ? [entry.id] : []
     ) ?? [])
   }
 
   getTransientEntries(sessionId: string): PiNativeEntry[] {
-    return [...(this.native.get(sessionId)?.transient ?? [])]
+    return this.native.get(sessionId)?.transient.map(item => item.entry) ?? []
   }
 
   getNativeEventStreaming(sessionId: string): boolean | undefined {
@@ -131,6 +146,10 @@ class NativeSessionStore {
       existing.native.revision !== snapshot.native.revision || existing.native.leafId !== snapshot.native.leafId ||
       existing.native.entryCount !== snapshot.native.entryCount
     this.snapshots.set(snapshot.session.id, snapshot)
+    if ((!existing?.runtime.isStreaming && snapshot.runtime.isStreaming) || existing?.native.epoch !== snapshot.native.epoch) {
+      const state = this.native.get(snapshot.session.id)
+      if (state) state.nativeEventStreaming = undefined
+    }
     if (options?.activate !== false) this.activeSessionId = snapshot.session.id
     for (const l of this.listeners) l()
     return { accepted: true, nativeChanged }
@@ -138,7 +157,8 @@ class NativeSessionStore {
 
   replaceFirstPage(sessionId: string, page: PiNativeEntriesPageV1): boolean {
     const snapshot = this.snapshots.get(sessionId)
-    if (!snapshot || page.head.epoch !== snapshot.native.epoch || page.head.revision < snapshot.native.revision) return false
+    const checkpoint = page.checkpoint
+    if (!snapshot || !checkpoint || page.head.epoch !== snapshot.native.epoch || page.head.revision < snapshot.native.revision) return false
     const state = this.ensureNative(sessionId)
     if (state.pageEpoch === page.head.epoch && state.pageRevision !== undefined && page.head.revision < state.pageRevision) return false
     if (state.pageEpoch !== page.head.epoch) state.entries.clear()
@@ -153,37 +173,52 @@ class NativeSessionStore {
     state.pageLoaded = true
     state.pageEpoch = page.head.epoch
     state.pageRevision = page.head.revision
-    const runtimeStreaming = snapshot.runtime.isStreaming
-    state.transient = runtimeStreaming
-      ? state.transient.filter(entry => typeof entry.id === "string" && state.streamingEntryIds.has(entry.id))
-      : []
-    state.streamingEntryIds = new Set(state.transient.flatMap(entry =>
-      typeof entry.id === "string" ? [entry.id] : [],
-    ))
-    if (!runtimeStreaming) {
+    state.pageLeafId = page.head.leafId
+
+    const previousPosition = state.checkpointPosition
+    const sameEventEpoch = previousPosition?.epoch === checkpoint.position.epoch
+    const checkpointBehind = previousPosition?.epoch === checkpoint.position.epoch &&
+      previousPosition.sequence > checkpoint.position.sequence
+    if (previousPosition && !sameEventEpoch) {
       state.liveTools.clear()
-      state.nativeEventStreaming = undefined
     }
-    const liveMessage = record(page.liveMessage)
+    state.transient = sameEventEpoch
+      ? state.transient.filter(item => item.position.sequence > checkpoint.position.sequence)
+      : []
+    state.checkpointPosition = sameEventEpoch && previousPosition.sequence > checkpoint.position.sequence
+      ? previousPosition
+      : checkpoint.position
+
+    const live = checkpointBehind ? undefined : checkpoint.liveMessage
+    const liveMessage = record(live?.message)
     const liveRole = liveMessage.role
-    if (liveRole === "user" || liveRole === "assistant" || liveRole === "toolResult") {
-      let target = [...state.transient].reverse().find(entry =>
-        messageRole(entry) === liveRole && typeof entry.id === "string" && state.streamingEntryIds.has(entry.id),
-      )
+    if (live && (liveRole === "user" || liveRole === "assistant" || liveRole === "toolResult")) {
+      let target = state.transient.find(item => item.liveId === live.id)
       if (!target) {
         const prefix = liveRole === "user" ? "u" : liveRole === "toolResult" ? "tr" : "a"
-        const id = `transient-${prefix}-${++state.transientCounter}`
-        target = { type: "message", id, parentId: page.head.leafId, timestamp: Date.now(), message: liveMessage }
+        const id = `transient-${prefix}-${live.id}`
+        target = {
+          entry: { type: "message", id, parentId: page.head.leafId, timestamp: Date.now(), message: liveMessage },
+          liveId: live.id,
+          liveRevision: live.revision,
+          phase: live.phase,
+          position: checkpoint.position,
+        }
         state.transient.push(target)
-        state.streamingEntryIds.add(id)
-      } else {
-        target.message = liveMessage
-        target.parentId = page.head.leafId
+      } else if (target.liveRevision <= live.revision) {
+        target.entry.message = liveMessage
+        target.liveRevision = live.revision
+        target.phase = live.phase
       }
-      if (liveRole === "assistant") state.nativeEventStreaming = true
-    } else if (state.transient[0]) {
-      state.transient[0].parentId = page.head.leafId
     }
+    if (state.transient[0]) state.transient[0].entry.parentId = page.head.leafId
+    state.streamingEntryIds = new Set(state.transient.flatMap(item =>
+      item.phase === "streaming" && typeof item.entry.id === "string" ? [item.entry.id] : [],
+    ))
+    state.nativeEventStreaming = state.transient.some(item =>
+      item.phase === "streaming" && messageRole(item.entry) === "assistant"
+    ) ? true : undefined
+    if (!snapshot.runtime.isStreaming && !checkpoint.liveMessage) state.liveTools.clear()
     for (const l of this.listeners) l()
     return true
   }
@@ -196,45 +231,85 @@ class NativeSessionStore {
     }
     state.beforeCursor = page.beforeCursor
     state.hasMore = page.hasMore
-    state.pageRevision = page.head.revision
+    state.pageRevision = Math.max(state.pageRevision ?? 0, page.head.revision)
     for (const l of this.listeners) l()
     return true
   }
 
-  applyNativeEvent(sessionId: string, value: unknown): boolean {
+  applyNativeEvent(sessionId: string, value: unknown, meta: PiNativeEventMetaV1): boolean {
     const event = record(value)
     if (typeof event.type !== "string") return false
     const state = this.ensureNative(sessionId)
     const now = Date.now()
-    const makeId = (role: unknown) => `transient-${role === "user" ? "u" : role === "toolResult" ? "tr" : "a"}-${++state.transientCounter}`
-    const currentLeaf = state.transient.at(-1)?.id ?? this.snapshots.get(sessionId)?.native.leafId ?? null
+    const isMessageEvent = event.type === "message_start" || event.type === "message_update" || event.type === "message_end"
+    const isCheckpointCoveredEvent = isMessageEvent || event.type === "agent_end" ||
+      event.type === "agent_settled" || event.type === "settled"
+    const previousPosition = state.checkpointPosition
+    if (isCheckpointCoveredEvent && previousPosition?.epoch === meta.position.epoch && meta.position.sequence <= previousPosition.sequence) {
+      return false
+    }
+    if (isCheckpointCoveredEvent && previousPosition && previousPosition.epoch !== meta.position.epoch) {
+      state.transient = []
+      state.streamingEntryIds.clear()
+      state.liveTools.clear()
+      state.nativeEventStreaming = undefined
+    }
+    if (isCheckpointCoveredEvent) state.checkpointPosition = meta.position
+
+    const currentLeaf = state.transient.at(-1)?.entry.id ??
+      (state.pageLoaded ? state.pageLeafId : this.snapshots.get(sessionId)?.native.leafId) ?? null
     const incomingMessage = record(event.message)
     const role = incomingMessage.role
-    const findStreaming = (wantedRole: unknown) => [...state.transient].reverse().find(entry =>
-      messageRole(entry) === wantedRole && typeof entry.id === "string" && state.streamingEntryIds.has(entry.id),
-    )
+    const live = meta.liveMessage
+    const findLive = () => live ? state.transient.find(item => item.liveId === live.id) : undefined
+    const createLive = (phase: "streaming" | "persisting") => {
+      if (!live) return undefined
+      const prefix = role === "user" ? "u" : role === "toolResult" ? "tr" : "a"
+      const item: TransientNativeEntry = {
+        entry: {
+          type: "message",
+          id: `transient-${prefix}-${live.id}`,
+          parentId: currentLeaf,
+          timestamp: now,
+          message: incomingMessage,
+        },
+        liveId: live.id,
+        liveRevision: live.revision,
+        phase,
+        position: meta.position,
+      }
+      state.transient.push(item)
+      return item
+    }
 
     if (event.type === "message_start") {
-      if (role !== "user" && role !== "assistant" && role !== "toolResult") return false
-      const id = makeId(role)
-      state.transient.push({ type: "message", id, parentId: currentLeaf, timestamp: now, message: incomingMessage })
-      state.streamingEntryIds.add(id)
+      if (!live || (role !== "user" && role !== "assistant" && role !== "toolResult")) return false
+      const target = findLive() ?? createLive("streaming")
+      if (!target) return false
+      target.entry.message = incomingMessage
+      target.liveRevision = live.revision
+      target.phase = "streaming"
+      target.position = meta.position
+      if (typeof target.entry.id === "string") state.streamingEntryIds.add(target.entry.id)
       if (role === "assistant") state.nativeEventStreaming = true
     } else if (event.type === "message_update") {
-      const target = findStreaming(role === "user" || role === "toolResult" ? role : "assistant")
+      if (!live || (role !== "user" && role !== "assistant" && role !== "toolResult")) return false
+      const target = findLive() ?? createLive("streaming")
       if (!target) return false
-      target.message = incomingMessage
+      if (live.revision >= target.liveRevision) target.entry.message = incomingMessage
+      target.liveRevision = Math.max(target.liveRevision, live.revision)
+      target.phase = "streaming"
+      target.position = meta.position
+      if (typeof target.entry.id === "string") state.streamingEntryIds.add(target.entry.id)
     } else if (event.type === "message_end") {
-      if (role !== "user" && role !== "assistant" && role !== "toolResult") return false
-      let target = findStreaming(role)
-      if (!target) {
-        const id = makeId(role)
-        target = { type: "message", id, parentId: currentLeaf, timestamp: now, message: incomingMessage }
-        state.transient.push(target)
-      } else {
-        target.message = incomingMessage
-      }
-      if (typeof target.id === "string") state.streamingEntryIds.delete(target.id)
+      if (!live || (role !== "user" && role !== "assistant" && role !== "toolResult")) return false
+      const target = findLive() ?? createLive("persisting")
+      if (!target) return false
+      if (live.revision >= target.liveRevision) target.entry.message = incomingMessage
+      target.liveRevision = Math.max(target.liveRevision, live.revision)
+      target.phase = "persisting"
+      target.position = meta.position
+      if (typeof target.entry.id === "string") state.streamingEntryIds.delete(target.entry.id)
     } else if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
       state.liveTools.set(event.toolCallId, {
         status: "running",
@@ -264,6 +339,10 @@ class NativeSessionStore {
       })
     } else if (event.type === "agent_end" || event.type === "agent_settled" || event.type === "settled") {
       state.streamingEntryIds.clear()
+      for (const item of state.transient) {
+        item.phase = "persisting"
+        item.position = meta.position
+      }
       state.nativeEventStreaming = false
     } else {
       return false
