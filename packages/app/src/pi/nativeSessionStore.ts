@@ -98,6 +98,10 @@ class NativeSessionStore {
     ) ?? [])
   }
 
+  getTransientEntries(sessionId: string): PiNativeEntry[] {
+    return [...(this.native.get(sessionId)?.transient ?? [])]
+  }
+
   getNativeEventStreaming(sessionId: string): boolean | undefined {
     return this.native.get(sessionId)?.nativeEventStreaming
   }

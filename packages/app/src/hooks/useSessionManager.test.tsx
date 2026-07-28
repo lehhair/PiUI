@@ -7,6 +7,7 @@ const {
   fetchNativePageMock,
   appendNativePageMock,
   messageStoreMock,
+  nativeStoreMock,
   sessionErrorHandlerMock,
 } = vi.hoisted(() => ({
   loadPiSessionMock: vi.fn(),
@@ -23,6 +24,11 @@ const {
     getHistoryCursor: vi.fn(),
     setRevertState: vi.fn(),
   },
+  nativeStoreMock: {
+    activate: vi.fn(),
+    getSnapshot: vi.fn(() => ({ session: { directory: '/workspace' }, runtime: {} })),
+    hasNativePage: vi.fn(() => true),
+  },
   sessionErrorHandlerMock: vi.fn(),
 }))
 
@@ -31,10 +37,7 @@ vi.mock('../pi/sessionApi', () => ({
 }))
 
 vi.mock('../pi/nativeSessionStore', () => ({
-  nativeSessionStore: {
-    activate: vi.fn(),
-    getSnapshot: vi.fn(() => ({ session: { directory: '/workspace' }, runtime: {} })),
-  },
+  nativeSessionStore: nativeStoreMock,
 }))
 
 vi.mock('../pi/applySnapshot', () => ({
@@ -64,6 +67,7 @@ describe('useSessionManager', () => {
     messageStoreMock.prependUiMessages.mockReset()
     messageStoreMock.getHistoryCursor.mockReset()
     messageStoreMock.setRevertState.mockReset()
+    nativeStoreMock.hasNativePage.mockReset().mockReturnValue(true)
     sessionErrorHandlerMock.mockReset()
 
     messageStoreMock.getSessionState.mockReturnValue(null)
@@ -121,5 +125,19 @@ describe('useSessionManager', () => {
 
     expect(loadPiSessionMock).not.toHaveBeenCalled()
     expect(messageStoreMock.setLoadState).not.toHaveBeenCalled()
+  })
+
+  it('reloads a cached message view when its native branch page is missing', async () => {
+    messageStoreMock.getSessionState.mockReturnValue({
+      loadState: 'loaded',
+      isStale: false,
+      messages: [{}],
+    })
+    nativeStoreMock.hasNativePage.mockReturnValue(false)
+    loadPiSessionMock.mockResolvedValue(undefined)
+
+    renderHook(() => useSessionManager({ sessionId: 'session-without-branch', directory: '/workspace' }))
+
+    await waitFor(() => expect(loadPiSessionMock).toHaveBeenCalledWith('session-without-branch'))
   })
 })

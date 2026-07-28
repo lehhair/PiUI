@@ -52,25 +52,20 @@ function publishNativeMessages(sessionId: string): void {
 
 function publishNativeLiveMessages(sessionId: string): void {
   const snapshot = nativeSessionStore.getSnapshot(sessionId)
-  if (!snapshot || !nativeSessionStore.hasNativePage(sessionId)) return
+  if (!snapshot) return
   const history = nativeSessionStore.getHistoryState(sessionId)
   const nativeStreaming = nativeSessionStore.getNativeEventStreaming(sessionId)
-  if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId)) {
-    messageStore.updateSessionMetadata(sessionId, {
-      title: snapshot.session.title,
-      directory: snapshot.session.directory,
-      hasMoreHistory: history.hasMore,
-      historyCursor: history.beforeCursor,
-    })
-    messageStore.setStreaming(sessionId, nativeStreaming ?? snapshot.runtime.isStreaming)
-    return
-  }
+  const hasNativePage = nativeSessionStore.hasNativePage(sessionId)
+  const disconnected = nativeSessionStore.hasDisconnectedTransientBranch(sessionId)
   const transientIds = nativeSessionStore.getTransientEntryIds(sessionId)
   const liveToolCallIds = new Set(nativeSessionStore.getLiveTools(sessionId).keys())
   const model = snapshot.runtime.model
     ? { providerID: snapshot.runtime.model.provider, modelID: snapshot.runtime.model.id }
     : undefined
-  const messages = nativeEntriesToUiMessages(nativeSessionStore.getActiveBranch(sessionId), {
+  const entries = hasNativePage && !disconnected
+    ? nativeSessionStore.getActiveBranch(sessionId)
+    : nativeSessionStore.getTransientEntries(sessionId)
+  const messages = nativeEntriesToUiMessages(entries, {
     sessionId,
     directory: snapshot.session.directory,
     model,

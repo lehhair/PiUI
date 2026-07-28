@@ -107,6 +107,7 @@ describe("app-local native session messages", () => {
     expect(messages.map(message => message.parts[0])).toEqual([
       expect.objectContaining({ type: "text", text: "ping" }),
       expect.objectContaining({ type: "text", text: "pong" }),
+      expect.objectContaining({ type: "text", text: "new question" }),
     ])
   })
 
@@ -131,5 +132,32 @@ describe("app-local native session messages", () => {
     expect(current[0]).toBe(persisted[0])
     expect(current[1]).toBe(persisted[1])
     expect(current.at(-1)?.parts[0]).toMatchObject({ type: "text", text: "streaming" })
+  })
+
+  it("shows raw user and assistant events immediately without a loaded branch page", () => {
+    applySnapshotToUi(snapshot(), { nativePage: page() })
+    const persisted = [...(messageStore.getSessionState("s-apply")?.messages ?? [])]
+    nativeSessionStore.clear("s-apply")
+    applySnapshotToUi(snapshot(2, 2, "a1"), { refreshNative: false })
+
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "user", content: "visible immediately" },
+    })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
+    })
+
+    const current = messageStore.getSessionState("s-apply")?.messages ?? []
+    expect(current[0]).toBe(persisted[0])
+    expect(current[1]).toBe(persisted[1])
+    expect(current[2]?.parts[0]).toMatchObject({ type: "text", text: "visible immediately" })
+    expect(current[3]?.parts[0]).toMatchObject({ type: "text", text: "partial" })
+    expect(current[3]?.isStreaming).toBe(true)
   })
 })

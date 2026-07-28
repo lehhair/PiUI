@@ -68,7 +68,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const hasExistingMessages = existingState && existingState.messages.length > 0
       nativeSessionStore.activate(sid)
       const cached = nativeSessionStore.getSnapshot(sid)
-      if (cached && hasExistingMessages && !force) {
+      if (cached && hasExistingMessages && nativeSessionStore.hasNativePage(sid) && !force) {
         messageStore.updateSessionMetadata(sid, { loadState: 'loaded', title: cached.session.title })
         if (!isStale()) onLoadComplete?.()
         return
@@ -167,7 +167,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   useEffect(() => {
     if (sessionId) {
       const cached = messageStore.getSessionState(sessionId)
-      const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale && cached.messages.length > 0
+      const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale &&
+        cached.messages.length > 0 && nativeSessionStore.hasNativePage(sessionId)
 
       if (canUseCached) {
         logger.log('[SessionManager] switch:use-cached', {
