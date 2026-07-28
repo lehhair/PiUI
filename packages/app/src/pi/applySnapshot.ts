@@ -82,6 +82,7 @@ function publishNativeLiveMessages(sessionId: string): void {
     directory: snapshot.session.directory,
     hasMoreHistory: history.hasMore,
     historyCursor: history.beforeCursor,
+    loadState: messages.length > 0 ? "loaded" : undefined,
   })
   messageStore.setStreaming(sessionId, nativeStreaming ?? snapshot.runtime.isStreaming)
 }
@@ -104,8 +105,9 @@ export function applySnapshotToUi(
 
 export async function loadPiSessionToUi(sessionId: string, options?: { activate?: boolean }): Promise<SessionSnapshotV1> {
   const snapshot = await fetchSnapshot(sessionId)
+  applySnapshotToUi(snapshot, { ...options, refreshNative: false })
   const nativePage = await fetchPiNativeBranchPage(sessionId)
-  applySnapshotToUi(snapshot, { ...options, nativePage })
+  if (nativeSessionStore.replaceFirstPage(sessionId, nativePage)) publishNativeMessages(sessionId)
   return snapshot
 }
 

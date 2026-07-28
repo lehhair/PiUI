@@ -2,13 +2,13 @@
 
 Baseline: `@earendil-works/pi-coding-agent@0.81.1` with the local SDK export patch in `patches/`.
 
-Capability revision: `pi-0.81.1-r17`; worker IPC: v13.
+Capability revision: `pi-0.81.1-r18`; worker IPC: v14.
 
 PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. SDK return values stay native on the transport; browser-only presentation fields are derived in the app. Function-valued dependency injection and TUI component factories remain inside the worker and are reported explicitly as `tui-only`; they are never advertised as browser RPC support.
 
 ## Native Data Contract
 
-`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every entries page is deep-equal to Pi `SessionManager.getEntries()`. The chat surface uses a separate lossless native branch page that is deep-equal to `SessionManager.getBranch()`, matching Pi's active-session semantics without reconstructing a branch from partial all-entry pages. Pages are limited by both item count and encoded byte size. The native tree route is a deep-equal JSON copy of `SessionManager.getTree()`. `runtime-inspection.native` remains an explicit, on-demand full envelope.
+`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every entries page is deep-equal to Pi `SessionManager.getEntries()`. The chat surface uses a separate lossless native branch page whose `items` are deep-equal to `SessionManager.getBranch()`, matching Pi's active-session semantics without reconstructing a branch from partial all-entry pages. During a turn, its independent `liveMessage` field is the JSON copy of Pi `Agent.state.streamingMessage`; it is never inserted into the persisted branch items. Pages are limited by both item count and encoded byte size. The native tree route is a deep-equal JSON copy of `SessionManager.getTree()`. `runtime-inspection.native` remains an explicit, on-demand full envelope.
 
 There is no remote timeline or presentation API. The browser pages Pi's native active branch and derives render-only `Message` objects in app memory. Raw Pi session events drive transient streaming entries; the next native revision replaces them with persisted branch entries. This browser adapter is disposable and cannot write or reconstruct Pi session data. Native image blocks, unknown fields, entries, and events retain their original JSON values on the transport.
 

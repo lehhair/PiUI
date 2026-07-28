@@ -153,10 +153,37 @@ class NativeSessionStore {
     state.pageLoaded = true
     state.pageEpoch = page.head.epoch
     state.pageRevision = page.head.revision
-    state.transient = []
-    state.streamingEntryIds.clear()
-    state.liveTools.clear()
-    state.nativeEventStreaming = undefined
+    const runtimeStreaming = snapshot.runtime.isStreaming
+    state.transient = runtimeStreaming
+      ? state.transient.filter(entry => typeof entry.id === "string" && state.streamingEntryIds.has(entry.id))
+      : []
+    state.streamingEntryIds = new Set(state.transient.flatMap(entry =>
+      typeof entry.id === "string" ? [entry.id] : [],
+    ))
+    if (!runtimeStreaming) {
+      state.liveTools.clear()
+      state.nativeEventStreaming = undefined
+    }
+    const liveMessage = record(page.liveMessage)
+    const liveRole = liveMessage.role
+    if (liveRole === "user" || liveRole === "assistant" || liveRole === "toolResult") {
+      let target = [...state.transient].reverse().find(entry =>
+        messageRole(entry) === liveRole && typeof entry.id === "string" && state.streamingEntryIds.has(entry.id),
+      )
+      if (!target) {
+        const prefix = liveRole === "user" ? "u" : liveRole === "toolResult" ? "tr" : "a"
+        const id = `transient-${prefix}-${++state.transientCounter}`
+        target = { type: "message", id, parentId: page.head.leafId, timestamp: Date.now(), message: liveMessage }
+        state.transient.push(target)
+        state.streamingEntryIds.add(id)
+      } else {
+        target.message = liveMessage
+        target.parentId = page.head.leafId
+      }
+      if (liveRole === "assistant") state.nativeEventStreaming = true
+    } else if (state.transient[0]) {
+      state.transient[0].parentId = page.head.leafId
+    }
     for (const l of this.listeners) l()
     return true
   }

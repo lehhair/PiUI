@@ -50,7 +50,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 13 as const
+export const PI_WORKER_PROTOCOL_VERSION = 14 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =

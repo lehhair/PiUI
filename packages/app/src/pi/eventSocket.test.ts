@@ -138,6 +138,53 @@ describe("PiEventSocket native session events", () => {
     socket.close()
   })
 
+  it("continues native message updates after resync restores a live Pi message", async () => {
+    const running = snapshot()
+    running.session.state = "running"
+    running.runtime.isStreaming = true
+    applySnapshotToUi(running, { nativePage: page(running.native) })
+    fetchSnapshot.mockResolvedValue(running)
+    fetchPiNativeBranchPage.mockResolvedValue({
+      ...page(running.native),
+      liveMessage: { role: "assistant", content: [{ type: "text", text: "before refresh" }] },
+    })
+
+    const socket = new PiEventSocket()
+    socket.connect()
+    const ws = FakeWebSocket.instances[0]!
+    ws.onopen?.()
+    const key = eventStreamKeyV2({ kind: "session", id: "active" })
+    send(ws, {
+      channel: "control",
+      type: "resync_required",
+      streams: { [key]: { cursor: { epoch: "event-epoch", sequence: 4 }, reason: "missing_cursor" } },
+    })
+    await vi.waitFor(() => expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({
+      text: "before refresh",
+    }))
+
+    send(ws, {
+      channel: "event",
+      event: {
+        protocolVersion: 2,
+        stream: { kind: "session", id: "active" },
+        cursor: { epoch: "event-epoch", sequence: 5 },
+        eventId: "native-after-refresh",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        type: "session.native.event",
+        payload: {
+          sessionId: "active",
+          event: {
+            type: "message_update",
+            message: { role: "assistant", content: [{ type: "text", text: "after refresh" }] },
+          },
+        },
+      },
+    })
+    expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({ text: "after refresh" })
+    socket.close()
+  })
+
   it("projects raw native streaming events and replaces transient data after native revision advances", async () => {
     const initial = snapshot()
     applySnapshotToUi(initial, { nativePage: page(initial.native) })
