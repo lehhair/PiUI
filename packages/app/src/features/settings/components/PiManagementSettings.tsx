@@ -23,7 +23,8 @@ import { PiSessionManagement } from './PiSessionManagement'
 
 type SettingsDraft = Pick<PiSettingsPatchV1,
   'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'transport' | 'steeringMode' | 'followUpMode' |
-  'compactionEnabled' | 'retryEnabled' | 'enableSkillCommands' | 'showImages' | 'shellPath' | 'defaultProjectTrust'>
+  'compactionEnabled' | 'retryEnabled' | 'enableSkillCommands' | 'showImages' | 'shellPath' | 'defaultProjectTrust' |
+  'theme' | 'httpProxy'>
 
 const inputClass = 'h-8 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100'
 
@@ -41,6 +42,8 @@ function draftFromSnapshot(snapshot: PiSettingsSnapshotV1): SettingsDraft {
     enableSkillCommands: settings.enableSkillCommands,
     showImages: settings.showImages,
     shellPath: settings.shellPath ?? '',
+    theme: settings.theme ?? '',
+    httpProxy: settings.httpProxy ?? '',
     defaultProjectTrust: settings.defaultProjectTrust,
   }
 }
@@ -124,6 +127,7 @@ export function PiManagementSettings() {
             <Button size="sm" disabled={busy !== null} onClick={() => workspacePath && void run('trust-allow', async () => setTrust(await setProjectTrust(workspacePath, true)), 'Project trusted')}>Trust</Button>
           </div>
         </div>
+        {trust ? <p className="text-[length:var(--fs-xs)] text-text-400">Required: {String(trust.required)} · saved decision: {trust.decision === null ? 'none' : String(trust.decision)} · default: {trust.defaultDecision}{trust.inheritedFrom ? ` · inherited from ${trust.inheritedFrom}` : ''}</p> : null}
       </section>
 
       {settings && draft ? (
@@ -136,6 +140,8 @@ export function PiManagementSettings() {
                 defaultProvider: draft.defaultProvider?.trim() || undefined,
                 defaultModel: draft.defaultModel?.trim() || undefined,
                 shellPath: draft.shellPath?.trim() || null,
+                theme: draft.theme?.trim() || undefined,
+                httpProxy: draft.httpProxy?.trim() || null,
               })
               setSettings(saved)
               setDraft(draftFromSnapshot(saved))
@@ -149,6 +155,8 @@ export function PiManagementSettings() {
             <Setting label="Steering mode"><select className={inputClass} value={draft.steeringMode} onChange={event => setDraft({ ...draft, steeringMode: event.target.value as SettingsDraft['steeringMode'] })}><option value="all">all</option><option value="one-at-a-time">one-at-a-time</option></select></Setting>
             <Setting label="Follow-up mode"><select className={inputClass} value={draft.followUpMode} onChange={event => setDraft({ ...draft, followUpMode: event.target.value as SettingsDraft['followUpMode'] })}><option value="all">all</option><option value="one-at-a-time">one-at-a-time</option></select></Setting>
             <Setting label="Shell path"><input className={inputClass} value={draft.shellPath ?? ''} onChange={event => setDraft({ ...draft, shellPath: event.target.value })} /></Setting>
+            <Setting label="Pi runtime theme"><input className={inputClass} value={draft.theme ?? ''} placeholder="Theme name" onChange={event => setDraft({ ...draft, theme: event.target.value })} /></Setting>
+            <Setting label="HTTP proxy"><input className={inputClass} value={draft.httpProxy ?? ''} placeholder="http://127.0.0.1:7890" onChange={event => setDraft({ ...draft, httpProxy: event.target.value })} /></Setting>
             <Setting label="Default trust"><select className={inputClass} value={draft.defaultProjectTrust} onChange={event => setDraft({ ...draft, defaultProjectTrust: event.target.value as SettingsDraft['defaultProjectTrust'] })}><option>ask</option><option>always</option><option>never</option></select></Setting>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -159,7 +167,9 @@ export function PiManagementSettings() {
           </div>
           <details className="border-t border-border-100 pt-3 text-[length:var(--fs-xs)]">
             <summary className="cursor-pointer text-text-300">All effective settings and advanced patch</summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-bg-200/40 p-2 text-text-400">{JSON.stringify(settings.effective, null, 2)}</pre>
+            <JsonScope title="Global scope" value={settings.global} />
+            <JsonScope title="Project scope" value={settings.project} />
+            <JsonScope title="Effective settings" value={settings.effective} />
             <label className="mt-3 block space-y-1"><span className="text-text-400">PiSettingsPatch JSON</span><textarea rows={7} className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-2 font-mono text-text-100" value={advancedPatch} onChange={event => setAdvancedPatch(event.target.value)} /></label>
             <div className="mt-2 flex justify-end"><Button size="sm" disabled={busy !== null} onClick={() => workspacePath && void run('advanced-settings', async () => {
               let patch: PiSettingsPatchV1
@@ -187,4 +197,8 @@ function Setting({ label, children }: { label: string; children: ReactNode }) {
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return <label className="flex min-h-8 items-center gap-2 text-[length:var(--fs-xs)] text-text-300"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />{label}</label>
+}
+
+function JsonScope({ title, value }: { title: string; value: unknown }) {
+  return <details className="mt-2"><summary className="cursor-pointer text-text-300">{title}</summary><pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-bg-200/40 p-2 text-text-400">{JSON.stringify(value, null, 2)}</pre></details>
 }

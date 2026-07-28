@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { PiResourceSnapshotV1, PiRuntimeInspectionV1 } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
+import { invalidateCommandCache } from '../../../api/command'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
 import { useManagementEvents } from '../../../pi/managementEventStore'
 import {
@@ -72,7 +73,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
 
   return (
     <section className="space-y-3">
-      <div className="flex items-end justify-between gap-3"><div><h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">Session resources and inspection</h3><p className="text-[length:var(--fs-xs)] text-text-400">Inspect loaded resources, extend temporary paths and query native Pi runtime details.</p></div><Button size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === 'reload'} onClick={() => void run('reload', async () => { const commandId = await reloadPiResources(sessionId); await waitForPiCommand(commandId); await load() })}>Reload</Button></div>
+      <div className="flex items-end justify-between gap-3"><div><h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">Session resources and inspection</h3><p className="text-[length:var(--fs-xs)] text-text-400">Inspect loaded resources, extend temporary paths and query native Pi runtime details.</p></div><Button size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === 'reload'} onClick={() => void run('reload', async () => { const commandId = await reloadPiResources(sessionId); await waitForPiCommand(commandId); invalidateCommandCache(); await load() })}>Reload</Button></div>
       {error ? <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">{error}</p> : null}
       <p className="text-[length:var(--fs-xs)] text-text-400">{resources ? `${resources.extensions.length} extensions · ${resources.skills.length} skills · ${resources.prompts.length} prompts · ${resources.themes.length} themes · ${resources.agentsFiles.length} AGENTS files` : 'Loading resources…'}</p>
 
