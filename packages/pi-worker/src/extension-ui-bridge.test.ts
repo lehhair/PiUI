@@ -47,9 +47,11 @@ describe("ExtensionUiBridge", () => {
   })
 
   it("fails loudly for TUI-only APIs", () => {
-    const bridge = new ExtensionUiBridge(() => "session-1", () => undefined)
+    const themes = [{ name: "dark", path: "/themes/dark.json" }]
+    const bridge = new ExtensionUiBridge(() => "session-1", () => undefined, () => themes)
     assert.throws(() => bridge.context.onTerminalInput(() => undefined), /unavailable/)
-    assert.throws(() => bridge.context.getAllThemes(), /unavailable/)
+    assert.deepEqual(bridge.context.getAllThemes(), themes)
+    assert.throws(() => bridge.context.getTheme("dark"), /unavailable/)
     assert.throws(() => bridge.context.getEditorComponent(), /unavailable/)
   })
 

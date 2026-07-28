@@ -95,6 +95,7 @@ vi.mock('../store', () => ({
   },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
   activeSessionStore: {
+    getSnapshot: () => ({ statusMap: activeSessionStatusMap }),
     updateStatus: (sessionId: string, status: { type: string }) => {
       if (status.type === 'idle') delete activeSessionStatusMap[sessionId]
       else activeSessionStatusMap[sessionId] = status

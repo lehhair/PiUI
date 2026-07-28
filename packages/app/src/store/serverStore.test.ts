@@ -127,14 +127,14 @@ describe('serverStore health check', () => {
     vi.unstubAllGlobals()
   })
 
-  it('marks a valid OpenCode health response as online', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ healthy: true, version: '1.16.0' }))
+  it('marks a valid PiUI health response as online', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, protocolV2: { piSdkVersion: '0.81.1' } }))
     const { serverStore } = await import('./serverStore')
 
     const health = await serverStore.checkHealth('local')
 
     expect(health.status).toBe('online')
-    expect(health.version).toBe('1.16.0')
+    expect(health.version).toBe('0.81.1')
   })
 
   it('rejects HTML responses even when the status is 200', async () => {
@@ -152,14 +152,14 @@ describe('serverStore health check', () => {
     expect(health.error).toMatch(/HTML/)
   })
 
-  it('rejects JSON that is not an OpenCode health response', async () => {
+  it('rejects JSON that is not a PiUI health response', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true }))
     const { serverStore } = await import('./serverStore')
 
     const health = await serverStore.checkHealth('local')
 
     expect(health.status).toBe('error')
-    expect(health.error).toBe('Not an OpenCode server')
+    expect(health.error).toBe('Not a compatible PiUI server')
   })
 
   it('reports unauthorized credentials separately', async () => {
@@ -175,7 +175,7 @@ describe('serverStore health check', () => {
     const staleResponse = createDeferred<Response>()
     vi.mocked(fetch)
       .mockImplementationOnce(() => staleResponse.promise)
-      .mockResolvedValueOnce(jsonResponse({ healthy: true, version: '1.16.0' }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, protocolV2: { piSdkVersion: '0.81.1' } }))
 
     const { serverStore } = await import('./serverStore')
 

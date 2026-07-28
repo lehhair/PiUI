@@ -14,8 +14,9 @@ import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import type { MessageError } from '../types/message'
 import { sessionProjectionStore } from '../pi/sessionProjectionStore'
-import { fetchSnapshot } from '../pi/sessionApi'
+import { fetchPiTimelinePage, fetchSnapshot } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
+import { timelineToUiMessages } from '../pi/timelineToMessages'
 
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
@@ -99,10 +100,31 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
   const loadMoreHistory = useCallback(async () => {
     if (!sessionId) return
+    const cursor = messageStore.getHistoryCursor(sessionId)
+    if (!cursor) return
     try {
-      applySnapshotToUi(await fetchSnapshot(sessionId))
+      const page = await fetchPiTimelinePage(sessionId, cursor)
+      const snapshot = sessionProjectionStore.getSnapshot(sessionId)
+      const messages = timelineToUiMessages(
+        page.items,
+        sessionId,
+        snapshot?.runtime.model ? {
+          providerID: snapshot.runtime.model.provider,
+          modelID: snapshot.runtime.model.id,
+        } : undefined,
+        snapshot?.session.directory ?? directoryRef.current ?? '',
+      )
+      messageStore.prependUiMessages(sessionId, messages, {
+        hasMoreHistory: page.hasMore,
+        historyCursor: page.beforeCursor,
+      })
     } catch (error) {
       sessionErrorHandler('load more history', error)
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'STALE_CURSOR') {
+        messageStore.clearSession(sessionId)
+        sessionProjectionStore.clear(sessionId)
+        await loadSessionRef.current(sessionId, { force: true })
+      }
     }
   }, [sessionId])
 

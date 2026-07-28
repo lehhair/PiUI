@@ -22,17 +22,34 @@ import type {
   GitFileDiffResponseV1,
   GitInfoResponseV1,
   GitStatusResponseV1,
+  PiSettingsPatchV1,
+  PiSettingsSnapshotV1,
+  ProjectTrustV1,
+  ProviderAuthInfoV1,
+  ConfiguredPackageV1,
+  PiResourceSnapshotV1,
+  PiResourceExtensionPathsV1,
+  PiRuntimeInspectionV1,
+  PiModelRuntimeSnapshotV1,
+  PiNativeModelV1,
+  ResolvedPackageResourcesV1,
+  PackageResolveMissingActionV1,
+  PackageUpdateV1,
+  WorkspaceDtoV1,
+  PiNativeEntriesPageV1,
+  PiTimelinePageV1,
 } from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
 import type { Attachment } from "../features/attachment/types"
 import { reconcilePiSessions, trackPiSession, trackPiWorkspace, untrackPiSession } from "./piSessionIndex"
 import { sessionProjectionStore } from "./sessionProjectionStore"
 import { extensionUiStore } from "./extensionUiStore"
+import { LOCAL_SERVER_ID, makeBasicAuthHeader, serverStore } from "../store/serverStore"
 
 const DEFAULT_BASE = "http://127.0.0.1:8787"
 const rawFetch = globalThis.fetch.bind(globalThis)
 
-function newCommandId(): string {
+export function newCommandId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `cmd-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
@@ -43,18 +60,30 @@ function newCommandId(): string {
 export function getApiBase(): string {
   const envBase = (import.meta as ImportMeta & { env?: { VITE_PIUI_API?: string } }).env?.VITE_PIUI_API
   if (envBase) return envBase.replace(/\/$/, "")
-  if (typeof window !== "undefined") return ""
+  if (typeof window !== "undefined") {
+    const active = serverStore.getActiveServer()
+    if (active && active.id !== LOCAL_SERVER_ID) return active.url.replace(/\/$/, "")
+    const storedLocal = serverStore.getStoredServers().find(server => server.id === LOCAL_SERVER_ID)
+    if (active && storedLocal && active.url !== storedLocal.url) return active.url.replace(/\/$/, "")
+    return ""
+  }
   return DEFAULT_BASE
 }
 
 function piHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init)
+  const gatewayAuth = serverStore.getActiveAuth()
+  if (gatewayAuth?.password) {
+    headers.set("authorization", makeBasicAuthHeader(gatewayAuth))
+    return headers
+  }
   const token = (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
   if (token) headers.set("authorization", `Bearer ${token}`)
   return headers
 }
 
 export function getPiAuthToken(): string | undefined {
+  if (serverStore.getActiveAuth()?.password) return undefined
   return (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
 }
 
@@ -76,31 +105,18 @@ export async function isPiServerUp(): Promise<boolean> {
   }
 }
 
-export interface PiModelDto {
-  id: string
-  name: string
-  providerId: string
-  providerName: string
-  family: string
-  contextLimit: number
-  outputLimit: number
-  supportsReasoning: boolean
-  supportsImages: boolean
-  supportsPdf: boolean
-  supportsAudio: boolean
-  supportsVideo: boolean
-  supportsToolcall: boolean
-  variants: string[]
-}
-
 export async function listPiModels(): Promise<{
   driver: string
-  models: PiModelDto[]
+  models: PiNativeModelV1[]
   error?: string
 }> {
   const res = await fetch(`${getApiBase()}/api/v1/drivers/pi/models`)
   if (!res.ok) throw new Error(`listPiModels ${res.status}`)
-  return (await res.json()) as { driver: string; models: PiModelDto[]; error?: string }
+  return (await res.json()) as { driver: string; models: PiNativeModelV1[]; error?: string }
+}
+
+export function listPiSessionModels(sessionId: string): Promise<PiNativeModelV1[]> {
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/models`, "listPiSessionModels")
 }
 
 export async function listPiSessions(workspacePath?: string): Promise<PiSessionSummary[]> {
@@ -173,6 +189,19 @@ const workspaceResolutionPromises = new Map<string, Promise<string>>()
 export function resetWorkspaceResolutionCache(): void {
   workspaceResolutionPromises.clear()
   defaultWorkspacePromise = null
+}
+
+export async function listRegisteredPiWorkspaces(): Promise<WorkspaceDtoV1[]> {
+  const data = await getPiJson<{ workspaces: WorkspaceDtoV1[] }>("/api/v1/workspaces", "listRegisteredPiWorkspaces")
+  return data.workspaces
+}
+
+export async function getRegisteredPiWorkspace(workspacePath: string): Promise<WorkspaceDtoV1> {
+  const data = await getPiJson<{ workspace: WorkspaceDtoV1 }>(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}`,
+    "getRegisteredPiWorkspace",
+  )
+  return data.workspace
 }
 
 async function ensureDefaultWorkspacePath(): Promise<string | null> {
@@ -379,6 +408,325 @@ async function throwPiApiError(response: Response, operation: string): Promise<n
   })
 }
 
+async function getPiJson<T>(path: string, operation: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${getApiBase()}${path}`, init)
+  if (!response.ok) await throwPiApiError(response, operation)
+  return await response.json() as T
+}
+
+async function sendPiVoid(path: string, operation: string, init: RequestInit): Promise<void> {
+  const response = await fetch(`${getApiBase()}${path}`, init)
+  if (!response.ok) await throwPiApiError(response, operation)
+}
+
+export async function getPiCommand(commandId: string): Promise<CommandRecordV2> {
+  return (await getPiJson<{ command: CommandRecordV2 }>(
+    `/api/v1/commands/${encodeURIComponent(commandId)}`,
+    "getPiCommand",
+  )).command
+}
+
+export async function waitForPiCommand(commandId: string, timeoutMs = 30_000): Promise<CommandRecordV2> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const command = await getPiCommand(commandId)
+    if (command.status === "completed") return command
+    if (command.status === "failed" || command.status === "cancelled" || command.status === "unknown_after_crash") {
+      throw Object.assign(new Error(command.error?.message || `Command ${command.status}`), { command })
+    }
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+  throw new Error(`Command did not complete within ${timeoutMs}ms`)
+}
+
+export async function getPiSettings(workspacePath: string): Promise<PiSettingsSnapshotV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/pi-settings`)
+  if (!res.ok) await throwPiApiError(res, "getPiSettings")
+  return await res.json() as PiSettingsSnapshotV1
+}
+
+export async function patchPiSettings(workspacePath: string, patch: PiSettingsPatchV1): Promise<PiSettingsSnapshotV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/pi-settings`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) await throwPiApiError(res, "patchPiSettings")
+  return await res.json() as PiSettingsSnapshotV1
+}
+
+export async function getProjectTrust(workspacePath: string): Promise<ProjectTrustV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/trust`)
+  if (!res.ok) await throwPiApiError(res, "getProjectTrust")
+  return await res.json() as ProjectTrustV1
+}
+
+export async function setProjectTrust(workspacePath: string, decision: boolean | null): Promise<ProjectTrustV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/trust`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision }),
+  })
+  if (!res.ok) await throwPiApiError(res, "setProjectTrust")
+  return await res.json() as ProjectTrustV1
+}
+
+export async function listPiProviders(): Promise<ProviderAuthInfoV1[]> {
+  const res = await fetch(`${getApiBase()}/api/v1/providers`)
+  if (!res.ok) await throwPiApiError(res, "listPiProviders")
+  return ((await res.json()) as { providers: ProviderAuthInfoV1[] }).providers
+}
+
+export function inspectModelRuntime(sessionId?: string): Promise<PiModelRuntimeSnapshotV1> {
+  const scope = sessionId ? `/api/v1/sessions/${encodeURIComponent(sessionId)}` : "/api/v1"
+  return getPiJson<PiModelRuntimeSnapshotV1>(`${scope}/model-runtime`, "inspectModelRuntime")
+}
+
+export async function reloadModelRuntime(sessionId?: string): Promise<void> {
+  const scope = sessionId ? `/api/v1/sessions/${encodeURIComponent(sessionId)}` : "/api/v1"
+  await getPiJson(`${scope}/model-runtime/reload`, "reloadModelRuntime", { method: "POST" })
+}
+
+export function refreshModelRuntime(sessionId?: string, options: Record<string, unknown> = {}): Promise<{ result: unknown }> {
+  const scope = sessionId ? `/api/v1/sessions/${encodeURIComponent(sessionId)}` : "/api/v1"
+  return getPiJson(`${scope}/model-runtime/refresh`, "refreshModelRuntime", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(options),
+  })
+}
+
+export async function setProviderApiKey(providerId: string, apiKey: string): Promise<void> {
+  const res = await fetch(`${getApiBase()}/api/v1/providers/${encodeURIComponent(providerId)}/runtime-api-key`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  })
+  if (!res.ok) await throwPiApiError(res, "setProviderApiKey")
+}
+
+export async function logoutProvider(providerId: string): Promise<void> {
+  const res = await fetch(`${getApiBase()}/api/v1/providers/${encodeURIComponent(providerId)}/auth`, { method: "DELETE" })
+  if (!res.ok) await throwPiApiError(res, "logoutProvider")
+}
+
+export function removeProviderApiKey(providerId: string, sessionId?: string): Promise<void> {
+  const path = sessionId
+    ? `/api/v1/sessions/${encodeURIComponent(sessionId)}/providers/${encodeURIComponent(providerId)}/runtime-api-key`
+    : `/api/v1/providers/${encodeURIComponent(providerId)}/runtime-api-key`
+  return sendPiVoid(path, "removeProviderApiKey", { method: "DELETE" })
+}
+
+export async function listSessionProviders(sessionId: string): Promise<ProviderAuthInfoV1[]> {
+  const data = await getPiJson<{ providers: ProviderAuthInfoV1[] }>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/providers`,
+    "listSessionProviders",
+  )
+  return data.providers
+}
+
+export async function setSessionProviderApiKey(sessionId: string, providerId: string, apiKey: string): Promise<void> {
+  await getPiJson(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/providers/${encodeURIComponent(providerId)}/runtime-api-key`,
+    "setSessionProviderApiKey",
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey }) },
+  )
+}
+
+export function startProviderAuth(providerId: string, type: "api_key" | "oauth", sessionId?: string): Promise<{ flowId: string }> {
+  const path = sessionId
+    ? `/api/v1/sessions/${encodeURIComponent(sessionId)}/providers/${encodeURIComponent(providerId)}/auth-flows`
+    : `/api/v1/providers/${encodeURIComponent(providerId)}/auth-flows`
+  return getPiJson(path, "startProviderAuth", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type }),
+  })
+}
+
+export async function respondProviderAuth(
+  flowId: string,
+  promptId: string,
+  value: string,
+  sessionId?: string,
+): Promise<void> {
+  const path = sessionId
+    ? `/api/v1/sessions/${encodeURIComponent(sessionId)}/auth-flows/${encodeURIComponent(flowId)}/prompts/${encodeURIComponent(promptId)}/response`
+    : `/api/v1/auth-flows/${encodeURIComponent(flowId)}/prompts/${encodeURIComponent(promptId)}/response`
+  await getPiJson(path, "respondProviderAuth", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value }),
+  })
+}
+
+export function cancelProviderAuth(flowId: string, sessionId?: string): Promise<void> {
+  const path = sessionId
+    ? `/api/v1/sessions/${encodeURIComponent(sessionId)}/auth-flows/${encodeURIComponent(flowId)}`
+    : `/api/v1/auth-flows/${encodeURIComponent(flowId)}`
+  return sendPiVoid(path, "cancelProviderAuth", { method: "DELETE" })
+}
+
+export function logoutSessionProvider(sessionId: string, providerId: string): Promise<void> {
+  return sendPiVoid(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/providers/${encodeURIComponent(providerId)}/auth`,
+    "logoutSessionProvider",
+    { method: "DELETE" },
+  )
+}
+
+export async function listPiPackages(workspacePath: string): Promise<ConfiguredPackageV1[]> {
+  const res = await fetch(`${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages`)
+  if (!res.ok) await throwPiApiError(res, "listPiPackages")
+  return ((await res.json()) as { packages: ConfiguredPackageV1[] }).packages
+}
+
+export async function managePiPackage(
+  workspacePath: string,
+  action: "install" | "remove" | "update",
+  source?: string,
+  local = true,
+): Promise<ConfiguredPackageV1[]> {
+  return (await managePiPackageDetailed(workspacePath, action, source, local)).packages
+}
+
+export async function managePiPackageDetailed(
+  workspacePath: string,
+  action: "install" | "remove" | "update",
+  source?: string,
+  local = true,
+): Promise<{ commandId: string; packages: ConfiguredPackageV1[] }> {
+  const commandId = newCommandId()
+  const res = await fetch(
+    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/commands/packages/${action}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-command-id": commandId },
+      body: JSON.stringify({ source, local, persist: true }),
+    },
+  )
+  if (!res.ok) await throwPiApiError(res, "managePiPackage")
+  return await res.json() as { commandId: string; packages: ConfiguredPackageV1[] }
+}
+
+export function resolvePiPackages(
+  workspacePath: string,
+  missingAction: PackageResolveMissingActionV1 = "skip",
+): Promise<ResolvedPackageResourcesV1> {
+  const query = new URLSearchParams({ missingAction })
+  return getPiJson(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages/resolved?${query}`,
+    "resolvePiPackages",
+  )
+}
+
+export function resolvePiExtensionSources(
+  workspacePath: string,
+  sources: string[],
+  options: { local?: boolean; temporary?: boolean } = {},
+): Promise<ResolvedPackageResourcesV1> {
+  return getPiJson(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages/resolve-extension-sources`,
+    "resolvePiExtensionSources",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sources, ...options }),
+    },
+  )
+}
+
+export async function changePiPackageSource(
+  workspacePath: string,
+  source: string,
+  action: "add" | "remove",
+  local = true,
+): Promise<{ changed: boolean; packages: ConfiguredPackageV1[] }> {
+  return getPiJson(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages/sources`,
+    "changePiPackageSource",
+    {
+      method: action === "add" ? "POST" : "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source, local }),
+    },
+  )
+}
+
+export async function getPiPackageInstalledPath(
+  workspacePath: string,
+  source: string,
+  scope: "user" | "project",
+): Promise<string> {
+  const query = new URLSearchParams({ source, scope })
+  const data = await getPiJson<{ path: string }>(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages/installed-path?${query}`,
+    "getPiPackageInstalledPath",
+  )
+  return data.path
+}
+
+export async function checkPiPackageUpdates(workspacePath: string): Promise<PackageUpdateV1[]> {
+  const data = await getPiJson<{ updates: PackageUpdateV1[] }>(
+    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}/packages/updates`,
+    "checkPiPackageUpdates",
+  )
+  return data.updates
+}
+
+export async function inspectPiResources(sessionId: string): Promise<PiResourceSnapshotV1> {
+  const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/resources`)
+  if (!res.ok) await throwPiApiError(res, "inspectPiResources")
+  return await res.json() as PiResourceSnapshotV1
+}
+
+export async function reloadPiResources(sessionId: string): Promise<string> {
+  const commandId = newCommandId()
+  const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/reload-resources`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-command-id": commandId },
+    body: JSON.stringify({ commandId }),
+  })
+  if (!res.ok) await throwPiApiError(res, "reloadPiResources")
+  return ((await res.json()) as { commandId?: string }).commandId ?? commandId
+}
+
+export function extendPiResources(sessionId: string, paths: PiResourceExtensionPathsV1): Promise<PiResourceSnapshotV1> {
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/resources`, "extendPiResources", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(paths),
+  })
+}
+
+export function inspectPiRuntime(sessionId: string): Promise<PiRuntimeInspectionV1> {
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/runtime-inspection`, "inspectPiRuntime")
+}
+
+export async function inspectPiSystemPrompt(sessionId: string): Promise<string> {
+  const data = await getPiJson<{ text: string }>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/system-prompt`,
+    "inspectPiSystemPrompt",
+  )
+  return data.text
+}
+
+export async function inspectPiToolDefinition(sessionId: string, toolName: string): Promise<unknown> {
+  const data = await getPiJson<{ definition: unknown }>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(toolName)}/definition`,
+    "inspectPiToolDefinition",
+  )
+  return data.definition
+}
+
+export async function hasPiExtensionHandlers(sessionId: string, eventType: string): Promise<boolean> {
+  const data = await getPiJson<{ registered: boolean }>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/extension-handlers/${encodeURIComponent(eventType)}`,
+    "hasPiExtensionHandlers",
+  )
+  return data.registered
+}
+
 export async function getWorkspaceGitStatus(workspacePath: string, signal?: AbortSignal): Promise<GitStatusResponseV1> {
   const res = await fetch(
     `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/status`,
@@ -466,7 +814,7 @@ export interface AcceptedSessionCommand<T extends keyof import("@piui/protocol")
   snapshot: SessionSnapshotV1
 }
 
-export interface SessionReplacementResponse<T extends "session.fork" | "session.clone" | "session.import">
+export interface SessionReplacementResponse<T extends "session.fork" | "session.clone" | "session.import" | "session.new" | "session.switch">
   extends SessionCommandResult<T> {
   replacement: SessionReplacementResultV1
   sourceSnapshot: SessionSnapshotV1
@@ -490,6 +838,7 @@ export function navigatePiSessionTree(
   sessionId: string,
   entryId: string,
   summarize = false,
+  options: { customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
   commandId = newCommandId(),
 ) {
   return postSessionCommand<
@@ -499,7 +848,12 @@ export function navigatePiSessionTree(
       aborted: boolean
       snapshot: SessionSnapshotV1
     }
-  >(sessionId, "navigate-tree", { entryId, summarize, commandId })
+  >(sessionId, "navigate-tree", {
+    entryId,
+    summarizeAbandonedBranch: summarize,
+    commandId,
+    ...options,
+  })
 }
 
 export function setPiSessionLabel(
@@ -554,6 +908,123 @@ export function importPiSession(
     cwdOverride,
     commandId,
   })
+}
+
+export function createNativePiSession(sessionId: string, parentSessionId?: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionReplacementResponse<"session.new">>(sessionId, "new-session", {
+    parentSessionId,
+    commandId,
+  })
+}
+
+export function switchNativePiSession(sessionId: string, targetSessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionReplacementResponse<"session.switch">>(sessionId, "switch-session", {
+    targetSessionId,
+    commandId,
+  })
+}
+
+export function cyclePiSessionModel(
+  sessionId: string,
+  direction: "forward" | "backward" = "forward",
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.cycleModel"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "cycle-model",
+    { direction, commandId },
+  )
+}
+
+export function cyclePiThinkingLevel(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.cycleThinkingLevel"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "cycle-thinking-level",
+    { commandId },
+  )
+}
+
+export function setPiScopedModels(sessionId: string, patterns: string[], commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.setScopedModels"> & {
+    snapshot: SessionSnapshotV1
+    diagnostics?: unknown[]
+  }>(sessionId, "set-scoped-models", { patterns, commandId })
+}
+
+export async function executePiBash(
+  sessionId: string,
+  command: string,
+  excludeFromContext = false,
+  commandId = newCommandId(),
+): Promise<CommandRecordV2> {
+  await postSessionCommand(sessionId, "bash", { command, excludeFromContext, commandId })
+  return waitForPiCommand(commandId)
+}
+
+export function abortPiBash(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.abortBash"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "abort-bash",
+    { commandId },
+  )
+}
+
+export async function exportPiSession(
+  sessionId: string,
+  format: "html" | "jsonl",
+  outputPath?: string,
+  commandId = newCommandId(),
+): Promise<CommandRecordV2> {
+  await postSessionCommand(sessionId, format === "html" ? "export-html" : "export-jsonl", { outputPath, commandId })
+  return waitForPiCommand(commandId)
+}
+
+export function sendPiUserMessage(
+  sessionId: string,
+  text: string,
+  deliverAs?: "steer" | "followUp",
+  attachments?: SessionAttachmentV2[],
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.sendUserMessage"> & { accepted: true; reused: boolean }>(sessionId, "send-user-message", {
+    text,
+    deliverAs,
+    attachments,
+    commandId,
+  })
+}
+
+export function sendPiCustomMessage(
+  sessionId: string,
+  body: import("@piui/protocol").CommandPayloadsV2["session.sendCustomMessage"],
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.sendCustomMessage"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "custom-message",
+    { ...body, commandId },
+  )
+}
+
+export function appendPiCustomEntry(
+  sessionId: string,
+  customType: string,
+  data?: unknown,
+  commandId = newCommandId(),
+) {
+  return postSessionCommand<SessionCommandResult<"session.appendCustomEntry"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "custom-entry",
+    { customType, data, commandId },
+  )
+}
+
+export function waitForPiSessionIdle(sessionId: string, commandId = newCommandId()) {
+  return postSessionCommand<SessionCommandResult<"session.waitForIdle"> & { snapshot: SessionSnapshotV1 }>(
+    sessionId,
+    "wait-for-idle",
+    { commandId },
+  )
 }
 
 export function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {
@@ -636,7 +1107,12 @@ export async function listSessionCommands(sessionId: string) {
   )
   if (!res.ok) throw new Error(`listSessionCommands ${res.status}`)
   return (await res.json()) as {
-    commands: Array<{ name: string; description?: string; source: string }>
+    commands: Array<{
+      name: string
+      description?: string
+      source: "extension" | "prompt" | "skill"
+      sourceInfo: unknown
+    }>
   }
 }
 
@@ -646,7 +1122,14 @@ export async function listSessionSkills(sessionId: string) {
   )
   if (!res.ok) throw new Error(`listSessionSkills ${res.status}`)
   return (await res.json()) as {
-    skills: Array<{ name: string; description?: string; source?: string }>
+    skills: Array<{
+      name: string
+      description: string
+      filePath: string
+      baseDir: string
+      sourceInfo: unknown
+      disableModelInvocation: boolean
+    }>
   }
 }
 
@@ -694,6 +1177,26 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`)
   if (!res.ok) throw new Error(`fetchSnapshot ${res.status}`)
   return (await res.json()) as SessionSnapshotV1
+}
+
+export async function fetchPiTimelinePage(sessionId: string, cursor?: string, limit = 50): Promise<PiTimelinePageV1> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (cursor) query.set("cursor", cursor)
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/timeline?${query}`, "fetchPiTimelinePage")
+}
+
+export async function fetchPiNativeEntriesPage(
+  sessionId: string,
+  cursor?: string,
+  limit = 50,
+): Promise<PiNativeEntriesPageV1> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (cursor) query.set("cursor", cursor)
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/entries?${query}`, "fetchPiNativeEntriesPage")
+}
+
+export function piNativeAttachmentUrl(sessionId: string, entryId: string, blockIndex: number): string {
+  return `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/native/entries/${encodeURIComponent(entryId)}/attachments/${blockIndex}`
 }
 
 export async function fetchExtensionUiSnapshot(sessionId: string): Promise<ExtensionUiSnapshotV1> {

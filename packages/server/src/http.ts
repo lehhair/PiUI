@@ -129,6 +129,15 @@ function sendMethodNotAllowed(res: ServerResponse, allowed: string) {
   return sendProblem(res, 405, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 
+function parsePageLimit(value: string | null, fallback: number, maximum: number): number {
+  if (value === null) return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
+    throw invalidRequest(`pagination value must be an integer from 1 to ${maximum}`)
+  }
+  return parsed
+}
+
 function requestAbortController(req: IncomingMessage, res: ServerResponse): AbortController {
   const controller = new AbortController()
   req.once("aborted", () => controller.abort())
@@ -787,17 +796,7 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
       if (method === "GET" && sessionModels) {
         try {
           const models = await sessions.listSessionModels(decodeURIComponent(sessionModels[1]))
-          return sendJson(res, 200, models.map(model => ({
-            id: model.id,
-            name: model.name,
-            providerId: model.providerId,
-            family: model.family,
-            contextLimit: model.contextLimit,
-            outputLimit: model.outputLimit,
-            supportsReasoning: model.supportsReasoning,
-            supportsImages: model.supportsImages,
-            variants: model.thinkingLevels,
-          })))
+          return sendJson(res, 200, models)
         } catch (error) {
           return handleSessionCmdError(res, error)
         }
@@ -2230,6 +2229,65 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
       }
 
+      const sessionNativeEntries = p.match(/^\/api\/v1\/sessions\/([^/]+)\/native\/entries$/)
+      if (method === "GET" && sessionNativeEntries) {
+        try {
+          const limit = parsePageLimit(url.searchParams.get("limit"), 50, 100)
+          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 1_048_576, 4_194_304)
+          return sendJson(res, 200, await sessions.getNativeEntriesPage(
+            decodeURIComponent(sessionNativeEntries[1]),
+            url.searchParams.get("cursor") ?? undefined,
+            limit,
+            maxBytes,
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionTimeline = p.match(/^\/api\/v1\/sessions\/([^/]+)\/timeline$/)
+      if (method === "GET" && sessionTimeline) {
+        try {
+          const limit = parsePageLimit(url.searchParams.get("limit"), 50, 100)
+          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 1_048_576, 4_194_304)
+          return sendJson(res, 200, await sessions.getTimelinePage(
+            decodeURIComponent(sessionTimeline[1]),
+            url.searchParams.get("cursor") ?? undefined,
+            limit,
+            maxBytes,
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
+      const sessionAttachment = p.match(
+        /^\/api\/v1\/sessions\/([^/]+)\/native\/entries\/([^/]+)\/attachments\/(\d+)$/,
+      )
+      if (method === "GET" && sessionAttachment) {
+        try {
+          const attachment = await sessions.getNativeImageAttachment(
+            decodeURIComponent(sessionAttachment[1]),
+            decodeURIComponent(sessionAttachment[2]),
+            Number(sessionAttachment[3]),
+          )
+          if (req.headers["if-none-match"] === attachment.etag) {
+            res.writeHead(304, { etag: attachment.etag, ...CORS_HEADERS })
+            return res.end()
+          }
+          res.writeHead(200, {
+            "content-type": attachment.mimeType,
+            "content-length": attachment.data.byteLength,
+            "cache-control": "private, max-age=31536000, immutable",
+            etag: attachment.etag,
+            ...CORS_HEADERS,
+          })
+          return res.end(attachment.data)
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
       return sendProblem(res, 404, "NOT_FOUND", "not found")
     } catch (e) {
       if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "BODY_TOO_LARGE") {
@@ -2290,6 +2348,9 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
   }
   if (code === "NOT_FOUND") {
     return sendProblem(res, 404, code, e instanceof Error ? e.message : String(e))
+  }
+  if (code === "STALE_CURSOR") {
+    return sendProblem(res, 409, "STALE_CURSOR", e instanceof Error ? e.message : String(e))
   }
   if (code === "EXTENSION_UI_CANCELLED" || code === "RESPONSE_CONFLICT") {
     return sendProblem(res, 409, code, e instanceof Error ? e.message : String(e))

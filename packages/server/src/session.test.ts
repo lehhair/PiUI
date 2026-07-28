@@ -264,9 +264,10 @@ describe("session mock snapshot (no LLM)", () => {
       getSessionId: () => "crash-session",
       getSessionFile: () => path.join(root, "crash-session.jsonl"),
       getSessionName: () => "Crash session",
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => null,
+      getNativeHead: () => ({ namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: null, entryCount: 0 }),
+      getNativeEntriesPage: () => ({ head: runtime.getNativeHead(), items: [], hasMore: false }),
+      getNativeImageAttachment: () => { throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }) },
       getModel: () => undefined,
       getThinkingLevel: () => "off",
       getAvailableThinkingLevels: () => ["off"],
@@ -360,8 +361,8 @@ describe("session mock snapshot (no LLM)", () => {
       })
       assert.equal(created.status, 201, JSON.stringify(created.data))
       const sourceId = created.data.snapshot.session.id as string
-      assert.equal(created.data.snapshot.native.entries[0]?.type, "message")
-      assert.equal(created.data.snapshot.native.tree[0]?.entry.id, "fixture-entry")
+      const nativePage = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/entries`)
+      assert.equal(nativePage.data.items[0]?.type, "message")
 
       const navigated = await json(
         port,
@@ -376,7 +377,9 @@ describe("session mock snapshot (no LLM)", () => {
         entryId: "fixture-entry",
         label: "checkpoint",
       })
-      assert.equal(labeled.data.snapshot.native.tree[0].label, "checkpoint")
+      assert.equal(labeled.status, 200)
+      const labeledPage = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/entries`)
+      assert.equal(labeledPage.data.items.at(-1).label, "checkpoint")
 
       const renamed = await json(port, "POST", `/api/v1/sessions/${sourceId}/commands/set-name`, {
         name: "R3 session",
@@ -463,6 +466,25 @@ describe("session mock snapshot (no LLM)", () => {
       })
       assert.equal(imagePrompt.status, 202)
       assert.equal((await waitForCommand(port, "r5-image")).data.command.status, "completed")
+      const imageSnapshot = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
+      const expectedImage = {
+        type: "image",
+        mimeType: "image/png",
+        data: Buffer.from("89504e470d0a1a0a", "hex").toString("base64"),
+      }
+      assert.deepEqual(imageSnapshot.data.timeline[0].attachments, [{
+        type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 8,
+      }])
+      const imageNativePage = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+      assert.deepEqual(imageNativePage.data.items[0].message.content[1], expectedImage)
+      const attachmentUrl = `http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/native/entries/fixture-entry/attachments/1`
+      const attachment = await fetch(attachmentUrl)
+      assert.equal(attachment.status, 200)
+      assert.equal(attachment.headers.get("content-type"), "image/png")
+      assert.deepEqual(Buffer.from(await attachment.arrayBuffer()), Buffer.from("89504e470d0a1a0a", "hex"))
+      const etag = attachment.headers.get("etag")
+      assert.ok(etag)
+      assert.equal((await fetch(attachmentUrl, { headers: { "if-none-match": etag } })).status, 304)
 
       const bash = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/bash`, {
         command: "git status",
@@ -598,14 +620,14 @@ describe("session mock snapshot (no LLM)", () => {
       const models = await json(port, "GET", `/api/v1/sessions/${sessionId}/models`)
       assert.equal(models.status, 200)
       assert.equal(models.data[0].id, "fixture-model")
-      assert.equal(models.data[0].providerId, "fixture")
+      assert.equal(models.data[0].provider, "fixture")
 
       const systemPrompt = await json(port, "GET", `/api/v1/sessions/${sessionId}/system-prompt`)
       assert.deepEqual(systemPrompt, { status: 200, data: { text: "Fixture system prompt" } })
 
       const inspected = await json(port, "GET", `/api/v1/sessions/${sessionId}/runtime-inspection`)
       assert.equal(inspected.status, 200)
-      assert.equal(inspected.data.header.id, "fixture-session")
+      assert.equal(inspected.data.native.header.id, "fixture-session")
       const resources = await json(port, "GET", `/api/v1/sessions/${sessionId}/resources`)
       assert.equal(resources.status, 200)
       assert.equal(resources.data.systemPrompt, "Fixture system prompt")
@@ -667,11 +689,8 @@ describe("session mock snapshot (no LLM)", () => {
       const settings = await json(port, "GET", `/api/v1/workspaces/${encodedWorkspace}/pi-settings`)
       assert.equal(settings.status, 200)
       assert.equal(settings.data.workspacePath, root)
-      // Raw scope objects must not cross the worker boundary; only key names do.
-      assert.equal(settings.data.global, undefined)
-      assert.equal(settings.data.project, undefined)
-      assert.deepEqual(settings.data.globalKeys, [])
-      assert.deepEqual(settings.data.projectKeys, [])
+      assert.deepEqual(settings.data.global, {})
+      assert.deepEqual(settings.data.project, {})
       const patched = await json(port, "PATCH", `/api/v1/workspaces/${encodedWorkspace}/pi-settings`, {
         defaultThinkingLevel: "high",
       })

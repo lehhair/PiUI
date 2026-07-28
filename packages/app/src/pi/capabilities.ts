@@ -50,14 +50,17 @@ const unavailable: PiCapabilities = {
 }
 
 let current = unavailable
+let currentManifest: CapabilityManifestV2 | undefined
 const listeners = new Set<() => void>()
 
 export function setPiCapabilities(value: Partial<PiCapabilities> | undefined) {
+  if (!value) currentManifest = undefined
   current = { ...unavailable, ...value }
   for (const listener of listeners) listener()
 }
 
 export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
+  currentManifest = manifest
   const enabled = (id: PiCapabilityId) => manifest.capabilities[id]?.enabled === true
   setPiCapabilities({
     pty: enabled("pty"),
@@ -82,6 +85,14 @@ export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
     worktree: enabled("git.worktree"),
     config: enabled("settings.manage"),
   })
+}
+
+export function getPiCapabilityManifest(): CapabilityManifestV2 | undefined {
+  return currentManifest
+}
+
+export function usePiCapabilityManifest(): CapabilityManifestV2 | undefined {
+  return useSyncExternalStore(subscribe, getPiCapabilityManifest, getPiCapabilityManifest)
 }
 
 export function getPiCapabilities(): PiCapabilities {

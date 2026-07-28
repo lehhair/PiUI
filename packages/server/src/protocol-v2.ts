@@ -28,7 +28,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
 
   return {
     protocolVersion: PROTOCOL_V2,
-    revision: "pi-0.81.1-r12",
+    revision: "pi-0.81.1-r14",
     capabilities: {
       ...unavailable,
       "session.list": capability(true, "workspace"),
@@ -36,7 +36,16 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
       "session.open": capability(true, "session"),
       "session.delete": capability(true, "session"),
       "session.name": capability(true, "session"),
-      "session.tree": capability(true, "session", undefined, { rawEntries: nativePi, runtimeInspection: nativePi }),
+      "session.tree": capability(true, "session", undefined, {
+        rawEntries: nativePi,
+        runtimeInspection: nativePi,
+        pagedEntries: nativePi,
+        pagedTimeline: true,
+        attachmentBinary: nativePi,
+        defaultPageSize: 50,
+        maxPageSize: 100,
+        maxPageBytes: 4_194_304,
+      }),
       // Navigation and every replacement path need a bound Pi runtime, so they
       // must not advertise themselves under the mock driver.
       "session.navigate": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {
@@ -125,7 +134,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         setEditorComponent: { support: "tui-only" },
         getEditorComponent: { support: "tui-only" },
         theme: { support: "tui-only" },
-        getAllThemes: { support: "tui-only" },
+        getAllThemes: { support: "rpc" },
         getTheme: { support: "tui-only" },
       }),
       "resources.reload": capability(nativePi, "session", nativePi ? undefined : "Requires the Pi runtime", {

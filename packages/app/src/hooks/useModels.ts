@@ -66,18 +66,18 @@ async function _fetchModels(force = false) {
       const data: ModelInfo[] = models.map(model => ({
         id: model.id,
         name: model.name,
-        providerId: model.providerId,
-        providerName: model.providerName,
-        family: model.family,
-        contextLimit: model.contextLimit,
-        outputLimit: model.outputLimit,
-        supportsReasoning: model.supportsReasoning,
-        supportsImages: model.supportsImages,
-        supportsPdf: model.supportsPdf,
-        supportsAudio: model.supportsAudio,
-        supportsVideo: model.supportsVideo,
-        supportsToolcall: model.supportsToolcall,
-        variants: model.variants,
+        providerId: model.provider,
+        providerName: model.provider,
+        family: model.api,
+        contextLimit: model.contextWindow,
+        outputLimit: model.maxTokens,
+        supportsReasoning: model.reasoning,
+        supportsImages: model.input.includes('image'),
+        supportsPdf: false,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsToolcall: true,
+        variants: getThinkingLevels(model),
       }))
       if (generation === _fetchGeneration) {
         _setState({ models: data, isLoading: false })
@@ -94,6 +94,14 @@ async function _fetchModels(force = false) {
   })()
 
   return _fetchPromise
+}
+
+function getThinkingLevels(model: Awaited<ReturnType<typeof listPiModels>>['models'][number]): string[] {
+  if (!model.reasoning) return ['off']
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].filter(level => {
+    const mapped = model.thinkingLevelMap?.[level as keyof typeof model.thinkingLevelMap]
+    return mapped !== null && (level !== 'xhigh' && level !== 'max' || mapped !== undefined)
+  })
 }
 
 export function refreshModels() {

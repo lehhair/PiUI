@@ -39,6 +39,7 @@ import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
 import { ExtensionUiDialogHost } from './features/chat/ExtensionUiDialogHost'
+import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 
 const SettingsDialog = lazy(() =>
   import('./features/settings/SettingsDialog').then(module => ({ default: module.SettingsDialog })),
@@ -1000,6 +1001,7 @@ function App() {
           )}
           <ToastContainer onOpenAbout={openAboutSettings} />
           <ExtensionUiDialogHost />
+          <ProviderAuthDialogHost />
         </div>
 
         <Suspense fallback={null}>

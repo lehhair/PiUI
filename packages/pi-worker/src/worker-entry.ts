@@ -24,6 +24,7 @@ let runtime: PiSessionRuntime | undefined
 let unsubscribeState: (() => void) | undefined
 let unsubscribeProjectionDelta: (() => void) | undefined
 let unsubscribeNativeEvent: (() => void) | undefined
+let unsubscribeNativeHead: (() => void) | undefined
 let unsubscribeResourcesChanged: (() => void) | undefined
 let unsubscribeExtensionUi: (() => void) | undefined
 const workerGeneration = randomUUID()
@@ -106,15 +107,19 @@ function projectionWire(value: ProjectionWire = requireRuntime().getProjection()
 
 function sessionWire(): WorkerSessionWire {
   const current = requireRuntime()
+  const fullProjection = current.getProjection()
+  const timelinePage = current.getInitialTimelinePage?.() ?? {
+    items: fullProjection.timeline.slice(-50),
+    hasMore: fullProjection.timeline.length > 50,
+  }
   return {
     sessionId: current.getSessionId(),
     sessionFile: current.getSessionFile(),
     sessionName: current.getSessionName(),
-    projection: projectionWire(current.getProjection()),
+    projection: projectionWire({ ...fullProjection, timeline: timelinePage.items }),
     state: current.getRuntimeUiState(),
-    entries: current.getEntries(),
-    tree: current.getTree(),
-    leafId: current.getLeafId(),
+    native: current.getNativeHead(),
+    timelinePage: { beforeCursor: timelinePage.beforeCursor, hasMore: timelinePage.hasMore },
   }
 }
 
@@ -240,6 +245,12 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
         type: "nativeEvent",
         event,
       }))
+      unsubscribeNativeHead = runtime.onNativeHead?.(native => send({
+        kind: "event",
+        generation: workerGeneration,
+        type: "nativeHead",
+        native,
+      }))
       unsubscribeResourcesChanged = runtime.onResourcesChanged?.(() => send({
         kind: "event",
         generation: workerGeneration,
@@ -335,6 +346,14 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "text", text: await requireRuntime().getSystemPrompt() }
     case "inspectRuntime":
       return { type: "runtimeInspection", inspection: await requireRuntime().inspectRuntime() }
+    case "getNativeEntriesPage":
+      return { type: "nativeEntriesPage", page: await requireRuntime().getNativeEntriesPage(command.cursor, command.limit, command.maxBytes) }
+    case "getNativeImageAttachment": {
+      const attachment = await requireRuntime().getNativeImageAttachment(command.entryId, command.blockIndex)
+      return { type: "nativeImageAttachment", ...attachment }
+    }
+    case "getTimelinePage":
+      return { type: "timelinePage", page: await requireRuntime().getTimelinePage!(command.cursor, command.limit, command.maxBytes) }
     case "inspectResources":
       return { type: "resources", resources: await requireRuntime().inspectResources() }
     case "extendResources":
@@ -419,6 +438,8 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       unsubscribeProjectionDelta = undefined
       unsubscribeNativeEvent?.()
       unsubscribeNativeEvent = undefined
+      unsubscribeNativeHead?.()
+      unsubscribeNativeHead = undefined
       unsubscribeResourcesChanged?.()
       unsubscribeResourcesChanged = undefined
       unsubscribeExtensionUi?.()

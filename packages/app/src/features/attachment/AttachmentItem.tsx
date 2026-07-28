@@ -8,6 +8,7 @@ import { AttachmentDetailModal } from './AttachmentDetailModal'
 import { clipboardErrorHandler, copyTextToClipboard } from '../../utils'
 import { saveData } from '../../utils/downloadUtils'
 import type { Attachment } from './types'
+import { useAuthenticatedObjectUrl } from './AuthenticatedImage'
 
 interface AttachmentItemProps {
   attachment: Attachment
@@ -29,6 +30,14 @@ function AttachmentItemComponent({
   const [imageError, setImageError] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const shouldRenderBody = useDelayedRender(isExpanded)
+  const resolvedUrl = useAuthenticatedObjectUrl(
+    attachment.url,
+    attachment.requiresAuth,
+    shouldRenderBody || isModalOpen,
+  )
+  const renderedAttachment = attachment.requiresAuth
+    ? { ...attachment, url: resolvedUrl }
+    : attachment
 
   const { Icon, colorClass } = getAttachmentIcon(attachment)
   const canExpand = expandable && hasExpandableContent(attachment)
@@ -117,7 +126,7 @@ function AttachmentItemComponent({
           <div className="min-w-0 overflow-hidden">
             {shouldRenderBody && (
               <ExpandedContent
-                attachment={attachment}
+                attachment={renderedAttachment}
                 imageError={imageError}
                 onImageError={() => setImageError(true)}
                 onOpenDetail={() => setIsModalOpen(true)}
@@ -128,7 +137,7 @@ function AttachmentItemComponent({
       )}
 
       {/* 附件详情弹窗 */}
-      <AttachmentDetailModal attachment={attachment} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <AttachmentDetailModal attachment={renderedAttachment} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </div>
   )
 }

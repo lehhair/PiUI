@@ -343,4 +343,22 @@ describe('messageStore', () => {
     unsubscribeSession2()
     unsubscribeAll()
   })
+
+  it('prepends older pages without duplicates and advances the history cursor', () => {
+    messageStore.setUiMessages('session-1', [
+      createMessageWithParts('message-3', 'three'),
+      createMessageWithParts('message-4', 'four'),
+    ], { hasMoreHistory: true, historyCursor: 'cursor-2' })
+    messageStore.prependUiMessages('session-1', [
+      createMessageWithParts('message-1', 'one'),
+      createMessageWithParts('message-2', 'two'),
+      createMessageWithParts('message-3', 'duplicate'),
+    ], { hasMoreHistory: false })
+
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual([
+      'message-1', 'message-2', 'message-3', 'message-4',
+    ])
+    expect(messageStore.getHasMoreHistory('session-1')).toBe(false)
+    expect(messageStore.getHistoryCursor('session-1')).toBeUndefined()
+  })
 })

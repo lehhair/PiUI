@@ -27,7 +27,7 @@ import { NotificationSettings } from './components/NotificationSettings'
 import { ServiceSettings } from './components/ServiceSettings'
 import { ServersSettings } from './components/ServersSettings'
 import { WorkspaceSettings } from './components/WorkspaceSettings'
-import { ConfigSettings } from './components/ConfigSettings'
+import { PiManagementSettings } from './components/PiManagementSettings'
 import { SettingsSearch } from './SettingsSearch'
 import { SETTINGS_SEARCH_DEFINITIONS, type SettingsSearchItem } from './settingsSearchCatalog'
 import { usePiCapabilities } from '../../pi/capabilities'
@@ -125,7 +125,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
     case 'service':
       return <ServiceSettings />
     case 'config':
-      return <ConfigSettings />
+      return <PiManagementSettings />
     case 'servers':
       return <ServersSettings />
     case 'keybindings':

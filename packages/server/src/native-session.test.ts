@@ -3,10 +3,40 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { applyWorkerEvent, createProjectionState, runMockTurn, type PiSessionRuntime } from "@piui/pi-worker"
+import { applyWorkerEvent, createProjectionState, nativeEntriesPage, nativeImageAttachment, nativeSessionHead, runMockTurn, type PiSessionRuntime } from "@piui/pi-worker"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { EventHub } from "./event-hub.ts"
+
+function nativeEnvelope(leafId: string | null = null, text = "") {
+  const entries = leafId ? [{
+    id: leafId,
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text }] },
+  }] : []
+  return {
+    namespace: "pi" as const,
+    schemaVersion: 1 as const,
+    sdkVersion: "0.81.1",
+    revision: 1,
+    header: null,
+    leafId,
+    entries,
+    tree: leafId ? [{ entryId: leafId, children: [] }] : [],
+  }
+}
+
+function nativeRuntime(native = nativeEnvelope()) {
+  return {
+    getNativeHead: () => nativeSessionHead(native),
+    getNativeEntriesPage: (cursor: string | undefined, limit: number, maxBytes: number) =>
+      nativeEntriesPage(native, { cursor, limit, maxBytes }),
+    getNativeImageAttachment: (entryId: string, blockIndex: number) =>
+      nativeImageAttachment(native, entryId, blockIndex),
+  }
+}
 
 describe("native Pi session discovery", () => {
   const root = mkdtempSync(path.join(tmpdir(), "piui-native-session-"))
@@ -19,6 +49,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(root, "native.jsonl"),
       getSessionName: () => "Native session",
       getProjection: () => projection,
+      ...nativeRuntime(),
     } as unknown as PiSessionRuntime
     const opened: Array<{ cwd: string; sessionFile?: string }> = []
     const backend: PiSessionBackend = {
@@ -57,6 +88,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(root, "concurrent.jsonl"),
       getSessionName: () => undefined,
       getProjection: () => projection,
+      ...nativeRuntime(),
     } as unknown as PiSessionRuntime
     let opens = 0
     let release!: () => void
@@ -118,25 +150,9 @@ describe("native Pi session discovery", () => {
       getAvailableThinkingLevels: () => ["off"],
       isStreaming: () => false,
       getLeafId: () => sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
-      getEntries: () => [{
-        id: sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
-        parentId: null,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        type: "message",
-        role: "user",
-        preview: sessionId === "pi-fork-source" ? "source" : "target",
-      }],
-      getTree: () => [{
-        entry: {
-          id: sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
-          parentId: null,
-          timestamp: "2026-01-01T00:00:00.000Z",
-          type: "message",
-          role: "user",
-          preview: sessionId === "pi-fork-source" ? "source" : "target",
-        },
-        children: [],
-      }],
+      ...nativeRuntime(sessionId === "pi-fork-source"
+        ? nativeEnvelope("source-entry", "source")
+        : nativeEnvelope("target-entry", "target")),
       fork: async () => {
         const sourceSessionId = sessionId
         sessionId = "pi-fork-target"
@@ -179,8 +195,8 @@ describe("native Pi session discovery", () => {
     assert.equal(registry.get("pi-fork-target"), result.target)
     const sourceSnapshot = registry.snapshot(result.source)
     assert.equal(sourceSnapshot.native.leafId, "source-entry")
-    assert.equal(sourceSnapshot.native.entries[0]?.id, "source-entry")
-    assert.equal(sourceSnapshot.native.tree[0]?.entry.id, "source-entry")
+    assert.equal(result.source.nativeHead?.leafId, "source-entry")
+    assert.equal(result.source.nativeHead?.entryCount, 1)
   })
 
   it("detaches a source runtime after replacement lease commit failure", async () => {
@@ -193,9 +209,8 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(root, "failed-replacement.jsonl"),
       getSessionName: () => "Source",
       getProjection: () => createProjectionState(),
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => null,
+      ...nativeRuntime(),
       fork: async () => {
         throw Object.assign(new Error("lease failed"), { code: "SESSION_REPLACEMENT_COMMIT_FAILED" })
       },
@@ -236,9 +251,8 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => sessionFile,
       getSessionName: () => "Source",
       getProjection: () => createProjectionState(),
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => null,
+      ...nativeRuntime(),
       fork: async () => {
         const sourceSessionId = sessionId
         sessionId = "pi-file-conflict-target"
@@ -285,6 +299,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => sessionFile,
       getSessionName: () => "Delete me",
       getProjection: () => createProjectionState(),
+      ...nativeRuntime(),
       onState: () => () => {},
       onCrash: () => () => {},
       dispose: async () => { disposed = true },
@@ -319,6 +334,7 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => sessionFile,
       getSessionName: () => "Keep me",
       getProjection: () => createProjectionState(),
+      ...nativeRuntime(),
       onState: () => () => {},
       onCrash: () => () => {},
       dispose: async () => { disposed = true },
@@ -458,8 +474,7 @@ describe("native Pi session discovery", () => {
       getAvailableThinkingLevels: () => ["off"],
       isStreaming: () => false,
       getLeafId: () => null,
-      getEntries: () => [],
-      getTree: () => [],
+      ...nativeRuntime(nativeEnvelope("crash-entry", "preserve after crash")),
     } as unknown as PiSessionRuntime
     const backend: PiSessionBackend = {
       listAll: async () => [{
@@ -489,6 +504,7 @@ describe("native Pi session discovery", () => {
     assert.equal(registry.snapshot(attached).runtime.runtimeError, "worker stopped")
     assert.equal(registry.snapshot(attached).runtime.isStreaming, false)
     assert.equal(attached.real, undefined)
+    assert.equal(attached.nativeHead?.leafId, "crash-entry")
     assert.deepEqual(eventTypes, [
       "session.runtime.replaced",
       "session.snapshot.updated",
@@ -519,8 +535,7 @@ describe("native Pi session discovery", () => {
       getAvailableThinkingLevels: () => ["off"],
       isStreaming: () => false,
       getLeafId: () => null,
-      getEntries: () => [],
-      getTree: () => [],
+      ...nativeRuntime(),
     } as unknown as PiSessionRuntime
     const backend: PiSessionBackend = {
       listAll: async () => [{
@@ -583,8 +598,7 @@ describe("native Pi session discovery", () => {
       getAvailableThinkingLevels: () => ["off"],
       isStreaming: () => false,
       getLeafId: () => null,
-      getEntries: () => [],
-      getTree: () => [],
+      ...nativeRuntime(),
       onSessionReplacement: (listener: typeof onReplacement) => {
         onReplacement = listener
         return () => { onReplacement = undefined }
@@ -657,8 +671,7 @@ describe("native Pi session discovery", () => {
       getAvailableThinkingLevels: () => ["off"],
       isStreaming: () => false,
       getLeafId: () => null,
-      getEntries: () => [],
-      getTree: () => [],
+      ...nativeRuntime(),
       dispose: async () => {},
     }
     const first = {
@@ -744,9 +757,8 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(cwd, `${id}.jsonl`),
       getSessionName: () => id,
       getProjection: () => createProjectionState(),
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => undefined,
+      ...nativeRuntime(),
       getRuntimeUiState: () => undefined,
       getModel: () => undefined,
       getThinkingLevel: () => "medium",
@@ -781,8 +793,8 @@ describe("native Pi session discovery", () => {
       patchSettings: async () => ({
         workspacePath: cwd,
         projectTrusted: true,
-        globalKeys: [],
-        projectKeys: [],
+        global: {},
+        project: {},
         effective: {} as never,
         errors: [],
       }),
@@ -849,14 +861,13 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(cwd, `${id}.jsonl`),
       getSessionName: () => id,
       getProjection: () => createProjectionState(),
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => undefined,
       getRuntimeUiState: () => uiState,
       getModel: () => undefined,
       getThinkingLevel: () => "medium",
       getAvailableThinkingLevels: () => ["off", "medium"],
       isStreaming: () => false,
+      ...nativeRuntime(nativeEnvelope("idle-entry", "preserve after detach")),
       dispose: async () => { disposals += 1 },
     }) as unknown as PiSessionRuntime
     const backend: PiSessionBackend = {
@@ -916,6 +927,7 @@ describe("native Pi session discovery", () => {
     // The session record survives, so using it again simply reopens it.
     const session = await registry.find("idle-session")
     assert.equal(session?.real, undefined)
+    assert.equal(session?.nativeHead?.leafId, "idle-entry")
     await registry.attach("idle-session")
     assert.equal((await registry.find("idle-session"))?.real !== undefined, true)
     assert.equal(opens, 2)
@@ -964,9 +976,8 @@ describe("native Pi session discovery", () => {
       getSessionFile: () => path.join(cwd, "auth-session.jsonl"),
       getSessionName: () => "auth",
       getProjection: () => createProjectionState(),
-      getEntries: () => [],
-      getTree: () => [],
       getLeafId: () => undefined,
+      ...nativeRuntime(),
       getRuntimeUiState: () => undefined,
       getModel: () => undefined,
       getThinkingLevel: () => "medium",

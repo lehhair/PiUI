@@ -31,6 +31,15 @@ import { configureSessionEditorDraftSync, setSessionEditorDraft } from "./sessio
 import { notificationStore } from "../store/notificationStore"
 import { invalidateWorkspaceFileCaches } from "../api/file"
 import { notifyReconnected, notifySessionIdle } from "../hooks/useGlobalEvents"
+import { reportPiConnectionState } from "../api/events"
+import {
+  getTrackedManagementProviders,
+  receivePackageProgress,
+  receiveProviderAuthEvent,
+  receiveProviderAuthUpdated,
+  receiveResourceRevision,
+  subscribeManagementStreams,
+} from "./managementEventStore"
 
 type Status = "idle" | "connecting" | "open" | "closed"
 
@@ -68,6 +77,7 @@ export class PiEventSocket {
   private resyncingStreamsV2 = new Map<string, Promise<void>>()
   private replayRequestedStreamsV2 = new Set<string>()
   private unsubscribeSessionIndex: (() => void) | null = null
+  private unsubscribeManagementStreams: (() => void) | null = null
   private openedBefore = false
 
   getStatus() {
@@ -82,6 +92,10 @@ export class PiEventSocket {
 
   private setStatus(status: Status) {
     this.status = status
+    reportPiConnectionState(
+      status === "open" ? "connected" : status === "connecting" ? "connecting" : "disconnected",
+      { lastEventTime: status === "open" ? Date.now() : undefined },
+    )
     for (const listener of this.statusListeners) listener(status)
   }
 
@@ -91,6 +105,7 @@ export class PiEventSocket {
     this.intentionalClose = false
     this.setStatus("connecting")
     this.unsubscribeSessionIndex ??= subscribePiSessionIndex(() => this.sendV2Subscription())
+    this.unsubscribeManagementStreams ??= subscribeManagementStreams(() => this.sendV2Subscription())
     configureSessionEditorDraftSync((sessionId, text) => {
       if (!listTrackedPiSessions().includes(sessionId)) return
       return setExtensionEditorState(sessionId, text).then(snapshot => extensionUiStore.replace(snapshot))
@@ -235,6 +250,16 @@ export class PiEventSocket {
         event.payload.message,
         event.payload.sessionId,
       )
+    } else if (event.type === "provider.auth.flow") {
+      receiveProviderAuthEvent(event.payload, event.stream.kind === "session" ? event.stream.id : undefined)
+    } else if (event.type === "provider.auth.updated") {
+      receiveProviderAuthUpdated()
+      window.dispatchEvent(new CustomEvent("piui:provider-auth-updated", { detail: event.payload }))
+    } else if (event.type === "packages.progress") {
+      receivePackageProgress(event.payload)
+    } else if (event.type === "resources.updated") {
+      receiveResourceRevision(event.payload.workspacePath, event.payload.revision)
+      window.dispatchEvent(new CustomEvent("piui:resources-updated", { detail: event.payload }))
     } else if (
       event.type === "command.updated" &&
       event.payload.sessionId &&
@@ -290,9 +315,11 @@ export class PiEventSocket {
   private currentStreamsV2(): EventStreamRefV2[] {
     const ids = new Set([...listTrackedPiSessions(), ...sessionProjectionStore.getSessionIds()])
     const workspaces = listTrackedPiWorkspacePaths().map(path => ({ kind: "workspace" as const, id: path }))
-    const sessionLimit = Math.max(0, 255 - workspaces.length)
+    const resources = listTrackedPiWorkspacePaths().map(path => ({ kind: "resources" as const, id: path }))
+    const providers = getTrackedManagementProviders().map(id => ({ kind: "provider" as const, id }))
+    const sessionLimit = Math.max(0, 255 - workspaces.length - resources.length - providers.length)
     const sessions = [...ids].slice(-sessionLimit).map(id => ({ kind: "session" as const, id }))
-    return [{ kind: "server", id: "server" }, ...workspaces, ...sessions]
+    return [{ kind: "server", id: "server" }, ...workspaces, ...resources, ...providers, ...sessions]
   }
 
   private sendV2Subscription(): void {
@@ -315,12 +342,13 @@ export class PiEventSocket {
 
     const pending = (async () => {
       if (stream.kind === "session") {
-        const [snapshot, extensionUi] = await Promise.all([
-          fetchSnapshot(stream.id),
-          fetchExtensionUiSnapshot(stream.id),
-        ])
+        const snapshot = await fetchSnapshot(stream.id)
         applySnapshotToUi(snapshot, { activate: false })
-        extensionUiStore.replace(extensionUi)
+        try {
+          extensionUiStore.replace(await fetchExtensionUiSnapshot(stream.id))
+        } catch {
+          extensionUiStore.remove(stream.id)
+        }
       } else if (stream.kind === "server" || stream.kind === "workspace") {
         window.dispatchEvent(new CustomEvent("piui:sessions-changed"))
         if (stream.kind === "workspace") {
@@ -332,6 +360,8 @@ export class PiEventSocket {
             detail: { workspacePath: stream.id, revision: cursor.sequence },
           }))
         }
+      } else if (stream.kind === "resources") {
+        receiveResourceRevision(stream.id, String(cursor.sequence))
       }
       this.cursorsV2[streamKey] = cursor
       this.blockedStreamsV2.delete(streamKey)
@@ -395,6 +425,8 @@ export class PiEventSocket {
     }
     this.unsubscribeSessionIndex?.()
     this.unsubscribeSessionIndex = null
+    this.unsubscribeManagementStreams?.()
+    this.unsubscribeManagementStreams = null
     configureSessionEditorDraftSync(undefined)
     this.stopHeartbeat()
     this.ws?.close()
@@ -414,4 +446,11 @@ export function ensurePiEventSocket(): PiEventSocket {
   const socket = getPiEventSocket()
   socket.connect()
   return socket
+}
+
+export function resetPiEventSocket(): PiEventSocket {
+  singleton?.close()
+  singleton = new PiEventSocket()
+  singleton.connect()
+  return singleton
 }

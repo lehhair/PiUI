@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   setAutoRetry: vi.fn(),
   setQueueModes: vi.fn(),
   setActiveTools: vi.fn(),
+  fetchNativeEntries: vi.fn(),
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
@@ -43,6 +44,7 @@ vi.mock('../pi/sessionApi', () => ({
   setPiAutoRetry: mocks.setAutoRetry,
   setPiQueueModes: mocks.setQueueModes,
   setPiActiveTools: mocks.setActiveTools,
+  fetchPiNativeEntriesPage: mocks.fetchNativeEntries,
 }))
 
 function snapshot(id = 'session-1'): SessionSnapshotV1 {
@@ -72,37 +74,16 @@ function snapshot(id = 'session-1'): SessionSnapshotV1 {
       activeTools: [],
     },
     timeline: [],
+    timelinePage: { hasMore: false },
     native: {
       namespace: 'pi',
       schemaVersion: 1,
+      sdkVersion: '0.81.1',
+      revision: 1,
+      epoch: 'native-test',
+      header: null,
       leafId: 'assistant-entry',
-      entries: [],
-      tree: [
-        {
-          entry: {
-            id: 'user-entry',
-            parentId: null,
-            timestamp: '2026-01-01T00:00:00.000Z',
-            type: 'message',
-            role: 'user',
-            preview: 'Change the parser',
-          },
-          children: [
-            {
-              entry: {
-                id: 'assistant-entry',
-                parentId: 'user-entry',
-                timestamp: '2026-01-01T00:00:01.000Z',
-                type: 'message',
-                role: 'assistant',
-                preview: 'Updated the parser',
-              },
-              label: 'working branch',
-              children: [],
-            },
-          ],
-        },
-      ],
+      entryCount: 3,
     },
   }
 }
@@ -114,6 +95,15 @@ function DraftProbe() {
 describe('SessionTreePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.fetchNativeEntries.mockResolvedValue({
+      head: snapshot().native,
+      items: [
+        { id: 'user-entry', parentId: null, timestamp: '2026-01-01T00:00:00.000Z', type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Change the parser' }] } },
+        { id: 'assistant-entry', parentId: 'user-entry', timestamp: '2026-01-01T00:00:01.000Z', type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Updated the parser' }] } },
+        { id: 'label-entry', parentId: 'assistant-entry', timestamp: '2026-01-01T00:00:02.000Z', type: 'label', targetId: 'assistant-entry', label: 'working branch' },
+      ],
+      hasMore: false,
+    })
     sessionProjectionStore.clear()
     clearSessionEditorDraft('session-1')
     sessionProjectionStore.replace(snapshot())
@@ -131,7 +121,7 @@ describe('SessionTreePanel', () => {
     mocks.navigate.mockResolvedValue({ snapshot: updated, editorText: 'Change the parser' })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click(screen.getByTitle('Return here'))
+    fireEvent.click(await screen.findByTitle('Return here'))
 
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry'))
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(updated)
@@ -154,12 +144,12 @@ describe('SessionTreePanel', () => {
     })
     render(<SessionTreePanel sessionId="session-1" onNavigateSession={onNavigateSession} />)
 
-    fireEvent.click(screen.getAllByTitle('Edit label')[0])
+    fireEvent.click((await screen.findAllByTitle('Edit label'))[0])
     fireEvent.change(screen.getByPlaceholderText('Branch label'), { target: { value: 'checkpoint' } })
     fireEvent.keyDown(screen.getByPlaceholderText('Branch label'), { key: 'Enter' })
     await waitFor(() => expect(mocks.setLabel).toHaveBeenCalledWith('session-1', 'user-entry', 'checkpoint'))
 
-    fireEvent.click(screen.getAllByTitle('Fork here')[0])
+    fireEvent.click((await screen.findAllByTitle('Fork here'))[0])
     await waitFor(() => expect(mocks.fork).toHaveBeenCalledWith('session-1', 'user-entry', 'at'))
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(sourceSnapshot, { activate: false })
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(targetSnapshot)
@@ -178,14 +168,14 @@ describe('SessionTreePanel', () => {
       </>,
     )
 
-    fireEvent.click(screen.getByTitle('Return here'))
+    fireEvent.click(await screen.findByTitle('Return here'))
     await waitFor(() => expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt'))
 
-    fireEvent.click(screen.getByTitle('Return here'))
+    fireEvent.click(await screen.findByTitle('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt')
 
-    fireEvent.click(screen.getByTitle('Return here'))
+    fireEvent.click(await screen.findByTitle('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(3))
     expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt')
   })
@@ -194,7 +184,7 @@ describe('SessionTreePanel', () => {
     mocks.setLabel.mockResolvedValue({ snapshot: { ...snapshot(), sequence: 2 } })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click(screen.getAllByTitle('Edit label')[1])
+    fireEvent.click((await screen.findAllByTitle('Edit label'))[1])
     const input = screen.getByPlaceholderText('Branch label')
     expect(input).toHaveValue('working branch')
     expect(input.closest('button')).toBeNull()
@@ -262,8 +252,8 @@ describe('SessionTreePanel', () => {
         },
         compaction: { autoEnabled: true, operation: { type: 'none' } },
         tools: [
-          { name: 'read', description: 'Read files', source: 'builtin' },
-          { name: 'bash', description: 'Run commands', source: 'builtin' },
+          { name: 'read', description: 'Read files', parameters: {}, sourceInfo: { origin: 'builtin' } },
+          { name: 'bash', description: 'Run commands', parameters: {}, sourceInfo: { origin: 'builtin' } },
         ],
         activeTools: ['read'],
       },
@@ -304,7 +294,7 @@ describe('SessionTreePanel', () => {
     await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith('session-1', 'Keep API decisions'))
 
     fireEvent.click(screen.getByLabelText('Summarize the abandoned branch when navigating'))
-    fireEvent.click(screen.getByTitle('Return here'))
+    fireEvent.click(await screen.findByTitle('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry', true))
   })
 })

@@ -36,6 +36,7 @@ export class ExtensionUiBridge {
   constructor(
     private readonly getSessionId: () => string,
     private readonly getWorkerGeneration: () => string | undefined,
+    private readonly getAllThemes: () => Array<{ name: string; path: string | undefined }> = () => [],
   ) {}
 
   readonly context = this.createContext()
@@ -184,7 +185,7 @@ export class ExtensionUiBridge {
         throw unsupported("TUI theme access")
       },
       getAllThemes() {
-        throw unsupported("TUI theme enumeration")
+        return bridge.getAllThemes()
       },
       getTheme() {
         throw unsupported("TUI theme access")

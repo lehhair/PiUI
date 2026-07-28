@@ -13,7 +13,10 @@ export function applySnapshotToUi(snapshot: SessionSnapshotV1, options?: { activ
   const messages = snapshotToUiMessages(snapshot)
   messageStore.setUiMessages(snapshot.session.id, messages, {
     title: snapshot.session.title,
-    hasMoreHistory: false,
+    directory: snapshot.session.directory,
+    hasMoreHistory: snapshot.timelinePage.hasMore,
+    historyCursor: snapshot.timelinePage.beforeCursor,
+    preserveHistory: true,
   })
   messageStore.setStreaming(
     snapshot.session.id,

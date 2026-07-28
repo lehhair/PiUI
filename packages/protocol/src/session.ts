@@ -83,8 +83,10 @@ export interface CompactionStateV1 {
 
 export interface PiToolInfoV1 {
   name: string
-  description?: string
-  source?: string
+  description: string
+  parameters: unknown
+  promptGuidelines?: string[]
+  sourceInfo: unknown
 }
 
 export type CompactionCommandResultV1 =
@@ -95,7 +97,7 @@ export type CompactionCommandResultV1 =
 export interface ContextUsageV1 {
   inputTokens?: number
   outputTokens?: number
-  contextTokens?: number
+  contextTokens: number | null
   contextWindow?: number
   percent?: number | null
 }
@@ -137,7 +139,13 @@ export interface ToolPresentationV1 {
   name: string
   status: "pending" | "running" | "completed" | "error"
   input: unknown
-  output?: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>
+  output?: Array<{ type: "text"; text: string } | {
+    type: "image"
+    entryId: string
+    blockIndex: number
+    mimeType: string
+    byteLength: number
+  }>
   isError?: boolean
   startedAt?: number
   endedAt?: number
@@ -152,6 +160,13 @@ export interface ToolPresentationV1 {
 
 export type AssistantContentV1 = TextContentV1 | ThinkingContentV1 | ToolPresentationV1
 
+export interface UserTimelineAttachmentV1 {
+  type: "image"
+  mimeType: string
+  blockIndex: number
+  byteLength: number
+}
+
 export interface UserTimelineItemV1 {
   type: "user"
   id: string
@@ -159,6 +174,7 @@ export interface UserTimelineItemV1 {
   parentEntryId?: string | null
   timestamp: number
   text: string
+  attachments?: UserTimelineAttachmentV1[]
 }
 
 export interface AssistantTimelineItemV1 {
@@ -176,38 +192,54 @@ export interface AssistantTimelineItemV1 {
 
 export type TimelineItemV1 = UserTimelineItemV1 | AssistantTimelineItemV1
 
-export interface PiSessionEntryBaseV1 {
-  id: string
-  parentId: string | null
-  timestamp: string
-  native?: unknown
+export type PiNativeJsonValueV1 = null | boolean | number | string | PiNativeJsonValueV1[] | {
+  [key: string]: PiNativeJsonValueV1
 }
 
-export type PiSessionEntryV1 =
-  | (PiSessionEntryBaseV1 & {
-      type: "message"
-      role: "user" | "assistant" | "toolResult" | "bashExecution" | "branchSummary" | "compactionSummary" | "custom"
-      preview: string
-    })
-  | (PiSessionEntryBaseV1 & { type: "thinking_level_change"; thinkingLevel: string })
-  | (PiSessionEntryBaseV1 & { type: "model_change"; provider: string; modelId: string })
-  | (PiSessionEntryBaseV1 & {
-      type: "compaction"
-      summary: string
-      firstKeptEntryId: string
-      tokensBefore: number
-    })
-  | (PiSessionEntryBaseV1 & { type: "branch_summary"; fromId: string; summary: string })
-  | (PiSessionEntryBaseV1 & { type: "custom"; customType: string })
-  | (PiSessionEntryBaseV1 & { type: "custom_message"; customType: string; preview: string; display: boolean })
-  | (PiSessionEntryBaseV1 & { type: "label"; targetId: string; label?: string })
-  | (PiSessionEntryBaseV1 & { type: "session_info"; name?: string })
-
-export interface PiSessionTreeNodeV1 {
-  entry: PiSessionEntryV1
-  children: PiSessionTreeNodeV1[]
+export interface PiNativeTreeRefV1 {
+  entryId: string
+  children: PiNativeTreeRefV1[]
   label?: string
   labelTimestamp?: string
+}
+
+/** JSON-structural copy of Pi's native session data. Presentation projections
+ * must never be used to reconstruct this envelope. */
+export interface PiNativeSessionEnvelopeV1 {
+  namespace: "pi"
+  schemaVersion: 1
+  sdkVersion: string
+  revision: number
+  sessionFormatVersion?: number
+  header: PiNativeJsonValueV1 | null
+  leafId: string | null
+  entries: Array<{ [key: string]: PiNativeJsonValueV1 }>
+  tree: PiNativeTreeRefV1[]
+}
+
+export interface PiNativeSessionHeadV1 {
+  namespace: "pi"
+  schemaVersion: 1
+  sdkVersion: string
+  revision: number
+  sessionFormatVersion?: number
+  epoch: string
+  header: PiNativeJsonValueV1 | null
+  leafId: string | null
+  entryCount: number
+}
+
+export interface PiNativeEntriesPageV1 {
+  head: PiNativeSessionHeadV1
+  items: Array<{ [key: string]: PiNativeJsonValueV1 }>
+  beforeCursor?: string
+  hasMore: boolean
+}
+
+export interface PiTimelinePageV1 {
+  items: TimelineItemV1[]
+  beforeCursor?: string
+  hasMore: boolean
 }
 
 export interface SessionReplacementResultV1 {
@@ -224,7 +256,7 @@ export interface PiNavigationResultV1 {
   editorText?: string
   cancelled: boolean
   aborted?: boolean
-  summaryEntry?: PiSessionEntryV1
+  summaryEntry?: { [key: string]: PiNativeJsonValueV1 }
 }
 
 export interface SessionSnapshotV1 {
@@ -265,14 +297,10 @@ export interface SessionSnapshotV1 {
     workerGeneration?: string
     runtimeError?: string
   }
+  /** Most recent presentation page only. Older pages are loaded explicitly. */
   timeline: TimelineItemV1[]
-  native: {
-    namespace: "pi"
-    schemaVersion: 1
-    leafId: string | null
-    entries: PiSessionEntryV1[]
-    tree: PiSessionTreeNodeV1[]
-  }
+  timelinePage: Omit<PiTimelinePageV1, "items">
+  native: PiNativeSessionHeadV1
 }
 
 export function isQueueDeliveryModeV1(value: unknown): value is QueueDeliveryModeV1 {

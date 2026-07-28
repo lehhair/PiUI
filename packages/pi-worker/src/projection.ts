@@ -55,6 +55,24 @@ function textFromContent(content: PiContentBlock[] | string | undefined): string
     .join("")
 }
 
+function userAttachmentsFromContent(content: PiContentBlock[] | string | undefined): UserTimelineItemV1["attachments"] {
+  if (!Array.isArray(content)) return undefined
+  const attachments = content
+    .map((block, blockIndex) => block.type === "image" ? {
+      type: "image" as const,
+      mimeType: block.mimeType,
+      blockIndex,
+      byteLength: base64ByteLength(block.data),
+    } : undefined)
+    .filter((attachment): attachment is NonNullable<typeof attachment> => Boolean(attachment))
+  return attachments.length ? attachments : undefined
+}
+
+function base64ByteLength(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0
+  return Math.max(0, Math.floor(data.length * 3 / 4) - padding)
+}
+
 function assistantContentFromBlocks(blocks: PiContentBlock[] | undefined): AssistantTimelineItemV1["content"] {
   if (!blocks) return []
   const out: AssistantTimelineItemV1["content"] = []
@@ -87,6 +105,7 @@ export function projectEntries(entries: PiEntry[]): ProjectionState {
         parentEntryId: e.parentId,
         timestamp: e.timestamp,
         text: textFromContent(e.message.content),
+        attachments: userAttachmentsFromContent(e.message.content),
       }
       state.timeline.push(item)
       state.byEntryId.set(e.id, state.timeline.length - 1)
@@ -129,7 +148,7 @@ export function projectEntries(entries: PiEntry[]): ProjectionState {
         result: e.message.result,
         content: e.message.content,
         details: e.message.details,
-      })
+      }, e.id)
     }
   }
   return state
@@ -139,6 +158,7 @@ function applyToolResult(
   state: ProjectionState,
   toolCallId: string,
   message: PiEntry["message"] & { role: "toolResult" },
+  entryId?: string,
 ) {
   const ref = state.toolsByCallId.get(toolCallId)
   if (!ref) return
@@ -151,12 +171,11 @@ function applyToolResult(
   t.isError = message.isError
   t.endedAt = Date.now()
   const result = Array.isArray(message.result)
-    ? message.result
+    ? resultBlocksForTimeline(message.result, entryId)
     : typeof message.result === "string"
       ? [{ type: "text" as const, text: message.result }]
       : Array.isArray(message.content)
-        ? message.content.filter((block): block is { type: "text"; text: string } | { type: "image"; data: string; mimeType: string } =>
-            block.type === "text" || block.type === "image")
+        ? resultBlocksForTimeline(message.content, entryId)
         : []
   t.output = result.length ? result : undefined
   t.nativeDetails = message.details
@@ -168,6 +187,26 @@ function applyToolResult(
     cwd: typeof details.cwd === "string" ? details.cwd : undefined,
     exitCode: typeof details.exitCode === "number" ? details.exitCode : undefined,
   } : undefined
+}
+
+function resultBlocksForTimeline(
+  blocks: PiContentBlock[],
+  entryId?: string,
+): NonNullable<ToolPresentationV1["output"]> {
+  const result: NonNullable<ToolPresentationV1["output"]> = []
+  blocks.forEach((block, blockIndex) => {
+    if (block.type === "text") result.push(block)
+    else if (block.type === "image" && entryId) {
+      result.push({
+        type: "image",
+        entryId,
+        blockIndex,
+        mimeType: block.mimeType,
+        byteLength: base64ByteLength(block.data),
+      })
+    }
+  })
+  return result
 }
 
 /** Apply streaming worker events onto projection (pure reducer). */
@@ -249,6 +288,7 @@ export function applyWorkerEvent(state: ProjectionState, event: WorkerEvent): Pr
             parentEntryId: event.parentId,
             timestamp: event.timestamp,
             text: textFromContent(event.message.content),
+            attachments: userAttachmentsFromContent(event.message.content),
           })
           next.byEntryId.set(event.entryId, next.timeline.length - 1)
         }
@@ -285,6 +325,7 @@ export function applyWorkerEvent(state: ProjectionState, event: WorkerEvent): Pr
         next.timeline[idx] = {
           ...item,
           text: textFromContent(event.message.content),
+          attachments: userAttachmentsFromContent(event.message.content),
           parentEntryId: event.parentId,
         }
       }
@@ -331,7 +372,7 @@ export function applyWorkerEvent(state: ProjectionState, event: WorkerEvent): Pr
       content[ref.toolIndex] = {
         ...tool,
         status: "running",
-        output: event.result,
+        output: event.result?.filter((block): block is { type: "text"; text: string } => block.type === "text"),
         nativeDetails: event.details,
       }
       next.timeline[index] = { ...item, content }

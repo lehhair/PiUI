@@ -982,9 +982,9 @@ export function SidePanel({
             opacity: showLabels ? 1 : 0,
           }}
         >
-          <a href="/" className="flex items-center whitespace-nowrap">
-            <span className="text-[length:var(--fs-heading-3)] font-semibold text-text-100 tracking-tight">
-              {t('header.openCode')}
+          <a href="/" className="flex items-center whitespace-nowrap" aria-label="Pi">
+            <span className="text-[length:var(--fs-heading-1)] font-semibold text-text-100 leading-none" aria-hidden="true">
+              π
             </span>
           </a>
         </div>

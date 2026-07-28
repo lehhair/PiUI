@@ -3,39 +3,18 @@
  */
 import { getDriverMode, type PiModelInfo } from "@piui/pi-worker"
 
-export interface ModelDtoV1 {
-  id: string
-  name: string
-  providerId: string
-  providerName: string
-  family: string
-  contextLimit: number
-  outputLimit: number
-  supportsReasoning: boolean
-  supportsImages: boolean
-  supportsPdf: boolean
-  supportsAudio: boolean
-  supportsVideo: boolean
-  supportsToolcall: boolean
-  variants: string[]
-}
-
-const MOCK_MODELS: ModelDtoV1[] = [
+const MOCK_MODELS: PiModelInfo[] = [
   {
     id: "mock",
     name: "Mock (no LLM)",
-    providerId: "mock",
-    providerName: "Mock",
-    family: "mock",
-    contextLimit: 128000,
-    outputLimit: 8192,
-    supportsReasoning: true,
-    supportsImages: false,
-    supportsPdf: false,
-    supportsAudio: false,
-    supportsVideo: false,
-    supportsToolcall: true,
-    variants: [],
+    api: "mock",
+    provider: "mock",
+    baseUrl: "",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 8192,
   },
 ]
 
@@ -44,7 +23,7 @@ export async function listModelsForUi(
   listPiModels?: () => Promise<PiModelInfo[]>,
 ): Promise<{
   driver: string
-  models: ModelDtoV1[]
+  models: PiModelInfo[]
   error?: string
 }> {
   if (driver === "mock") {
@@ -55,24 +34,7 @@ export async function listModelsForUi(
     const available = listPiModels
       ? await listPiModels()
       : await (await import("./pi-worker-client.ts")).PiWorkerSession.listModels()
-    const models: ModelDtoV1[] = available.map(m => {
-      return {
-        id: m.id,
-        name: m.name || m.id,
-        providerId: m.providerId,
-        providerName: m.providerId,
-        family: m.family,
-        contextLimit: m.contextLimit,
-        outputLimit: m.outputLimit,
-        supportsReasoning: m.supportsReasoning,
-        supportsImages: m.supportsImages,
-        supportsPdf: false,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsToolcall: true,
-        variants: m.thinkingLevels,
-      }
-    })
+    const models = available
     if (models.length === 0) {
       return {
         driver,

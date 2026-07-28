@@ -97,7 +97,8 @@ function bootstrap() {
 
 async function startApp() {
   // Do not mount legacy OpenCode consumers before the PiUI backend decision.
-  const { initializePiBackend, seedMockChatIfEnabled } = await import('./pi/bootstrapMockChat')
+  const { initializePiBackend, installPiBackendServerSwitch, seedMockChatIfEnabled } = await import('./pi/bootstrapMockChat')
+  installPiBackendServerSwitch()
   const backend = await initializePiBackend()
   bootstrap()
 

@@ -274,6 +274,11 @@ class MessageStore {
     return this.sessions.get(sessionId)?.hasMoreHistory ?? false
   }
 
+  getHistoryCursor(sessionId: string | null): string | undefined {
+    if (!sessionId) return undefined
+    return this.sessions.get(sessionId)?.historyCursor
+  }
+
   getSessionDirectory(sessionId: string | null): string {
     if (!sessionId) return ''
     return this.sessions.get(sessionId)?.directory ?? ''
@@ -362,6 +367,7 @@ class MessageStore {
     sessionId: string,
     options: {
       hasMoreHistory?: boolean
+      historyCursor?: string
       directory?: string
       title?: string
       loadState?: SessionState['loadState']
@@ -373,6 +379,7 @@ class MessageStore {
     if (!state) return
 
     if (options.hasMoreHistory !== undefined) state.hasMoreHistory = options.hasMoreHistory
+    if (options.historyCursor !== undefined || options.hasMoreHistory === false) state.historyCursor = options.historyCursor
     if (options.directory !== undefined) state.directory = options.directory
     if (options.title !== undefined) state.title = options.title
     if (options.loadState !== undefined) state.loadState = options.loadState
@@ -443,6 +450,8 @@ class MessageStore {
       directory?: string
       title?: string
       hasMoreHistory?: boolean
+      historyCursor?: string
+      preserveHistory?: boolean
       revertState?: { messageID?: string } | null
       shareUrl?: string
     },
@@ -451,7 +460,17 @@ class MessageStore {
     const previousMessages = state.messages
     const previousById = new Map(previousMessages.map(message => [message.info.id, message]))
 
-    state.messages = messages.map(next => {
+    let nextMessages = messages
+    let preservedHistory = false
+    if (options?.preserveHistory && previousMessages.length && messages.length) {
+      const incomingIds = new Set(messages.map(message => message.info.id))
+      const overlapIndex = previousMessages.findIndex(message => incomingIds.has(message.info.id))
+      if (overlapIndex > 0) {
+        nextMessages = [...previousMessages.slice(0, overlapIndex), ...messages]
+        preservedHistory = true
+      }
+    }
+    state.messages = nextMessages.map(next => {
       const previous = previousById.get(next.info.id)
       // 定稿（completed）强制采用服务端；仅流式/未完成时不回退更长 live
       if (!previous || !shouldPreserveLiveParts(previous, next)) return next
@@ -463,7 +482,10 @@ class MessageStore {
     })
     state.loadState = 'loaded'
     state.loadError = undefined
-    state.hasMoreHistory = options?.hasMoreHistory ?? false
+    if (!preservedHistory) {
+      state.hasMoreHistory = options?.hasMoreHistory ?? false
+      state.historyCursor = options?.historyCursor
+    }
     state.directory = options?.directory ?? ''
     if (options?.title !== undefined) state.title = options.title
     state.shareUrl = options?.shareUrl
@@ -505,6 +527,18 @@ class MessageStore {
       state.isStreaming = false
     }
 
+    this.notify([sessionId])
+  }
+
+  prependUiMessages(sessionId: string, messages: Message[], options: { hasMoreHistory: boolean; historyCursor?: string }) {
+    const state = this.ensureSession(sessionId)
+    const existingIds = new Set(state.messages.map(message => message.info.id))
+    const unique = messages.filter(message => !existingIds.has(message.info.id))
+    if (unique.length) state.messages = [...unique, ...state.messages]
+    state.hasMoreHistory = options.hasMoreHistory
+    state.historyCursor = options.historyCursor
+    state.loadState = 'loaded'
+    state.isStale = false
     this.notify([sessionId])
   }
 

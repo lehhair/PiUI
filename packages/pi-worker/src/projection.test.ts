@@ -5,6 +5,26 @@ import { runMockTurn } from "./mock-runtime.js"
 import type { PiEntry } from "./types.js"
 
 describe("projectEntries", () => {
+  it("preserves user image blocks in the presentation timeline", () => {
+    const state = projectEntries([{
+      type: "message",
+      id: "user-image",
+      parentId: null,
+      timestamp: 1,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "describe this" },
+          { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        ],
+      },
+    }])
+    const user = state.timeline[0]
+    assert.ok(user?.type === "user")
+    assert.equal(user.text, "describe this")
+    assert.deepEqual(user.attachments, [{ type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 5 }])
+  })
+
   it("pairs toolCall with toolResult", () => {
     const entries: PiEntry[] = [
       {
@@ -57,6 +77,14 @@ describe("projectEntries", () => {
       assert.match(tool.output[0].text, /export const x/)
     }
     assert.equal(tool.output?.[1]?.type, "image")
+    assert.deepEqual(tool.output?.[1], {
+      type: "image",
+      entryId: "tr1",
+      blockIndex: 1,
+      mimeType: "image/png",
+      byteLength: 8,
+    })
+    assert.equal(JSON.stringify(state.timeline).includes("iVBORw0KGgo="), false)
     assert.equal(tool.normalized?.patch, "@@ -1 +1 @@")
     assert.equal(tool.normalized?.cwd, "/workspace")
     assert.equal(tool.normalized?.exitCode, 0)

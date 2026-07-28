@@ -88,10 +88,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const [project, setProject] = useState<ApiProject | null>(null)
   const [vcsInfo, setVcsInfo] = useState<VcsInfo | null>(null)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, session: false, turn: false })
-  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, session: false, turn: false })
+  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
+  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
   const [gitDiffs, setGitDiffs] = useState<FileDiff[]>([])
   const [branchDiffs, setBranchDiffs] = useState<FileDiff[]>([])
+  const [stagedDiffs, setStagedDiffs] = useState<FileDiff[]>([])
+  const [unstagedDiffs, setUnstagedDiffs] = useState<FileDiff[]>([])
   const [sessionDiffs, setSessionDiffs] = useState<FileDiff[]>([])
   const [turnDiffs, setTurnDiffs] = useState<FileDiff[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -122,7 +124,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   }, [directory])
 
   const projectRequestIdRef = useRef(0)
-  const diffRequestIdRef = useRef({ git: 0, branch: 0, session: 0, turn: 0 })
+  const diffRequestIdRef = useRef({ git: 0, branch: 0, staged: 0, unstaged: 0, session: 0, turn: 0 })
   const diffAbortRef = useRef<Partial<Record<ChangeMode, AbortController>>>({})
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openDiffFilesRef = useRef<string[]>([])
@@ -146,6 +148,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     if (project?.vcs && vcsInfo?.branch) {
       options.push('branch')
     }
+    if (project?.vcs) options.push('staged', 'unstaged')
     return options
   }, [project?.vcs, vcsInfo?.branch])
   const preferredChangeMode = useMemo(() => getDefaultChangeMode(changeOptions), [changeOptions])
@@ -160,6 +163,16 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         label: t('sessionChanges.branchScope'),
         description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.default_branch ?? 'main' }),
         icon: <GitBranchIcon size={12} />,
+      },
+      staged: {
+        label: 'Staged',
+        description: 'Changes currently staged in the Git index',
+        icon: <GitDiffIcon size={12} />,
+      },
+      unstaged: {
+        label: 'Unstaged',
+        description: 'Working tree changes not staged in the Git index',
+        icon: <GitDiffIcon size={12} />,
       },
       session: {
         label: t('sessionChanges.sessionScope'),
@@ -180,10 +193,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         ? gitDiffs
         : changeMode === 'branch'
           ? branchDiffs
+          : changeMode === 'staged'
+            ? stagedDiffs
+            : changeMode === 'unstaged'
+              ? unstagedDiffs
           : changeMode === 'session'
             ? sessionDiffs
             : turnDiffs,
-    [branchDiffs, changeMode, gitDiffs, sessionDiffs, turnDiffs],
+    [branchDiffs, changeMode, gitDiffs, sessionDiffs, stagedDiffs, turnDiffs, unstagedDiffs],
   )
   const loading = projectLoading || loadingModes[changeMode]
 
@@ -366,7 +383,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     async (mode: ChangeMode, options?: { force?: boolean; project?: ApiProject | null }) => {
       const currentProject = options?.project ?? project
       if (!sessionId || !currentProject?.vcs) return
-      if (mode !== 'git' && mode !== 'branch') return
+      if (mode !== 'git' && mode !== 'branch' && mode !== 'staged' && mode !== 'unstaged') return
       if (!options?.force && loadedModes[mode]) return
 
       const requestId = ++diffRequestIdRef.current[mode]
@@ -385,6 +402,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
           setGitDiffs(data)
         } else if (mode === 'branch') {
           setBranchDiffs(data)
+        } else if (mode === 'staged') {
+          setStagedDiffs(data)
+        } else if (mode === 'unstaged') {
+          setUnstagedDiffs(data)
         } else if (mode === 'session') {
           setSessionDiffs(data)
         } else {
@@ -410,6 +431,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     diffRequestIdRef.current = {
       git: diffRequestIdRef.current.git + 1,
       branch: diffRequestIdRef.current.branch + 1,
+      staged: diffRequestIdRef.current.staged + 1,
+      unstaged: diffRequestIdRef.current.unstaged + 1,
       session: diffRequestIdRef.current.session + 1,
       turn: diffRequestIdRef.current.turn + 1,
     }
@@ -417,10 +440,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     setVcsInfo(null)
     setGitDiffs([])
     setBranchDiffs([])
+    setStagedDiffs([])
+    setUnstagedDiffs([])
     setSessionDiffs([])
     setTurnDiffs([])
-    setLoadedModes({ git: false, branch: false, session: false, turn: false })
-    setLoadingModes({ git: false, branch: false, session: false, turn: false })
+    setLoadedModes({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
+    setLoadingModes({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
     setError(null)
     setOpenDiffFiles([])
     setSelectedFile(null)
@@ -474,7 +499,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     const onGitChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ workspacePath: string }>).detail
       if (!canonicalWorkspaceRef.current || detail?.workspacePath !== canonicalWorkspaceRef.current) return
-      setLoadedModes(prev => ({ ...prev, git: false, branch: false }))
+      setLoadedModes(prev => ({ ...prev, git: false, branch: false, staged: false, unstaged: false }))
       if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current)
       gitRefreshTimerRef.current = setTimeout(() => {
         gitRefreshTimerRef.current = null
@@ -590,7 +615,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   useEffect(() => {
     if (!selectedFile || selectedDiff?.patch !== undefined || selectedDiff?.binary ||
       (selectedDiff?.before !== undefined && selectedDiff.after !== undefined)) return
-    if (changeMode !== 'git' && changeMode !== 'branch') return
+    if (changeMode !== 'git' && changeMode !== 'branch' && changeMode !== 'staged' && changeMode !== 'unstaged') return
     const controller = new AbortController()
     const listRequestId = diffRequestIdRef.current[changeMode]
     void getVcsFileDiff(changeMode, selectedFile, directory, controller.signal)
@@ -598,7 +623,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         if (controller.signal.aborted || diffRequestIdRef.current[changeMode] !== listRequestId) return
         const apply = (items: FileDiff[]) => items.map(item => item.file === loaded.file ? { ...item, ...loaded } : item)
         if (changeMode === 'git') setGitDiffs(apply)
-        else setBranchDiffs(apply)
+        else if (changeMode === 'branch') setBranchDiffs(apply)
+        else if (changeMode === 'staged') setStagedDiffs(apply)
+        else setUnstagedDiffs(apply)
       })
       .catch(error => {
         if (!controller.signal.aborted) sessionErrorHandler('load file diff', error)

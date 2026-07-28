@@ -18,7 +18,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 8)
+      assert.equal(hello.workerProtocolVersion, 10)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -55,22 +55,40 @@ describe("PiWorkerSession IPC", () => {
       let ticks = 0
       let deltas = 0
       const nativeEvents: unknown[] = []
+      const nativeHeads: unknown[] = []
       const unsubscribe = runtime.onProjection(() => { ticks += 1 })
       const unsubscribeDelta = runtime.onProjectionDelta(() => { deltas += 1 })
       const unsubscribeNative = runtime.onNativeEvent(event => { nativeEvents.push(event) })
-      await runtime.prompt("hello")
+      const unsubscribeNativeHead = runtime.onNativeHead(native => { nativeHeads.push(native) })
+      await runtime.prompt("hello", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
       unsubscribe()
       unsubscribeDelta()
       unsubscribeNative()
+      unsubscribeNativeHead()
       assert.equal(ticks > 1, true)
       assert.equal(deltas, 1)
       assert.deepEqual(nativeEvents, [{ type: "turn_start", turnIndex: 0 }])
+      assert.equal(nativeHeads.length, 1)
       assert.equal(runtime.getProjection().timeline[0]?.entryId, "fixture-entry")
-      assert.equal(runtime.getEntries()[0]?.type, "message")
-      assert.equal(runtime.getTree()[0]?.entry.id, "fixture-entry")
+      let nativePage = await runtime.getNativeEntriesPage(undefined, 50, 1_000_000)
+      assert.equal(nativePage.items[0]?.type, "message")
+      assert.deepEqual(nativePage.items[0]?.futureField, {
+        unknown: [1, "two", false, null],
+      })
+      assert.deepEqual(nativePage.items[1], {
+        type: "future_pi_entry",
+        id: "future-entry",
+        parentId: "fixture-entry",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: { untouched: { deep: ["value"] } },
+      })
+      const message = nativePage.items[0]?.message as { content?: unknown[] }
+      assert.deepEqual(message.content?.[1], { type: "image", mimeType: "image/png", data: "aW1hZ2U=" })
+      assert.equal(runtime.getNativeHead().entryCount, 2)
       assert.equal((await runtime.navigateTree("fixture-entry")).editorText, "fixture draft")
       await runtime.setLabel("fixture-entry", "checkpoint")
-      assert.equal(runtime.getTree()[0]?.label, "checkpoint")
+      nativePage = await runtime.getNativeEntriesPage(undefined, 50, 1_000_000)
+      assert.equal(nativePage.items.at(-1)?.label, "checkpoint")
       await runtime.setSessionName("Renamed fixture")
       assert.equal(runtime.getSessionName(), "Renamed fixture")
       await runtime.prompt("image", [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }])

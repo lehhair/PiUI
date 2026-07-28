@@ -113,10 +113,10 @@ export class ProviderAuthHost {
     const registeredProviderIds = [...runtime.getRegisteredProviderIds()]
     return {
       providers,
-      models: safeJson(runtime.getModels()) as unknown[],
-      availableModels: safeJson(await runtime.getAvailable()) as unknown[],
-      availableSnapshot: safeJson(runtime.getAvailableSnapshot()) as unknown[],
-      credentials: safeJson(await runtime.listCredentials()) as unknown[],
+      models: [...jsonClone(runtime.getModels())],
+      availableModels: [...jsonClone(await runtime.getAvailable())],
+      availableSnapshot: [...jsonClone(runtime.getAvailableSnapshot())],
+      credentials: [...jsonClone(await runtime.listCredentials())],
       registeredProviderIds,
       registeredProviderConfigs: Object.fromEntries(registeredProviderIds.map(providerId => [
         providerId,
@@ -219,7 +219,7 @@ export class ProviderAuthHost {
 function safeJson(value: unknown): unknown {
   if (value === undefined) return undefined
   return JSON.parse(JSON.stringify(value, (key, item) => {
-    if (/(api[-_]?key|token|secret|credential|authorization|headers?)/i.test(key)) return "[redacted]"
+    if (/^(api[-_]?key|access|refresh|secret|credential|authorization|proxy-authorization)$/i.test(key)) return "[redacted]"
     if (item instanceof Map) {
       return Object.fromEntries([...item.entries()].map(([mapKey, mapValue]) => [String(mapKey), safeJson(mapValue)]))
     }
@@ -228,4 +228,15 @@ function safeJson(value: unknown): unknown {
     if (typeof item === "bigint") return item.toString()
     return item
   }))
+}
+
+function jsonClone<T>(value: T): T {
+  if (value === undefined) return value
+  return JSON.parse(JSON.stringify(value, (_key, item) => {
+    if (item instanceof Map) return Object.fromEntries(item)
+    if (item instanceof Error) return { name: item.name, message: item.message }
+    if (typeof item === "function" || typeof item === "symbol") return undefined
+    if (typeof item === "bigint") return item.toString()
+    return item
+  })) as T
 }

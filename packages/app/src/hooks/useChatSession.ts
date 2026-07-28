@@ -42,7 +42,7 @@ import { promptSession } from '../pi/sessionApi'
 import { forkPiSession } from '../pi/sessionApi'
 import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
-import { usePiCapabilities } from '../pi/capabilities'
+import { getPiCapabilities, usePiCapabilities } from '../pi/capabilities'
 import { clearSessionEditorDraft, useSessionEditorDraft } from '../pi/sessionEditorDraftStore'
 import { sessionProjectionStore } from '../pi/sessionProjectionStore'
 
@@ -210,7 +210,7 @@ export function useChatSession({
       const session = sessions.find(s => s.id === sessionId)
       if (session?.title) return session.title
       if (sessionId) return `Session ${sessionId.slice(0, 6)}`
-      return 'OpenCode'
+      return 'Pi'
     },
     [sessions],
   )
@@ -510,9 +510,14 @@ export function useChatSession({
           navigateToSession(sessionId, newSession.directory)
         }
 
-        const busy = messageStore.getSessionState(sessionId)?.isStreaming === true
+        const runtimeStatus = activeSessionStore.getSnapshot().statusMap[sessionId]
+        const busy = (runtimeStatus !== undefined && runtimeStatus.type !== 'idle') ||
+          messageStore.getSessionState(sessionId)?.isStreaming === true
         const delivery = busy ? input.options?.delivery : undefined
         if (busy && !delivery) throw new Error('Choose steer or follow-up while the session is running')
+        const capabilities = getPiCapabilities()
+        if (delivery === 'steer' && !capabilities.promptSteer) throw new Error('Steer is unavailable on this PiUI server')
+        if (delivery === 'followUp' && !capabilities.promptFollowUp) throw new Error('Follow-up is unavailable on this PiUI server')
         messageStore.setStreaming(sessionId, true)
         activeSessionStore.updateStatus(sessionId, { type: 'busy' })
         let commandId: string | undefined

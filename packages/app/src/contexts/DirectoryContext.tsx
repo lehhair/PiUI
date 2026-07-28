@@ -8,6 +8,7 @@ import { normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStora
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
 import { isTauri } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
+import { hasUnsavedFileChanges } from '../store/unsavedFileStore'
 
 const STORAGE_KEY_SAVED = 'opencode-saved-directories'
 const STORAGE_KEY_RECENT = 'opencode-recent-projects'
@@ -71,12 +72,13 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 设置当前目录（更新 URL + 记录最近使用）
   const setCurrentDirectory = useCallback(
     (directory: string | undefined) => {
+      if (directory !== urlDirectory && hasUnsavedFileChanges() && !window.confirm('Discard unsaved file changes?')) return
       setUrlDirectory(directory)
       if (directory) {
         setRecentProjects(prev => ({ ...prev, [directory]: Date.now() }))
       }
     },
-    [setUrlDirectory],
+    [setUrlDirectory, urlDirectory],
   )
 
   // 添加目录

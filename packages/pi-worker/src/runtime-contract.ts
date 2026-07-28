@@ -7,8 +7,10 @@ import type { PiExtensionUiEvent } from "./extension-ui-bridge.js"
 import type {
   CompactionCommandResultV1,
   PiNavigationResultV1,
-  PiSessionEntryV1,
-  PiSessionTreeNodeV1,
+  PiNativeSessionEnvelopeV1,
+  PiNativeSessionHeadV1,
+  PiNativeEntriesPageV1,
+  PiTimelinePageV1,
   PiResourceSnapshotV1,
   PiResourceExtensionPathsV1,
   PiRuntimeInspectionV1,
@@ -24,6 +26,7 @@ export interface PiSessionRuntime {
   onProjection(listener: (projection: ProjectionState) => void): () => void
   onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void
   onNativeEvent?(listener: (event: unknown) => void): () => void
+  onNativeHead?(listener: (native: PiNativeSessionHeadV1) => void): () => void
   onResourcesChanged?(listener: () => void): () => void
   onSessionReplacement?(listener: (replacement: SessionReplacementResultV1) => void | Promise<void>): () => void
   listRuntimeProviders?(): Promise<import("@piui/protocol").ProviderAuthInfoV1[]>
@@ -41,9 +44,12 @@ export interface PiSessionRuntime {
   getSessionId(): string
   getSessionFile(): string | undefined
   getSessionName(): string | undefined
-  getEntries(): PiSessionEntryV1[]
-  getTree(): PiSessionTreeNodeV1[]
   getLeafId(): string | null
+  getNativeHead(): PiNativeSessionHeadV1
+  getNativeEntriesPage(cursor: string | undefined, limit: number, maxBytes: number): PiNativeEntriesPageV1 | Promise<PiNativeEntriesPageV1>
+  getNativeImageAttachment(entryId: string, blockIndex: number): { mimeType: string; data: string; etag: string } | Promise<{ mimeType: string; data: string; etag: string }>
+  getTimelinePage?(cursor: string | undefined, limit: number, maxBytes?: number): PiTimelinePageV1 | Promise<PiTimelinePageV1>
+  getInitialTimelinePage?(): PiTimelinePageV1
   getModel(): { provider: string; id: string; displayName: string } | undefined
   getThinkingLevel(): string
   getAvailableThinkingLevels(): string[]

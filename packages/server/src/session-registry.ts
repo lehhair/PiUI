@@ -26,8 +26,7 @@ import type {
   ResolvedPackageResourcesV1,
   PackageUpdateV1,
   PiModelRuntimeSnapshotV1,
-  PiSessionEntryV1,
-  PiSessionTreeNodeV1,
+  PiNativeSessionHeadV1,
   QueueDeliveryModeV1,
   SessionAttachmentV2,
   SessionReplacementResultV1,
@@ -50,6 +49,7 @@ import { workspacePathKey, type WorkspaceStore } from "./workspace-store.ts"
 import type { EventHub } from "./event-hub.ts"
 import { preparePromptInput } from "./prompt-attachments.ts"
 import { resolveWorkspacePath } from "./path-safety.ts"
+import { timelinePage } from "./native-pagination.ts"
 
 export interface AppSession {
   id: string
@@ -68,9 +68,7 @@ export interface AppSession {
   real?: PiSessionRuntime
   workerGeneration?: string
   runtimeError?: string
-  nativeEntries?: PiSessionEntryV1[]
-  nativeTree?: PiSessionTreeNodeV1[]
-  nativeLeafId?: string | null
+  nativeHead?: PiNativeSessionHeadV1
 }
 
 export interface PiSessionBackend {
@@ -1011,9 +1009,7 @@ export class SessionRegistry {
     if (!runtime) throw unsupportedRuntimeOperation("resource reload")
     await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.reload())
     session.projection = runtime.getProjection()
-    session.nativeEntries = runtime.getEntries()
-    session.nativeTree = runtime.getTree()
-    session.nativeLeafId = runtime.getLeafId()
+    session.nativeHead = runtime.getNativeHead()
     this.touch(session)
     if (publish !== false) {
       this.publishResourcesUpdated(session.cwd, typeof publish === "string" ? publish : undefined)
@@ -1096,8 +1092,7 @@ export class SessionRegistry {
     await this.runBoundRuntimeCommand(
       session, runtime, session.workerGeneration, () => runtime.appendCustomEntry(customType, data),
     )
-    session.nativeEntries = runtime.getEntries()
-    session.nativeTree = runtime.getTree()
+    session.nativeHead = runtime.getNativeHead()
     this.touch(session)
     return session
   }
@@ -1406,9 +1401,7 @@ export class SessionRegistry {
     if (!runtime) throw unsupportedRuntimeOperation("session replacement")
     const sourceProjection = source.projection
     const sourceGeneration = source.workerGeneration
-    source.nativeEntries = runtime.getEntries()
-    source.nativeTree = runtime.getTree()
-    source.nativeLeafId = runtime.getLeafId()
+    source.nativeHead = runtime.getNativeHead()
     let replacement: SessionReplacementResultV1
     try {
       replacement = await replace(runtime)
@@ -1569,6 +1562,7 @@ export class SessionRegistry {
     session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
     session.title = runtime.getSessionName() ?? session.title
     session.workerGeneration = runtime.getWorkerGeneration?.()
+    session.nativeHead = runtime.getNativeHead()
     session.runtimeError = undefined
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -1710,6 +1704,16 @@ export class SessionRegistry {
         { sessionId: session.id, command: event.command },
       )
     })
+    const unsubscribeNativeHead = runtime.onNativeHead?.(native => {
+      if (!this.isCurrentRuntime(session, runtime, generation)) return
+      session.nativeHead = native
+      this.touch(session)
+      this.eventHub?.publishV2(
+        { kind: "session", id: session.id },
+        "session.snapshot.updated",
+        { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
+      )
+    })
     const unsubscribeSessionReplacement = runtime.onSessionReplacement?.(async replacement => {
       if (!this.isCurrentRuntime(session, runtime, generation)) throw runtimeReplacedError()
       const result = await this.commitReplacement(
@@ -1736,6 +1740,7 @@ export class SessionRegistry {
       this.runtimeBindings.delete(session.id)
       binding.unsubscribe()
       this.closeExtensionUi(session.id, "runtime_crashed", generation)
+      session.nativeHead = runtime.getNativeHead()
       session.real = undefined
       session.runtimeError = error.message
       session.projection = {
@@ -1766,6 +1771,7 @@ export class SessionRegistry {
       this.runtimeBindings.delete(session.id)
       binding.unsubscribe()
       this.closeExtensionUi(session.id, "runtime_disposed", generation)
+      session.nativeHead = runtime.getNativeHead()
       session.real = undefined
       session.workerGeneration = undefined
       session.projection = { ...session.projection, isStreaming: false }
@@ -1781,6 +1787,7 @@ export class SessionRegistry {
       unsubscribeProjection?.()
       unsubscribeProjectionDelta?.()
       unsubscribeNativeEvent?.()
+      unsubscribeNativeHead?.()
       unsubscribeProviderAuth?.()
       unsubscribeResourcesChanged?.()
       unsubscribeExtensionUi?.()
@@ -1908,6 +1915,7 @@ export class SessionRegistry {
   /** Drops the runtime but keeps the session record, so a later attach reopens it. */
   private async detachRuntime(session: AppSession): Promise<void> {
     const runtime = session.real
+    if (runtime) session.nativeHead = runtime.getNativeHead()
     this.unbindRuntime(session)
     session.real = undefined
     session.workerGeneration = undefined
@@ -1941,6 +1949,28 @@ export class SessionRegistry {
       }
     }
     this.extensionUiStates.delete(sessionId)
+  }
+
+  async getNativeEntriesPage(sessionId: string, cursor: string | undefined, limit: number, maxBytes: number) {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw sessionRuntimeUnavailable(session)
+    return runtime.getNativeEntriesPage(cursor, limit, maxBytes)
+  }
+
+  async getTimelinePage(sessionId: string, cursor: string | undefined, limit: number, maxBytes: number) {
+    const session = await this.attach(sessionId)
+    if (session.real?.getTimelinePage) return await session.real.getTimelinePage(cursor, limit, maxBytes)
+    const native = session.nativeHead ?? emptyNativeHead(null)
+    return timelinePage(session.projection.timeline, native.epoch, { cursor, limit, maxBytes })
+  }
+
+  async getNativeImageAttachment(sessionId: string, entryId: string, blockIndex: number) {
+    const session = await this.attach(sessionId)
+    const runtime = session.real
+    if (!runtime) throw sessionRuntimeUnavailable(session)
+    const attachment = await runtime.getNativeImageAttachment(entryId, blockIndex)
+    return { ...attachment, data: Buffer.from(attachment.data, "base64") }
   }
 
   private rememberExtensionUiSettlement(
@@ -2155,6 +2185,13 @@ export class SessionRegistry {
     else if (ui?.retry?.phase === "waiting" || ui?.retry?.phase === "running") state = "retrying"
     else if (isStreaming) state = "running"
 
+    const native = session.real?.getNativeHead() ?? session.nativeHead ?? emptyNativeHead(
+      session.projection.timeline.at(-1)?.entryId ?? null,
+    )
+    if (session.real) session.nativeHead = native
+    const firstTimelinePage = session.real?.getInitialTimelinePage?.() ?? timelinePage(
+      session.projection.timeline as TimelineItemV1[], native.epoch, { limit: 50, maxBytes: 1_048_576 },
+    )
     return {
       protocolVersion: 1,
       epoch: session.epoch,
@@ -2208,15 +2245,26 @@ export class SessionRegistry {
         workerGeneration: session.workerGeneration,
         runtimeError: session.runtimeError,
       },
-      timeline: session.projection.timeline as TimelineItemV1[],
-      native: {
-        namespace: "pi",
-        schemaVersion: 1,
-        leafId: session.real?.getLeafId() ?? session.nativeLeafId ?? session.projection.timeline.at(-1)?.entryId ?? null,
-        entries: session.real?.getEntries() ?? session.nativeEntries ?? [],
-        tree: session.real?.getTree() ?? session.nativeTree ?? [],
+      timeline: firstTimelinePage.items,
+      timelinePage: {
+        beforeCursor: firstTimelinePage.beforeCursor,
+        hasMore: firstTimelinePage.hasMore,
       },
+      native,
     }
+  }
+}
+
+function emptyNativeHead(leafId: string | null): PiNativeSessionHeadV1 {
+  return {
+    namespace: "pi",
+    schemaVersion: 1,
+    sdkVersion: "mock",
+    revision: 0,
+    epoch: "mock",
+    header: null,
+    leafId,
+    entryCount: 0,
   }
 }
 
@@ -2228,6 +2276,10 @@ function runtimeReplacedError(): Error {
 
 function unsupportedRuntimeOperation(operation: string): Error {
   return Object.assign(new Error(`Pi runtime does not support ${operation}`), { code: "CAPABILITY_DISABLED" })
+}
+
+function sessionRuntimeUnavailable(session: AppSession): Error {
+  return Object.assign(new Error(`session runtime is unavailable: ${session.id}`), { code: "SESSION_NOT_RUNNING" })
 }
 
 function sameSessionFile(sourceFile?: string, targetFile?: string): boolean {

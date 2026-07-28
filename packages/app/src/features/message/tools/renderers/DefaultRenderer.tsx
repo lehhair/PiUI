@@ -6,6 +6,7 @@ import { detectLanguage } from '../../../../utils/languageUtils'
 import { getMaterialIconUrl } from '../../../../utils/materialIcons'
 import { themeStore } from '../../../../store/themeStore'
 import type { ToolRendererProps, ExtractedToolData } from '../types'
+import { AuthenticatedImage } from '../../../attachment'
 
 // ============================================
 // Default Tool Renderer
@@ -62,6 +63,25 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
           stateBaseKey={`message:${part.messageID}:tool:${part.id}:output`}
         />
       )}
+      {data.notice ? (
+        <div className="flex items-start gap-1.5 text-[length:var(--fs-xs)] text-warning-100">
+          <AlertCircleIcon size={12} className="mt-0.5 shrink-0" />
+          <span className="break-all">{data.notice}</span>
+        </div>
+      ) : null}
+      {data.images?.length ? (
+        <div className="grid grid-cols-2 gap-2">
+          {data.images.map((image, index) => (
+            <AuthenticatedImage
+              key={`${image.mimeType}-${index}`}
+              src={image.url}
+              requiresAuth={image.requiresAuth}
+              alt={`${tool} result ${index + 1}`}
+              className="max-h-64 w-full object-contain border border-border-200 bg-bg-100"
+            />
+          ))}
+        </div>
+      ) : null}
 
       {/* Diagnostics */}
       {hasDiagnostics && <DiagnosticsBlock diagnostics={data.diagnostics!} />}
@@ -114,7 +134,7 @@ function OutputBlock({
   }
 
   // 2. 工具活跃时（running/pending）统一显示 loading — compact 模式下不显示
-  if (isActive) {
+  if (isActive && !hasOutput) {
     if (compact) return null
     return (
       <ContentBlock

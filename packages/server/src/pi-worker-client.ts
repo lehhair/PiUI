@@ -122,6 +122,7 @@ export class PiWorkerSession implements PiSessionRuntime {
   private readonly closeListeners = new Set<() => void>()
   private readonly extensionUiListeners = new Set<(event: PiExtensionUiEvent) => void>()
   private readonly nativeEventListeners = new Set<(event: unknown) => void>()
+  private readonly nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
   private readonly resourceListeners = new Set<() => void>()
   private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
   private readonly packageProgressListeners = new Set<(event: PackageProgressV1) => void>()
@@ -521,9 +522,30 @@ export class PiWorkerSession implements PiSessionRuntime {
   getSessionId(): string { return this.session.sessionId }
   getSessionFile(): string | undefined { return this.session.sessionFile }
   getSessionName(): string | undefined { return this.session.sessionName }
-  getEntries() { return this.session.entries }
-  getTree() { return this.session.tree }
-  getLeafId(): string | null { return this.session.leafId }
+  getLeafId(): string | null { return this.session.native.leafId }
+  getNativeHead() { return this.session.native }
+
+  async getNativeEntriesPage(cursor: string | undefined, limit: number, maxBytes: number) {
+    const result = await this.request({ type: "getNativeEntriesPage", cursor, limit, maxBytes })
+    if (result.type !== "nativeEntriesPage") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.page
+  }
+
+  async getNativeImageAttachment(entryId: string, blockIndex: number) {
+    const result = await this.request({ type: "getNativeImageAttachment", entryId, blockIndex })
+    if (result.type !== "nativeImageAttachment") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return { mimeType: result.mimeType, data: result.data, etag: result.etag }
+  }
+
+  async getTimelinePage(cursor: string | undefined, limit: number, maxBytes = 1_048_576) {
+    const result = await this.request({ type: "getTimelinePage", cursor, limit, maxBytes })
+    if (result.type !== "timelinePage") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.page
+  }
+
+  getInitialTimelinePage() {
+    return { items: this.projection.timeline, ...this.session.timelinePage }
+  }
   getModel() { return this.runtimeState.model }
   getThinkingLevel(): string { return this.runtimeState.thinkingLevel }
   getAvailableThinkingLevels(): string[] { return this.runtimeState.availableThinkingLevels }
@@ -697,6 +719,11 @@ export class PiWorkerSession implements PiSessionRuntime {
 
   async fork(entryId: string, position: "before" | "at"): Promise<SessionReplacementResultV1> {
     return this.requestReplacement("fork", undefined, { type: "fork", entryId, position })
+  }
+
+  onNativeHead(listener: (native: import("@piui/protocol").PiNativeSessionHeadV1) => void): () => void {
+    this.nativeHeadListeners.add(listener)
+    return () => this.nativeHeadListeners.delete(listener)
   }
 
   async clone(entryId?: string): Promise<SessionReplacementResultV1> {
@@ -955,6 +982,11 @@ export class PiWorkerSession implements PiSessionRuntime {
       for (const listener of this.nativeEventListeners) listener(message.event)
       return
     }
+    if (message.type === "nativeHead") {
+      this.session = { ...this.session, native: message.native }
+      for (const listener of this.nativeHeadListeners) listener(message.native)
+      return
+    }
     if (message.type === "resourcesChanged") {
       for (const listener of this.resourceListeners) listener()
       return
@@ -982,6 +1014,13 @@ export class PiWorkerSession implements PiSessionRuntime {
         }
       }
       this.projection = restoreProjection(timeline, delta.isStreaming)
+      this.session = {
+        ...this.session,
+        projection: {
+          timeline: this.projection.timeline,
+          isStreaming: this.projection.isStreaming,
+        },
+      }
       for (const listener of this.projectionListeners) listener(this.projection)
       for (const listener of this.projectionDeltaListeners) listener({
         timeline: delta.timeline,

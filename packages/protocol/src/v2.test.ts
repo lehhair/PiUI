@@ -67,14 +67,17 @@ describe("protocol v2 foundation", () => {
     const native: SessionSnapshotV1["native"] = {
       namespace: "pi",
       schemaVersion: 1,
+      sdkVersion: "0.81.1",
+      revision: 1,
+      sessionFormatVersion: 3,
+      header: { type: "session", version: 3, id: "session-1" },
       leafId: "entry-1",
       entries: [{
         type: "message",
         id: "entry-1",
         parentId: null,
         timestamp: "2026-01-01T00:00:00.000Z",
-        role: "user",
-        preview: "hello",
+        message: { role: "user", content: [{ type: "text", text: "hello" }] },
       }],
       tree: [],
     }
