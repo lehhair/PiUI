@@ -163,18 +163,18 @@ export class PiWorkerSession implements PiSessionRuntime {
       this.resolveClosed = resolve
     })
     this.readyTimer = setTimeout(() => {
-      this.rejectHandshake(new Error("Pi worker handshake timeout"))
+      this.rejectHandshake(workerRuntimeError("Pi worker handshake timeout"))
       this.terminate()
     }, options.handshakeTimeoutMs ?? 15_000)
     this.readyTimer.unref()
     child.on("message", message => this.handleMessage(message as WorkerMessage))
-    child.on("error", error => this.handleExit(error))
+    child.on("error", error => this.handleExit(workerRuntimeError(`Pi worker process error: ${error.message}`, error)))
     child.on("exit", (code, signal) => {
-      this.handleExit(new Error(`Pi worker exited unexpectedly (${signal ?? code ?? "unknown"})`))
+      this.handleExit(workerRuntimeError(`Pi worker exited unexpectedly (${signal ?? code ?? "unknown"})`))
       this.notifyClose()
     })
     child.on("close", (code, signal) => {
-      this.handleExit(new Error(`Pi worker closed unexpectedly (${signal ?? code ?? "unknown"})`))
+      this.handleExit(workerRuntimeError(`Pi worker closed unexpectedly (${signal ?? code ?? "unknown"})`))
       this.notifyClose()
     })
   }
@@ -1252,6 +1252,10 @@ function spawnWorker(workerEntry: URL): ChildProcess {
     // 1.5s of startup per worker for nothing.
     execArgv: [],
   })
+}
+
+function workerRuntimeError(message: string, cause?: unknown): Error {
+  return Object.assign(new Error(message, { cause }), { code: "SESSION_RUNTIME_CRASHED" })
 }
 
 function expectSession(result: WorkerResult): WorkerSessionWire {

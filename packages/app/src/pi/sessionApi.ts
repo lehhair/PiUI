@@ -1165,9 +1165,7 @@ export async function createMockSession(workspacePath: string, title?: string) {
 }
 
 export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV1> {
-  const res = await fetch(`${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`)
-  if (!res.ok) throw new Error(`fetchSnapshot ${res.status}`)
-  return (await res.json()) as SessionSnapshotV1
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`, "fetchSnapshot")
 }
 
 export async function fetchPiNativeEntriesPage(

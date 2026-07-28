@@ -18,12 +18,16 @@ import { fetchPiNativeBranchPage } from '../pi/sessionApi'
 import { appendPiNativeEntriesPageToUi, loadPiSessionToUi } from '../pi/applySnapshot'
 
 function toLoadMessageError(error: unknown): MessageError {
-  const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
+  const record = error && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const code = typeof record.code === 'string' ? record.code : undefined
+  const status = typeof record.status === 'number' ? record.status : undefined
+  const detail = error instanceof Error ? error.message : String(error || 'Failed to load session')
+  const message = code ? `${code}: ${detail}` : detail
   return {
     name: 'APIError',
     data: {
       message,
-      isRetryable: true,
+      isRetryable: status === undefined || status === 429 || status >= 500,
       responseBody: error instanceof Error ? error.stack : undefined,
     },
   }
@@ -170,6 +174,10 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           sessionId,
           cachedCount: cached.messages.length,
         })
+        return
+      }
+      if (cached?.loadState === 'error' && !cached.isStale) {
+        logger.log('[SessionManager] switch:keep-load-error', { sessionId })
         return
       }
 
