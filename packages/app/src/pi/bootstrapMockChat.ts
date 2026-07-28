@@ -6,7 +6,7 @@ import { setPiCapabilities, setPiCapabilityManifest } from "./capabilities"
 import { getPiBackendState, setPiBackendState } from "./serverMode"
 import { serverStore } from "../store/serverStore"
 import { clearPiSessionIndex } from "./piSessionIndex"
-import { sessionProjectionStore } from "./sessionProjectionStore"
+import { nativeSessionStore } from "./nativeSessionStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { messageStore } from "../store/messageStore"
 import { resetWorkspaceResolutionCache } from "./sessionApi"
@@ -86,7 +86,7 @@ export function installPiBackendServerSwitch(): void {
   serverSwitchInstalled = true
   serverStore.onServerChange(() => {
     clearPiSessionIndex()
-    sessionProjectionStore.clear()
+    nativeSessionStore.clear()
     extensionUiStore.reset()
     messageStore.clearAll()
     resetWorkspaceResolutionCache()

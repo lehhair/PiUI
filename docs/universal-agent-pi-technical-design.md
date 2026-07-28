@@ -1,10 +1,12 @@
 # Universal Agent 应用技术设计与工程交接文档
 
-> 文档状态：工程实施基线  
+> 文档状态：历史设计稿
 > 研究日期：2026-07-24  
 > 首个 Agent：Pi  
 > UI 参考代码：`/workspace/OpenCodeUI/`  
 > Pi SDK 参考代码：`/workspace/pi-mono/`
+
+> 当前实现的数据与远程 API 边界以 [`PI_SDK_API_MATRIX.md`](./PI_SDK_API_MATRIX.md) 为准。本文早期章节中的服务端 timeline/projection 草案已经废弃；浏览器现在直接消费 Pi native entries、native tree 和原始 JSON events，并只在 App 内派生 React 渲染对象。
 
 ## 1. 文档目的
 

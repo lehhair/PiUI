@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import type { ExtensionUiDialogResponseV1 } from "@piui/protocol"
-import { createProjectionState, type PiExtensionUiEvent, type PiSessionRuntime } from "@piui/pi-worker"
+import type { PiExtensionUiEvent, PiSessionRuntime } from "@piui/pi-worker"
 import { EventHub } from "./event-hub.ts"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
@@ -17,7 +17,6 @@ describe("SessionRegistry extension UI", () => {
       getSessionFile: () => undefined,
       getSessionName: () => "Extension session",
       getWorkerGeneration: () => "generation-1",
-      getProjection: () => createProjectionState(),
       getRuntimeUiState: () => ({
         phase: "idle",
         queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
@@ -37,8 +36,6 @@ describe("SessionRegistry extension UI", () => {
       getNativeEntriesPage: () => ({ head: runtime.getNativeHead(), items: [], hasMore: false }),
       getNativeImageAttachment: () => { throw Object.assign(new Error("not found"), { code: "NOT_FOUND" }) },
       onState: () => () => {},
-      onProjection: () => () => {},
-      onProjectionDelta: () => () => {},
       onCrash: () => () => {},
       onExtensionUi: (listener: (event: PiExtensionUiEvent) => void) => {
         listeners.add(listener)

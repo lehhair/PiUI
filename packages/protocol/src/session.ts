@@ -123,88 +123,11 @@ export type CustomMessageContentV1 =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string }
 
-export interface TextContentV1 {
-  type: "text"
-  text: string
-}
-
-export interface ThinkingContentV1 {
-  type: "thinking"
-  text: string
-}
-
-export interface ToolPresentationV1 {
-  type: "tool"
-  callId: string
-  name: string
-  status: "pending" | "running" | "completed" | "error"
-  input: unknown
-  output?: Array<{ type: "text"; text: string } | {
-    type: "image"
-    entryId: string
-    blockIndex: number
-    mimeType: string
-    byteLength: number
-  }>
-  isError?: boolean
-  startedAt?: number
-  endedAt?: number
-  normalized?: {
-    title?: string
-    cwd?: string
-    exitCode?: number
-    patch?: string
-  }
-  nativeDetails?: unknown
-}
-
-export type AssistantContentV1 = TextContentV1 | ThinkingContentV1 | ToolPresentationV1
-
-export interface UserTimelineAttachmentV1 {
-  type: "image"
-  mimeType: string
-  blockIndex: number
-  byteLength: number
-}
-
-export interface UserTimelineItemV1 {
-  type: "user"
-  id: string
-  entryId?: string
-  parentEntryId?: string | null
-  timestamp: number
-  text: string
-  attachments?: UserTimelineAttachmentV1[]
-}
-
-export interface AssistantTimelineItemV1 {
-  type: "assistant"
-  id: string
-  entryId?: string
-  parentEntryId?: string | null
-  timestamp: number
-  status: "streaming" | "completed" | "error" | "aborted"
-  provider: string
-  model: string
-  stopReason?: string
-  content: AssistantContentV1[]
-}
-
-export type TimelineItemV1 = UserTimelineItemV1 | AssistantTimelineItemV1
-
 export type PiNativeJsonValueV1 = null | boolean | number | string | PiNativeJsonValueV1[] | {
   [key: string]: PiNativeJsonValueV1
 }
 
-export interface PiNativeTreeRefV1 {
-  entryId: string
-  children: PiNativeTreeRefV1[]
-  label?: string
-  labelTimestamp?: string
-}
-
-/** JSON-structural copy of Pi's native session data. Presentation projections
- * must never be used to reconstruct this envelope. */
+/** JSON-structural copy of Pi's native session data. */
 export interface PiNativeSessionEnvelopeV1 {
   namespace: "pi"
   schemaVersion: 1
@@ -232,12 +155,6 @@ export interface PiNativeSessionHeadV1 {
 export interface PiNativeEntriesPageV1 {
   head: PiNativeSessionHeadV1
   items: Array<{ [key: string]: PiNativeJsonValueV1 }>
-  beforeCursor?: string
-  hasMore: boolean
-}
-
-export interface PiTimelinePageV1 {
-  items: TimelineItemV1[]
   beforeCursor?: string
   hasMore: boolean
 }
@@ -297,9 +214,6 @@ export interface SessionSnapshotV1 {
     workerGeneration?: string
     runtimeError?: string
   }
-  /** Most recent presentation page only. Older pages are loaded explicitly. */
-  timeline: TimelineItemV1[]
-  timelinePage: Omit<PiTimelinePageV1, "items">
   native: PiNativeSessionHeadV1
 }
 

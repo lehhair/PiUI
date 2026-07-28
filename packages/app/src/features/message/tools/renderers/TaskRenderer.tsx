@@ -13,8 +13,7 @@ import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 import type { Message, TextPart, ToolPart } from '../../../../types/message'
 import { isVisibleTextPart } from '../../../../types/message'
-import { fetchSnapshot } from '../../../../pi/sessionApi'
-import { snapshotToUiMessages } from '../../../../pi/timelineToMessages'
+import { loadPiSessionToUi } from '../../../../pi/applySnapshot'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -319,23 +318,7 @@ const SubSessionView = memo(function SubSessionView({ sessionId }: SubSessionVie
     loadedRef.current = true
     messageStore.setLoadState(sessionId, 'loading')
 
-    fetchSnapshot(sessionId)
-      .then(snapshot => {
-        const allMessages = snapshotToUiMessages(snapshot)
-        const messages = allMessages.slice(-20)
-        return { messages, hasMoreHistory: allMessages.length > messages.length }
-      })
-      .then(({ messages, hasMoreHistory }) => {
-        const currentState = messageStore.getSessionState(sessionId)
-        if (currentState && currentState.messages.length > messages.length) {
-          messageStore.setLoadState(sessionId, 'loaded')
-          return
-        }
-        messageStore.setUiMessages(sessionId, messages, {
-          directory: '',
-          hasMoreHistory,
-        })
-      })
+    loadPiSessionToUi(sessionId, { activate: false })
       .catch(err => {
         sessionErrorHandler('load sub-session', err)
         messageStore.setLoadState(sessionId, 'error')

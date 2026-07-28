@@ -161,7 +161,7 @@ export default function (pi) {
     }
   })
 
-  it("projects an offline faux-provider turn without user configuration", async () => {
+  it("streams raw events and persists an offline faux-provider turn", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-sdk-"))
     const { fauxAssistantMessage, fauxProvider, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()
     const faux = fauxProvider({ provider: "piui-faux", api: "piui-faux" })
@@ -223,30 +223,20 @@ export default function (pi) {
       await session.prompt("ping", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
       unsubscribeNative()
 
-      // Native events carry lifecycle metadata only: message content, tool
-      // arguments and tool results must never cross the worker boundary.
+      // The authenticated client receives Pi's complete JSON event structure.
       assert.ok(nativeEvents.length > 0)
       for (const event of nativeEvents) {
         assert.equal(typeof event.type, "string")
-        for (const [key, value] of Object.entries(event)) {
-          assert.equal(
-            typeof value === "string" || typeof value === "number" || typeof value === "boolean",
-            true,
-            `native event ${String(event.type)} leaked non-scalar key ${key}`,
-          )
-        }
-        for (const forbidden of ["message", "args", "result", "partialResult", "content"]) {
-          assert.equal(forbidden in event, false, `native event leaked ${forbidden}`)
-        }
       }
+      assert.ok(nativeEvents.some(event => {
+        const message = event.message
+        return event.type === "message_start" && message && typeof message === "object" &&
+          !Array.isArray(message) && (message as { role?: unknown }).role === "user"
+      }))
 
       assert.equal(faux.state.callCount, 1)
       assert.equal(session.getSessionFile(), undefined)
       assert.equal(session.getModel()?.provider, "piui-faux")
-      assert.ok(session.getProjection().timeline.some(item => item.type === "user" && item.text === "ping"))
-      const assistant = session.getProjection().timeline.find(item => item.type === "assistant")
-      assert.ok(assistant?.content.some(block => block.type === "text" && block.text === "offline answer"))
-
       const nativeEntries = session.getNativeEnvelope().entries
       const userEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "user")
       const assistantEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "assistant")
@@ -258,9 +248,6 @@ export default function (pi) {
         { type: "text", text: "ping" },
         { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
       ])
-      const projectedUser = session.getProjection().timeline.find(item => item.type === "user")
-      assert.ok(projectedUser?.type === "user")
-      assert.deepEqual(projectedUser.attachments, [{ type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 5 }])
       session.setLabel(String(assistantEntry.id), "offline checkpoint")
       session.setSessionName("Offline R3")
       assert.equal(session.getSessionName(), "Offline R3")
@@ -292,15 +279,16 @@ export default function (pi) {
 
       await session.sendUserMessage("sent while idle")
       assert.equal(faux.state.callCount, 2)
-      assert.ok(session.getProjection().timeline.some(
-        item => item.type === "user" && item.text === "sent while idle",
+      assert.ok(session.getNativeEnvelope().entries.some(entry =>
+        entry.type === "message" && nativeRole(entry) === "user" && nativeMessageText(entry) === "sent while idle"
       ))
 
       await session.prompt("fail offline")
-      const failed = session.getProjection().timeline.filter(item => item.type === "assistant").at(-1)
+      const failed = session.getNativeEnvelope().entries.filter(entry =>
+        entry.type === "message" && nativeRole(entry) === "assistant"
+      ).at(-1)
       assert.equal(faux.state.callCount, 3)
-      assert.equal(failed?.status, "error")
-      assert.equal(failed?.stopReason, "error")
+      assert.equal(nativeMessage(failed).stopReason, "error")
     } finally {
       await session?.dispose()
       rmSync(cwd, { recursive: true, force: true })
@@ -399,16 +387,19 @@ export default function (pi) {
         api.fauxAssistantMessage("follow-up handled"),
       ])
       session = opened.session
-      const deltaSizes: number[] = []
-      const offDelta = session.onProjectionDelta(projection => deltaSizes.push(projection.timeline.length))
-      const partialStarted = waitForProjection(session, projection => {
-        const assistant = projection.timeline.find(item => item.type === "assistant")
-        if (!assistant) return false
-        const text = assistant.content
-          .filter(block => block.type === "text")
-          .map(block => block.type === "text" ? block.text : "")
-          .join("")
+      const nativeEvents: Array<Record<string, unknown>> = []
+      let resolvePartial!: () => void
+      const partialStarted = new Promise<void>(resolve => { resolvePartial = resolve })
+      const offNative = session.onNativeEvent(event => {
+        if (!event || typeof event !== "object" || Array.isArray(event)) return
+        nativeEvents.push(event)
+        if (event.type !== "message_update") return
+        const message = event.message
+        if (!message || typeof message !== "object" || Array.isArray(message)) return
+        const text = nativeContentText(message.content)
         return text.length > 0 && text.length < slowText.length
+          ? resolvePartial()
+          : undefined
       })
 
       const prompt = session.prompt("initial")
@@ -419,20 +410,16 @@ export default function (pi) {
       assert.deepEqual(session.getRuntimeUiState().queue.followUp, ["follow up later"])
 
       await prompt
-      offDelta()
+      offNative()
       assert.equal(opened.faux.state.callCount, 3)
       assert.equal(opened.faux.getPendingResponseCount(), 0)
       assert.deepEqual(session.getRuntimeUiState().queue.steering, [])
       assert.deepEqual(session.getRuntimeUiState().queue.followUp, [])
-      const answers = session.getProjection().timeline
-        .filter(item => item.type === "assistant")
-        .map(item => item.content
-          .filter(block => block.type === "text")
-          .map(block => block.type === "text" ? block.text : "")
-          .join(""))
+      const answers = session.getNativeEnvelope().entries
+        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
+        .map(nativeMessageText)
       assert.deepEqual(answers, [slowText, "steering handled", "follow-up handled"])
-      assert.ok(deltaSizes.length > 1)
-      assert.ok(deltaSizes.every(size => size <= 2))
+      assert.ok(nativeEvents.some(event => event.type === "message_update" && "message" in event))
     } finally {
       await session?.dispose()
       rmSync(cwd, { recursive: true, force: true })
@@ -606,6 +593,27 @@ function nativeRole(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entri
   return message && typeof message === "object" && !Array.isArray(message) ? message.role : undefined
 }
 
+function nativeMessage(
+  entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number] | undefined,
+): Record<string, unknown> {
+  const message = entry?.message
+  return message && typeof message === "object" && !Array.isArray(message) ? message : {}
+}
+
+function nativeMessageText(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number]): string {
+  return nativeContentText(nativeMessage(entry).content)
+}
+
+function nativeContentText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content.flatMap(block =>
+    block && typeof block === "object" && !Array.isArray(block) && block.type === "text" && typeof block.text === "string"
+      ? [block.text]
+      : []
+  ).join("")
+}
+
 type ModelRuntimeOptions = NonNullable<Parameters<typeof ModelRuntime.create>[0]>
 type NativeProvider = Parameters<ModelRuntime["registerNativeProvider"]>[0]
 
@@ -678,25 +686,6 @@ async function openOfflineSession(
     }),
     faux,
   }
-}
-
-function waitForProjection(
-  session: RealPiSession,
-  predicate: (projection: ReturnType<RealPiSession["getProjection"]>) => boolean,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      off()
-      reject(new Error("Timed out waiting for Pi projection"))
-    }, 5_000)
-    let off = () => {}
-    off = session.onProjection(projection => {
-      if (!predicate(projection)) return
-      clearTimeout(timer)
-      off()
-      resolve()
-    })
-  })
 }
 
 async function loadPiAiFromPinnedSdk(): Promise<PiAiTestApi> {

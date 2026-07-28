@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { applyWorkerEvent, createProjectionState, nativeEntriesPage, nativeImageAttachment, nativeSessionHead, runMockTurn, type PiSessionRuntime } from "@piui/pi-worker"
+import { nativeEntriesPage, nativeImageAttachment, nativeSessionHead, type PiSessionRuntime } from "@piui/pi-worker"
 import { SessionRegistry, type PiSessionBackend } from "./session-registry.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { EventHub } from "./event-hub.ts"
@@ -43,12 +43,10 @@ describe("native Pi session discovery", () => {
   after(() => rmSync(root, { recursive: true, force: true }))
 
   it("uses the Pi session id and opens only the server-discovered file", async () => {
-    const projection = createProjectionState()
     const runtime = {
       getSessionId: () => "pi-native-id",
       getSessionFile: () => path.join(root, "native.jsonl"),
       getSessionName: () => "Native session",
-      getProjection: () => projection,
       ...nativeRuntime(),
     } as unknown as PiSessionRuntime
     const opened: Array<{ cwd: string; sessionFile?: string }> = []
@@ -82,12 +80,10 @@ describe("native Pi session discovery", () => {
   })
 
   it("deduplicates concurrent runtime attachment", async () => {
-    const projection = createProjectionState()
     const runtime = {
       getSessionId: () => "pi-concurrent-id",
       getSessionFile: () => path.join(root, "concurrent.jsonl"),
       getSessionName: () => undefined,
-      getProjection: () => projection,
       ...nativeRuntime(),
     } as unknown as PiSessionRuntime
     let opens = 0
@@ -123,11 +119,8 @@ describe("native Pi session discovery", () => {
   })
 
   it("keeps the source session and binds a replaced runtime to the fork target", async () => {
-    const sourceProjection = createProjectionState()
-    const targetProjection = { ...createProjectionState(), isStreaming: false }
     let sessionId = "pi-fork-source"
     let sessionFile = path.join(root, "fork-source.jsonl")
-    let projection = sourceProjection
     const runtime = {
       getWorkerGeneration: () => "fork-generation",
       onState: () => () => {},
@@ -135,7 +128,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => sessionId,
       getSessionFile: () => sessionFile,
       getSessionName: () => "Forked session",
-      getProjection: () => projection,
       getRuntimeUiState: () => ({
         thinkingLevel: "off",
         availableThinkingLevels: ["off"],
@@ -157,7 +149,6 @@ describe("native Pi session discovery", () => {
         const sourceSessionId = sessionId
         sessionId = "pi-fork-target"
         sessionFile = path.join(root, "fork-target.jsonl")
-        projection = targetProjection
         return {
           sourceSessionId,
           targetSessionId: sessionId,
@@ -187,10 +178,8 @@ describe("native Pi session discovery", () => {
     const result = await registry.forkSession("pi-fork-source", "source-entry", "at")
     assert.equal(result.source.id, "pi-fork-source")
     assert.equal(result.source.real, undefined)
-    assert.equal(result.source.projection, sourceProjection)
     assert.equal(result.target.id, "pi-fork-target")
     assert.equal(result.target.real, runtime)
-    assert.equal(result.target.projection, targetProjection)
     assert.equal(registry.get("pi-fork-source"), result.source)
     assert.equal(registry.get("pi-fork-target"), result.target)
     const sourceSnapshot = registry.snapshot(result.source)
@@ -208,7 +197,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "pi-failed-replacement",
       getSessionFile: () => path.join(root, "failed-replacement.jsonl"),
       getSessionName: () => "Source",
-      getProjection: () => createProjectionState(),
       getLeafId: () => null,
       ...nativeRuntime(),
       fork: async () => {
@@ -250,7 +238,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => sessionId,
       getSessionFile: () => sessionFile,
       getSessionName: () => "Source",
-      getProjection: () => createProjectionState(),
       getLeafId: () => null,
       ...nativeRuntime(),
       fork: async () => {
@@ -298,7 +285,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "pi-durable-delete",
       getSessionFile: () => sessionFile,
       getSessionName: () => "Delete me",
-      getProjection: () => createProjectionState(),
       ...nativeRuntime(),
       onState: () => () => {},
       onCrash: () => () => {},
@@ -333,7 +319,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "pi-delete-failure",
       getSessionFile: () => sessionFile,
       getSessionName: () => "Keep me",
-      getProjection: () => createProjectionState(),
       ...nativeRuntime(),
       onState: () => () => {},
       onCrash: () => () => {},
@@ -362,13 +347,11 @@ describe("native Pi session discovery", () => {
   })
 
   it("disposes a runtime that finishes opening after its session was deleted", async () => {
-    const projection = createProjectionState()
     let disposals = 0
     const runtime = {
       getSessionId: () => "pi-delete-during-open",
       getSessionFile: () => path.join(root, "delete-during-open.jsonl"),
       getSessionName: () => undefined,
-      getProjection: () => projection,
       dispose: async () => { disposals += 1 },
     } as unknown as PiSessionRuntime
     let release!: () => void
@@ -448,7 +431,6 @@ describe("native Pi session discovery", () => {
   })
 
   it("records worker generation and publishes runtime replacement and crash", async () => {
-    const projection = { ...createProjectionState(), isStreaming: true }
     let crash: ((error: Error) => void) | undefined
     const runtime = {
       getWorkerGeneration: () => "worker-generation-1",
@@ -459,7 +441,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "pi-lifecycle-id",
       getSessionFile: () => path.join(root, "lifecycle.jsonl"),
       getSessionName: () => "Lifecycle session",
-      getProjection: () => projection,
       getRuntimeUiState: () => ({
         thinkingLevel: "off",
         availableThinkingLevels: ["off"],
@@ -515,7 +496,6 @@ describe("native Pi session discovery", () => {
 
   it("detaches a runtime after an extension requests graceful shutdown", async () => {
     let close: (() => void) | undefined
-    const projection = createProjectionState()
     const runtime = {
       getWorkerGeneration: () => "graceful-generation",
       onClose: (listener: () => void) => {
@@ -525,7 +505,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "pi-graceful-id",
       getSessionFile: () => path.join(root, "graceful.jsonl"),
       getSessionName: () => "Graceful session",
-      getProjection: () => projection,
       getRuntimeUiState: () => ({
         thinkingLevel: "off", availableThinkingLevels: ["off"], isStreaming: false,
         isCompacting: false, retryAttempt: 0, queue: { steering: [], followUp: [] }, activeTools: [],
@@ -567,13 +546,11 @@ describe("native Pi session discovery", () => {
     let currentId = sourceId
     let currentFile = sourceFile
     let onReplacement: ((replacement: import("@piui/protocol").SessionReplacementResultV1) => Promise<void>) | undefined
-    const projection = createProjectionState()
     const runtime = {
       getWorkerGeneration: () => "extension-replacement-generation",
       getSessionId: () => currentId,
       getSessionFile: () => currentFile,
       getSessionName: () => "Extension target",
-      getProjection: () => projection,
       getRuntimeUiState: () => ({
         thinkingLevel: "off",
         availableThinkingLevels: ["off"],
@@ -642,13 +619,8 @@ describe("native Pi session discovery", () => {
   })
 
   it("rejects delayed callbacks from a crashed worker generation", async () => {
-    const initialProjection = createProjectionState()
-    let staleProjection = initialProjection
-    for (const event of runMockTurn({ userText: "stale", assistantText: "stale reply" })) {
-      staleProjection = applyWorkerEvent(staleProjection, event)
-    }
     let crashFirst!: (error: Error) => void
-    let staleTick: ((projection: typeof staleProjection) => void) | undefined
+    let staleTick: (() => void) | undefined
     let releasePrompt!: () => void
     const promptGate = new Promise<void>(resolve => { releasePrompt = resolve })
     let secondState!: () => void
@@ -677,10 +649,7 @@ describe("native Pi session discovery", () => {
     const first = {
       ...common,
       getWorkerGeneration: () => "generation-1",
-      getProjection: () => initialProjection,
-      onState: () => () => {},
-      onProjection: (listener: (projection: typeof staleProjection) => void) => {
-        listener(initialProjection)
+      onState: (listener: () => void) => {
         staleTick = listener
         return () => {}
       },
@@ -693,11 +662,6 @@ describe("native Pi session discovery", () => {
     const second = {
       ...common,
       getWorkerGeneration: () => "generation-2",
-      getProjection: () => initialProjection,
-      onProjection: (listener: (projection: typeof staleProjection) => void) => {
-        listener(initialProjection)
-        return () => {}
-      },
       onState: (listener: () => void) => {
         listener()
         secondState = listener
@@ -734,7 +698,7 @@ describe("native Pi session discovery", () => {
     const replacement = await registry.attach("pi-generation-id")
     assert.equal(replacement.workerGeneration, "generation-2")
     const replacementSequence = replacement.sequence
-    staleTick?.(staleProjection)
+    staleTick?.()
     releasePrompt()
     await assert.rejects(running, error => {
       assert.equal((error as { code?: string }).code, "SESSION_RUNTIME_CRASHED")
@@ -742,7 +706,6 @@ describe("native Pi session discovery", () => {
     })
     assert.equal(replacement.real, second)
     assert.equal(replacement.sequence, replacementSequence)
-    assert.equal(replacement.projection.timeline.length, 0)
     assert.deepEqual(runtimeCrashes, ["generation-1"])
 
     secondState()
@@ -756,7 +719,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => id,
       getSessionFile: () => path.join(cwd, `${id}.jsonl`),
       getSessionName: () => id,
-      getProjection: () => createProjectionState(),
       getLeafId: () => undefined,
       ...nativeRuntime(),
       getRuntimeUiState: () => undefined,
@@ -860,7 +822,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => id,
       getSessionFile: () => path.join(cwd, `${id}.jsonl`),
       getSessionName: () => id,
-      getProjection: () => createProjectionState(),
       getLeafId: () => undefined,
       getRuntimeUiState: () => uiState,
       getModel: () => undefined,
@@ -975,7 +936,6 @@ describe("native Pi session discovery", () => {
       getSessionId: () => "auth-session",
       getSessionFile: () => path.join(cwd, "auth-session.jsonl"),
       getSessionName: () => "auth",
-      getProjection: () => createProjectionState(),
       getLeafId: () => undefined,
       ...nativeRuntime(),
       getRuntimeUiState: () => undefined,

@@ -44,7 +44,7 @@ import { applySnapshotToUi } from '../pi/applySnapshot'
 import { followupQueueStore, useFollowupQueue } from '../store/followupQueueStore'
 import { getPiCapabilities, usePiCapabilities } from '../pi/capabilities'
 import { clearSessionEditorDraft, useSessionEditorDraft } from '../pi/sessionEditorDraftStore'
-import { sessionProjectionStore } from '../pi/sessionProjectionStore'
+import { nativeSessionStore } from '../pi/nativeSessionStore'
 
 const handleError = createErrorHandler('session')
 
@@ -773,7 +773,7 @@ export function useChatSession({
   // Abort handler
   const handleAbort = useCallback(async () => {
     if (!routeSessionId) return
-    const queuedBeforeAbort = sessionProjectionStore.getSnapshot(routeSessionId)?.runtime.queue
+    const queuedBeforeAbort = nativeSessionStore.getSnapshot(routeSessionId)?.runtime.queue
     try {
       const { abortSessionCommand } = await import('../pi/sessionApi')
       const result = await abortSessionCommand(routeSessionId)

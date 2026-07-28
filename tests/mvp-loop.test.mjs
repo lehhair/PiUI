@@ -52,7 +52,11 @@ describe("mvp chat loop", () => {
     assert.equal(seed.status, 201)
     const seeded = await seed.json()
     const sessionId = seeded.snapshot.session.id
-    const before = seeded.snapshot.timeline.length
+    const initialEntries = await fetch(
+      `http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/native/entries`,
+      { headers: authHeaders },
+    ).then(response => response.json())
+    const before = initialEntries.items.length
 
     const prompt = await fetch(
       `http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/commands/prompt`,
@@ -67,15 +71,18 @@ describe("mvp chat loop", () => {
     assert.equal(accepted.accepted, true)
     let body
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const snapshot = await fetch(`http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/snapshot`, { headers: authHeaders })
-      body = await snapshot.json()
-      if (body.timeline.length > before) break
+      const entries = await fetch(
+        `http://127.0.0.1:${PORT}/api/v1/sessions/${sessionId}/native/entries`,
+        { headers: authHeaders },
+      )
+      body = await entries.json()
+      if (body.items.length > before) break
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    assert.ok(body.timeline.length > before)
-    const texts = body.timeline
-      .filter(t => t.type === "user")
-      .map(t => t.text)
+    assert.ok(body.items.length > before)
+    const texts = body.items
+      .filter(entry => entry.message?.role === "user")
+      .map(entry => entry.message.content)
     assert.ok(texts.includes("mvp hello"))
   })
 })

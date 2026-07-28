@@ -2,15 +2,15 @@
 
 Baseline: `@earendil-works/pi-coding-agent@0.81.1` with the local SDK export patch in `patches/`.
 
-Capability revision: `pi-0.81.1-r15`; worker IPC: v11.
+Capability revision: `pi-0.81.1-r16`; worker IPC: v12.
 
 PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. SDK return values stay native on the transport; browser-only presentation fields are derived in the app. Function-valued dependency injection and TUI component factories remain inside the worker and are reported explicitly as `tui-only`; they are never advertised as browser RPC support.
 
 ## Native Data Contract
 
-`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every page is deep-equal to Pi `SessionManager.getEntries()`. Pages are limited by both item count and encoded byte size. `runtime-inspection.native` remains an explicit, on-demand full envelope whose entries and tree are deep-equal JSON copies of `SessionManager.getEntries()` and `SessionManager.getTree()`.
+`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every page is deep-equal to Pi `SessionManager.getEntries()`. Pages are limited by both item count and encoded byte size. The native tree route is a deep-equal JSON copy of `SessionManager.getTree()`. `runtime-inspection.native` remains an explicit, on-demand full envelope.
 
-`timeline` contains only the most recent presentation page. Older pages use stable item cursors and can be prepended without reloading the session. Image bytes are fetched lazily by native entry id and block index; native entry pages and JSONL export retain the original base64 block. Timeline data is not a native serialization and must never be used to reconstruct Pi session data.
+There is no remote timeline or presentation API. The browser pages native entries, selects the active branch by following Pi `parentId` values from the native leaf, and derives render-only `Message` objects in app memory. Raw Pi session events drive transient streaming entries; the next native revision replaces them with persisted entries. This browser adapter is disposable and cannot write or reconstruct Pi session data. Native image blocks, unknown fields, entries, and events retain their original JSON values on the transport.
 
 ## Session And Prompt
 
@@ -25,7 +25,7 @@ PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. 
 | tools and tool inspection | tools commands and runtime inspection | Complete; parameter schema, prompt guidelines, and sourceInfo are retained |
 | compaction/retry/branch summary | independent control commands | Complete |
 | user bash | bash command, abort, bounded output metadata | Complete |
-| entries/tree/labels/navigation | tree routes and snapshot native tree | Complete |
+| entries/tree/labels/navigation | native entry/tree routes and commands | Complete; entries and tree nodes remain Pi-native JSON |
 | new/fork/clone/switch/import | replacement commands | Complete with pre-replacement lease reservation |
 | extension `ctx.newSession/fork/switchSession` | worker host-control IPC | Complete with setup/withSession support |
 | extension `ctx.shutdown` | graceful worker disposal | Complete |
@@ -74,9 +74,9 @@ The following public library hooks are intentionally not remote APIs:
 - raw credential reads and credential-store injection
 - `PromptOptions.preflightResult`, because command status is the remote acknowledgement
 - low-level direct append/rewrite methods that can bypass command idempotency and the single-writer lease
-- unsanitized native events containing message content, tool arguments, or tool results
+- event handler functions and non-JSON event members
 
-These remain usable by extensions inside the isolated worker. They are excluded from browser RPC to preserve serialization, credential isolation, command accounting, and single-writer guarantees.
+These remain usable by extensions inside the isolated worker. JSON-serializable `AgentSessionEvent` fields, including message content, tool arguments, partial results, and tool results, are transported unchanged to the authenticated session stream so the browser can render native events without a server projection.
 
 ## SDK Export Integration
 
@@ -91,7 +91,7 @@ Release checks must include:
 - worker IPC handshake and host-call tests
 - cross-process session lease tests
 - server HTTP and WebSocket replay/resync tests
-- app event-store and dialog tests
+- app native-entry/event adapter and dialog tests
 - live server file, Git, write, and chat-loop tests
 
 Any Pi SDK version change requires reviewing this matrix and changing the capability revision.

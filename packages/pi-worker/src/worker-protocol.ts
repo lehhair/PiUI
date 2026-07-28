@@ -17,30 +17,21 @@ import type {
   PackageUpdateV1,
   PiModelRuntimeSnapshotV1,
   PiNativeModelV1,
+  PiNativeJsonValueV1,
   PiNativeSessionHeadV1,
   PiNativeEntriesPageV1,
-  PiTimelinePageV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
-  TimelineItemV1,
 } from "@piui/protocol"
 import type { PiExtensionUiEvent } from "./extension-ui-bridge.js"
 import type { PiCommandInfo, PiRuntimeUiState, PiSessionInfo, PiSkillInfo } from "./real-session.js"
-
-export interface ProjectionWire {
-  timeline: TimelineItemV1[]
-  isStreaming: boolean
-  removedItemIds?: string[]
-}
 
 export interface WorkerSessionWire {
   sessionId: string
   sessionFile?: string
   sessionName?: string
-  projection: ProjectionWire
   state: PiRuntimeUiState
   native: PiNativeSessionHeadV1
-  timelinePage: Omit<PiTimelinePageV1, "items">
 }
 
 export type PiModelInfo = PiNativeModelV1
@@ -59,7 +50,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 11 as const
+export const PI_WORKER_PROTOCOL_VERSION = 12 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -143,8 +134,8 @@ export type WorkerCommand =
   | { type: "inspectSystemPrompt" }
   | { type: "inspectRuntime" }
   | { type: "getNativeEntriesPage"; cursor?: string; limit: number; maxBytes: number }
+  | { type: "getNativeTree" }
   | { type: "getNativeImageAttachment"; entryId: string; blockIndex: number }
-  | { type: "getTimelinePage"; cursor?: string; limit: number; maxBytes: number }
   | { type: "inspectResources" }
   | { type: "extendResources"; paths: PiResourceExtensionPathsV1 }
   | { type: "executeBash"; command: string; excludeFromContext?: boolean }
@@ -236,8 +227,8 @@ export type WorkerResult =
   | { type: "boolean"; value: boolean }
   | { type: "runtimeInspection"; inspection: PiRuntimeInspectionV1 }
   | { type: "nativeEntriesPage"; page: PiNativeEntriesPageV1 }
+  | { type: "nativeTree"; tree: Array<{ [key: string]: PiNativeJsonValueV1 }> }
   | { type: "nativeImageAttachment"; mimeType: string; data: string; etag: string }
-  | { type: "timelinePage"; page: PiTimelinePageV1 }
   | { type: "resources"; resources: PiResourceSnapshotV1 }
   | ({ type: "navigation"; session: WorkerSessionWire } & PiNavigationResultV1)
   | { type: "compaction"; compaction: CompactionCommandResultV1; session: WorkerSessionWire }
@@ -279,10 +270,8 @@ export type WorkerHostReply =
   | { kind: "hostReply"; id: string; generation: string; ok: false; error: { code: string; message: string } }
 
 export type WorkerIpcEvent =
-  | { kind: "event"; generation: string; type: "projection"; projection: ProjectionWire }
-  | { kind: "event"; generation: string; type: "projectionDelta"; projection: ProjectionWire }
   | { kind: "event"; generation: string; type: "state"; state: PiRuntimeUiState }
-  | { kind: "event"; generation: string; type: "nativeEvent"; event: unknown }
+  | { kind: "event"; generation: string; type: "nativeEvent"; event: PiNativeJsonValueV1 }
   | { kind: "event"; generation: string; type: "nativeHead"; native: PiNativeSessionHeadV1 }
   | { kind: "event"; generation: string; type: "resourcesChanged" }
   | { kind: "event"; generation: string; type: "extensionUi"; event: PiExtensionUiEvent }

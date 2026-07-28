@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
-import { createProjectionState, type PiSessionRuntime } from "@piui/pi-worker"
+import type { PiSessionRuntime } from "@piui/pi-worker"
 import { createAppServer } from "./http.ts"
 import { EventHub } from "./event-hub.ts"
 import type { PiSessionBackend } from "./session-registry.ts"
@@ -66,7 +66,9 @@ describe("session mock snapshot (no LLM)", () => {
       const res = await json(port, "POST", "/api/v1/dev/mock-chat")
       assert.equal(res.status, 201)
       assert.ok(res.data.workspace.path)
-      assert.ok(res.data.snapshot.timeline.length >= 2)
+      const sessionId = res.data.snapshot.session.id as string
+      const entries = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+      assert.ok(entries.data.items.length >= 2)
     } finally {
       await close()
     }
@@ -83,7 +85,7 @@ describe("session mock snapshot (no LLM)", () => {
     try {
       const created = await json(port, "POST", "/api/v1/sessions", { title: "blank" })
       assert.equal(created.status, 201)
-      assert.equal(created.data.snapshot.timeline.length, 0)
+      assert.equal(created.data.snapshot.native.entryCount, 0)
       const id = created.data.session.id as string
       assert.equal(created.data.snapshot.session.driverSessionId, id)
       assert.deepEqual(workspaceEvents, [id])
@@ -137,7 +139,7 @@ describe("session mock snapshot (no LLM)", () => {
     try {
       const seeded = await json(port, "POST", "/api/v1/dev/mock-chat")
       const sessionId = seeded.data.snapshot.session.id as string
-      const before = seeded.data.snapshot.timeline.length as number
+      const before = seeded.data.snapshot.native.entryCount as number
 
       const prompted = await json(port, "POST", `/api/v1/sessions/${sessionId}/commands/prompt`, {
         text: "second turn",
@@ -149,11 +151,12 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(snapshots[0]?.snapshot.session.title, "second turn")
       await waitForCommand(port, prompted.data.commandId)
       const completed = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
-      const after = completed.data.timeline as { type: string; text?: string }[]
+      const nativePage = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+      const after = nativePage.data.items as Array<{ message?: { role?: string; content?: unknown } }>
       assert.ok(after.length > before)
-      const lastUser = [...after].reverse().find(t => t.type === "user")
-      assert.equal(lastUser?.text, "second turn")
-      const lastAsst = [...after].reverse().find(t => t.type === "assistant")
+      const lastUser = [...after].reverse().find(entry => entry.message?.role === "user")
+      assert.equal(lastUser?.message?.content, "second turn")
+      const lastAsst = [...after].reverse().find(entry => entry.message?.role === "assistant")
       assert.ok(lastAsst)
       assert.equal(snapshots.at(-1)?.reason, "command")
       assert.equal(snapshots.at(-1)?.snapshot.sequence, completed.data.sequence)
@@ -222,9 +225,9 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(second.status, 202)
       assert.equal(second.data.reused, true)
       await waitForCommand(port, "prompt-once")
-      const snapshot = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
-      const users = (snapshot.data.timeline as Array<{ type: string; text?: string }>)
-        .filter(item => item.type === "user" && item.text === "only once")
+      const nativePage = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+      const users = (nativePage.data.items as Array<{ message?: { role?: string; content?: unknown } }>)
+        .filter(entry => entry.message?.role === "user" && entry.message.content === "only once")
       assert.equal(users.length, 1)
 
       const command = await json(port, "GET", "/api/v1/commands/prompt-once")
@@ -236,7 +239,6 @@ describe("session mock snapshot (no LLM)", () => {
   })
 
   it("marks a crashed prompt unknown and does not replay it", async () => {
-    const projection = createProjectionState()
     let crash: ((error: Error) => void) | undefined
     let opens = 0
     const runtimeState = {
@@ -260,7 +262,6 @@ describe("session mock snapshot (no LLM)", () => {
         listener(runtimeState)
         return () => {}
       },
-      getProjection: () => projection,
       getSessionId: () => "crash-session",
       getSessionFile: () => path.join(root, "crash-session.jsonl"),
       getSessionName: () => "Crash session",
@@ -311,7 +312,7 @@ describe("session mock snapshot (no LLM)", () => {
     }
   })
 
-  it("creates session with projected timeline", async () => {
+  it("creates a session backed by native Pi entries", async () => {
     const server = createAppServer({ authToken: null })
     const { port, close } = await listen(server)
     try {
@@ -329,19 +330,22 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(snap.protocolVersion, 1)
       assert.equal(snap.session.driverId, "pi")
       assert.equal(snap.session.directory, path.resolve(root))
-      assert.ok(Array.isArray(snap.timeline))
-      assert.ok(snap.timeline.length >= 2)
-      assert.equal(snap.timeline[0].type, "user")
-      assert.equal(snap.timeline[1].type, "assistant")
-      const tool = snap.timeline[1].content.find((c: { type: string }) => c.type === "tool")
-      assert.ok(tool)
-      assert.equal(tool.status, "completed")
-
       const sessionId = snap.session.id as string
+      const nativePage = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+      assert.equal(nativePage.status, 200)
+      const entries = nativePage.data.items as Array<{ message?: { role?: string; toolCallId?: string; content?: unknown[] } }>
+      assert.equal(entries[0]?.message?.role, "user")
+      assert.equal(entries[1]?.message?.role, "assistant")
+      assert.equal(entries[2]?.message?.role, "toolResult")
+      assert.ok(entries[1]?.message?.content?.some(block => (block as { type?: string }).type === "toolCall"))
+      assert.equal(entries[2]?.message?.toolCallId, (entries[1]?.message?.content?.find(
+        block => (block as { type?: string }).type === "toolCall",
+      ) as { id?: string } | undefined)?.id)
+
       const again = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
       assert.equal(again.status, 200)
       assert.equal(again.data.session.id, sessionId)
-      assert.equal(again.data.timeline.length, snap.timeline.length)
+      assert.equal(again.data.native.entryCount, entries.length)
     } finally {
       await close()
     }
@@ -363,6 +367,10 @@ describe("session mock snapshot (no LLM)", () => {
       const sourceId = created.data.snapshot.session.id as string
       const nativePage = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/entries`)
       assert.equal(nativePage.data.items[0]?.type, "message")
+      const nativeTree = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/tree`)
+      assert.equal(nativeTree.status, 200)
+      assert.deepEqual(nativeTree.data[0].entry, nativePage.data.items[0])
+      assert.deepEqual(nativeTree.data[0].children[0].entry, nativePage.data.items[1])
 
       const navigated = await json(
         port,
@@ -466,15 +474,11 @@ describe("session mock snapshot (no LLM)", () => {
       })
       assert.equal(imagePrompt.status, 202)
       assert.equal((await waitForCommand(port, "r5-image")).data.command.status, "completed")
-      const imageSnapshot = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
       const expectedImage = {
         type: "image",
         mimeType: "image/png",
         data: Buffer.from("89504e470d0a1a0a", "hex").toString("base64"),
       }
-      assert.deepEqual(imageSnapshot.data.timeline[0].attachments, [{
-        type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 8,
-      }])
       const imageNativePage = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
       assert.deepEqual(imageNativePage.data.items[0].message.content[1], expectedImage)
       const attachmentUrl = `http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/native/entries/fixture-entry/attachments/1`
@@ -667,10 +671,10 @@ describe("session mock snapshot (no LLM)", () => {
       assert.equal(userMessage.status, 202, JSON.stringify(userMessage.data))
       assert.equal(userMessage.data.accepted, true)
       const delivered = await waitFor(async () => {
-        const current = await json(port, "GET", `/api/v1/sessions/${sessionId}/snapshot`)
-        return current.data.timeline.some(
-          (item: { type?: string; text?: string }) =>
-            item.type === "user" && item.text === "from sendUserMessage",
+        const current = await json(port, "GET", `/api/v1/sessions/${sessionId}/native/entries`)
+        return current.data.items.some(
+          (entry: { message?: { role?: string; content?: unknown } }) =>
+            entry.message?.role === "user" && entry.message.content === "from sendUserMessage",
         )
       })
       assert.equal(delivered, true)

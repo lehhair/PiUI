@@ -19,7 +19,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 11)
+      assert.equal(hello.workerProtocolVersion, 12)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -53,24 +53,24 @@ describe("PiWorkerSession IPC", () => {
       assert.equal(runtime.getSessionName(), "Fixture")
       assert.equal((await runtime.listSkills())[0]?.name, "fixture-skill")
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
-      let ticks = 0
-      let deltas = 0
       const nativeEvents: unknown[] = []
       const nativeHeads: unknown[] = []
-      const unsubscribe = runtime.onProjection(() => { ticks += 1 })
-      const unsubscribeDelta = runtime.onProjectionDelta(() => { deltas += 1 })
       const unsubscribeNative = runtime.onNativeEvent(event => { nativeEvents.push(event) })
       const unsubscribeNativeHead = runtime.onNativeHead(native => { nativeHeads.push(native) })
       await runtime.prompt("hello", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
-      unsubscribe()
-      unsubscribeDelta()
       unsubscribeNative()
       unsubscribeNativeHead()
-      assert.equal(ticks > 1, true)
-      assert.equal(deltas, 1)
-      assert.deepEqual(nativeEvents, [{ type: "turn_start", turnIndex: 0 }])
+      assert.deepEqual(nativeEvents, [
+        { type: "message_start", message: { role: "user", content: [
+          { type: "text", text: "hello" },
+          { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        ] } },
+        { type: "message_end", message: { role: "user", content: [
+          { type: "text", text: "hello" },
+          { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        ], metadata: { nested: { preserved: true } } } },
+      ])
       assert.equal(nativeHeads.length, 1)
-      assert.equal(runtime.getProjection().timeline[0]?.entryId, "fixture-entry")
       let nativePage = await runtime.getNativeEntriesPage(undefined, 50, 1_000_000)
       assert.equal(nativePage.items[0]?.type, "message")
       assert.deepEqual(nativePage.items[0]?.futureField, {
@@ -164,19 +164,14 @@ describe("PiWorkerSession IPC", () => {
     }
   })
 
-  it("removes synthetic timeline ids when a bounded delta reconciles native entries", async () => {
+  it("forwards complete native event JSON", async () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     try {
-      const ids: string[][] = []
-      const unsubscribe = runtime.onProjection(projection => {
-        ids.push(projection.timeline.map(item => item.id))
-      })
+      const events: unknown[] = []
+      const unsubscribe = runtime.onNativeEvent(event => { events.push(event) })
       await runtime.prompt("reconcile")
       unsubscribe()
-      assert.equal(ids.some(value => value.length === 1 && value[0] === "synthetic-entry"), true)
-      assert.equal(ids.some(value => value.length === 1 && value[0] === "native-entry"), true)
-      assert.equal(ids.some(value => value.includes("synthetic-entry") && value.includes("native-entry")), false)
-      assert.deepEqual(runtime.getProjection().timeline.map(item => item.id), ["native-entry"])
+      assert.deepEqual(events, [{ type: "message_end", message: { role: "user", content: "reconcile" } }])
     } finally {
       await runtime.dispose()
     }
@@ -216,12 +211,11 @@ describe("PiWorkerSession IPC", () => {
   it("ignores events from another worker generation", async () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
     try {
-      let ticks = 0
-      const unsubscribe = runtime.onProjection(() => { ticks += 1 })
+      let events = 0
+      const unsubscribe = runtime.onNativeEvent(() => { events += 1 })
       await runtime.prompt("stale")
       unsubscribe()
-      assert.equal(ticks, 1)
-      assert.equal(runtime.getProjection().timeline.length, 0)
+      assert.equal(events, 0)
     } finally {
       await runtime.dispose()
     }

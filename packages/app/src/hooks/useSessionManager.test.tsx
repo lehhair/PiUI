@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionManager } from './useSessionManager'
 
 const {
-  fetchSnapshotMock,
-  fetchTimelinePageMock,
+  loadPiSessionMock,
+  fetchNativePageMock,
+  appendNativePageMock,
   messageStoreMock,
   sessionErrorHandlerMock,
 } = vi.hoisted(() => ({
-  fetchSnapshotMock: vi.fn(),
-  fetchTimelinePageMock: vi.fn(),
+  loadPiSessionMock: vi.fn(),
+  fetchNativePageMock: vi.fn(),
+  appendNativePageMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -25,19 +27,19 @@ const {
 }))
 
 vi.mock('../pi/sessionApi', () => ({
-  fetchSnapshot: (...args: unknown[]) => fetchSnapshotMock(...args),
-  fetchPiTimelinePage: (...args: unknown[]) => fetchTimelinePageMock(...args),
+  fetchPiNativeEntriesPage: (...args: unknown[]) => fetchNativePageMock(...args),
 }))
 
-vi.mock('../pi/sessionProjectionStore', () => ({
-  sessionProjectionStore: {
+vi.mock('../pi/nativeSessionStore', () => ({
+  nativeSessionStore: {
     activate: vi.fn(),
     getSnapshot: vi.fn(() => ({ session: { directory: '/workspace' }, runtime: {} })),
   },
 }))
 
 vi.mock('../pi/applySnapshot', () => ({
-  applySnapshotToUi: vi.fn(),
+  loadPiSessionToUi: (...args: unknown[]) => loadPiSessionMock(...args),
+  appendPiNativeEntriesPageToUi: (...args: unknown[]) => appendNativePageMock(...args),
 }))
 
 vi.mock('../store', () => ({
@@ -50,8 +52,9 @@ vi.mock('../utils', () => ({
 
 describe('useSessionManager', () => {
   beforeEach(() => {
-    fetchSnapshotMock.mockReset()
-    fetchTimelinePageMock.mockReset()
+    loadPiSessionMock.mockReset()
+    fetchNativePageMock.mockReset()
+    appendNativePageMock.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -69,7 +72,7 @@ describe('useSessionManager', () => {
   it('reports missing route sessions when loading returns not found', async () => {
     const onSessionMissing = vi.fn()
     const notFoundError = Object.assign(new Error('session not found'), { status: 404 })
-    fetchSnapshotMock.mockRejectedValue(notFoundError)
+    loadPiSessionMock.mockRejectedValue(notFoundError)
 
     renderHook(() =>
       useSessionManager({
@@ -90,22 +93,20 @@ describe('useSessionManager', () => {
     )
   })
 
-  it('loads an older timeline page and prepends it in chronological order', async () => {
+  it('loads an older native entries page and rebuilds the local projection', async () => {
     messageStoreMock.getSessionState.mockReturnValue({ loadState: 'loaded', isStale: false, messages: [{}] })
     messageStoreMock.getHistoryCursor.mockReturnValue('cursor-1')
-    fetchTimelinePageMock.mockResolvedValue({
-      items: [{ type: 'user', id: 'older-user', entryId: 'older-entry', timestamp: 1, text: 'older' }],
+    const page = {
+      head: { namespace: 'pi', schemaVersion: 1, sdkVersion: 'test', revision: 1, epoch: 'native', header: null, leafId: 'newer', entryCount: 2 },
+      items: [{ type: 'message', id: 'older-user', parentId: null, message: { role: 'user', content: 'older' } }],
       hasMore: false,
-    })
+    }
+    fetchNativePageMock.mockResolvedValue(page)
     const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/workspace' }))
 
     await result.current.loadMoreHistory()
 
-    expect(fetchTimelinePageMock).toHaveBeenCalledWith('session-1', 'cursor-1')
-    expect(messageStoreMock.prependUiMessages).toHaveBeenCalledWith(
-      'session-1',
-      [expect.objectContaining({ info: expect.objectContaining({ id: 'older-user' }) })],
-      { hasMoreHistory: false, historyCursor: undefined },
-    )
+    expect(fetchNativePageMock).toHaveBeenCalledWith('session-1', 'cursor-1')
+    expect(appendNativePageMock).toHaveBeenCalledWith('session-1', page)
   })
 })

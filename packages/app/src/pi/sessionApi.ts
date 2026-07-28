@@ -37,12 +37,12 @@ import type {
   PackageUpdateV1,
   WorkspaceDtoV1,
   PiNativeEntriesPageV1,
-  PiTimelinePageV1,
+  PiNativeJsonValueV1,
 } from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
 import type { Attachment } from "../features/attachment/types"
 import { reconcilePiSessions, trackPiSession, trackPiWorkspace, untrackPiSession } from "./piSessionIndex"
-import { sessionProjectionStore } from "./sessionProjectionStore"
+import { nativeSessionStore } from "./nativeSessionStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { LOCAL_SERVER_ID, makeBasicAuthHeader, serverStore } from "../store/serverStore"
 
@@ -128,7 +128,7 @@ export async function listPiSessions(workspacePath?: string): Promise<PiSessionS
     trackPiSession(s.id, s.directory)
   }
   for (const removed of reconcilePiSessions(data.sessions.map(session => session.id), workspacePath)) {
-    sessionProjectionStore.clear(removed)
+    nativeSessionStore.clear(removed)
     extensionUiStore.remove(removed)
   }
   return data.sessions
@@ -179,7 +179,7 @@ export async function deletePiSession(sessionId: string): Promise<{
     command: CommandRecordV2<"session.delete">
   }
   untrackPiSession(sessionId)
-  sessionProjectionStore.clear(sessionId)
+  nativeSessionStore.clear(sessionId)
   return result
 }
 
@@ -1179,20 +1179,18 @@ export async function fetchSnapshot(sessionId: string): Promise<SessionSnapshotV
   return (await res.json()) as SessionSnapshotV1
 }
 
-export async function fetchPiTimelinePage(sessionId: string, cursor?: string, limit = 50): Promise<PiTimelinePageV1> {
-  const query = new URLSearchParams({ limit: String(limit) })
-  if (cursor) query.set("cursor", cursor)
-  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/timeline?${query}`, "fetchPiTimelinePage")
-}
-
 export async function fetchPiNativeEntriesPage(
   sessionId: string,
   cursor?: string,
   limit = 50,
 ): Promise<PiNativeEntriesPageV1> {
-  const query = new URLSearchParams({ limit: String(limit) })
+  const query = new URLSearchParams({ limit: String(limit), maxBytes: String(32 * 1024 * 1024) })
   if (cursor) query.set("cursor", cursor)
   return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/entries?${query}`, "fetchPiNativeEntriesPage")
+}
+
+export function fetchPiNativeTree(sessionId: string): Promise<Array<Record<string, PiNativeJsonValueV1>>> {
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/tree`, "fetchPiNativeTree")
 }
 
 export function piNativeAttachmentUrl(sessionId: string, entryId: string, blockIndex: number): string {

@@ -26,7 +26,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 11,
+  workerProtocolVersion: 12,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -123,15 +123,13 @@ function snapshot(sessionId = "fixture-session", sessionFile = "/fixture/session
     sessionFormatVersion: 3,
     header: { type: "session", version: 3, id: sessionId },
     entries: [entry, futureEntry],
-    tree: [{ entryId: entry.id, children: [] }],
+    tree: [{ entry, children: [{ entry: futureEntry, children: [] }] }],
     leafId: entry.id,
   }
   return {
     sessionId,
     sessionFile,
     sessionName: "Fixture",
-    projection: { timeline: [], isStreaming: false },
-    timelinePage: { hasMore: false },
     state: state(),
     native: {
       namespace: "pi",
@@ -307,63 +305,43 @@ process.on("message", async request => {
       process.send?.({
         kind: "event",
         generation: "stale-generation",
-        type: "projection",
-        projection: {
-          timeline: [{ type: "user", id: "stale-entry", entryId: "stale-entry", timestamp: 1, text: "stale" }],
-          isStreaming: false,
-        },
+        type: "nativeEvent",
+        event: { type: "message_end", message: { role: "user", content: "stale" } },
       })
       result = { type: "session", session: session ?? snapshot() }
       process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
       return
     }
     if (command.text === "reconcile") {
-      const synthetic = {
-        timeline: [{ type: "user", id: "synthetic-entry", entryId: "synthetic-entry", timestamp: 1, text: command.text }],
-        isStreaming: true,
-      }
-      const projection = {
-        timeline: [{ type: "user", id: "native-entry", entryId: "native-entry", timestamp: 1, text: command.text }],
-        removedItemIds: ["synthetic-entry"],
-        isStreaming: false,
-      }
-      process.send?.({ kind: "event", generation, type: "projectionDelta", projection: synthetic })
-      process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
-      session = { ...(session ?? snapshot()), projection: { timeline: projection.timeline, isStreaming: false } }
+      process.send?.({
+        kind: "event",
+        generation,
+        type: "nativeEvent",
+        event: { type: "message_end", message: { role: "user", content: command.text } },
+      })
+      session = session ?? snapshot()
       result = { type: "session", session }
       process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
       return
     }
     const images = command.images ?? []
-    const attachments = images.map((image, index) => ({
-      type: "image",
-      mimeType: image.mimeType,
-      blockIndex: index + 1,
-      byteLength: Buffer.from(image.data, "base64").byteLength,
-    }))
-    const projection = {
-      timeline: [{
-        type: "user",
-        id: "fixture-entry",
-        entryId: "fixture-entry",
-        timestamp: 1,
-        text: command.text,
-        attachments: attachments.length ? attachments : undefined,
-      }],
-      isStreaming: false,
-    }
     process.send?.({
       kind: "event",
       generation,
       type: "nativeEvent",
-      event: { type: "turn_start", turnIndex: 0 },
+      event: { type: "message_start", message: { role: "user", content: [{ type: "text", text: command.text }, ...images] } },
     })
-    session = { ...(session ?? snapshot()), projection }
+    session = session ?? snapshot()
     fullNative.entries[0].message.content = [
       { type: "text", text: command.text },
       ...images,
     ]
-    process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
+    process.send?.({
+      kind: "event",
+      generation,
+      type: "nativeEvent",
+      event: { type: "message_end", message: fullNative.entries[0].message },
+    })
     session.native.revision += 1
     process.send?.({ kind: "event", generation, type: "nativeHead", native: session.native })
     result = { type: "session", session }
@@ -377,18 +355,21 @@ process.on("message", async request => {
     session = { ...(session ?? snapshot()), state: state() }
     result = { type: "thinkingLevel", level: thinkingLevel, session }
   } else if (command.type === "sendUserMessage") {
-    const projection = {
-      timeline: [{
-        type: "user",
-        id: "fixture-user-message",
-        entryId: "fixture-user-message",
-        timestamp: 2,
-        text: command.text,
-      }],
-      isStreaming: false,
+    session = session ?? snapshot()
+    const entry = {
+      type: "message",
+      id: `fixture-user-${fullNative.entries.length}`,
+      parentId: fullNative.leafId,
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: command.text },
     }
-    session = { ...(session ?? snapshot()), projection }
-    process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
+    fullNative.entries.push(entry)
+    fullNative.leafId = entry.id
+    session.native = { ...session.native, revision: session.native.revision + 1, leafId: entry.id, entryCount: fullNative.entries.length }
+    process.send?.({ kind: "event", generation, type: "nativeEvent", event: {
+      type: "message_end", message: { role: "user", content: command.text },
+    } })
+    process.send?.({ kind: "event", generation, type: "nativeHead", native: session.native })
     result = { type: "session", session }
   } else if (command.type === "setModel") {
     model = { provider: command.provider, id: command.modelId, displayName: command.modelId }
@@ -481,13 +462,13 @@ process.on("message", async request => {
         hasMore: start > 0,
       },
     }
+  } else if (command.type === "getNativeTree") {
+    result = { type: "nativeTree", tree: fullNative.tree }
   } else if (command.type === "getNativeImageAttachment") {
     const entry = fullNative.entries.find(item => item.id === command.entryId)
     const block = entry?.message?.content?.[command.blockIndex]
     if (!block || block.type !== "image") throw Object.assign(new Error("image not found"), { code: "NOT_FOUND" })
     result = { type: "nativeImageAttachment", mimeType: block.mimeType, data: block.data, etag: '\"fixture-image\"' }
-  } else if (command.type === "getTimelinePage") {
-    result = { type: "timelinePage", page: { items: (session ?? snapshot()).projection.timeline, hasMore: false } }
   } else if (command.type === "inspectResources" || command.type === "extendResources") {
     result = {
       type: "resources",

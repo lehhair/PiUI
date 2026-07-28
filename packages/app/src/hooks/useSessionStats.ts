@@ -1,7 +1,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { messageStore } from '../store/messageStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
-import { sessionProjectionStore } from '../pi/sessionProjectionStore'
+import { nativeSessionStore } from '../pi/nativeSessionStore'
 import { computeSessionStats, isSameSessionStats } from './sessionStatsCompute'
 import type { SessionStats } from './sessionStatsTypes'
 
@@ -22,7 +22,7 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
     const sessionId = paneLayoutStore.getFocusedSessionId()
     const messages = messageStore.getVisibleMessages(sessionId)
     const fallback = computeSessionStats(messages, contextLimit)
-    const runtime = sessionProjectionStore.getSnapshot(sessionId)?.runtime
+    const runtime = nativeSessionStore.getSnapshot(sessionId)?.runtime
     const authoritative = runtime?.sessionStats
     const usage = runtime?.contextUsage
     const contextUsed = usage?.contextTokens ?? fallback.contextUsed
@@ -72,7 +72,7 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
 
     const unsubMessage = messageStore.subscribe(schedule)
     const unsubPane = paneLayoutStore.subscribe(schedule)
-    const unsubProjection = sessionProjectionStore.subscribe(schedule)
+    const unsubProjection = nativeSessionStore.subscribe(schedule)
     return () => {
       unsubMessage()
       unsubPane()

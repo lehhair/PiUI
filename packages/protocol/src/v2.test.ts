@@ -63,23 +63,17 @@ describe("protocol v2 foundation", () => {
     assert.equal(command.payload.entryId, "entry-1")
   })
 
-  it("types native Pi tree entries and replacement commands", () => {
+  it("types native Pi session heads and replacement commands", () => {
     const native: SessionSnapshotV1["native"] = {
       namespace: "pi",
       schemaVersion: 1,
       sdkVersion: "0.81.1",
       revision: 1,
       sessionFormatVersion: 3,
+      epoch: "native-session-1",
       header: { type: "session", version: 3, id: "session-1" },
       leafId: "entry-1",
-      entries: [{
-        type: "message",
-        id: "entry-1",
-        parentId: null,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        message: { role: "user", content: [{ type: "text", text: "hello" }] },
-      }],
-      tree: [],
+      entryCount: 1,
     }
     const fork: CommandRequestV2<"session.fork"> = {
       protocolVersion: 2,
@@ -89,7 +83,7 @@ describe("protocol v2 foundation", () => {
       sessionId: "session-1",
       payload: { entryId: "entry-1", position: "before" },
     }
-    assert.equal(native.entries[0]?.type, "message")
+    assert.equal(native.entryCount, 1)
     assert.equal(fork.payload.position, "before")
   })
 

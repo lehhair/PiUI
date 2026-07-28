@@ -13,10 +13,9 @@ import { messageStore } from '../store'
 import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import type { MessageError } from '../types/message'
-import { sessionProjectionStore } from '../pi/sessionProjectionStore'
-import { fetchPiTimelinePage, fetchSnapshot } from '../pi/sessionApi'
-import { applySnapshotToUi } from '../pi/applySnapshot'
-import { timelineToUiMessages } from '../pi/timelineToMessages'
+import { nativeSessionStore } from '../pi/nativeSessionStore'
+import { fetchPiNativeEntriesPage } from '../pi/sessionApi'
+import { appendPiNativeEntriesPageToUi, loadPiSessionToUi } from '../pi/applySnapshot'
 
 function toLoadMessageError(error: unknown): MessageError {
   const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
@@ -63,8 +62,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
       const existingState = messageStore.getSessionState(sid)
       const hasExistingMessages = existingState && existingState.messages.length > 0
-      sessionProjectionStore.activate(sid)
-      const cached = sessionProjectionStore.getSnapshot(sid)
+      nativeSessionStore.activate(sid)
+      const cached = nativeSessionStore.getSnapshot(sid)
       if (cached && hasExistingMessages && !force) {
         messageStore.updateSessionMetadata(sid, { loadState: 'loaded', title: cached.session.title })
         if (!isStale()) onLoadComplete?.()
@@ -72,9 +71,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       }
       messageStore.setLoadState(sid, 'loading')
       try {
-        const snapshot = await fetchSnapshot(sid)
+        await loadPiSessionToUi(sid)
         if (isStale()) return
-        applySnapshotToUi(snapshot)
         if (!force) onLoadComplete?.()
       } catch (error) {
         if (isStale()) return
@@ -103,26 +101,13 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
     const cursor = messageStore.getHistoryCursor(sessionId)
     if (!cursor) return
     try {
-      const page = await fetchPiTimelinePage(sessionId, cursor)
-      const snapshot = sessionProjectionStore.getSnapshot(sessionId)
-      const messages = timelineToUiMessages(
-        page.items,
-        sessionId,
-        snapshot?.runtime.model ? {
-          providerID: snapshot.runtime.model.provider,
-          modelID: snapshot.runtime.model.id,
-        } : undefined,
-        snapshot?.session.directory ?? directoryRef.current ?? '',
-      )
-      messageStore.prependUiMessages(sessionId, messages, {
-        hasMoreHistory: page.hasMore,
-        historyCursor: page.beforeCursor,
-      })
+      const page = await fetchPiNativeEntriesPage(sessionId, cursor)
+      appendPiNativeEntriesPageToUi(sessionId, page)
     } catch (error) {
       sessionErrorHandler('load more history', error)
       if (error && typeof error === 'object' && 'code' in error && error.code === 'STALE_CURSOR') {
         messageStore.clearSession(sessionId)
-        sessionProjectionStore.clear(sessionId)
+        nativeSessionStore.clear(sessionId)
         await loadSessionRef.current(sessionId, { force: true })
       }
     }

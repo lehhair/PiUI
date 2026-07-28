@@ -1,8 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import type { PiNativeSessionEnvelopeV1, TimelineItemV1 } from "@piui/protocol"
+import type { PiNativeSessionEnvelopeV1 } from "@piui/protocol"
 import { nativeEntriesPage, nativeImageAttachment } from "@piui/pi-worker"
-import { timelinePage } from "./native-pagination.ts"
 
 function envelope(count = 120): PiNativeSessionEnvelopeV1 {
   return {
@@ -67,27 +66,6 @@ describe("native pagination", () => {
     )
     const bounded = nativeEntriesPage(native, { limit: 10, maxBytes: 1_500 })
     assert.ok(Buffer.byteLength(JSON.stringify(bounded), "utf8") <= 1_500)
-  })
-
-  it("pages presentation history by stable item identity", () => {
-    const timeline: TimelineItemV1[] = Array.from({ length: 105 }, (_, index) => ({
-      type: "user", id: `item-${index}`, entryId: `entry-${index}`, timestamp: index, text: String(index),
-    }))
-    const latest = timelinePage(timeline, "epoch", { limit: 50, maxBytes: 1_000_000 })
-    const middle = timelinePage(timeline, "epoch", { cursor: latest.beforeCursor, limit: 50, maxBytes: 1_000_000 })
-    const oldest = timelinePage(timeline, "epoch", { cursor: middle.beforeCursor, limit: 50, maxBytes: 1_000_000 })
-    assert.deepEqual([...oldest.items, ...middle.items, ...latest.items], timeline)
-    assert.equal(oldest.hasMore, false)
-  })
-
-  it("enforces a byte budget for presentation pages", () => {
-    const timeline: TimelineItemV1[] = [{
-      type: "user", id: "large", entryId: "entry-large", timestamp: 1, text: "x".repeat(2_000),
-    }]
-    assert.throws(
-      () => timelinePage(timeline, "epoch", { limit: 50, maxBytes: 100 }),
-      error => (error as { code?: string }).code === "FILE_TOO_LARGE",
-    )
   })
 
   it("returns the exact decoded image block and immutable ETag", () => {

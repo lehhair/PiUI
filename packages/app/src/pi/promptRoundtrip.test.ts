@@ -1,38 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { SessionSnapshotV1 } from "@piui/protocol"
-import { applySnapshotToUi } from "./applySnapshot"
+import { beforeEach, describe, expect, it } from "vitest"
 import { messageStore } from "../store/messageStore"
-import { sessionProjectionStore } from "./sessionProjectionStore"
+import { applySnapshotToUi } from "./applySnapshot"
 import { isPiSession } from "./isPiSession"
+import { nativeSessionStore } from "./nativeSessionStore"
 
-function snap(id: string, n: number): SessionSnapshotV1 {
-  const timeline = []
-  for (let i = 0; i < n; i++) {
-    timeline.push({ type: "user" as const, id: `u${i}`, timestamp: i * 2, text: `q${i}` })
-    timeline.push({
-      type: "assistant" as const,
-      id: `a${i}`,
-      timestamp: i * 2 + 1,
-      status: "completed" as const,
-      provider: "mock",
-      model: "mock",
-      content: [{ type: "text" as const, text: `r${i}` }],
-    })
-  }
+function snapshot(): SessionSnapshotV1 {
   return {
     protocolVersion: 1,
     epoch: "e",
-    sequence: n,
-    session: {
-      id,
-      directory: "/workspace",
-      driverId: "pi",
-      driverSessionId: "d",
-      title: "t",
-      state: "idle",
-      createdAt: "a",
-      updatedAt: "b",
-    },
+    sequence: 1,
+    session: { id: "sess-rt", directory: "/workspace", driverId: "pi", driverSessionId: "d", state: "idle", createdAt: "a", updatedAt: "b" },
     runtime: {
       attached: true,
       thinkingLevel: "off",
@@ -45,31 +23,27 @@ function snap(id: string, n: number): SessionSnapshotV1 {
       tools: [],
       activeTools: [],
     },
-    timeline,
-    timelinePage: { hasMore: false },
-    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: `a${n - 1}`, entryCount: 0 },
-  }
+    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "native", header: null, leafId: "a1", entryCount: 2 },
+  } as unknown as SessionSnapshotV1
 }
 
-describe("pi prompt roundtrip (ui apply)", () => {
+describe("Pi prompt UI roundtrip", () => {
   beforeEach(() => {
     messageStore.clearAll()
-    sessionProjectionStore.clear()
-    vi.restoreAllMocks()
+    nativeSessionStore.clear()
   })
 
-  it("isPiSession true after apply", () => {
-    applySnapshotToUi(snap("sess-rt", 1))
+  it("tracks the session and renders persisted native messages", () => {
+    const snap = snapshot()
+    applySnapshotToUi(snap, { nativePage: {
+      head: snap.native,
+      items: [
+        { type: "message", id: "u1", parentId: null, message: { role: "user", content: "q" } },
+        { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: "r" } },
+      ],
+      hasMore: false,
+    } })
     expect(isPiSession("sess-rt")).toBe(true)
-    expect(isPiSession("other")).toBe(false)
-  })
-
-  it("re-apply grows visible messages", () => {
-    applySnapshotToUi(snap("sess-rt", 1))
-    expect(messageStore.getVisibleMessages("sess-rt")).toHaveLength(2)
-    applySnapshotToUi(snap("sess-rt", 2))
-    expect(messageStore.getVisibleMessages("sess-rt")).toHaveLength(4)
-    const last = messageStore.getVisibleMessages("sess-rt").at(-1)
-    expect(last?.info.role).toBe("assistant")
+    expect(messageStore.getVisibleMessages("sess-rt").map(message => message.info.role)).toEqual(["user", "assistant"])
   })
 })

@@ -1,30 +1,26 @@
 import {
   EVENT_WS_SUBPROTOCOL_V2,
   eventStreamKeyV2,
-  type EventEnvelopeV1,
-  type EventEnvelopeV2,
   type ExtensionUiSnapshotV1,
+  type PiNativeEntriesPageV1,
   type SessionSnapshotV1,
 } from "@piui/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { messageStore } from "../store/messageStore"
 import { applySnapshotToUi } from "./applySnapshot"
 import { PiEventSocket } from "./eventSocket"
 import { clearPiSessionIndex } from "./piSessionIndex"
-import { sessionProjectionStore } from "./sessionProjectionStore"
-import {
-  getManagementEventSnapshot,
-  resetManagementEvents,
-  trackManagementProviders,
-} from "./managementEventStore"
+import { nativeSessionStore } from "./nativeSessionStore"
 
-const { fetchSnapshot, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
+const { fetchSnapshot, fetchPiNativeEntriesPage, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
   fetchSnapshot: vi.fn<(id: string) => Promise<SessionSnapshotV1>>(),
+  fetchPiNativeEntriesPage: vi.fn<(id: string) => Promise<PiNativeEntriesPageV1>>(),
   fetchExtensionUiSnapshot: vi.fn<(id: string) => Promise<ExtensionUiSnapshotV1>>(),
 }))
 
 vi.mock("./sessionApi", async importOriginal => {
   const original = await importOriginal<typeof import("./sessionApi")>()
-  return { ...original, fetchSnapshot, fetchExtensionUiSnapshot }
+  return { ...original, fetchSnapshot, fetchPiNativeEntriesPage, fetchExtensionUiSnapshot }
 })
 
 class FakeWebSocket {
@@ -34,29 +30,28 @@ class FakeWebSocket {
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
-
   readyState = FakeWebSocket.OPEN
   protocol: string
   sent: string[] = []
 
   constructor(_url: string, protocol?: string | string[]) {
-    this.protocol = Array.isArray(protocol) ? (protocol[0] ?? "") : (protocol ?? "")
+    this.protocol = Array.isArray(protocol) ? protocol[0] ?? "" : protocol ?? ""
     FakeWebSocket.instances.push(this)
   }
   send(data: string) { this.sent.push(data) }
   close() { this.readyState = 3; this.onclose?.() }
 }
 
-function snapshot(id: string, sequence: number, text: string): SessionSnapshotV1 {
+function snapshot(revision = 1, leafId = "u1", sequence = revision): SessionSnapshotV1 {
   return {
     protocolVersion: 1,
-    epoch: "session-epoch",
+    epoch: "snapshot-epoch",
     sequence,
     session: {
-      id,
+      id: "active",
       directory: "/workspace",
       driverId: "pi",
-      driverSessionId: id,
+      driverSessionId: "active",
       state: "idle",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -73,243 +68,129 @@ function snapshot(id: string, sequence: number, text: string): SessionSnapshotV1
       tools: [],
       activeTools: [],
     },
-    timeline: [{ type: "user", id: `entry-${id}`, entryId: `entry-${id}`, timestamp: 1, text }],
-    timelinePage: { hasMore: false },
-    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: `entry-${id}`, entryCount: 0 },
-  }
+    native: {
+      namespace: "pi",
+      schemaVersion: 1,
+      sdkVersion: "0.81.1",
+      revision,
+      epoch: "native-epoch",
+      header: null,
+      leafId,
+      entryCount: leafId === "a1" ? 2 : 1,
+    },
+  } as unknown as SessionSnapshotV1
 }
 
-function envelope(sequence: number, payload: SessionSnapshotV1): EventEnvelopeV1 {
+function page(head: SessionSnapshotV1["native"], assistantText?: string): PiNativeEntriesPageV1 {
   return {
-    protocolVersion: 1,
-    epoch: "event-epoch",
-    sequence,
-    eventId: `event-${sequence}`,
-    sessionId: payload.session.id,
-    timestamp: "2026-01-01T00:00:00.000Z",
-    type: "session.snapshot",
-    payload,
+    head,
+    items: [
+      { type: "message", id: "u1", parentId: null, timestamp: 1, message: { role: "user", content: "question" } },
+      ...(assistantText ? [{ type: "message", id: "a1", parentId: "u1", timestamp: 2, message: { role: "assistant", content: assistantText } }] : []),
+    ],
+    hasMore: false,
   }
 }
 
-function envelopeV2(sequence: number, payload: SessionSnapshotV1): EventEnvelopeV2<"session.snapshot.updated"> {
-  return {
-    protocolVersion: 2,
-    stream: { kind: "session", id: payload.session.id },
-    cursor: { epoch: "stream-epoch", sequence },
-    eventId: `event-v2-${sequence}`,
-    timestamp: "2026-01-01T00:00:00.000Z",
-    type: "session.snapshot.updated",
-    payload: { sessionId: payload.session.id, reason: "runtime", snapshot: payload },
-  }
+function send(ws: FakeWebSocket, value: unknown): void {
+  ws.onmessage?.({ data: JSON.stringify(value) })
 }
 
-describe("PiEventSocket", () => {
+describe("PiEventSocket native session events", () => {
   beforeEach(() => {
-    sessionProjectionStore.clear()
+    messageStore.clearAll()
+    nativeSessionStore.clear()
     clearPiSessionIndex()
-    resetManagementEvents()
     FakeWebSocket.instances = []
     fetchSnapshot.mockReset()
-    fetchSnapshot.mockRejectedValue(new Error("not available in unit test"))
+    fetchPiNativeEntriesPage.mockReset()
     fetchExtensionUiSnapshot.mockReset()
     fetchExtensionUiSnapshot.mockImplementation(async sessionId => ({
       sessionId,
-      state: {
-        revision: 0,
-        statuses: {},
-        workingVisible: true,
-        widgets: {},
-        editorText: "",
-        toolsExpanded: false,
-      },
+      state: { revision: 0, statuses: {}, workingVisible: true, widgets: {}, editorText: "", toolsExpanded: false },
       pending: [],
     }))
     vi.stubGlobal("WebSocket", FakeWebSocket)
   })
 
-  it("isolates background snapshots and resyncs legacy event gaps before advancing", async () => {
-    applySnapshotToUi(snapshot("active", 1, "active"))
+  it("resyncs a session with both snapshot and native entries page", async () => {
+    const initial = snapshot()
+    applySnapshotToUi(initial, { nativePage: page(initial.native) })
+    const resynced = snapshot(2, "a1")
+    fetchSnapshot.mockResolvedValue(resynced)
+    fetchPiNativeEntriesPage.mockResolvedValue(page(resynced.native, "resynced"))
+
     const socket = new PiEventSocket()
     socket.connect()
-    const ws = FakeWebSocket.instances[0]
-    expect(ws).toBeDefined()
-
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelope(1, snapshot("background", 1, "background")) }) })
-    expect(sessionProjectionStore.getActiveSessionId()).toBe("active")
-    expect(sessionProjectionStore.getTimeline("background")[0]).toMatchObject({ text: "background" })
-
-    fetchSnapshot.mockImplementation(async id => snapshot(id, 3, id === "active" ? "new" : "background"))
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelope(3, snapshot("active", 3, "ignored-gap")) }) })
-    await vi.waitFor(() => {
-      expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "new" })
-    })
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelope(2, snapshot("active", 2, "old")) }) })
-    expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "new" })
-    socket.close()
-  })
-
-  it("subscribes with cursor maps and applies contiguous v2 session events", async () => {
-    applySnapshotToUi(snapshot("active", 1, "base"))
-    fetchSnapshot.mockResolvedValue(snapshot("active", 2, "resynced"))
-    const socket = new PiEventSocket()
-    socket.connect()
-    const ws = FakeWebSocket.instances[0]
-    ws?.onopen?.()
-
-    const initialSubscribe = JSON.parse(ws?.sent[0] ?? "{}") as { streams?: Array<{ kind: string; id: string }> }
-    expect(ws?.protocol).toBe(EVENT_WS_SUBPROTOCOL_V2)
-    expect(initialSubscribe.streams).toContainEqual({ kind: "session", id: "active" })
-    expect(initialSubscribe.streams).toContainEqual({ kind: "workspace", id: "/workspace" })
-
+    const ws = FakeWebSocket.instances[0]!
+    ws.onopen?.()
+    expect(ws.protocol).toBe(EVENT_WS_SUBPROTOCOL_V2)
     const key = eventStreamKeyV2({ kind: "session", id: "active" })
-    ws?.onmessage?.({
-      data: JSON.stringify({
-        channel: "control",
-        type: "resync_required",
-        streams: { [key]: { cursor: { epoch: "stream-epoch", sequence: 0 }, reason: "missing_cursor" } },
-      }),
+    send(ws, {
+      channel: "control",
+      type: "resync_required",
+      streams: { [key]: { cursor: { epoch: "event-epoch", sequence: 0 }, reason: "missing_cursor" } },
     })
-    await vi.waitFor(() => {
-      expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "resynced" })
-    })
-    const resubscribe = JSON.parse(ws?.sent.at(-1) ?? "{}") as { streams?: Array<{ kind: string; id: string }> }
-    expect(resubscribe.streams).toContainEqual({ kind: "server", id: "server" })
-    expect(resubscribe.streams).toContainEqual({ kind: "workspace", id: "/workspace" })
-    expect(resubscribe.streams).toContainEqual({ kind: "session", id: "active" })
 
-    ws?.onmessage?.({
-      data: JSON.stringify({ channel: "event", event: envelopeV2(1, snapshot("active", 3, "live")) }),
-    })
-    expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "live" })
+    await vi.waitFor(() => expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({ text: "resynced" }))
+    expect(fetchSnapshot).toHaveBeenCalledWith("active")
+    expect(fetchPiNativeEntriesPage).toHaveBeenCalledWith("active")
     socket.close()
   })
 
-  it("recovers a gapped v2 stream from ordered replay", async () => {
-    applySnapshotToUi(snapshot("active", 1, "base"))
-    fetchSnapshot.mockResolvedValue(snapshot("active", 2, "resynced"))
+  it("projects raw native streaming events and replaces transient data after native revision advances", async () => {
+    const initial = snapshot()
+    applySnapshotToUi(initial, { nativePage: page(initial.native) })
+    fetchSnapshot.mockResolvedValue(initial)
+    fetchPiNativeEntriesPage.mockResolvedValue(page(initial.native))
     const socket = new PiEventSocket()
     socket.connect()
-    const ws = FakeWebSocket.instances[0]
-    ws?.onopen?.()
+    const ws = FakeWebSocket.instances[0]!
+    ws.onopen?.()
     const key = eventStreamKeyV2({ kind: "session", id: "active" })
-    ws?.onmessage?.({
-      data: JSON.stringify({
-        channel: "control",
-        type: "resync_required",
-        streams: { [key]: { cursor: { epoch: "stream-epoch", sequence: 0 }, reason: "missing_cursor" } },
-      }),
+    send(ws, {
+      channel: "control",
+      type: "resync_required",
+      streams: { [key]: { cursor: { epoch: "event-epoch", sequence: 0 }, reason: "missing_cursor" } },
     })
-    await vi.waitFor(() => expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "resynced" }))
+    await vi.waitFor(() => expect(JSON.parse(ws.sent.at(-1) ?? "{}").cursors?.[key]?.sequence).toBe(0))
 
-    ws?.onmessage?.({
-      data: JSON.stringify({ channel: "event", event: envelopeV2(3, snapshot("active", 3, "must-not-apply")) }),
+    const nativeEnvelope = (sequence: number, event: unknown) => ({
+      channel: "event",
+      event: {
+        protocolVersion: 2,
+        stream: { kind: "session", id: "active" },
+        cursor: { epoch: "event-epoch", sequence },
+        eventId: `native-${sequence}`,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        type: "session.native.event",
+        payload: { sessionId: "active", event },
+      },
     })
-    const subscriptionsAfterGap = ws?.sent.length
-    ws?.onmessage?.({
-      data: JSON.stringify({ channel: "event", event: envelopeV2(4, snapshot("active", 4, "also-gapped")) }),
+    send(ws, nativeEnvelope(1, { type: "message_start", message: { role: "assistant", content: [] } }))
+    send(ws, nativeEnvelope(2, {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
+    }))
+    expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({ text: "partial" })
+    expect(messageStore.getIsStreaming("active")).toBe(true)
+
+    const persisted = snapshot(2, "a1", 2)
+    fetchPiNativeEntriesPage.mockResolvedValue(page(persisted.native, "complete"))
+    send(ws, {
+      channel: "event",
+      event: {
+        protocolVersion: 2,
+        stream: { kind: "session", id: "active" },
+        cursor: { epoch: "event-epoch", sequence: 3 },
+        eventId: "snapshot-3",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        type: "session.snapshot.updated",
+        payload: { sessionId: "active", reason: "runtime", snapshot: persisted },
+      },
     })
-    expect(ws?.sent.length).toBe(subscriptionsAfterGap)
-    expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "resynced" })
-    expect(ws?.sent.some(raw => JSON.parse(raw).cursors?.[key]?.sequence === 0)).toBe(true)
-
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(1, snapshot("active", 3, "replay-1")) }) })
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(2, snapshot("active", 4, "replay-2")) }) })
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: envelopeV2(3, snapshot("active", 5, "replay-3")) }) })
-    expect(sessionProjectionStore.getTimeline("active")[0]).toMatchObject({ text: "replay-3" })
-    socket.close()
-  })
-
-  it("delivers workspace file and Git invalidation events", async () => {
-    applySnapshotToUi(snapshot("active", 1, "base"))
-    const socket = new PiEventSocket()
-    socket.connect()
-    const ws = FakeWebSocket.instances[0]
-    ws?.onopen?.()
-    const workspaceKey = eventStreamKeyV2({ kind: "workspace", id: "/workspace" })
-    ws?.onmessage?.({
-      data: JSON.stringify({
-        channel: "control",
-        type: "resync_required",
-        streams: { [workspaceKey]: { cursor: { epoch: "workspace-epoch", sequence: 0 }, reason: "missing_cursor" } },
-      }),
-    })
-    await vi.waitFor(() => expect(JSON.parse(ws?.sent.at(-1) ?? "{}").cursors?.[workspaceKey]?.sequence).toBe(0))
-
-    const fileListener = vi.fn()
-    const gitListener = vi.fn()
-    window.addEventListener("piui:workspace-files-changed", fileListener)
-    window.addEventListener("piui:workspace-git-updated", gitListener)
-    ws?.onmessage?.({
-      data: JSON.stringify({
-        channel: "event",
-        event: {
-          protocolVersion: 2,
-          stream: { kind: "workspace", id: "/workspace" },
-          cursor: { epoch: "workspace-epoch", sequence: 1 },
-          eventId: "file-1",
-          timestamp: "2026-01-01T00:00:00.000Z",
-          type: "workspace.files.changed",
-          payload: {
-            workspacePath: "/workspace",
-            revision: 1,
-            changes: [{ path: "src/app.ts", kind: "changed", type: "file" }],
-            rescan: false,
-          },
-        },
-      }),
-    })
-    ws?.onmessage?.({
-      data: JSON.stringify({
-        channel: "event",
-        event: {
-          protocolVersion: 2,
-          stream: { kind: "workspace", id: "/workspace" },
-          cursor: { epoch: "workspace-epoch", sequence: 2 },
-          eventId: "git-2",
-          timestamp: "2026-01-01T00:00:00.000Z",
-          type: "workspace.git.updated",
-          payload: { workspacePath: "/workspace", revision: 1 },
-        },
-      }),
-    })
-    expect(fileListener).toHaveBeenCalledTimes(1)
-    expect((fileListener.mock.calls[0]?.[0] as CustomEvent).detail.changes[0].path).toBe("src/app.ts")
-    expect(gitListener).toHaveBeenCalledTimes(1)
-    window.removeEventListener("piui:workspace-files-changed", fileListener)
-    window.removeEventListener("piui:workspace-git-updated", gitListener)
-    socket.close()
-  })
-
-  it("subscribes to provider and resource streams and delivers management events", async () => {
-    applySnapshotToUi(snapshot("active", 1, "base"))
-    trackManagementProviders(["anthropic"])
-    const socket = new PiEventSocket()
-    socket.connect()
-    const ws = FakeWebSocket.instances[0]
-    ws?.onopen?.()
-    const subscribe = JSON.parse(ws?.sent[0] ?? "{}") as { streams: Array<{ kind: string; id: string }> }
-    expect(subscribe.streams).toContainEqual({ kind: "provider", id: "anthropic" })
-    expect(subscribe.streams).toContainEqual({ kind: "resources", id: "/workspace" })
-
-    const providerKey = eventStreamKeyV2({ kind: "provider", id: "anthropic" })
-    const resourcesKey = eventStreamKeyV2({ kind: "resources", id: "/workspace" })
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "control", type: "resync_required", streams: {
-      [providerKey]: { cursor: { epoch: "provider-epoch", sequence: 0 }, reason: "missing_cursor" },
-      [resourcesKey]: { cursor: { epoch: "resources-epoch", sequence: 0 }, reason: "missing_cursor" },
-    } }) })
-    await vi.waitFor(() => expect(JSON.parse(ws?.sent.at(-1) ?? "{}").cursors?.[providerKey]?.sequence).toBe(0))
-
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: {
-      protocolVersion: 2, stream: { kind: "provider", id: "anthropic" }, cursor: { epoch: "provider-epoch", sequence: 1 }, eventId: "auth-1", timestamp: "2026-01-01T00:00:00.000Z", type: "provider.auth.flow",
-      payload: { type: "prompt", flowId: "flow-1", promptId: "prompt-1", providerId: "anthropic", prompt: { type: "text", message: "Code" } },
-    } }) })
-    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: {
-      protocolVersion: 2, stream: { kind: "resources", id: "/workspace" }, cursor: { epoch: "resources-epoch", sequence: 1 }, eventId: "package-1", timestamp: "2026-01-01T00:00:00.000Z", type: "packages.progress",
-      payload: { commandId: "command-1", workspacePath: "/workspace", type: "progress", action: "install", source: "pkg", message: "working" },
-    } }) })
-    expect(getManagementEventSnapshot().flows["flow-1"].event?.type).toBe("prompt")
-    expect(getManagementEventSnapshot().packageProgress["command-1"].message).toBe("working")
+    await vi.waitFor(() => expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({ text: "complete" }))
+    expect(nativeSessionStore.getStreamingEntryIds("active").size).toBe(0)
     socket.close()
   })
 })
