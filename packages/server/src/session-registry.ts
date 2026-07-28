@@ -1894,6 +1894,27 @@ export class SessionRegistry {
     return nativeEntriesPageFromEntries(head, session.nativeEntries, { cursor, limit, maxBytes }, entry => entry)
   }
 
+  async getNativeBranchPage(sessionId: string, cursor: string | undefined, limit: number, maxBytes: number) {
+    const session = await this.attach(sessionId)
+    if (session.real) return session.real.getNativeBranchPage(cursor, limit, maxBytes)
+    const head = mockNativeHead(session)
+    const byId = new Map(session.nativeEntries.flatMap(entry =>
+      typeof entry.id === "string" ? [[entry.id, entry] as const] : []
+    ))
+    const branch: NativeEntry[] = []
+    const visited = new Set<string>()
+    let id = head.leafId
+    while (id && !visited.has(id)) {
+      visited.add(id)
+      const entry = byId.get(id)
+      if (!entry) break
+      branch.push(entry)
+      id = typeof entry.parentId === "string" ? entry.parentId : null
+    }
+    branch.reverse()
+    return nativeEntriesPageFromEntries(head, branch, { cursor, limit, maxBytes }, entry => entry)
+  }
+
   async getNativeTree(sessionId: string) {
     const session = await this.attach(sessionId)
     if (session.real) return session.real.getNativeTree()

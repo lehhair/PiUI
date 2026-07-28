@@ -255,10 +255,10 @@ describe('InputToolbar file selection', () => {
       />,
     )
 
-    expect(screen.getByRole('group', { name: 'Running message delivery' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Follow-up' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: 'Follow-up' })).toHaveAttribute('title', 'Send this message as the next turn after the current response finishes')
-    fireEvent.click(screen.getByRole('button', { name: 'Steer' }))
+    expect(screen.getByRole('group', { name: 'Running message timing' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next turn' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Next turn' })).toHaveAttribute('title', 'Send this message as the next turn after the current response finishes')
+    fireEvent.click(screen.getByRole('button', { name: 'Current turn' }))
     expect(onDeliveryModeChange).toHaveBeenCalledWith('steer')
   })
 })

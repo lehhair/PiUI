@@ -4,7 +4,7 @@ import { activeSessionStore } from "../store/activeSessionStore"
 import { nativeSessionStore } from "./nativeSessionStore"
 import { trackPiSession } from "./piSessionIndex"
 import { nativeEntriesToUiMessages } from "./nativeEntriesToMessages"
-import { fetchPiNativeEntriesPage, fetchSnapshot } from "./sessionApi"
+import { fetchPiNativeBranchPage, fetchSnapshot } from "./sessionApi"
 
 function publishNativeMessages(sessionId: string): void {
   const snapshot = nativeSessionStore.getSnapshot(sessionId)
@@ -31,12 +31,7 @@ function publishNativeMessages(sessionId: string): void {
     liveTools: nativeSessionStore.getLiveTools(sessionId),
   })
   if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId)) {
-    const existing = messageStore.getSessionState(sessionId)?.messages ?? []
-    const transientIds = new Set(messages.map(message => message.info.id))
-    messageStore.setUiMessages(sessionId, [
-      ...existing.filter(message => !transientIds.has(message.info.id)),
-      ...messages,
-    ], {
+    messageStore.updateSessionMetadata(sessionId, {
       title: snapshot.session.title,
       directory: snapshot.session.directory,
       hasMoreHistory: history.hasMore,
@@ -66,26 +61,26 @@ export function applySnapshotToUi(
   if (options?.nativePage) nativeSessionStore.replaceFirstPage(snapshot.session.id, options.nativePage)
   publishNativeMessages(snapshot.session.id)
   if (!options?.nativePage && replaced.nativeChanged && options?.refreshNative !== false) {
-    void refreshPiNativeEntries(snapshot.session.id).catch(() => undefined)
+    void refreshPiNativeBranch(snapshot.session.id).catch(() => undefined)
   }
   return snapshot.session.id
 }
 
 export async function loadPiSessionToUi(sessionId: string, options?: { activate?: boolean }): Promise<SessionSnapshotV1> {
   const snapshot = await fetchSnapshot(sessionId)
-  const nativePage = await fetchPiNativeEntriesPage(sessionId)
+  const nativePage = await fetchPiNativeBranchPage(sessionId)
   applySnapshotToUi(snapshot, { ...options, nativePage })
   return snapshot
 }
 
-export async function refreshPiNativeEntries(sessionId: string): Promise<void> {
-  const page = await fetchPiNativeEntriesPage(sessionId)
+export async function refreshPiNativeBranch(sessionId: string): Promise<void> {
+  const page = await fetchPiNativeBranchPage(sessionId)
   if (nativeSessionStore.replaceFirstPage(sessionId, page)) publishNativeMessages(sessionId)
 }
 
 export async function resyncPiSessionToUi(sessionId: string, options?: { activate?: boolean }): Promise<void> {
   const snapshot = await fetchSnapshot(sessionId)
-  const nativePage = await fetchPiNativeEntriesPage(sessionId)
+  const nativePage = await fetchPiNativeBranchPage(sessionId)
   applySnapshotToUi(snapshot, { ...options, nativePage, refreshNative: false })
 }
 
@@ -97,6 +92,12 @@ export function appendPiNativeEntriesPageToUi(sessionId: string, page: PiNativeE
 
 export function applyPiNativeEventToUi(sessionId: string, event: unknown): boolean {
   const applied = nativeSessionStore.applyNativeEvent(sessionId, event)
-  if (applied) publishNativeMessages(sessionId)
+  if (applied) {
+    publishNativeMessages(sessionId)
+    if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId) &&
+      event && typeof event === "object" && !Array.isArray(event) && "type" in event && event.type === "message_start") {
+      void refreshPiNativeBranch(sessionId).catch(() => undefined)
+    }
+  }
   return applied
 }

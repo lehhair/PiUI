@@ -518,6 +518,12 @@ export class PiWorkerSession implements PiSessionRuntime {
     return result.page
   }
 
+  async getNativeBranchPage(cursor: string | undefined, limit: number, maxBytes: number) {
+    const result = await this.request({ type: "getNativeBranchPage", cursor, limit, maxBytes })
+    if (result.type !== "nativeBranchPage") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.page
+  }
+
   async getNativeTree() {
     const result = await this.request({ type: "getNativeTree" })
     if (result.type !== "nativeTree") throw new Error(`unexpected Pi worker result: ${result.type}`)

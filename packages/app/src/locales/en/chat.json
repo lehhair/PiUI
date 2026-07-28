@@ -95,10 +95,10 @@
     "stopGeneration": "Stop generation",
     "sendingMessage": "Sending message",
     "sendMessage": "Send message",
-    "deliveryMode": "Running message delivery",
-    "steer": "Steer",
+    "deliveryMode": "Running message timing",
+    "steer": "Current turn",
     "steerHint": "Add this message to the response currently being generated",
-    "followUp": "Follow-up",
+    "followUp": "Next turn",
     "followUpHint": "Send this message as the next turn after the current response finishes"
   },
   "inputFooter": {

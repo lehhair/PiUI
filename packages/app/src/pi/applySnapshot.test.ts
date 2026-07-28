@@ -92,7 +92,7 @@ describe("app-local native session messages", () => {
     expect(messageStore.getIsStreaming("s-apply")).toBe(false)
   })
 
-  it("keeps visible history while a new transient turn is disconnected from the loaded page", () => {
+  it("keeps visible history while fetching a missing transient parent", () => {
     applySnapshotToUi(snapshot(), { nativePage: page() })
     applySnapshotToUi(snapshot(2, 2, "missing-leaf"), { refreshNative: false })
 
@@ -105,7 +105,6 @@ describe("app-local native session messages", () => {
     expect(messages.map(message => message.parts[0])).toEqual([
       expect.objectContaining({ type: "text", text: "ping" }),
       expect.objectContaining({ type: "text", text: "pong" }),
-      expect.objectContaining({ type: "text", text: "new question" }),
     ])
   })
 })

@@ -1180,6 +1180,16 @@ export async function fetchPiNativeEntriesPage(
   return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/entries?${query}`, "fetchPiNativeEntriesPage")
 }
 
+export async function fetchPiNativeBranchPage(
+  sessionId: string,
+  cursor?: string,
+  limit = 50,
+): Promise<PiNativeEntriesPageV1> {
+  const query = new URLSearchParams({ limit: String(limit), maxBytes: String(32 * 1024 * 1024) })
+  if (cursor) query.set("cursor", cursor)
+  return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/branch?${query}`, "fetchPiNativeBranchPage")
+}
+
 export function fetchPiNativeTree(sessionId: string): Promise<Array<Record<string, PiNativeJsonValueV1>>> {
   return getPiJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/native/tree`, "fetchPiNativeTree")
 }
