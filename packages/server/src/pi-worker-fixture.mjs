@@ -257,6 +257,13 @@ process.on("message", async request => {
     if (command.cwd.includes("hang-open")) return
     runtimeCwd = command.cwd
     session = snapshot("fixture-session", command.sessionFile ?? path.join(command.cwd, "session.jsonl"))
+    process.send?.({
+      kind: "event",
+      generation,
+      sessionId: session.sessionId,
+      type: "state",
+      state: session.state,
+    })
     result = { type: "session", session }
   } else if (command.type === "prompt") {
     if (command.text === "crash") {

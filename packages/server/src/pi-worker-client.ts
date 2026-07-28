@@ -955,7 +955,7 @@ export class PiWorkerSession implements PiSessionRuntime {
       return
     }
     if ((message.type === "state" || message.type === "nativeEvent" || message.type === "nativeHead") &&
-      message.sessionId !== this.session.sessionId) return
+      (!this.session || message.sessionId !== this.session.sessionId)) return
     if (message.type === "extensionUi") {
       const event = message.event.type === "requested"
         ? {
