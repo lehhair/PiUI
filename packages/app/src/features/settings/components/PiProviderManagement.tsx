@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PiModelRuntimeSnapshotV1, ProviderAuthInfoV1 } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
+import { refreshModels } from '../../../hooks/useModels'
 import {
   registerProviderAuthFlow,
   trackManagementProviders,
@@ -95,8 +96,8 @@ export function PiProviderManagement({ sessionId }: { sessionId: string | null }
         <span className="mr-auto text-[length:var(--fs-xs)] text-text-400">
           {runtime ? `${runtime.providers.length} providers · ${runtime.availableModels.length} available models · ${runtime.registeredProviderIds.length} registered` : 'Loading runtime…'}
         </span>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('refresh', async () => { await refreshModelRuntime(scopedSessionId) })}>Refresh</Button>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('reload', async () => { await reloadModelRuntime(scopedSessionId) })}>Reload</Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('refresh', async () => { await refreshModelRuntime(scopedSessionId); await refreshModels() })}>Refresh</Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('reload', async () => { await reloadModelRuntime(scopedSessionId); await refreshModels() })}>Reload</Button>
       </div>
       {runtime?.error ? <p className="text-[length:var(--fs-xs)] text-danger-100">{runtime.error}</p> : null}
       {runtime ? <details className="text-[length:var(--fs-xs)]"><summary className="cursor-pointer text-text-300">Runtime inspection</summary><pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-200/40 p-2 text-text-400">{JSON.stringify(runtime, null, 2)}</pre></details> : null}

@@ -55,6 +55,11 @@ async function fetchCommands(_directory?: string): Promise<Command[]> {
   return getFrontendCommands()
 }
 
+export function invalidateCommandCache(): void {
+  commandCache.clear()
+  commandInflight.clear()
+}
+
 export async function getCommands(directory?: string): Promise<Command[]> {
   const key = getCommandCacheKey(directory)
   const now = Date.now()

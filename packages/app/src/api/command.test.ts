@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCommands } from './command'
+import { getCommands, invalidateCommandCache } from './command'
 
 const listMock = vi.fn()
 const isPiServerUpMock = vi.fn()
@@ -15,8 +15,22 @@ vi.mock('../pi/nativeSessionStore', () => ({
 
 describe('getCommands', () => {
   beforeEach(() => {
+    invalidateCommandCache()
     listMock.mockReset()
     isPiServerUpMock.mockResolvedValue(true)
+  })
+
+  it('reloads native commands after resource invalidation', async () => {
+    listMock
+      .mockResolvedValueOnce({ commands: [{ name: 'before' }] })
+      .mockResolvedValueOnce({ commands: [{ name: 'after' }] })
+    await getCommands('/workspace/reload')
+    invalidateCommandCache()
+
+    const commands = await getCommands('/workspace/reload')
+
+    expect(commands[0]?.name).toBe('after')
+    expect(listMock).toHaveBeenCalledTimes(2)
   })
 
   it('marks frontend and api commands with stable sources', async () => {

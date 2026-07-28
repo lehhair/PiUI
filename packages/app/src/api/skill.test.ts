@@ -26,7 +26,16 @@ describe('Pi skill facade', () => {
     })
 
     await expect(getSkills('session-1')).resolves.toEqual([
-      { name: 'review', description: 'Review code', location: '/skills/review/SKILL.md' },
+      {
+        name: 'review',
+        description: 'Review code',
+        location: '/skills/review/SKILL.md',
+        content: JSON.stringify({
+          baseDir: '/skills/review',
+          disableModelInvocation: false,
+          sourceInfo: { origin: 'top-level' },
+        }, null, 2),
+      },
     ])
     expect(listSessionSkills).toHaveBeenCalledWith('session-1')
   })

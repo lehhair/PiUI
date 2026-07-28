@@ -47,6 +47,14 @@ There is no remote timeline or presentation API. The browser pages native entrie
 | model catalogs and runtime inspection | model routes | Complete; Pi model JSON is retained without capability fabrication; credential-bearing config fields are redacted |
 | model runtime reload/refresh | model runtime routes | Complete |
 
+## Browser UI Coverage
+
+Every interactive surface exposed by the current PiUI server has a browser path. Session lifecycle, prompt/image input, model and thinking selection, tree navigation, queue/retry/compaction, tools, providers, packages, resources, project trust, export, Bash, custom messages, custom entries, and extension dialogs have dedicated controls. Low-frequency persistent settings remain fully reachable through the typed `PiSettingsPatch` JSON editor; global, project, and effective native scopes are visible beside it.
+
+Prompt-template expansion and Bash context exclusion are explicit controls in Session commands. Resource reload invalidates the browser command cache, and model runtime reload/refresh also refreshes the chat model catalog. Skills display the native serializable metadata returned by Pi rather than an empty fabricated body.
+
+Transport-only surfaces do not receive artificial buttons: health, capability negotiation, command polling, cursors, replay/resync, attachment bytes, revisions, and idempotency records are consumed automatically. Capabilities that do not exist in the server API, including llama.cpp management, Git mutation, worktrees, PTY, and MCP, remain disabled and are not represented as completed UI integration.
+
 ## Extension UI
 
 The capability manifest contains a per-method `rpc`, `web-equivalent`, or `tui-only` value and concrete size limits.

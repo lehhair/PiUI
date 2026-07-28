@@ -13,6 +13,7 @@ import {
   fetchSnapshot,
   listPiSessions,
   listPiSessionModels,
+  promptSession,
   sendPiCustomMessage,
   sendPiUserMessage,
   setPiScopedModels,
@@ -32,12 +33,15 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
   const [scopedModels, setScopedModels] = useState('')
   const [bashCommand, setBashCommand] = useState('')
   const [bashResult, setBashResult] = useState<unknown>()
+  const [bashExcludeFromContext, setBashExcludeFromContext] = useState(false)
   const [exportPath, setExportPath] = useState('')
   const [exportResult, setExportResult] = useState<unknown>()
   const [customType, setCustomType] = useState('')
   const [customPayload, setCustomPayload] = useState('{}')
   const [userMessage, setUserMessage] = useState('')
   const [deliveryMode, setDeliveryMode] = useState<'' | 'steer' | 'followUp'>('')
+  const [promptText, setPromptText] = useState('')
+  const [expandPromptTemplates, setExpandPromptTemplates] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -118,10 +122,21 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
         <Button size="sm" disabled={busy !== null || !userMessage.trim()} onClick={() => void run('user-message', async () => { await sendPiUserMessage(sessionId, userMessage.trim(), deliveryMode || undefined); setUserMessage('') })}>Send</Button>
       </div>
 
+      <div className="space-y-2 border-t border-border-100 pt-3">
+        <div className="flex flex-wrap gap-2">
+          <input className={`${inputClass} min-w-44 flex-1`} value={promptText} placeholder="Prompt through AgentSession.prompt" onChange={event => setPromptText(event.target.value)} />
+          <Button size="sm" disabled={busy !== null || !promptText.trim()} onClick={() => void run('prompt', async () => {
+            await promptSession(sessionId, promptText.trim(), { stream: true, expandPromptTemplates })
+            setPromptText('')
+          })}>Prompt</Button>
+        </div>
+        <Toggle label="Expand prompt templates" checked={expandPromptTemplates} onChange={setExpandPromptTemplates} />
+      </div>
+
       <label className="block space-y-1"><span className="text-[length:var(--fs-xs)] text-text-400">Scoped model patterns, one per line</span><textarea rows={3} className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-2 font-mono text-[length:var(--fs-xs)] text-text-100" value={scopedModels} onChange={event => setScopedModels(event.target.value)} /></label>
       <Button size="sm" disabled={busy !== null} onClick={() => void run('scoped-models', async () => { const result = await setPiScopedModels(sessionId, scopedModels.split(/\r?\n/).map(item => item.trim()).filter(Boolean)); applySnapshotToUi(result.snapshot); setSnapshot(result.snapshot) })}>Apply model scope</Button>
 
-      <div className="flex flex-wrap gap-2 border-t border-border-100 pt-3"><input className={`${inputClass} min-w-44 flex-1`} value={bashCommand} placeholder="One-shot bash command" onChange={event => setBashCommand(event.target.value)} /><Button size="sm" disabled={busy !== null || !bashCommand.trim()} onClick={() => void run('bash', async () => setBashResult((await executePiBash(sessionId, bashCommand.trim())).result))}>Run</Button><Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run('abort-bash', async () => { const result = await abortPiBash(sessionId); applySnapshotToUi(result.snapshot) })}>Abort</Button></div>
+      <div className="space-y-2 border-t border-border-100 pt-3"><div className="flex flex-wrap gap-2"><input className={`${inputClass} min-w-44 flex-1`} value={bashCommand} placeholder="One-shot bash command" onChange={event => setBashCommand(event.target.value)} /><Button size="sm" disabled={busy !== null || !bashCommand.trim()} onClick={() => void run('bash', async () => setBashResult((await executePiBash(sessionId, bashCommand.trim(), bashExcludeFromContext)).result))}>Run</Button><Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run('abort-bash', async () => { const result = await abortPiBash(sessionId); applySnapshotToUi(result.snapshot) })}>Abort</Button></div><Toggle label="Exclude bash output from session context" checked={bashExcludeFromContext} onChange={setBashExcludeFromContext} /></div>
       {bashResult !== undefined ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-bg-200/40 p-2 text-[length:var(--fs-xs)] text-text-300">{formatValue(bashResult)}</pre> : null}
 
       <div className="flex flex-wrap gap-2"><input className={`${inputClass} min-w-44 flex-1`} value={exportPath} placeholder="Optional output path" onChange={event => setExportPath(event.target.value)} /><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('export-html', async () => setExportResult((await exportPiSession(sessionId, 'html', exportPath.trim() || undefined)).result))}>Export HTML</Button><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('export-jsonl', async () => setExportResult((await exportPiSession(sessionId, 'jsonl', exportPath.trim() || undefined)).result))}>Export JSONL</Button></div>
@@ -134,4 +149,8 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
 
 function formatValue(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <label className="flex min-h-8 items-center gap-2 text-[length:var(--fs-xs)] text-text-300"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />{label}</label>
 }

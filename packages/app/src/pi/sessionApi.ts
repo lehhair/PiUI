@@ -822,7 +822,7 @@ export interface SessionReplacementResponse<T extends "session.fork" | "session.
 }
 
 async function postSessionCommand<T>(sessionId: string, command: string, body: unknown): Promise<T> {
-  const res = await fetch(
+  const res = await piFetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/${command}`,
     {
       method: "POST",
@@ -850,7 +850,7 @@ export function navigatePiSessionTree(
     }
   >(sessionId, "navigate-tree", {
     entryId,
-    summarizeAbandonedBranch: summarize,
+    summarize,
     commandId,
     ...options,
   })
@@ -999,11 +999,8 @@ export function sendPiCustomMessage(
   body: import("@piui/protocol").CommandPayloadsV2["session.sendCustomMessage"],
   commandId = newCommandId(),
 ) {
-  return postSessionCommand<SessionCommandResult<"session.sendCustomMessage"> & { snapshot: SessionSnapshotV1 }>(
-    sessionId,
-    "custom-message",
-    { ...body, commandId },
-  )
+  return postSessionCommand<SessionSnapshotV1>(sessionId, "custom-message", { ...body, commandId })
+    .then(snapshot => ({ snapshot }))
 }
 
 export function appendPiCustomEntry(
@@ -1012,19 +1009,13 @@ export function appendPiCustomEntry(
   data?: unknown,
   commandId = newCommandId(),
 ) {
-  return postSessionCommand<SessionCommandResult<"session.appendCustomEntry"> & { snapshot: SessionSnapshotV1 }>(
-    sessionId,
-    "custom-entry",
-    { customType, data, commandId },
-  )
+  return postSessionCommand<SessionSnapshotV1>(sessionId, "custom-entry", { customType, data, commandId })
+    .then(snapshot => ({ snapshot }))
 }
 
 export function waitForPiSessionIdle(sessionId: string, commandId = newCommandId()) {
-  return postSessionCommand<SessionCommandResult<"session.waitForIdle"> & { snapshot: SessionSnapshotV1 }>(
-    sessionId,
-    "wait-for-idle",
-    { commandId },
-  )
+  return postSessionCommand<SessionSnapshotV1>(sessionId, "wait-for-idle", { commandId })
+    .then(snapshot => ({ snapshot }))
 }
 
 export function compactSession(sessionId: string, instructions?: string, commandId = newCommandId()) {
@@ -1278,6 +1269,7 @@ export async function promptSession(
     attachments?: Attachment[]
     thinkingLevel?: string
     deliverAs?: "steer" | "followUp"
+    expandPromptTemplates?: boolean
     commandId?: string
   },
 ): Promise<AcceptedSessionCommand<"session.prompt" | "session.steer" | "session.followUp">> {
@@ -1286,7 +1278,7 @@ export async function promptSession(
     : opts?.deliverAs === "followUp"
       ? "follow-up"
       : "prompt"
-  const res = await fetch(
+  const res = await piFetch(
     `${getApiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/commands/${command}`,
     {
       method: "POST",
@@ -1300,6 +1292,7 @@ export async function promptSession(
           ? { provider: opts.model.providerID, id: opts.model.modelID }
           : undefined,
         thinkingLevel: opts?.thinkingLevel,
+        expandPromptTemplates: opts?.expandPromptTemplates,
       }),
     },
   )
