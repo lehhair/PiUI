@@ -67,7 +67,14 @@ export class RuntimeSupervisor {
   private replenishStandby(): void {
     if (this.disposed) return
     while (this.standbyPool.length < this.standbySize) {
-      this.standbyPool.push(this.createHost())
+      const host = this.createHost()
+      this.standbyPool.push(host)
+      void host.getHandshake().catch(() => {
+        const index = this.standbyPool.indexOf(host)
+        if (index < 0) return
+        this.standbyPool.splice(index, 1)
+        void host.dispose()
+      })
     }
   }
 

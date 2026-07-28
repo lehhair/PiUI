@@ -160,6 +160,10 @@ export class PiWorkerSession implements PiSessionRuntime {
       this.resolveReady = resolve
       this.rejectReady = reject
     })
+    // Catalog and standby workers can time out before anyone awaits them.
+    // Keep the original rejected promise for callers without letting Node treat
+    // an idle prewarm failure as an unhandled rejection.
+    void this.ready.catch(() => undefined)
     this.closed = new Promise<void>(resolve => {
       this.resolveClosed = resolve
     })
