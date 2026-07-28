@@ -1,14 +1,14 @@
 # Pi SDK API Matrix
 
-Baseline: `@earendil-works/pi-coding-agent@0.81.1`
+Baseline: `@earendil-works/pi-coding-agent@0.81.1` with the local SDK export patch in `patches/`.
 
-Capability revision: `pi-0.81.1-r14`; worker IPC: v10.
+Capability revision: `pi-0.81.1-r15`; worker IPC: v11.
 
 PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. SDK return values stay native on the transport; browser-only presentation fields are derived in the app. Function-valued dependency injection and TUI component factories remain inside the worker and are reported explicitly as `tui-only`; they are never advertised as browser RPC support.
 
 ## Native Data Contract
 
-`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every page is deep-equal to Pi `SessionManager.getEntries()`. Pages are limited by both item count and encoded byte size. `runtime-inspection.native` remains an explicit, on-demand full envelope.
+`SessionSnapshotV1.native` is a small native head containing Pi header identity, leaf, revision, and entry count. Exact entries are retrieved through opaque-cursor pages; concatenating every page is deep-equal to Pi `SessionManager.getEntries()`. Pages are limited by both item count and encoded byte size. `runtime-inspection.native` remains an explicit, on-demand full envelope whose entries and tree are deep-equal JSON copies of `SessionManager.getEntries()` and `SessionManager.getTree()`.
 
 `timeline` contains only the most recent presentation page. Older pages use stable item cursors and can be prepended without reloading the session. Image bytes are fetched lazily by native entry id and block index; native entry pages and JSONL export retain the original base64 block. Timeline data is not a native serialization and must never be used to reconstruct Pi session data.
 
@@ -35,10 +35,10 @@ PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. 
 
 | Pi SDK surface | PiUI surface | Status |
 | --- | --- | --- |
-| settings getters | global/project native scope snapshots plus effective view | Complete except applying `httpProxy`; see SDK export blockers below |
-| persistent settings setters | typed settings patch | Complete for every setter exported by 0.81.1 |
+| settings getters | global/project native scope snapshots plus effective view | Complete, including applied `httpProxy` |
+| persistent settings setters | typed settings patch | Complete for every setter exported by the patched SDK, including `httpProxy` |
 | project trust store | trust GET/PUT | Complete |
-| extension `project_trust` | pre-resource trust callback | Behavior matches Pi, but blocked from calling Pi's resolver directly; see SDK export blockers below |
+| extension `project_trust` | pre-resource trust callback | Complete through Pi's exported `resolveProjectTrusted` |
 | packages list/install/remove/update | package routes | Complete |
 | package resolve missing action | `install`, `skip`, `error` | Complete; omitted remains non-destructive `skip` |
 | package sources/path/update check | package management routes | Complete |
@@ -78,9 +78,9 @@ The following public library hooks are intentionally not remote APIs:
 
 These remain usable by extensions inside the isolated worker. They are excluded from browser RPC to preserve serialization, credential isolation, command accounting, and single-writer guarantees.
 
-## SDK Export Blockers
+## SDK Export Integration
 
-Pi 0.81.1 implements `resolveProjectTrusted` and `applyHttpProxySettings`, but does not export either function from `@earendil-works/pi-coding-agent`. PiUI must not copy those implementations as a second source of truth. The current RPC trust callback remains isolated and covered for parity until the SDK exports its resolver; `httpProxy` is returned in the settings snapshot but is not advertised as applied by PiUI. Upgrading the SDK export surface is required to remove these two limitations.
+The local Pi SDK fork exports `resolveProjectTrusted` and `applyHttpProxySettings`, adds native `SettingsManager.getHttpProxy()/setHttpProxy()`, and exposes the native command catalog through `AgentSession.getCommands()`. PiUI calls those APIs directly. Until that fork is published as a newer package version, `patch-package` applies the same compiled API additions to the pinned `0.81.1` dependency during install; no Pi behavior is reimplemented in PiUI.
 
 ## Conformance
 

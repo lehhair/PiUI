@@ -214,7 +214,7 @@ export interface PiNativeSessionEnvelopeV1 {
   header: PiNativeJsonValueV1 | null
   leafId: string | null
   entries: Array<{ [key: string]: PiNativeJsonValueV1 }>
-  tree: PiNativeTreeRefV1[]
+  tree: Array<{ [key: string]: PiNativeJsonValueV1 }>
 }
 
 export interface PiNativeSessionHeadV1 {
