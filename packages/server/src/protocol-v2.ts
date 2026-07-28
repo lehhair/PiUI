@@ -43,7 +43,7 @@ export function createCapabilityManifestV2(driver: "mock" | "pi" = "pi"): Capabi
         attachmentBinary: nativePi,
         defaultPageSize: 50,
         maxPageSize: 100,
-        maxPageBytes: 4_194_304,
+        maxPageBytes: 33_554_432,
       }),
       // Navigation and every replacement path need a bound Pi runtime, so they
       // must not advertise themselves under the mock driver.

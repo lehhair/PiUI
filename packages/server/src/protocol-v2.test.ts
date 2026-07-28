@@ -17,6 +17,7 @@ describe("Pi capability manifest", () => {
     assert.equal(manifest.capabilities["files.search"]?.limits?.cancellable, true)
     assert.equal(manifest.capabilities["git.diff"]?.limits?.lazyFilePatch, true)
     assert.equal(manifest.capabilities["events.workspace"]?.enabled, true)
+    assert.equal(manifest.capabilities["session.tree"]?.limits?.maxPageBytes, 33_554_432)
   })
 
   it("does not advertise native runtime features under the mock driver", () => {
