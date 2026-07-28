@@ -213,18 +213,22 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       unsubscribeState = runtime.onState(state => send({
         kind: "event",
         generation: workerGeneration,
+        sessionId: runtime!.getSessionId(),
         type: "state",
         state,
       }))
-      unsubscribeNativeEvent = runtime.onNativeEvent?.(event => send({
+      unsubscribeNativeEvent = runtime.onNativeEvent?.((event, meta) => send({
         kind: "event",
         generation: workerGeneration,
+        sessionId: runtime!.getSessionId(),
         type: "nativeEvent",
         event,
+        meta,
       }))
       unsubscribeNativeHead = runtime.onNativeHead?.(native => send({
         kind: "event",
         generation: workerGeneration,
+        sessionId: runtime!.getSessionId(),
         type: "nativeHead",
         native,
       }))

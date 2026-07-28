@@ -1,4 +1,4 @@
-import type { PiNativeEntriesPageV1, SessionSnapshotV1 } from "@piui/protocol"
+import type { PiNativeEntriesPageV1, PiNativeEventMetaV1, SessionSnapshotV1 } from "@piui/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { activeSessionStore } from "../store/activeSessionStore"
 import { messageStore } from "../store/messageStore"
@@ -53,7 +53,15 @@ function page(head = snapshot().native): PiNativeEntriesPageV1 {
       { type: "message", id: "u1", parentId: null, timestamp: 1, message: { role: "user", content: "ping" } },
       { type: "message", id: "a1", parentId: "u1", timestamp: 2, message: { role: "assistant", content: "pong" } },
     ],
+    checkpoint: { position: { epoch: "worker-epoch", sequence: 0 } },
     hasMore: false,
+  }
+}
+
+function meta(sequence: number, id?: string, revision = 1): PiNativeEventMetaV1 {
+  return {
+    position: { epoch: "worker-epoch", sequence },
+    liveMessage: id ? { id, revision } : undefined,
   }
 }
 
@@ -79,18 +87,18 @@ describe("app-local native session messages", () => {
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "assistant", content: [] },
-    })
+    }, meta(1, "assistant"))
     applyPiNativeEventToUi("s-apply", {
       type: "message_update",
       message: { role: "assistant", provider: "anthropic", model: "claude-test", content: [{ type: "text", text: "partial" }] },
-    })
+    }, meta(2, "assistant", 2))
     const assistant = messageStore.getVisibleMessages("s-apply").at(-1)
     expect(assistant?.parts[0]).toMatchObject({ type: "text", text: "partial" })
     expect(assistant?.isStreaming).toBe(true)
     expect(messageStore.getIsStreaming("s-apply")).toBe(true)
     expect(messageStore.getSessionState("s-apply")?.messages[0]).toBe(persistedUser)
 
-    applyPiNativeEventToUi("s-apply", { type: "agent_settled" })
+    applyPiNativeEventToUi("s-apply", { type: "agent_settled" }, meta(3))
     expect(messageStore.getIsStreaming("s-apply")).toBe(false)
   })
 
@@ -101,7 +109,7 @@ describe("app-local native session messages", () => {
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "user", content: "new question" },
-    })
+    }, meta(1, "user"))
 
     const messages = messageStore.getVisibleMessages("s-apply")
     expect(messages.map(message => message.parts[0])).toEqual([
@@ -118,15 +126,15 @@ describe("app-local native session messages", () => {
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "user", content: "next" },
-    })
+    }, meta(1, "user"))
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "assistant", content: [] },
-    })
+    }, meta(2, "assistant"))
     applyPiNativeEventToUi("s-apply", {
       type: "message_update",
       message: { role: "assistant", content: [{ type: "text", text: "streaming" }] },
-    })
+    }, meta(3, "assistant", 2))
 
     const current = messageStore.getSessionState("s-apply")?.messages ?? []
     expect(current[0]).toBe(persisted[0])
@@ -143,15 +151,15 @@ describe("app-local native session messages", () => {
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "user", content: "visible immediately" },
-    })
+    }, meta(1, "user"))
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "assistant", content: [] },
-    })
+    }, meta(2, "assistant"))
     applyPiNativeEventToUi("s-apply", {
       type: "message_update",
       message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
-    })
+    }, meta(3, "assistant", 2))
 
     const current = messageStore.getSessionState("s-apply")?.messages ?? []
     expect(current[0]).toBe(persisted[0])

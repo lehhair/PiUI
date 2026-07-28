@@ -21,6 +21,7 @@ import type {
   PackageUpdateV1,
   PiModelRuntimeSnapshotV1,
   PiNativeJsonValueV1,
+  PiNativeEventMetaV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
 } from "@piui/protocol"
@@ -117,7 +118,7 @@ export class PiWorkerSession implements PiSessionRuntime {
   private readonly crashListeners = new Set<(error: Error) => void>()
   private readonly closeListeners = new Set<() => void>()
   private readonly extensionUiListeners = new Set<(event: PiExtensionUiEvent) => void>()
-  private readonly nativeEventListeners = new Set<(event: PiNativeJsonValueV1) => void>()
+  private readonly nativeEventListeners = new Set<(event: PiNativeJsonValueV1, meta: PiNativeEventMetaV1) => void>()
   private readonly nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
   private readonly resourceListeners = new Set<() => void>()
   private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
@@ -496,7 +497,7 @@ export class PiWorkerSession implements PiSessionRuntime {
     return () => this.stateListeners.delete(listener)
   }
 
-  onNativeEvent(listener: (event: PiNativeJsonValueV1) => void): () => void {
+  onNativeEvent(listener: (event: PiNativeJsonValueV1, meta: PiNativeEventMetaV1) => void): () => void {
     this.nativeEventListeners.add(listener)
     return () => this.nativeEventListeners.delete(listener)
   }
@@ -953,6 +954,8 @@ export class PiWorkerSession implements PiSessionRuntime {
       void this.handleHostCall(message.id, message.call)
       return
     }
+    if ((message.type === "state" || message.type === "nativeEvent" || message.type === "nativeHead") &&
+      message.sessionId !== this.session.sessionId) return
     if (message.type === "extensionUi") {
       const event = message.event.type === "requested"
         ? {
@@ -964,7 +967,7 @@ export class PiWorkerSession implements PiSessionRuntime {
       return
     }
     if (message.type === "nativeEvent") {
-      for (const listener of this.nativeEventListeners) listener(message.event)
+      for (const listener of this.nativeEventListeners) listener(message.event, message.meta)
       return
     }
     if (message.type === "nativeHead") {

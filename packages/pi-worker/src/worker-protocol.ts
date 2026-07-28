@@ -20,6 +20,7 @@ import type {
   PiNativeJsonValueV1,
   PiNativeSessionHeadV1,
   PiNativeEntriesPageV1,
+  PiNativeEventMetaV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
 } from "@piui/protocol"
@@ -50,7 +51,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 14 as const
+export const PI_WORKER_PROTOCOL_VERSION = 15 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -272,9 +273,9 @@ export type WorkerHostReply =
   | { kind: "hostReply"; id: string; generation: string; ok: false; error: { code: string; message: string } }
 
 export type WorkerIpcEvent =
-  | { kind: "event"; generation: string; type: "state"; state: PiRuntimeUiState }
-  | { kind: "event"; generation: string; type: "nativeEvent"; event: PiNativeJsonValueV1 }
-  | { kind: "event"; generation: string; type: "nativeHead"; native: PiNativeSessionHeadV1 }
+  | { kind: "event"; generation: string; sessionId: string; type: "state"; state: PiRuntimeUiState }
+  | { kind: "event"; generation: string; sessionId: string; type: "nativeEvent"; event: PiNativeJsonValueV1; meta: PiNativeEventMetaV1 }
+  | { kind: "event"; generation: string; sessionId: string; type: "nativeHead"; native: PiNativeSessionHeadV1 }
   | { kind: "event"; generation: string; type: "resourcesChanged" }
   | { kind: "event"; generation: string; type: "extensionUi"; event: PiExtensionUiEvent }
   | { kind: "event"; generation: string; type: "providerAuth"; event: ProviderAuthEventV1 }

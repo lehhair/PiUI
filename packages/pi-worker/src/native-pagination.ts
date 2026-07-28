@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import type {
   PiNativeEntriesPageV1,
+  PiNativeBranchCheckpointV1,
   PiNativeJsonValueV1,
   PiNativeSessionEnvelopeV1,
   PiNativeSessionHeadV1,
@@ -43,7 +44,7 @@ export function nativeEntriesPage(
 export function nativeEntriesPageFromEntries<T>(
   head: PiNativeSessionHeadV1,
   entries: readonly T[],
-  options: { cursor?: string; limit: number; maxBytes: number; liveMessage?: PiNativeJsonValueV1 },
+  options: { cursor?: string; limit: number; maxBytes: number; checkpoint?: PiNativeBranchCheckpointV1 },
   serialize: (entry: T) => { [key: string]: PiNativeJsonValueV1 },
 ): PiNativeEntriesPageV1 {
   const decoded = options.cursor ? decodeCursor(options.cursor) : undefined
@@ -52,7 +53,7 @@ export function nativeEntriesPageFromEntries<T>(
     ? entries.findIndex(entry => entryId(entry) === decoded.beforeId)
     : entries.length
   if (before < 0) throw staleCursor("native cursor anchor is no longer in the session")
-  const emptyPage = { head, items: [], liveMessage: options.liveMessage, hasMore: before > 0 }
+  const emptyPage = { head, items: [], checkpoint: options.checkpoint, hasMore: before > 0 }
   if (Buffer.byteLength(JSON.stringify(emptyPage), "utf8") > options.maxBytes) {
     throw Object.assign(new Error("native page metadata exceeds the byte limit"), { code: "FILE_TOO_LARGE" })
   }
@@ -71,7 +72,7 @@ export function nativeEntriesPageFromEntries<T>(
     const candidatePage = {
       head,
       items: candidate,
-      liveMessage: options.liveMessage,
+      checkpoint: options.checkpoint,
       beforeCursor: candidateCursor,
       hasMore: candidateStart > 0,
     }
@@ -87,7 +88,7 @@ export function nativeEntriesPageFromEntries<T>(
   return {
     head,
     items: selected,
-    liveMessage: options.liveMessage,
+    checkpoint: options.checkpoint,
     beforeCursor: start > 0 && selected[0]
       ? encodeCursor({ v: 1, epoch: head.epoch, beforeId: String(selected[0].id) })
       : undefined,

@@ -6,7 +6,7 @@ import { createCapabilityManifestV2 } from "./protocol-v2.ts"
 describe("Pi capability manifest", () => {
   it("describes every known capability and the extension RPC boundary", () => {
     const manifest = createCapabilityManifestV2("pi")
-    assert.equal(manifest.revision, "pi-0.81.1-r18")
+    assert.equal(manifest.revision, "pi-0.81.1-r19")
     assert.deepEqual(Object.keys(manifest.capabilities).sort(), [...PI_CAPABILITY_IDS].sort())
     assert.equal(manifest.capabilities["extension.commands"]?.limits?.sessionReplacementContext, true)
     assert.equal(manifest.capabilities["extension.commands"]?.limits?.shutdownContext, true)

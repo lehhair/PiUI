@@ -17,6 +17,7 @@ const {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
     setLoadError: vi.fn(),
+    clearSession: vi.fn(),
     setMessages: vi.fn(),
     updateSessionMetadata: vi.fn(),
     prependMessages: vi.fn(),
@@ -26,6 +27,7 @@ const {
   },
   nativeStoreMock: {
     activate: vi.fn(),
+    clear: vi.fn(),
     getSnapshot: vi.fn(() => ({ session: { directory: '/workspace' }, runtime: {} })),
     hasNativePage: vi.fn(() => true),
   },
@@ -61,6 +63,7 @@ describe('useSessionManager', () => {
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
+    messageStoreMock.clearSession.mockReset()
     messageStoreMock.setMessages.mockReset()
     messageStoreMock.updateSessionMetadata.mockReset()
     messageStoreMock.prependMessages.mockReset()
@@ -68,6 +71,8 @@ describe('useSessionManager', () => {
     messageStoreMock.getHistoryCursor.mockReset()
     messageStoreMock.setRevertState.mockReset()
     nativeStoreMock.hasNativePage.mockReset().mockReturnValue(true)
+    nativeStoreMock.activate.mockReset()
+    nativeStoreMock.clear.mockReset()
     sessionErrorHandlerMock.mockReset()
 
     messageStoreMock.getSessionState.mockReturnValue(null)
@@ -138,6 +143,37 @@ describe('useSessionManager', () => {
 
     renderHook(() => useSessionManager({ sessionId: 'session-without-branch', directory: '/workspace' }))
 
-    await waitFor(() => expect(loadPiSessionMock).toHaveBeenCalledWith('session-without-branch'))
+    await waitFor(() => expect(loadPiSessionMock).toHaveBeenCalledWith('session-without-branch', { activate: false }))
+  })
+
+  it('keeps activation in the hook instead of a late session load', async () => {
+    loadPiSessionMock.mockResolvedValue(undefined)
+
+    renderHook(() => useSessionManager({ sessionId: 'session-a', directory: '/workspace' }))
+
+    await waitFor(() => expect(loadPiSessionMock).toHaveBeenCalledWith('session-a', { activate: false }))
+    expect(nativeStoreMock.activate).toHaveBeenCalledWith('session-a')
+  })
+
+  it('does not reactivate an old session after a stale history request', async () => {
+    let rejectHistory!: (error: unknown) => void
+    fetchNativePageMock.mockReturnValue(new Promise((_, reject) => { rejectHistory = reject }))
+    messageStoreMock.getHistoryCursor.mockReturnValue('cursor-a')
+    loadPiSessionMock.mockResolvedValue(undefined)
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useSessionManager({ sessionId, directory: '/workspace' }),
+      { initialProps: { sessionId: 'session-a' } },
+    )
+    await waitFor(() => expect(nativeStoreMock.activate).toHaveBeenCalledWith('session-a'))
+    const loadMoreA = result.current.loadMoreHistory
+    const pending = loadMoreA()
+
+    rerender({ sessionId: 'session-b' })
+    await waitFor(() => expect(nativeStoreMock.activate).toHaveBeenLastCalledWith('session-b'))
+    rejectHistory(Object.assign(new Error('stale cursor'), { code: 'STALE_CURSOR' }))
+    await pending
+
+    expect(nativeStoreMock.activate).toHaveBeenLastCalledWith('session-b')
+    expect(loadPiSessionMock).toHaveBeenCalledWith('session-a', { activate: false })
   })
 })

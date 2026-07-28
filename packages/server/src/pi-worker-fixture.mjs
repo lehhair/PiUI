@@ -16,6 +16,8 @@ let thinkingLevel = "medium"
 let model
 let isCompacting = false
 let pendingCompaction
+let nativeEventSequence = 0
+let nativeEventEpoch = "fixture-native-events"
 const generation = "fixture-generation"
 const pendingHostCalls = new Map()
 let hostCallSequence = 0
@@ -26,7 +28,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 14,
+  workerProtocolVersion: 15,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -285,6 +287,8 @@ process.on("message", async request => {
         `fixture-extension-${replacementCount}`,
         path.join(runtimeCwd, `extension-${replacementCount}.jsonl`),
       )
+      nativeEventEpoch = `fixture-native-events-${replacementCount}`
+      nativeEventSequence = 0
       const replacement = {
         operation: "new",
         sourceSessionId: source.sessionId,
@@ -293,6 +297,17 @@ process.on("message", async request => {
         targetCwd: runtimeCwd,
         cancelled: false,
       }
+      process.send?.({
+        kind: "event",
+        generation,
+        sessionId: session.sessionId,
+        type: "nativeEvent",
+        event: { type: "message_start", message: { role: "user", content: "target before commit" } },
+        meta: {
+          position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence },
+          liveMessage: { id: "target-before-commit", revision: 1 },
+        },
+      })
       await callHost({
         type: "extensionReplacement.commit",
         reservationId,
@@ -305,8 +320,10 @@ process.on("message", async request => {
       process.send?.({
         kind: "event",
         generation: "stale-generation",
+        sessionId: session?.sessionId ?? "fixture-session",
         type: "nativeEvent",
         event: { type: "message_end", message: { role: "user", content: "stale" } },
+        meta: { position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence }, liveMessage: { id: "stale", revision: 1 } },
       })
       result = { type: "session", session: session ?? snapshot() }
       process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
@@ -316,8 +333,10 @@ process.on("message", async request => {
       process.send?.({
         kind: "event",
         generation,
+        sessionId: session?.sessionId ?? "fixture-session",
         type: "nativeEvent",
         event: { type: "message_end", message: { role: "user", content: command.text } },
+        meta: { position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence }, liveMessage: { id: "reconcile", revision: 1 } },
       })
       session = session ?? snapshot()
       result = { type: "session", session }
@@ -328,8 +347,10 @@ process.on("message", async request => {
     process.send?.({
       kind: "event",
       generation,
+      sessionId: session?.sessionId ?? "fixture-session",
       type: "nativeEvent",
       event: { type: "message_start", message: { role: "user", content: [{ type: "text", text: command.text }, ...images] } },
+      meta: { position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence }, liveMessage: { id: "prompt-user", revision: 1 } },
     })
     session = session ?? snapshot()
     fullNative.entries[0].message.content = [
@@ -339,11 +360,13 @@ process.on("message", async request => {
     process.send?.({
       kind: "event",
       generation,
+      sessionId: session.sessionId,
       type: "nativeEvent",
       event: { type: "message_end", message: fullNative.entries[0].message },
+      meta: { position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence }, liveMessage: { id: "prompt-user", revision: 2 } },
     })
     session.native.revision += 1
-    process.send?.({ kind: "event", generation, type: "nativeHead", native: session.native })
+    process.send?.({ kind: "event", generation, sessionId: session.sessionId, type: "nativeHead", native: session.native })
     result = { type: "session", session }
   } else if (command.type === "setThinkingLevel") {
     thinkingLevel = command.level
@@ -366,10 +389,15 @@ process.on("message", async request => {
     fullNative.entries.push(entry)
     fullNative.leafId = entry.id
     session.native = { ...session.native, revision: session.native.revision + 1, leafId: entry.id, entryCount: fullNative.entries.length }
-    process.send?.({ kind: "event", generation, type: "nativeEvent", event: {
-      type: "message_end", message: { role: "user", content: command.text },
-    } })
-    process.send?.({ kind: "event", generation, type: "nativeHead", native: session.native })
+    process.send?.({
+      kind: "event",
+      generation,
+      sessionId: session.sessionId,
+      type: "nativeEvent",
+      event: { type: "message_end", message: { role: "user", content: command.text } },
+      meta: { position: { epoch: nativeEventEpoch, sequence: ++nativeEventSequence }, liveMessage: { id: entry.id, revision: 1 } },
+    })
+    process.send?.({ kind: "event", generation, sessionId: session.sessionId, type: "nativeHead", native: session.native })
     result = { type: "session", session }
   } else if (command.type === "setModel") {
     model = { provider: command.provider, id: command.modelId, displayName: command.modelId }
@@ -380,7 +408,7 @@ process.on("message", async request => {
       isCompacting = true
       session = { ...(session ?? snapshot()), state: state() }
       pendingCompaction = request
-      process.send?.({ kind: "event", generation, type: "state", state: session.state })
+      process.send?.({ kind: "event", generation, sessionId: session.sessionId, type: "state", state: session.state })
       return
     }
     result = {
@@ -400,14 +428,14 @@ process.on("message", async request => {
         result: { type: "compaction", compaction: { status: "aborted" }, session },
       })
       pendingCompaction = undefined
-      process.send?.({ kind: "event", generation, type: "state", state: session.state })
+      process.send?.({ kind: "event", generation, sessionId: session.sessionId, type: "state", state: session.state })
     }
     result = { type: "session", session: session ?? snapshot() }
   } else if (command.type === "steer" || command.type === "followUp") {
     if (command.type === "steer") steering = [...steering, command.text]
     else followUp = [...followUp, command.text]
     session = { ...(session ?? snapshot()), state: state() }
-    process.send?.({ kind: "event", generation, type: "state", state: session.state })
+    process.send?.({ kind: "event", generation, sessionId: session.sessionId, type: "state", state: session.state })
     result = { type: "session", session }
   } else if (command.type === "setQueueModes") {
     steeringMode = command.steeringMode ?? steeringMode
@@ -481,6 +509,9 @@ process.on("message", async request => {
       page: {
         head: { ...current.native, entryCount: fullNative.entries.length },
         items: branch.slice(start, before),
+        checkpoint: command.cursor ? undefined : {
+          position: { epoch: nativeEventEpoch, sequence: nativeEventSequence },
+        },
         beforeCursor: start > 0 ? Buffer.from(String(start)).toString("base64url") : undefined,
         hasMore: start > 0,
       },

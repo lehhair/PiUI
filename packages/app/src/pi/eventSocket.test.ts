@@ -81,13 +81,14 @@ function snapshot(revision = 1, leafId = "u1", sequence = revision): SessionSnap
   } as unknown as SessionSnapshotV1
 }
 
-function page(head: SessionSnapshotV1["native"], assistantText?: string): PiNativeEntriesPageV1 {
+function page(head: SessionSnapshotV1["native"], assistantText?: string, eventSequence = 0): PiNativeEntriesPageV1 {
   return {
     head,
     items: [
       { type: "message", id: "u1", parentId: null, timestamp: 1, message: { role: "user", content: "question" } },
       ...(assistantText ? [{ type: "message", id: "a1", parentId: "u1", timestamp: 2, message: { role: "assistant", content: assistantText } }] : []),
     ],
+    checkpoint: { position: { epoch: "worker-epoch", sequence: eventSequence } },
     hasMore: false,
   }
 }
@@ -146,7 +147,15 @@ describe("PiEventSocket native session events", () => {
     fetchSnapshot.mockResolvedValue(running)
     fetchPiNativeBranchPage.mockResolvedValue({
       ...page(running.native),
-      liveMessage: { role: "assistant", content: [{ type: "text", text: "before refresh" }] },
+      checkpoint: {
+        position: { epoch: "worker-epoch", sequence: 4 },
+        liveMessage: {
+          id: "assistant-live",
+          revision: 4,
+          phase: "streaming",
+          message: { role: "assistant", content: [{ type: "text", text: "before refresh" }] },
+        },
+      },
     })
 
     const socket = new PiEventSocket()
@@ -169,6 +178,27 @@ describe("PiEventSocket native session events", () => {
         protocolVersion: 2,
         stream: { kind: "session", id: "active" },
         cursor: { epoch: "event-epoch", sequence: 5 },
+        eventId: "native-replayed-start",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        type: "session.native.event",
+        payload: {
+          sessionId: "active",
+          event: { type: "message_start", message: { role: "assistant", content: [] } },
+          meta: {
+            position: { epoch: "worker-epoch", sequence: 3 },
+            liveMessage: { id: "assistant-live", revision: 3 },
+          },
+        },
+      },
+    })
+    expect(messageStore.getVisibleMessages("active")).toHaveLength(2)
+
+    send(ws, {
+      channel: "event",
+      event: {
+        protocolVersion: 2,
+        stream: { kind: "session", id: "active" },
+        cursor: { epoch: "event-epoch", sequence: 6 },
         eventId: "native-after-refresh",
         timestamp: "2026-01-01T00:00:00.000Z",
         type: "session.native.event",
@@ -177,6 +207,10 @@ describe("PiEventSocket native session events", () => {
           event: {
             type: "message_update",
             message: { role: "assistant", content: [{ type: "text", text: "after refresh" }] },
+          },
+          meta: {
+            position: { epoch: "worker-epoch", sequence: 5 },
+            liveMessage: { id: "assistant-live", revision: 5 },
           },
         },
       },
@@ -202,7 +236,7 @@ describe("PiEventSocket native session events", () => {
     })
     await vi.waitFor(() => expect(JSON.parse(ws.sent.at(-1) ?? "{}").cursors?.[key]?.sequence).toBe(0))
 
-    const nativeEnvelope = (sequence: number, event: unknown) => ({
+    const nativeEnvelope = (sequence: number, event: unknown, liveRevision = sequence) => ({
       channel: "event",
       event: {
         protocolVersion: 2,
@@ -211,7 +245,14 @@ describe("PiEventSocket native session events", () => {
         eventId: `native-${sequence}`,
         timestamp: "2026-01-01T00:00:00.000Z",
         type: "session.native.event",
-        payload: { sessionId: "active", event },
+        payload: {
+          sessionId: "active",
+          event,
+          meta: {
+            position: { epoch: "worker-epoch", sequence },
+            liveMessage: { id: "assistant-live", revision: liveRevision },
+          },
+        },
       },
     })
     send(ws, nativeEnvelope(1, { type: "message_start", message: { role: "assistant", content: [] } }))
@@ -223,7 +264,7 @@ describe("PiEventSocket native session events", () => {
     expect(messageStore.getIsStreaming("active")).toBe(true)
 
     const persisted = snapshot(2, "a1", 2)
-    fetchPiNativeBranchPage.mockResolvedValue(page(persisted.native, "complete"))
+    fetchPiNativeBranchPage.mockResolvedValue(page(persisted.native, "complete", 2))
     send(ws, {
       channel: "event",
       event: {

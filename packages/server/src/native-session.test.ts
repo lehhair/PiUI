@@ -546,6 +546,7 @@ describe("native Pi session discovery", () => {
     let currentId = sourceId
     let currentFile = sourceFile
     let onReplacement: ((replacement: import("@piui/protocol").SessionReplacementResultV1) => Promise<void>) | undefined
+    let onNativeEvent: ((event: import("@piui/protocol").PiNativeJsonValueV1, meta: import("@piui/protocol").PiNativeEventMetaV1) => void) | undefined
     const runtime = {
       getWorkerGeneration: () => "extension-replacement-generation",
       getSessionId: () => currentId,
@@ -580,9 +581,20 @@ describe("native Pi session discovery", () => {
         onReplacement = listener
         return () => { onReplacement = undefined }
       },
+      onNativeEvent: (listener: typeof onNativeEvent) => {
+        onNativeEvent = listener
+        return () => { onNativeEvent = undefined }
+      },
       prompt: async () => {
         currentId = targetId
         currentFile = targetFile
+        onNativeEvent?.(
+          { type: "message_start", message: { role: "user", content: "target message" } },
+          {
+            position: { epoch: "target-events", sequence: 1 },
+            liveMessage: { id: "target-live", revision: 1 },
+          },
+        )
         await onReplacement?.({
           operation: "new",
           sourceSessionId: sourceId,
@@ -606,7 +618,12 @@ describe("native Pi session discovery", () => {
       }],
       open: async () => runtime,
     }
-    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    const eventHub = new EventHub()
+    const nativeEventStreams: string[] = []
+    eventHub.subscribeV2(event => {
+      if (event.type === "session.native.event") nativeEventStreams.push(event.stream.id)
+    })
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend, eventHub)
     await registry.list()
     await registry.attach(sourceId)
 
@@ -616,6 +633,7 @@ describe("native Pi session discovery", () => {
     assert.equal(target.sessionFile, targetFile)
     assert.equal(registry.get(sourceId)?.real, undefined)
     assert.equal(registry.get(targetId)?.real, runtime)
+    assert.deepEqual(nativeEventStreams, [])
   })
 
   it("rejects delayed callbacks from a crashed worker generation", async () => {

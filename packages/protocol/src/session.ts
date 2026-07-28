@@ -127,6 +127,31 @@ export type PiNativeJsonValueV1 = null | boolean | number | string | PiNativeJso
   [key: string]: PiNativeJsonValueV1
 }
 
+export interface PiNativeEventPositionV1 {
+  epoch: string
+  sequence: number
+}
+
+export interface PiNativeLiveMessageRefV1 {
+  id: string
+  revision: number
+}
+
+export interface PiNativeLiveMessageV1 extends PiNativeLiveMessageRefV1 {
+  phase: "streaming" | "persisting"
+  message: PiNativeJsonValueV1
+}
+
+export interface PiNativeEventMetaV1 {
+  position: PiNativeEventPositionV1
+  liveMessage?: PiNativeLiveMessageRefV1
+}
+
+export interface PiNativeBranchCheckpointV1 {
+  position: PiNativeEventPositionV1
+  liveMessage?: PiNativeLiveMessageV1
+}
+
 /** JSON-structural copy of Pi's native session data. */
 export interface PiNativeSessionEnvelopeV1 {
   namespace: "pi"
@@ -155,8 +180,8 @@ export interface PiNativeSessionHeadV1 {
 export interface PiNativeEntriesPageV1 {
   head: PiNativeSessionHeadV1
   items: Array<{ [key: string]: PiNativeJsonValueV1 }>
-  /** Current unpersisted Agent message; not part of SessionManager.getBranch(). */
-  liveMessage?: PiNativeJsonValueV1
+  /** Runtime state captured with the latest branch page; never part of `items`. */
+  checkpoint?: PiNativeBranchCheckpointV1
   beforeCursor?: string
   hasMore: boolean
 }
