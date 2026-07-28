@@ -91,4 +91,21 @@ describe("app-local native session messages", () => {
     applyPiNativeEventToUi("s-apply", { type: "agent_settled" })
     expect(messageStore.getIsStreaming("s-apply")).toBe(false)
   })
+
+  it("keeps visible history while a new transient turn is disconnected from the loaded page", () => {
+    applySnapshotToUi(snapshot(), { nativePage: page() })
+    applySnapshotToUi(snapshot(2, 2, "missing-leaf"), { refreshNative: false })
+
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "user", content: "new question" },
+    })
+
+    const messages = messageStore.getVisibleMessages("s-apply")
+    expect(messages.map(message => message.parts[0])).toEqual([
+      expect.objectContaining({ type: "text", text: "ping" }),
+      expect.objectContaining({ type: "text", text: "pong" }),
+      expect.objectContaining({ type: "text", text: "new question" }),
+    ])
+  })
 })

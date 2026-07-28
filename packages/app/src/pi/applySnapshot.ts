@@ -30,6 +30,21 @@ function publishNativeMessages(sessionId: string): void {
     streamingEntryIds: nativeSessionStore.getStreamingEntryIds(sessionId),
     liveTools: nativeSessionStore.getLiveTools(sessionId),
   })
+  if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId)) {
+    const existing = messageStore.getSessionState(sessionId)?.messages ?? []
+    const transientIds = new Set(messages.map(message => message.info.id))
+    messageStore.setUiMessages(sessionId, [
+      ...existing.filter(message => !transientIds.has(message.info.id)),
+      ...messages,
+    ], {
+      title: snapshot.session.title,
+      directory: snapshot.session.directory,
+      hasMoreHistory: history.hasMore,
+      historyCursor: history.beforeCursor,
+    })
+    messageStore.setStreaming(sessionId, nativeSessionStore.getNativeEventStreaming(sessionId) ?? snapshot.runtime.isStreaming)
+    return
+  }
   messageStore.setUiMessages(sessionId, messages, {
     title: snapshot.session.title,
     directory: snapshot.session.directory,

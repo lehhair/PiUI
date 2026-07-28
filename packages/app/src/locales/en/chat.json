@@ -97,7 +97,9 @@
     "sendMessage": "Send message",
     "deliveryMode": "Running message delivery",
     "steer": "Steer",
-    "followUp": "Follow-up"
+    "steerHint": "Add this message to the response currently being generated",
+    "followUp": "Follow-up",
+    "followUpHint": "Send this message as the next turn after the current response finishes"
   },
   "inputFooter": {
     "autoApproveOff": "Auto-approve: off",

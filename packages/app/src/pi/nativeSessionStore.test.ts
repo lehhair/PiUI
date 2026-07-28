@@ -110,4 +110,47 @@ describe("nativeSessionStore", () => {
     expect(nativeSessionStore.getActiveBranch("s1").map(entry => entry.id)).toEqual(["u-root", "a-persisted"])
     expect(nativeSessionStore.getStreamingEntryIds("s1").size).toBe(0)
   })
+
+  it("retains loaded history when a later first page contains only the new turn", () => {
+    const initial = snapshot("s1", 1, "a-old")
+    nativeSessionStore.replace(initial)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: { ...initial.native, leafId: "a-old", entryCount: 4 },
+      items: [
+        { type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } },
+        { type: "message", id: "a-old", parentId: "u-root", message: { role: "assistant", content: "old" } },
+        { type: "label", id: "label-1", targetId: "a-old" },
+        { type: "session_info", id: "info-1" },
+      ],
+      hasMore: false,
+    })
+
+    const updated = snapshot("s1", 2, "a-new")
+    nativeSessionStore.replace(updated)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: { ...updated.native, entryCount: 2 },
+      items: [
+        { type: "message", id: "u-new", parentId: "a-old", message: { role: "user", content: "new" } },
+        { type: "message", id: "a-new", parentId: "u-new", message: { role: "assistant", content: "answer" } },
+      ],
+      hasMore: false,
+    })
+
+    expect(nativeSessionStore.getActiveBranch("s1").map(entry => entry.id)).toEqual([
+      "u-root", "a-old", "u-new", "a-new",
+    ])
+  })
+
+  it("detects a transient turn whose persisted parent is not loaded", () => {
+    nativeSessionStore.replace(snapshot("s1", 1, "missing-leaf"))
+    nativeSessionStore.replaceFirstPage("s1", page([
+      { type: "message", id: "unrelated", parentId: null, message: { role: "user", content: "cached" } },
+    ]))
+    nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_start",
+      message: { role: "user", content: "new" },
+    })
+
+    expect(nativeSessionStore.hasDisconnectedTransientBranch("s1")).toBe(true)
+  })
 })
