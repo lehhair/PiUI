@@ -5,6 +5,7 @@ import { PiWorkerSession } from "./pi-worker-client.ts"
 const fixture = new URL("./pi-worker-fixture.mjs", import.meta.url)
 const incompatibleFixture = new URL("./pi-worker-incompatible-fixture.mjs", import.meta.url)
 const limitedFixture = new URL("./pi-worker-limited-fixture.mjs", import.meta.url)
+const noHandshakeFixture = new URL("./pi-worker-no-handshake-fixture.mjs", import.meta.url)
 
 describe("PiWorkerSession IPC", () => {
   it("lists sessions through an isolated worker process", async () => {
@@ -130,6 +131,16 @@ describe("PiWorkerSession IPC", () => {
       assert.equal((await runtime.listCommands())[0]?.name, "fixture-command")
     } finally {
       await runtime.dispose()
+    }
+  })
+
+  it("contains a handshake timeout before an idle worker is awaited", async () => {
+    const catalog = PiWorkerSession.createCatalog(noHandshakeFixture, { handshakeTimeoutMs: 20 })
+    try {
+      await new Promise<void>(resolve => setTimeout(resolve, 40))
+      await assert.rejects(catalog.getHandshake(), /handshake timeout/)
+    } finally {
+      await catalog.dispose()
     }
   })
 
