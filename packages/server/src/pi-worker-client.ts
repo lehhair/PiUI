@@ -20,13 +20,13 @@ import type {
   ResolvedPackageResourcesV1,
   PackageUpdateV1,
   PiModelRuntimeSnapshotV1,
+  PiNativeJsonValueV1,
   QueueDeliveryModeV1,
   SessionReplacementResultV1,
 } from "@piui/protocol"
 import {
   getPiWorkerEntryUrl,
   PI_WORKER_PROTOCOL_VERSION,
-  restoreProjection,
   type PiCommandInfo,
   type PiBashResult,
   type PiImageInput,
@@ -37,8 +37,6 @@ import {
   type PiSessionRuntime,
   type PiSkillInfo,
   type PiWorkerCapability,
-  type ProjectionDelta,
-  type ProjectionState,
   type WorkerCommand,
   type WorkerHello,
   type WorkerHostCall,
@@ -116,12 +114,10 @@ export interface PiWorkerHost {
 export class PiWorkerSession implements PiSessionRuntime {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly stateListeners = new Set<(state: PiRuntimeUiState) => void>()
-  private readonly projectionListeners = new Set<(projection: ProjectionState) => void>()
-  private readonly projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
   private readonly closeListeners = new Set<() => void>()
   private readonly extensionUiListeners = new Set<(event: PiExtensionUiEvent) => void>()
-  private readonly nativeEventListeners = new Set<(event: unknown) => void>()
+  private readonly nativeEventListeners = new Set<(event: PiNativeJsonValueV1) => void>()
   private readonly nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
   private readonly resourceListeners = new Set<() => void>()
   private readonly providerAuthListeners = new Set<(event: ProviderAuthEventV1) => void>()
@@ -132,7 +128,6 @@ export class PiWorkerSession implements PiSessionRuntime {
   private child: ChildProcess
   private session!: WorkerSessionWire
   private runtimeState!: PiRuntimeUiState
-  private projection: ProjectionState = restoreProjection([])
   private replacementHandler?: (replacement: SessionReplacementResultV1) => void | Promise<void>
   private hostCallHandler?: (call: WorkerHostCall) => void | Promise<void>
   private disposed = false
@@ -501,18 +496,7 @@ export class PiWorkerSession implements PiSessionRuntime {
     return () => this.stateListeners.delete(listener)
   }
 
-  onProjection(listener: (projection: ProjectionState) => void): () => void {
-    this.projectionListeners.add(listener)
-    listener(this.projection)
-    return () => this.projectionListeners.delete(listener)
-  }
-
-  onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
-    this.projectionDeltaListeners.add(listener)
-    return () => this.projectionDeltaListeners.delete(listener)
-  }
-
-  onNativeEvent(listener: (event: unknown) => void): () => void {
+  onNativeEvent(listener: (event: PiNativeJsonValueV1) => void): () => void {
     this.nativeEventListeners.add(listener)
     return () => this.nativeEventListeners.delete(listener)
   }
@@ -522,7 +506,6 @@ export class PiWorkerSession implements PiSessionRuntime {
     return () => this.resourceListeners.delete(listener)
   }
 
-  getProjection(): ProjectionState { return this.projection }
   getSessionId(): string { return this.session.sessionId }
   getSessionFile(): string | undefined { return this.session.sessionFile }
   getSessionName(): string | undefined { return this.session.sessionName }
@@ -535,21 +518,18 @@ export class PiWorkerSession implements PiSessionRuntime {
     return result.page
   }
 
+  async getNativeTree() {
+    const result = await this.request({ type: "getNativeTree" })
+    if (result.type !== "nativeTree") throw new Error(`unexpected Pi worker result: ${result.type}`)
+    return result.tree
+  }
+
   async getNativeImageAttachment(entryId: string, blockIndex: number) {
     const result = await this.request({ type: "getNativeImageAttachment", entryId, blockIndex })
     if (result.type !== "nativeImageAttachment") throw new Error(`unexpected Pi worker result: ${result.type}`)
     return { mimeType: result.mimeType, data: result.data, etag: result.etag }
   }
 
-  async getTimelinePage(cursor: string | undefined, limit: number, maxBytes = 1_048_576) {
-    const result = await this.request({ type: "getTimelinePage", cursor, limit, maxBytes })
-    if (result.type !== "timelinePage") throw new Error(`unexpected Pi worker result: ${result.type}`)
-    return result.page
-  }
-
-  getInitialTimelinePage() {
-    return { items: this.projection.timeline, ...this.session.timelinePage }
-  }
   getModel() { return this.runtimeState.model }
   getThinkingLevel(): string { return this.runtimeState.thinkingLevel }
   getAvailableThinkingLevels(): string[] { return this.runtimeState.availableThinkingLevels }
@@ -967,11 +947,6 @@ export class PiWorkerSession implements PiSessionRuntime {
       void this.handleHostCall(message.id, message.call)
       return
     }
-    if (message.type === "projection") {
-      this.projection = restoreProjection(message.projection.timeline, message.projection.isStreaming)
-      for (const listener of this.projectionListeners) listener(this.projection)
-      return
-    }
     if (message.type === "extensionUi") {
       const event = message.event.type === "requested"
         ? {
@@ -1001,36 +976,6 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
     if (message.type === "packageProgress") {
       for (const listener of this.packageProgressListeners) listener(message.event)
-      return
-    }
-    if (message.type === "projectionDelta") {
-      const delta = restoreProjection(message.projection.timeline, message.projection.isStreaming)
-      const removed = new Set(message.projection.removedItemIds ?? [])
-      const timeline = this.projection.timeline.filter(item => !removed.has(item.id))
-      const byId = new Map(timeline.map((item, index) => [item.id, index]))
-      for (const item of delta.timeline) {
-        const index = byId.get(item.id)
-        if (index === undefined) {
-          byId.set(item.id, timeline.length)
-          timeline.push(item)
-        } else {
-          timeline[index] = item
-        }
-      }
-      this.projection = restoreProjection(timeline, delta.isStreaming)
-      this.session = {
-        ...this.session,
-        projection: {
-          timeline: this.projection.timeline,
-          isStreaming: this.projection.isStreaming,
-        },
-      }
-      for (const listener of this.projectionListeners) listener(this.projection)
-      for (const listener of this.projectionDeltaListeners) listener({
-        timeline: delta.timeline,
-        isStreaming: delta.isStreaming,
-        removedItemIds: message.projection.removedItemIds,
-      })
       return
     }
     if (!isRuntimeControlStateV1(message.state)) {
@@ -1127,7 +1072,6 @@ export class PiWorkerSession implements PiSessionRuntime {
     }
     this.session = session
     this.runtimeState = session.state
-    this.projection = restoreProjection(session.projection.timeline, session.projection.isStreaming)
   }
 
   private handleExit(error: Error): void {

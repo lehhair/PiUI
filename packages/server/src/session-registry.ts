@@ -26,30 +26,29 @@ import type {
   ResolvedPackageResourcesV1,
   PackageUpdateV1,
   PiModelRuntimeSnapshotV1,
+  PiNativeJsonValueV1,
   PiNativeSessionHeadV1,
   QueueDeliveryModeV1,
   SessionAttachmentV2,
   SessionReplacementResultV1,
   SessionExportResultV2,
   SessionSnapshotV1,
-  TimelineItemV1,
 } from "@piui/protocol"
 import {
-  applyWorkerEvent,
-  createProjectionState,
   getDriverMode,
-  runMockTurn,
+  nativeEntriesPageFromEntries,
   type DriverMode,
   type PiModelInfo,
   type PiSessionInfo,
   type PiSessionRuntime,
-  type ProjectionState,
 } from "@piui/pi-worker"
 import { workspacePathKey, type WorkspaceStore } from "./workspace-store.ts"
 import type { EventHub } from "./event-hub.ts"
 import { preparePromptInput } from "./prompt-attachments.ts"
 import { resolveWorkspacePath } from "./path-safety.ts"
-import { timelinePage } from "./native-pagination.ts"
+
+type NativeEntry = { [key: string]: PiNativeJsonValueV1 }
+type MockTreeNode = { entry: NativeEntry; children: MockTreeNode[] }
 
 export interface AppSession {
   id: string
@@ -62,7 +61,7 @@ export interface AppSession {
   updatedAt: string
   epoch: string
   sequence: number
-  projection: ProjectionState
+  nativeEntries: NativeEntry[]
   driver: DriverMode
   sessionFile?: string
   real?: PiSessionRuntime
@@ -747,7 +746,7 @@ export class SessionRegistry {
   ): Promise<AppSession> {
     const ws = this.workspaces.resolve(cwd)
     const now = new Date().toISOString()
-    let projection = createProjectionState()
+    const nativeEntries: NativeEntry[] = []
     let sequence = 0
     let real: PiSessionRuntime | undefined
     let driverSessionId = `mock-${randomUUID().slice(0, 8)}`
@@ -756,17 +755,13 @@ export class SessionRegistry {
       const backend = await this.getBackend()
       real = await backend.open(ws.canonicalRoot)
       driverSessionId = real.getSessionId()
-      projection = real.getProjection()
     } else if (opts?.seedMock === true) {
-      for (const ev of runMockTurn({
+      sequence += appendMockTurnEntries(nativeEntries, {
         userText: "hello from mock",
         assistantText: "this is a mock assistant reply",
         thinking: "mock think",
         tool: { name: "read", args: { path: "README.md" }, result: "# mock\n" },
-      })) {
-        projection = applyWorkerEvent(projection, ev)
-        sequence++
-      }
+      })
     }
 
     const seedMock = opts?.seedMock === true && this.driver === "mock"
@@ -779,7 +774,7 @@ export class SessionRegistry {
       updatedAt: now,
       epoch: randomUUID(),
       sequence,
-      projection,
+      nativeEntries,
       driver: this.driver,
       sessionFile: real?.getSessionFile(),
       real: undefined,
@@ -845,7 +840,6 @@ export class SessionRegistry {
         }
         throw runtimeReplacedError()
       }
-      session.projection = runtime.getProjection()
       session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
       session.title = runtime.getSessionName() ?? session.title
       session.sequence += 1
@@ -855,22 +849,14 @@ export class SessionRegistry {
     }
 
     // mock path — no LLM
-    let projection = session.projection
-    const events = runMockTurn({
+    const turn = {
       userText: trimmed,
       assistantText: `mock reply: ${trimmed.slice(0, 200)}`,
       thinking: "mock thinking",
-    })
-    const delay = opts?.stream ? (opts.delayMs ?? 25) : 0
-    for (const ev of events) {
-      projection = applyWorkerEvent(projection, ev)
-      session.sequence += 1
-      session.projection = projection
-      session.updatedAt = new Date().toISOString()
-      opts?.onTick?.(session)
-      if (delay > 0) await new Promise(r => setTimeout(r, delay))
     }
-    session.sequence += 1
+    const delay = opts?.stream ? (opts.delayMs ?? 25) : 0
+    if (delay > 0) await new Promise(r => setTimeout(r, delay))
+    session.sequence += appendMockTurnEntries(session.nativeEntries, turn)
     session.updatedAt = new Date().toISOString()
     opts?.onTick?.(session)
     return session
@@ -921,7 +907,6 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.sendUserMessage(trimmed, prepared.images, options?.deliverAs),
     )
-    session.projection = runtime.getProjection()
     this.touch(session)
     return session
   }
@@ -938,7 +923,6 @@ export class SessionRegistry {
     let cleared = { steering: [] as string[], followUp: [] as string[] }
     if (runtime) {
       cleared = await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.abort())
-      session.projection = runtime.getProjection()
     }
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
@@ -959,7 +943,6 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.executeBash(command, excludeFromContext),
     )
-    session.projection = runtime.getProjection()
     this.touch(session)
     return {
       output: result.output,
@@ -1008,7 +991,6 @@ export class SessionRegistry {
     const runtime = session.real
     if (!runtime) throw unsupportedRuntimeOperation("resource reload")
     await this.runBoundRuntimeCommand(session, runtime, session.workerGeneration, () => runtime.reload())
-    session.projection = runtime.getProjection()
     session.nativeHead = runtime.getNativeHead()
     this.touch(session)
     if (publish !== false) {
@@ -1080,7 +1062,6 @@ export class SessionRegistry {
       session.workerGeneration,
       () => runtime.sendCustomMessage(customType, content, options),
     )
-    session.projection = runtime.getProjection()
     this.touch(session)
     return session
   }
@@ -1195,7 +1176,6 @@ export class SessionRegistry {
     }
     if (runtime) {
       result = await this.runBoundRuntimeCommand(session, runtime, generation, () => runtime.compact(instructions))
-      session.projection = runtime.getProjection()
     }
     this.touch(session)
     return { session, result }
@@ -1267,7 +1247,6 @@ export class SessionRegistry {
     await this.runBoundRuntimeCommand(session, runtime, generation, async () => {
       result = await runtime.navigateTree(entryId, options)
     })
-    session.projection = runtime.getProjection()
     this.touch(session)
     return { session, ...result }
   }
@@ -1399,7 +1378,6 @@ export class SessionRegistry {
     const source = await this.attach(sessionId)
     const runtime = source.real
     if (!runtime) throw unsupportedRuntimeOperation("session replacement")
-    const sourceProjection = source.projection
     const sourceGeneration = source.workerGeneration
     source.nativeHead = runtime.getNativeHead()
     let replacement: SessionReplacementResultV1
@@ -1415,13 +1393,12 @@ export class SessionRegistry {
       }
       throw error
     }
-    return this.commitReplacement(source, runtime, sourceProjection, sourceGeneration, replacement, options)
+    return this.commitReplacement(source, runtime, sourceGeneration, replacement, options)
   }
 
   private async commitReplacement(
     source: AppSession,
     runtime: PiSessionRuntime,
-    sourceProjection: ProjectionState,
     sourceGeneration: string | undefined,
     replacement: SessionReplacementResultV1,
     options: { existingTargetId?: string } = {},
@@ -1455,7 +1432,6 @@ export class SessionRegistry {
       this.unbindRuntime(source)
       source.real = undefined
       source.workerGeneration = undefined
-      source.projection = sourceProjection
       this.touch(source)
 
       // A replacement may move the session to a different directory.
@@ -1472,13 +1448,12 @@ export class SessionRegistry {
         updatedAt: now,
         epoch: randomUUID(),
         sequence: 0,
-        projection: runtime.getProjection(),
+        nativeEntries: [],
         driver: "pi",
         sessionFile: targetSessionFile,
       }
       target.cwd = targetCwd
       target.sessionFile = targetSessionFile
-      target.projection = runtime.getProjection()
       target.driverSessionId = targetId
       target.updatedAt = now
       target.runtimeError = undefined
@@ -1490,7 +1465,6 @@ export class SessionRegistry {
       this.unbindRuntime(source)
       source.real = undefined
       source.workerGeneration = undefined
-      source.projection = sourceProjection
       this.touch(source)
       await this.disposeRuntime(runtime)
       throw error
@@ -1557,7 +1531,6 @@ export class SessionRegistry {
   private bindRuntime(session: AppSession, runtime: PiSessionRuntime): void {
     this.unbindRuntime(session)
     session.real = runtime
-    session.projection = runtime.getProjection()
     session.driverSessionId = runtime.getSessionId()
     session.sessionFile = runtime.getSessionFile() ?? session.sessionFile
     session.title = runtime.getSessionName() ?? session.title
@@ -1595,31 +1568,6 @@ export class SessionRegistry {
         { kind: "session", id: session.id },
         "session.snapshot.updated",
         { sessionId: session.id, reason: "runtime", snapshot: this.snapshot(session) },
-      )
-    })
-    let initialProjection = true
-    const unsubscribeProjection = runtime.onProjection?.(projection => {
-      if (initialProjection) {
-        initialProjection = false
-        return
-      }
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
-      session.projection = projection
-    })
-    const unsubscribeProjectionDelta = runtime.onProjectionDelta?.(projection => {
-      if (!this.isCurrentRuntime(session, runtime, generation)) return
-      this.touch(session)
-      this.eventHub?.publishV2(
-        { kind: "session", id: session.id },
-        "session.timeline.delta",
-        {
-          sessionId: session.id,
-          epoch: session.epoch,
-          sequence: session.sequence,
-          items: projection.timeline,
-          removedItemIds: projection.removedItemIds,
-          isStreaming: projection.isStreaming,
-        },
       )
     })
     const unsubscribeNativeEvent = runtime.onNativeEvent?.(event => {
@@ -1719,7 +1667,6 @@ export class SessionRegistry {
       const result = await this.commitReplacement(
         session,
         runtime,
-        session.projection,
         generation,
         replacement,
         { existingTargetId: replacement.operation === "switch" ? replacement.targetSessionId : undefined },
@@ -1743,15 +1690,6 @@ export class SessionRegistry {
       session.nativeHead = runtime.getNativeHead()
       session.real = undefined
       session.runtimeError = error.message
-      session.projection = {
-        ...session.projection,
-        isStreaming: false,
-        timeline: session.projection.timeline.map(item =>
-          item.type === "assistant" && item.status === "streaming"
-            ? { ...item, status: "error", stopReason: item.stopReason ?? "error" }
-            : item,
-        ),
-      }
       session.sequence += 1
       session.updatedAt = new Date().toISOString()
       this.eventHub?.publishV2(
@@ -1774,7 +1712,6 @@ export class SessionRegistry {
       session.nativeHead = runtime.getNativeHead()
       session.real = undefined
       session.workerGeneration = undefined
-      session.projection = { ...session.projection, isStreaming: false }
       this.touch(session)
       this.eventHub?.publishV2(
         { kind: "session", id: session.id },
@@ -1784,8 +1721,6 @@ export class SessionRegistry {
     })
     binding.unsubscribe = () => {
       unsubscribeState?.()
-      unsubscribeProjection?.()
-      unsubscribeProjectionDelta?.()
       unsubscribeNativeEvent?.()
       unsubscribeNativeHead?.()
       unsubscribeProviderAuth?.()
@@ -1873,7 +1808,7 @@ export class SessionRegistry {
   private isRuntimeReclaimable(session: AppSession): boolean {
     if (!session.real || session.runtimeError) return false
     if (this.attaching.has(session.id) || this.deleting.has(session.id)) return false
-    if (session.projection.isStreaming || session.real.isStreaming()) return false
+    if (session.real.isStreaming()) return false
     const ui = session.real.getRuntimeUiState()
     if (!ui) return false
     if (ui.isStreaming || ui.isCompacting || ui.isBashRunning || ui.hasPendingBashMessages) return false
@@ -1954,15 +1889,26 @@ export class SessionRegistry {
   async getNativeEntriesPage(sessionId: string, cursor: string | undefined, limit: number, maxBytes: number) {
     const session = await this.attach(sessionId)
     const runtime = session.real
-    if (!runtime) throw sessionRuntimeUnavailable(session)
-    return runtime.getNativeEntriesPage(cursor, limit, maxBytes)
+    if (runtime) return runtime.getNativeEntriesPage(cursor, limit, maxBytes)
+    const head = mockNativeHead(session)
+    return nativeEntriesPageFromEntries(head, session.nativeEntries, { cursor, limit, maxBytes }, entry => entry)
   }
 
-  async getTimelinePage(sessionId: string, cursor: string | undefined, limit: number, maxBytes: number) {
+  async getNativeTree(sessionId: string) {
     const session = await this.attach(sessionId)
-    if (session.real?.getTimelinePage) return await session.real.getTimelinePage(cursor, limit, maxBytes)
-    const native = session.nativeHead ?? emptyNativeHead(null)
-    return timelinePage(session.projection.timeline, native.epoch, { cursor, limit, maxBytes })
+    if (session.real) return session.real.getNativeTree()
+    const byId = new Map<string, MockTreeNode>()
+    for (const entry of session.nativeEntries) {
+      if (typeof entry.id === "string") byId.set(entry.id, { entry, children: [] })
+    }
+    const roots: MockTreeNode[] = []
+    for (const node of byId.values()) {
+      const parentId = typeof node.entry.parentId === "string" ? node.entry.parentId : undefined
+      const parent = parentId ? byId.get(parentId) : undefined
+      if (parent) parent.children.push(node)
+      else roots.push(node)
+    }
+    return roots as unknown as Array<{ [key: string]: PiNativeJsonValueV1 }>
   }
 
   async getNativeImageAttachment(sessionId: string, entryId: string, blockIndex: number) {
@@ -2138,7 +2084,7 @@ export class SessionRegistry {
       updatedAt: info.updatedAt,
       epoch: randomUUID(),
       sequence: 0,
-      projection: createProjectionState(),
+      nativeEntries: [],
       driver: "pi",
       sessionFile: info.path,
     })
@@ -2177,7 +2123,7 @@ export class SessionRegistry {
     const ui = session.real?.getRuntimeUiState()
     const model = ui?.model ?? session.real?.getModel()
     const isStreaming = !session.runtimeError &&
-      Boolean(ui?.isStreaming || session.projection.isStreaming || session.real?.isStreaming())
+      Boolean(ui?.isStreaming || session.real?.isStreaming())
     const isCompacting = !session.runtimeError && (ui?.isCompacting ?? false)
     let state: SessionSnapshotV1["session"]["state"] = "idle"
     if (session.runtimeError) state = "crashed"
@@ -2185,13 +2131,8 @@ export class SessionRegistry {
     else if (ui?.retry?.phase === "waiting" || ui?.retry?.phase === "running") state = "retrying"
     else if (isStreaming) state = "running"
 
-    const native = session.real?.getNativeHead() ?? session.nativeHead ?? emptyNativeHead(
-      session.projection.timeline.at(-1)?.entryId ?? null,
-    )
+    const native = session.real?.getNativeHead() ?? session.nativeHead ?? mockNativeHead(session)
     if (session.real) session.nativeHead = native
-    const firstTimelinePage = session.real?.getInitialTimelinePage?.() ?? timelinePage(
-      session.projection.timeline as TimelineItemV1[], native.epoch, { limit: 50, maxBytes: 1_048_576 },
-    )
     return {
       protocolVersion: 1,
       epoch: session.epoch,
@@ -2245,11 +2186,6 @@ export class SessionRegistry {
         workerGeneration: session.workerGeneration,
         runtimeError: session.runtimeError,
       },
-      timeline: firstTimelinePage.items,
-      timelinePage: {
-        beforeCursor: firstTimelinePage.beforeCursor,
-        hasMore: firstTimelinePage.hasMore,
-      },
       native,
     }
   }
@@ -2266,6 +2202,81 @@ function emptyNativeHead(leafId: string | null): PiNativeSessionHeadV1 {
     leafId,
     entryCount: 0,
   }
+}
+
+function mockNativeHead(session: AppSession): PiNativeSessionHeadV1 {
+  const leaf = session.nativeEntries.at(-1)
+  return {
+    namespace: "pi",
+    schemaVersion: 1,
+    sdkVersion: "mock",
+    revision: session.sequence,
+    epoch: session.epoch,
+    header: null,
+    leafId: typeof leaf?.id === "string" ? leaf.id : null,
+    entryCount: session.nativeEntries.length,
+  }
+}
+
+function appendMockTurnEntries(
+  entries: NativeEntry[],
+  turn: {
+    userText: string
+    assistantText: string
+    thinking?: string
+    tool?: { name: string; args: unknown; result: string; isError?: boolean }
+  },
+): number {
+  const timestamp = Date.now()
+  const parentId = typeof entries.at(-1)?.id === "string" ? String(entries.at(-1)?.id) : null
+  const userId = `mock-user-${randomUUID()}`
+  const assistantId = `mock-assistant-${randomUUID()}`
+  entries.push({
+    type: "message",
+    id: userId,
+    parentId,
+    timestamp: new Date(timestamp).toISOString(),
+    message: { role: "user", timestamp, content: turn.userText },
+  })
+  const content: PiNativeJsonValueV1[] = []
+  if (turn.thinking) content.push({ type: "thinking", thinking: turn.thinking })
+  if (turn.assistantText) content.push({ type: "text", text: turn.assistantText })
+  const toolCallId = turn.tool ? `mock-tool-${randomUUID()}` : undefined
+  if (turn.tool && toolCallId) {
+    content.push({ type: "toolCall", id: toolCallId, name: turn.tool.name, arguments: turn.tool.args as PiNativeJsonValueV1 })
+  }
+  entries.push({
+    type: "message",
+    id: assistantId,
+    parentId: userId,
+    timestamp: new Date(timestamp + 1).toISOString(),
+    message: {
+      role: "assistant",
+      timestamp: timestamp + 1,
+      provider: "mock",
+      model: "mock",
+      stopReason: toolCallId ? "toolUse" : "stop",
+      content,
+    },
+  })
+  if (turn.tool && toolCallId) {
+    entries.push({
+      type: "message",
+      id: `mock-result-${randomUUID()}`,
+      parentId: assistantId,
+      timestamp: new Date(timestamp + 2).toISOString(),
+      message: {
+        role: "toolResult",
+        timestamp: timestamp + 2,
+        toolCallId,
+        toolName: turn.tool.name,
+        isError: turn.tool.isError === true,
+        content: [{ type: "text", text: turn.tool.result }],
+      },
+    })
+    return 3
+  }
+  return 2
 }
 
 function runtimeReplacedError(): Error {

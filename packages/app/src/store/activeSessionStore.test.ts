@@ -39,8 +39,6 @@ function snapshot(state: SessionSnapshotV1['session']['state']): SessionSnapshot
       tools: [],
       activeTools: [],
     },
-    timeline: [],
-    timelinePage: { hasMore: false },
     native: { namespace: 'pi', schemaVersion: 1, sdkVersion: '0.81.1', revision: 1, epoch: 'test', header: null, leafId: null, entryCount: 0 },
   }
 }

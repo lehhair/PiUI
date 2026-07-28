@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshotV1 } from '@piui/protocol'
 import { SessionTreePanel } from './SessionTreePanel'
 import { setPiCapabilities } from '../pi/capabilities'
-import { sessionProjectionStore } from '../pi/sessionProjectionStore'
+import { nativeSessionStore } from '../pi/nativeSessionStore'
 import {
   clearSessionEditorDraft,
   useSessionEditorDraft,
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   setAutoRetry: vi.fn(),
   setQueueModes: vi.fn(),
   setActiveTools: vi.fn(),
-  fetchNativeEntries: vi.fn(),
+  fetchNativeTree: vi.fn(),
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
@@ -44,7 +44,7 @@ vi.mock('../pi/sessionApi', () => ({
   setPiAutoRetry: mocks.setAutoRetry,
   setPiQueueModes: mocks.setQueueModes,
   setPiActiveTools: mocks.setActiveTools,
-  fetchPiNativeEntriesPage: mocks.fetchNativeEntries,
+  fetchPiNativeTree: mocks.fetchNativeTree,
 }))
 
 function snapshot(id = 'session-1'): SessionSnapshotV1 {
@@ -73,8 +73,6 @@ function snapshot(id = 'session-1'): SessionSnapshotV1 {
       tools: [],
       activeTools: [],
     },
-    timeline: [],
-    timelinePage: { hasMore: false },
     native: {
       namespace: 'pi',
       schemaVersion: 1,
@@ -85,7 +83,7 @@ function snapshot(id = 'session-1'): SessionSnapshotV1 {
       leafId: 'assistant-entry',
       entryCount: 3,
     },
-  }
+  } as unknown as SessionSnapshotV1
 }
 
 function DraftProbe() {
@@ -95,18 +93,17 @@ function DraftProbe() {
 describe('SessionTreePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.fetchNativeEntries.mockResolvedValue({
-      head: snapshot().native,
-      items: [
-        { id: 'user-entry', parentId: null, timestamp: '2026-01-01T00:00:00.000Z', type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Change the parser' }] } },
-        { id: 'assistant-entry', parentId: 'user-entry', timestamp: '2026-01-01T00:00:01.000Z', type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Updated the parser' }] } },
-        { id: 'label-entry', parentId: 'assistant-entry', timestamp: '2026-01-01T00:00:02.000Z', type: 'label', targetId: 'assistant-entry', label: 'working branch' },
-      ],
-      hasMore: false,
-    })
-    sessionProjectionStore.clear()
+    mocks.fetchNativeTree.mockResolvedValue([{
+      entry: { id: 'user-entry', parentId: null, timestamp: '2026-01-01T00:00:00.000Z', type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Change the parser' }] } },
+      children: [{
+        entry: { id: 'assistant-entry', parentId: 'user-entry', timestamp: '2026-01-01T00:00:01.000Z', type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Updated the parser' }] } },
+        label: 'working branch',
+        children: [],
+      }],
+    }])
+    nativeSessionStore.clear()
     clearSessionEditorDraft('session-1')
-    sessionProjectionStore.replace(snapshot())
+    nativeSessionStore.replace(snapshot())
     setPiCapabilities({
       sessionTree: true,
       sessionNavigate: true,
@@ -258,7 +255,7 @@ describe('SessionTreePanel', () => {
         activeTools: ['read'],
       },
     }
-    sessionProjectionStore.replace(runtimeSnapshot)
+    nativeSessionStore.replace(runtimeSnapshot)
     setPiCapabilities({
       sessionTree: true,
       sessionNavigate: true,

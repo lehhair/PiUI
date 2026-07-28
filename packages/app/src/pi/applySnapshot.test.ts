@@ -1,120 +1,94 @@
-import { describe, expect, it, beforeEach } from "vitest"
-import type { SessionSnapshotV1 } from "@piui/protocol"
-import { applySnapshotToUi } from "./applySnapshot"
-import { messageStore } from "../store/messageStore"
+import type { PiNativeEntriesPageV1, SessionSnapshotV1 } from "@piui/protocol"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { activeSessionStore } from "../store/activeSessionStore"
-import { sessionProjectionStore } from "./sessionProjectionStore"
+import { messageStore } from "../store/messageStore"
+import { applyPiNativeEventToUi, applySnapshotToUi } from "./applySnapshot"
+import { nativeSessionStore } from "./nativeSessionStore"
 
-const snap: SessionSnapshotV1 = {
-  protocolVersion: 1,
-  epoch: "e",
-  sequence: 1,
-  session: {
-    id: "s-apply",
-    directory: "/workspace",
-    driverId: "pi",
-    driverSessionId: "d",
-    title: "t",
-    state: "idle",
-    createdAt: "a",
-    updatedAt: "b",
-  },
-  runtime: {
-    attached: true,
-    thinkingLevel: "off",
-    availableThinkingLevels: ["off"],
-    isStreaming: false,
-    isCompacting: false,
-    queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
-    retry: { phase: "idle", autoEnabled: false },
-    compaction: { autoEnabled: false, operation: { type: "none" } },
-    tools: [],
-    activeTools: [],
-  },
-  timeline: [
-    { type: "user", id: "u", timestamp: 1, text: "ping" },
-    {
-      type: "assistant",
-      id: "a",
-      timestamp: 2,
-      status: "completed",
-      provider: "mock",
-      model: "mock",
-      content: [{ type: "text", text: "pong" }],
+function snapshot(sequence = 1, revision = 1, leafId = "a1"): SessionSnapshotV1 {
+  return {
+    protocolVersion: 1,
+    epoch: "snapshot-epoch",
+    sequence,
+    session: {
+      id: "s-apply",
+      directory: "/workspace",
+      driverId: "pi",
+      driverSessionId: "s-apply",
+      title: "title",
+      state: "idle",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
     },
-  ],
-  timelinePage: { hasMore: false },
-  native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: "a", entryCount: 0 },
+    runtime: {
+      attached: true,
+      model: { provider: "anthropic", id: "claude-test" },
+      thinkingLevel: "off",
+      availableThinkingLevels: ["off"],
+      isStreaming: false,
+      isCompacting: false,
+      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      retry: { phase: "idle", autoEnabled: false },
+      compaction: { autoEnabled: false, operation: { type: "none" } },
+      tools: [],
+      activeTools: [],
+    },
+    native: {
+      namespace: "pi",
+      schemaVersion: 1,
+      sdkVersion: "0.81.1",
+      revision,
+      epoch: "native-epoch",
+      header: null,
+      leafId,
+      entryCount: 2,
+    },
+  } as unknown as SessionSnapshotV1
 }
 
-describe("applySnapshotToUi", () => {
+function page(head = snapshot().native): PiNativeEntriesPageV1 {
+  return {
+    head,
+    items: [
+      { type: "message", id: "u1", parentId: null, timestamp: 1, message: { role: "user", content: "ping" } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: 2, message: { role: "assistant", content: "pong" } },
+    ],
+    hasMore: false,
+  }
+}
+
+describe("app-local native session messages", () => {
   beforeEach(() => {
     messageStore.clearAll()
-    sessionProjectionStore.clear()
+    nativeSessionStore.clear()
     activeSessionStore.initialize({})
+    vi.restoreAllMocks()
   })
 
-  it("fills both stores", () => {
-    const id = applySnapshotToUi(snap)
-    expect(id).toBe("s-apply")
-    expect(sessionProjectionStore.getTimeline()).toHaveLength(2)
-    expect(messageStore.getVisibleMessages("s-apply")[1]?.parts[0]).toMatchObject({
-      type: "text",
-      text: "pong",
-    })
+  it("publishes UI messages only from the supplied native entries page", () => {
+    applySnapshotToUi(snapshot(), { nativePage: page() })
+    expect(nativeSessionStore.getActiveBranch("s-apply").map(entry => entry.id)).toEqual(["u1", "a1"])
+    expect(messageStore.getVisibleMessages("s-apply")).toHaveLength(2)
+    expect(messageStore.getVisibleMessages("s-apply")[1]?.parts[0]).toMatchObject({ type: "text", text: "pong" })
   })
 
-  it("updates a background session without changing the active session", () => {
-    applySnapshotToUi(snap)
-    const background = {
-      ...snap,
-      session: { ...snap.session, id: "s-background", driverSessionId: "s-background" },
-    }
-    applySnapshotToUi(background, { activate: false })
-    expect(sessionProjectionStore.getActiveSessionId()).toBe("s-apply")
-    expect(sessionProjectionStore.getSnapshot("s-background")?.session.id).toBe("s-background")
-  })
+  it("projects native streaming events without changing persisted entries", () => {
+    const initial = snapshot(1, 1, "u1")
+    applySnapshotToUi(initial, { nativePage: { ...page(initial.native), items: page().items.slice(0, 1) } })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_update",
+      message: { role: "assistant", provider: "anthropic", model: "claude-test", content: [{ type: "text", text: "partial" }] },
+    })
+    const assistant = messageStore.getVisibleMessages("s-apply").at(-1)
+    expect(assistant?.parts[0]).toMatchObject({ type: "text", text: "partial" })
+    expect(assistant?.isStreaming).toBe(true)
+    expect(messageStore.getIsStreaming("s-apply")).toBe(true)
 
-  it("does not expose steer controls when retry is waiting outside an active stream", () => {
-    applySnapshotToUi({
-      ...snap,
-      sequence: 2,
-      session: { ...snap.session, state: "retrying" },
-      runtime: {
-        ...snap.runtime,
-        retry: {
-          phase: "waiting",
-          autoEnabled: true,
-          attempt: 1,
-          maxAttempts: 3,
-          delayMs: 100,
-          nextAttemptAt: "2026-01-01T00:00:00.100Z",
-          errorMessage: "overloaded",
-        },
-      },
-    })
-    expect(messageStore.getSessionState("s-apply")?.isStreaming).toBe(false)
-    expect(activeSessionStore.getBusySessions()[0]?.status).toMatchObject({
-      type: "retry",
-      attempt: 1,
-      message: "overloaded",
-    })
-  })
-
-  it("publishes running snapshots to the active session list", () => {
-    applySnapshotToUi({
-      ...snap,
-      sequence: 2,
-      session: { ...snap.session, state: "running" },
-      runtime: { ...snap.runtime, isStreaming: true },
-    })
-    expect(activeSessionStore.getBusySessions()).toEqual([
-      expect.objectContaining({
-        sessionId: "s-apply",
-        title: "t",
-        directory: "/workspace",
-        status: { type: "busy" },
-      }),
-    ])
+    applyPiNativeEventToUi("s-apply", { type: "agent_settled" })
+    expect(messageStore.getIsStreaming("s-apply")).toBe(false)
   })
 })

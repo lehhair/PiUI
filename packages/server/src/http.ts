@@ -2229,29 +2229,22 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
       }
 
-      const sessionNativeEntries = p.match(/^\/api\/v1\/sessions\/([^/]+)\/native\/entries$/)
-      if (method === "GET" && sessionNativeEntries) {
+      const sessionNativeTree = p.match(/^\/api\/v1\/sessions\/([^/]+)\/native\/tree$/)
+      if (method === "GET" && sessionNativeTree) {
         try {
-          const limit = parsePageLimit(url.searchParams.get("limit"), 50, 100)
-          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 1_048_576, 4_194_304)
-          return sendJson(res, 200, await sessions.getNativeEntriesPage(
-            decodeURIComponent(sessionNativeEntries[1]),
-            url.searchParams.get("cursor") ?? undefined,
-            limit,
-            maxBytes,
-          ))
+          return sendJson(res, 200, await sessions.getNativeTree(decodeURIComponent(sessionNativeTree[1])))
         } catch (error) {
           return handleSessionCmdError(res, error)
         }
       }
 
-      const sessionTimeline = p.match(/^\/api\/v1\/sessions\/([^/]+)\/timeline$/)
-      if (method === "GET" && sessionTimeline) {
+      const sessionNativeEntries = p.match(/^\/api\/v1\/sessions\/([^/]+)\/native\/entries$/)
+      if (method === "GET" && sessionNativeEntries) {
         try {
           const limit = parsePageLimit(url.searchParams.get("limit"), 50, 100)
-          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 1_048_576, 4_194_304)
-          return sendJson(res, 200, await sessions.getTimelinePage(
-            decodeURIComponent(sessionTimeline[1]),
+          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 33_554_432, 33_554_432)
+          return sendJson(res, 200, await sessions.getNativeEntriesPage(
+            decodeURIComponent(sessionNativeEntries[1]),
             url.searchParams.get("cursor") ?? undefined,
             limit,
             maxBytes,

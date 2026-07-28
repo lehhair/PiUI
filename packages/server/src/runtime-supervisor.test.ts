@@ -66,7 +66,7 @@ describe("RuntimeSupervisor", () => {
       await assert.rejects(runtime.prompt("crash"), /exited unexpectedly/)
       await closed
       const replacement = await second.open(root, sessionFile)
-      assert.equal(replacement.getProjection().timeline.length, 0)
+      assert.equal(replacement.getNativeHead().entryCount, 2)
       await replacement.dispose()
     } finally {
       await first.dispose()

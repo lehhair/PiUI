@@ -14,18 +14,21 @@ import {
   getApiBase,
   getPiAuthToken,
   fetchExtensionUiSnapshot,
-  fetchSnapshot,
   setExtensionEditorState,
   resetWorkspaceResolutionCache,
 } from "./sessionApi"
-import { applySnapshotToUi } from "./applySnapshot"
+import {
+  applyPiNativeEventToUi,
+  applySnapshotToUi,
+  resyncPiSessionToUi,
+} from "./applySnapshot"
 import {
   listTrackedPiSessions,
   listTrackedPiWorkspacePaths,
   subscribePiSessionIndex,
   trackPiSession,
 } from "./piSessionIndex"
-import { sessionProjectionStore } from "./sessionProjectionStore"
+import { nativeSessionStore } from "./nativeSessionStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { configureSessionEditorDraftSync, setSessionEditorDraft } from "./sessionEditorDraftStore"
 import { notificationStore } from "../store/notificationStore"
@@ -202,22 +205,9 @@ export class PiEventSocket {
       trackPiSession(snapshot.session.id, snapshot.session.directory)
       applySnapshotToUi(snapshot, { activate: false })
       if (snapshot.session.state === "idle") notifySessionIdle(snapshot.session.id)
-    } else if (event.type === "session.timeline.delta") {
+    } else if (event.type === "session.native.event") {
       if (event.payload.sessionId !== event.stream.id) return
-      const snapshot = sessionProjectionStore.buildTimelineDelta(
-        event.payload.sessionId,
-        event.payload.epoch,
-        event.payload.sequence,
-        event.payload.items,
-        event.payload.removedItemIds,
-        event.payload.isStreaming,
-      )
-      if (!snapshot) {
-        this.blockedStreamsV2.add(key)
-        void this.resyncStreamV2(key, event.cursor)
-        return
-      }
-      applySnapshotToUi(snapshot, { activate: false })
+      applyPiNativeEventToUi(event.payload.sessionId, event.payload.event)
     } else if (event.type === "session.runtime.replaced" || event.type === "session.runtime.crashed") {
       this.blockedStreamsV2.add(key)
       void this.resyncStreamV2(key, event.cursor)
@@ -268,8 +258,7 @@ export class PiEventSocket {
         event.payload.status === "unknown_after_crash")
     ) {
       window.dispatchEvent(new CustomEvent("piui:command-updated", { detail: event.payload }))
-      void fetchSnapshot(event.payload.sessionId)
-        .then(snapshot => applySnapshotToUi(snapshot, { activate: false }))
+      void resyncPiSessionToUi(event.payload.sessionId, { activate: false })
         .catch(() => undefined)
     } else if (event.type === "command.updated") {
       window.dispatchEvent(new CustomEvent("piui:command-updated", { detail: event.payload }))
@@ -313,7 +302,7 @@ export class PiEventSocket {
   }
 
   private currentStreamsV2(): EventStreamRefV2[] {
-    const ids = new Set([...listTrackedPiSessions(), ...sessionProjectionStore.getSessionIds()])
+    const ids = new Set([...listTrackedPiSessions(), ...nativeSessionStore.getSessionIds()])
     const workspaces = listTrackedPiWorkspacePaths().map(path => ({ kind: "workspace" as const, id: path }))
     const resources = listTrackedPiWorkspacePaths().map(path => ({ kind: "resources" as const, id: path }))
     const providers = getTrackedManagementProviders().map(id => ({ kind: "provider" as const, id }))
@@ -342,8 +331,7 @@ export class PiEventSocket {
 
     const pending = (async () => {
       if (stream.kind === "session") {
-        const snapshot = await fetchSnapshot(stream.id)
-        applySnapshotToUi(snapshot, { activate: false })
+        await resyncPiSessionToUi(stream.id, { activate: false })
         try {
           extensionUiStore.replace(await fetchExtensionUiSnapshot(stream.id))
         } catch {
@@ -377,10 +365,10 @@ export class PiEventSocket {
 
   private resyncLegacySnapshots(): Promise<void> {
     if (this.legacyResync) return this.legacyResync
-    const ids = new Set([...listTrackedPiSessions(), ...sessionProjectionStore.getSessionIds()])
+    const ids = new Set([...listTrackedPiSessions(), ...nativeSessionStore.getSessionIds()])
     this.legacyResync = Promise.all([...ids].map(async id => {
       try {
-        applySnapshotToUi(await fetchSnapshot(id), { activate: false })
+        await resyncPiSessionToUi(id, { activate: false })
       } catch {
         /* deleted sessions disappear on the next session-list refresh */
       }

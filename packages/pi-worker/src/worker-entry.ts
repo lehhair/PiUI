@@ -9,7 +9,6 @@ import {
   PI_WORKER_PROTOCOL_VERSION,
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
   type PiWorkerCapability,
-  type ProjectionWire,
   type WorkerCommand,
   type WorkerMessage,
   type WorkerHostCall,
@@ -22,7 +21,6 @@ import {
 
 let runtime: PiSessionRuntime | undefined
 let unsubscribeState: (() => void) | undefined
-let unsubscribeProjectionDelta: (() => void) | undefined
 let unsubscribeNativeEvent: (() => void) | undefined
 let unsubscribeNativeHead: (() => void) | undefined
 let unsubscribeResourcesChanged: (() => void) | undefined
@@ -97,29 +95,14 @@ function callHost(call: WorkerHostCall): Promise<void> {
   })
 }
 
-function projectionWire(value: ProjectionWire = requireRuntime().getProjection()): ProjectionWire {
-  return {
-    timeline: value.timeline,
-    isStreaming: value.isStreaming,
-    removedItemIds: value.removedItemIds,
-  }
-}
-
 function sessionWire(): WorkerSessionWire {
   const current = requireRuntime()
-  const fullProjection = current.getProjection()
-  const timelinePage = current.getInitialTimelinePage?.() ?? {
-    items: fullProjection.timeline.slice(-50),
-    hasMore: fullProjection.timeline.length > 50,
-  }
   return {
     sessionId: current.getSessionId(),
     sessionFile: current.getSessionFile(),
     sessionName: current.getSessionName(),
-    projection: projectionWire({ ...fullProjection, timeline: timelinePage.items }),
     state: current.getRuntimeUiState(),
     native: current.getNativeHead(),
-    timelinePage: { beforeCursor: timelinePage.beforeCursor, hasMore: timelinePage.hasMore },
   }
 }
 
@@ -233,12 +216,6 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
         type: "state",
         state,
       }))
-      unsubscribeProjectionDelta = runtime.onProjectionDelta(projection => send({
-        kind: "event",
-        generation: workerGeneration,
-        type: "projectionDelta",
-        projection: projectionWire(projection),
-      }))
       unsubscribeNativeEvent = runtime.onNativeEvent?.(event => send({
         kind: "event",
         generation: workerGeneration,
@@ -348,12 +325,12 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "runtimeInspection", inspection: await requireRuntime().inspectRuntime() }
     case "getNativeEntriesPage":
       return { type: "nativeEntriesPage", page: await requireRuntime().getNativeEntriesPage(command.cursor, command.limit, command.maxBytes) }
+    case "getNativeTree":
+      return { type: "nativeTree", tree: await requireRuntime().getNativeTree() }
     case "getNativeImageAttachment": {
       const attachment = await requireRuntime().getNativeImageAttachment(command.entryId, command.blockIndex)
       return { type: "nativeImageAttachment", ...attachment }
     }
-    case "getTimelinePage":
-      return { type: "timelinePage", page: await requireRuntime().getTimelinePage!(command.cursor, command.limit, command.maxBytes) }
     case "inspectResources":
       return { type: "resources", resources: await requireRuntime().inspectResources() }
     case "extendResources":
@@ -434,8 +411,6 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       clearInterval(heartbeatTimer)
       unsubscribeState?.()
       unsubscribeState = undefined
-      unsubscribeProjectionDelta?.()
-      unsubscribeProjectionDelta = undefined
       unsubscribeNativeEvent?.()
       unsubscribeNativeEvent = undefined
       unsubscribeNativeHead?.()

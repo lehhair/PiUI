@@ -19,7 +19,6 @@ import {
   type ProjectTrustContext,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type {
@@ -53,21 +52,12 @@ import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import {
-  applyWorkerEvent,
-  createProjectionState,
-  projectEntries,
-  type ProjectionDelta,
-  type ProjectionState,
-} from "./projection.js"
-import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
 import type { PiBashResult, PiImageInput, PiModelInfo } from "./worker-protocol.js"
 import { ExtensionUiBridge, type PiExtensionUiEvent } from "./extension-ui-bridge.js"
 import {
   nativeEntriesPageFromEntries,
   nativeImageAttachmentFromEntry,
   nativeSessionHeadFromParts,
-  nativeTimelinePage,
 } from "./native-pagination.js"
 
 export interface PiRuntimeUiState {
@@ -502,14 +492,9 @@ export class RealPiSession {
   private runtime: AgentSessionRuntime
   private readonly extensionUi: ExtensionUiBridge
   private extensionsInitialized = false
-  private projection: ProjectionState = createProjectionState()
   private stateUnsub: (() => void) | null = null
-  private lastUserId: string | null = null
-  private currentAsstId: string | null = null
   private stateListeners = new Set<(s: PiRuntimeUiState) => void>()
-  private projectionListeners = new Set<(projection: ProjectionState) => void>()
-  private projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
-  private nativeEventListeners = new Set<(event: unknown) => void>()
+  private nativeEventListeners = new Set<(event: PiNativeJsonValueV1) => void>()
   private nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
   private nativeRevision = 1
   private nativeFingerprint = ""
@@ -537,17 +522,11 @@ export class RealPiSession {
   private bindStateEvents(): void {
     this.stateUnsub?.()
     this.stateUnsub = this.runtime.session.subscribe(event => {
-      const nativeEvent = sanitizeNativeEvent(event)
+      const nativeEvent = toNativeJsonValue(event)
+      if (nativeEvent === undefined) {
+        throw Object.assign(new Error("Pi native event is not JSON serializable"), { code: "NATIVE_EVENT_NOT_JSON" })
+      }
       for (const listener of this.nativeEventListeners) listener(nativeEvent)
-      let projectionChanged = false
-      for (const workerEvent of mapPiEventToWorker(event, this)) {
-        this.projection = applyWorkerEvent(this.projection, workerEvent)
-        projectionChanged = true
-      }
-      if (projectionChanged) {
-        this.emitProjection()
-        this.emitProjectionDelta()
-      }
       this.emitNativeEnvelopeIfChanged()
 
       if (event.type === "compaction_start") {
@@ -620,10 +599,7 @@ export class RealPiSession {
       if (isRuntimeStateEvent(event.type)) this.emitState()
       if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
         queueMicrotask(() => {
-          const previous = this.projection
-          this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-          this.emitProjection()
-          this.emitProjectionReconciliation(previous)
+          this.emitNativeEnvelopeIfChanged()
           this.emitState()
         })
       }
@@ -643,8 +619,6 @@ export class RealPiSession {
       autoEnabled: this.runtime.session.autoCompactionEnabled,
       operation: { type: "none" },
     }
-    this.lastUserId = null
-    this.currentAsstId = null
   }
 
   static async open(
@@ -666,7 +640,6 @@ export class RealPiSession {
         code: "SESSION_WORKSPACE_MISMATCH",
       })
     }
-    const projection = sessionFile ? projectNativeBranch(sessionManager.getBranch()) : undefined
     const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime, {
       cwd: sessionManager.getCwd(),
       agentDir,
@@ -691,7 +664,6 @@ export class RealPiSession {
       }
       result.bindStateEvents()
     })
-    if (projection) result.projection = projection
     return result
   }
 
@@ -849,18 +821,7 @@ export class RealPiSession {
     return () => this.stateListeners.delete(listener)
   }
 
-  onProjection(listener: (projection: ProjectionState) => void): () => void {
-    this.projectionListeners.add(listener)
-    listener(this.projection)
-    return () => this.projectionListeners.delete(listener)
-  }
-
-  onProjectionDelta(listener: (projection: ProjectionDelta) => void): () => void {
-    this.projectionDeltaListeners.add(listener)
-    return () => this.projectionDeltaListeners.delete(listener)
-  }
-
-  onNativeEvent(listener: (event: unknown) => void): () => void {
+  onNativeEvent(listener: (event: PiNativeJsonValueV1) => void): () => void {
     this.nativeEventListeners.add(listener)
     return () => this.nativeEventListeners.delete(listener)
   }
@@ -873,38 +834,6 @@ export class RealPiSession {
   private emitState() {
     const s = this.getRuntimeUiState()
     for (const l of this.stateListeners) l(s)
-  }
-
-  private emitProjection(): void {
-    for (const listener of this.projectionListeners) listener(this.projection)
-  }
-
-  private emitProjectionDelta(): void {
-    const delta = { ...this.projection, timeline: this.projection.timeline.slice(-1) }
-    for (const listener of this.projectionDeltaListeners) listener(delta)
-  }
-
-  private emitProjectionReconciliation(previous: ProjectionState): void {
-    const nextById = new Map(this.projection.timeline.map(item => [item.id, item]))
-    const previousById = new Map(previous.timeline.map(item => [item.id, item]))
-    const removedItemIds = previous.timeline
-      .filter(item => !nextById.has(item.id))
-      .map(item => item.id)
-    const changed = this.projection.timeline.filter(item => {
-      const old = previousById.get(item.id)
-      return !old || JSON.stringify(old) !== JSON.stringify(item)
-    }).slice(-2)
-    if (removedItemIds.length === 0 && changed.length === 0) return
-    const delta: ProjectionDelta = {
-      timeline: changed,
-      isStreaming: this.projection.isStreaming,
-      removedItemIds,
-    }
-    for (const listener of this.projectionDeltaListeners) listener(delta)
-  }
-
-  getProjection(): ProjectionState {
-    return this.projection
   }
 
   getSessionId(): string {
@@ -978,22 +907,18 @@ export class RealPiSession {
     )
   }
 
+  getNativeTree(): Array<{ [key: string]: PiNativeJsonValueV1 }> {
+    const tree = toNativeJsonValue(this.runtime.session.sessionManager.getTree())
+    if (!Array.isArray(tree) || tree.some(node => !isNativeJsonObject(node))) {
+      throw Object.assign(new Error("Pi session tree nodes are not JSON objects"), { code: "NATIVE_SESSION_NOT_JSON" })
+    }
+    return tree.filter(isNativeJsonObject)
+  }
+
   getNativeImageAttachment(entryId: string, blockIndex: number) {
     const entry = this.runtime.session.sessionManager.getEntry(entryId)
     if (!entry) throw Object.assign(new Error("native entry not found"), { code: "NOT_FOUND" })
     return nativeImageAttachmentFromEntry(toNativeJsonObject(entry), blockIndex)
-  }
-
-  getTimelinePage(cursor: string | undefined, limit: number, maxBytes = 1_048_576) {
-    return nativeTimelinePage(projectNativeBranch(this.runtime.session.sessionManager.getBranch()).timeline, this.getNativeHead().epoch, {
-      cursor,
-      limit,
-      maxBytes,
-    })
-  }
-
-  getInitialTimelinePage() {
-    return this.getTimelinePage(undefined, 50)
   }
 
   private getNativeFingerprint(): string {
@@ -1106,8 +1031,7 @@ export class RealPiSession {
   async compact(customInstructions?: string): Promise<CompactionCommandResultV1> {
     try {
       const result = await this.runtime.session.compact(customInstructions)
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      this.emitProjection()
+      this.emitNativeEnvelopeIfChanged()
       this.emitState()
       return { status: "completed", result: mapCompactionResult(result) }
     } catch (error) {
@@ -1166,8 +1090,7 @@ export class RealPiSession {
       this.compactionState = { ...this.compactionState, lastAborted: Boolean(result.aborted) }
     }
     if (!result.cancelled) {
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      this.emitProjection()
+      this.emitNativeEnvelopeIfChanged()
       this.emitState()
     }
     return {
@@ -1194,7 +1117,7 @@ export class RealPiSession {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.fork(entryId, { position })
-    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    if (!result.cancelled) this.emitNativeEnvelopeIfChanged()
     this.emitState()
     return {
       sourceSessionId,
@@ -1215,7 +1138,7 @@ export class RealPiSession {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.newSession({ parentSession })
-    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    if (!result.cancelled) this.emitNativeEnvelopeIfChanged()
     this.emitState()
     return {
       sourceSessionId,
@@ -1230,7 +1153,7 @@ export class RealPiSession {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.switchSession(resolveUserPath(sessionPath), { cwdOverride })
-    if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+    if (!result.cancelled) this.emitNativeEnvelopeIfChanged()
     this.emitState()
     return {
       sourceSessionId,
@@ -1259,7 +1182,7 @@ export class RealPiSession {
     try {
       const result = await this.runtime.importFromJsonl(stagedPath, cwdOverride)
       keepStagedFile = !result.cancelled
-      if (!result.cancelled) this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
+      if (!result.cancelled) this.emitNativeEnvelopeIfChanged()
       this.emitState()
       return {
         sourceSessionId,
@@ -1370,8 +1293,7 @@ export class RealPiSession {
       triggerTurn: options.triggerTurn,
       deliverAs: options.deliverAs,
     })
-    this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-    this.emitProjection()
+    this.emitNativeEnvelopeIfChanged()
     this.emitState()
   }
 
@@ -1406,8 +1328,7 @@ export class RealPiSession {
     try {
       await this.runtime.session.sendUserMessage(content, deliverAs ? { deliverAs } : undefined)
     } finally {
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      this.emitProjection()
+      this.emitNativeEnvelopeIfChanged()
       this.emitState()
     }
   }
@@ -1519,8 +1440,7 @@ export class RealPiSession {
         operations: eventResult?.operations,
       })
     } finally {
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      this.emitProjection()
+      this.emitNativeEnvelopeIfChanged()
       this.emitState()
     }
   }
@@ -1543,8 +1463,6 @@ export class RealPiSession {
     await this.runtime.session.reload()
     this.nativeFingerprint = ""
     this.emitNativeEnvelopeIfChanged()
-    this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-    this.emitProjection()
     this.emitState()
     for (const listener of this.resourceListeners) listener()
   }
@@ -1580,8 +1498,7 @@ export class RealPiSession {
         source: "rpc",
       })
     } finally {
-      this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
-      this.emitProjection()
+      this.emitNativeEnvelopeIfChanged()
       this.emitState()
     }
   }
@@ -1615,50 +1532,12 @@ export class RealPiSession {
     this.extensionUi.cancelAll("runtime_disposed")
     this.detachSessionSubscriptions()
     this.stateListeners.clear()
-    this.projectionListeners.clear()
-    this.projectionDeltaListeners.clear()
     this.nativeEventListeners.clear()
     this.nativeHeadListeners.clear()
     this.resourceListeners.clear()
     await this.runtime.dispose()
   }
 
-  _setLastUser(id: string) {
-    this.lastUserId = id
-  }
-  _getLastUser() {
-    return this.lastUserId
-  }
-  _setAsst(id: string | null) {
-    this.currentAsstId = id
-  }
-  _getAsst() {
-    return this.currentAsstId
-  }
-}
-
-/**
- * Lifecycle metadata that is safe to broadcast for a native Pi event. Tool
- * arguments, tool results and message content are deliberately excluded: they
- * can carry file contents, environment values or credentials. Clients receive
- * that data through the projected timeline, which maps explicit DTOs.
- */
-const NATIVE_EVENT_METADATA_KEYS = new Set([
-  "turnIndex", "toolCallId", "toolName", "attempt", "maxAttempts", "delayMs",
-  "reason", "success", "aborted", "isError", "errorMessage", "finalError",
-  "entryId", "messageId", "role", "stopReason", "phase", "targetEntryId",
-  "durationMs", "index", "count",
-])
-
-function sanitizeNativeEvent(event: { type: string; [k: string]: unknown }): unknown {
-  const safe: Record<string, unknown> = { type: event.type }
-  for (const [key, value] of Object.entries(event)) {
-    if (key === "type" || !NATIVE_EVENT_METADATA_KEYS.has(key)) continue
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      safe[key] = value
-    }
-  }
-  return safe
 }
 
 function toJsonValue(value: unknown): unknown {
@@ -1771,246 +1650,4 @@ function isRuntimeStateEvent(type: string): boolean {
     type === "summarization_retry_scheduled" ||
     type === "summarization_retry_attempt_start" ||
     type === "summarization_retry_finished"
-}
-
-function projectNativeBranch(entries: SessionEntry[]): ProjectionState {
-  const projected: PiEntry[] = []
-  for (const entry of entries) {
-    if (entry.type !== "message") continue
-    const message = entry.message as unknown as Record<string, unknown>
-    const role = message.role
-    const messageTimestamp = typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp)
-    const timestamp = Number.isFinite(messageTimestamp) ? messageTimestamp : 0
-    if (role === "user") {
-      projected.push({
-        type: "message",
-        id: entry.id,
-        parentId: entry.parentId,
-        timestamp,
-        message: { role: "user", content: toContentBlocks(message.content) },
-      })
-    } else if (role === "assistant") {
-      projected.push({
-        type: "message",
-        id: entry.id,
-        parentId: entry.parentId,
-        timestamp,
-        message: {
-          role: "assistant",
-          content: toContentBlocks(message.content),
-          provider: typeof message.provider === "string" ? message.provider : undefined,
-          model: typeof message.model === "string" ? message.model : undefined,
-          stopReason: isStopReason(message.stopReason) ? message.stopReason : undefined,
-          errorMessage: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
-        },
-      })
-    } else if (role === "toolResult") {
-      projected.push({
-        type: "message",
-        id: entry.id,
-        parentId: entry.parentId,
-        timestamp,
-        message: {
-          role: "toolResult",
-          toolCallId: String(message.toolCallId ?? ""),
-          toolName: typeof message.toolName === "string" ? message.toolName : undefined,
-          isError: Boolean(message.isError),
-          result: toResultBlocks(message.content),
-          details: message.details,
-        },
-      })
-    }
-  }
-  return projectEntries(projected)
-}
-
-function isStopReason(value: unknown): value is "stop" | "length" | "toolUse" | "error" | "aborted" {
-  return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted"
-}
-
-function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: RealPiSession): WorkerEvent[] {
-  const out: WorkerEvent[] = []
-  const now = Date.now()
-
-  if (event.type === "message_start") {
-    const message = event.message as { role?: string; content?: unknown } | undefined
-    const role = message?.role
-    if (role === "user") {
-      const id = `u-${now}-${Math.random().toString(36).slice(2, 7)}`
-      ctx._setLastUser(id)
-      out.push({ type: "message_start", entryId: id, role: "user", timestamp: now })
-      out.push({
-        type: "message_end",
-        entryId: id,
-        role: "user",
-        parentId: null,
-        timestamp: now,
-        message: { role: "user", content: toContentBlocks(message?.content) },
-      })
-    } else if (role === "assistant") {
-      const id = `a-${now}-${Math.random().toString(36).slice(2, 7)}`
-      ctx._setAsst(id)
-      out.push({ type: "message_start", entryId: id, role: "assistant", timestamp: now })
-    }
-    return out
-  }
-
-  if (event.type === "message_update") {
-    const asstId = ctx._getAsst()
-    if (!asstId) return out
-    const message = event.message as { content?: unknown } | undefined
-    // prefer delta path: full content rebuild from message
-    const blocks = toContentBlocks(message?.content)
-    out.push({ type: "message_update", entryId: asstId, content: blocks })
-    return out
-  }
-
-  if (event.type === "message_end") {
-    const message = event.message as { role?: string; content?: unknown } | undefined
-    if (message?.role === "assistant") {
-      const asstId = ctx._getAsst() ?? `a-${now}`
-      const blocks = toContentBlocks(message.content)
-      out.push({
-        type: "message_end",
-        entryId: asstId,
-        role: "assistant",
-        parentId: ctx._getLastUser(),
-        timestamp: now,
-        message: { role: "assistant", content: blocks },
-      })
-      ctx._setAsst(null)
-    } else if (message?.role === "toolResult") {
-      const m = message as {
-        toolCallId?: string
-        isError?: boolean
-        content?: unknown
-        result?: unknown
-      }
-      const toolCallId = m.toolCallId ?? ""
-      const result = toResultBlocks(m.content ?? m.result)
-      out.push({
-        type: "tool_execution_end",
-        toolCallId,
-        isError: m.isError,
-        result,
-        details: (message as Record<string, unknown>).details,
-      })
-      out.push({
-        type: "message_end",
-        entryId: `tr-${now}`,
-        role: "toolResult",
-        parentId: ctx._getAsst(),
-        timestamp: now,
-        message: {
-          role: "toolResult",
-          toolCallId,
-          isError: m.isError,
-          result,
-          details: (message as Record<string, unknown>).details,
-        },
-      })
-    }
-    return out
-  }
-
-  if (event.type === "tool_execution_start") {
-    out.push({
-      type: "tool_execution_start",
-      toolCallId: String(event.toolCallId ?? ""),
-      toolName: String(event.toolName ?? "tool"),
-      args: event.args,
-    })
-    return out
-  }
-
-  if (event.type === "tool_execution_end") {
-    out.push({
-      type: "tool_execution_end",
-      toolCallId: String(event.toolCallId ?? ""),
-      isError: Boolean(event.isError),
-      result: toResultBlocks((event.result as { content?: unknown } | undefined)?.content ?? event.result),
-      details: (event.result as { details?: unknown } | undefined)?.details,
-    })
-    return out
-  }
-
-  if (event.type === "tool_execution_update") {
-    const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
-    out.push({
-      type: "tool_execution_update",
-      toolCallId: String(event.toolCallId ?? ""),
-      result: toResultBlocks(partial?.content),
-      details: partial?.details,
-    })
-    return out
-  }
-
-  if (event.type === "agent_end" || event.type === "agent_settled") {
-    out.push({ type: "agent_end" })
-  }
-
-  return out
-}
-
-function extractText(content: unknown): string {
-  if (content == null) return ""
-  if (typeof content === "string") return content
-  if (Array.isArray(content)) {
-    return content
-      .map(b => {
-        if (!b || typeof b !== "object") return ""
-        const o = b as Record<string, unknown>
-        if (o.type === "text" && typeof o.text === "string") return o.text
-        if (typeof o.text === "string") return o.text
-        return ""
-      })
-      .join("")
-  }
-  return String(content)
-}
-
-function toContentBlocks(content: unknown): PiContentBlock[] {
-  if (content == null) return []
-  if (typeof content === "string") return [{ type: "text", text: content }]
-  if (!Array.isArray(content)) return [{ type: "text", text: String(content) }]
-  const blocks: PiContentBlock[] = []
-  for (const b of content) {
-    if (!b || typeof b !== "object") continue
-    const o = b as Record<string, unknown>
-    if (o.type === "text" && typeof o.text === "string") {
-      blocks.push({ type: "text", text: o.text })
-    } else if (o.type === "image" && typeof o.data === "string" && typeof o.mimeType === "string") {
-      blocks.push({ type: "image", data: o.data, mimeType: o.mimeType })
-    } else if (o.type === "thinking" || o.type === "reasoning") {
-      const t = typeof o.thinking === "string" ? o.thinking : typeof o.text === "string" ? o.text : ""
-      blocks.push({ type: "thinking", thinking: t })
-    } else if (o.type === "toolCall" || o.type === "tool_use") {
-      blocks.push({
-        type: "toolCall",
-        id: String(o.id ?? o.toolCallId ?? `tc-${Date.now()}`),
-        name: String(o.name ?? o.toolName ?? "tool"),
-        arguments: o.arguments ?? o.input ?? {},
-      })
-    }
-  }
-  return blocks
-}
-
-function toResultBlocks(content: unknown): Array<
-  { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-> {
-  if (content == null) return []
-  if (typeof content === "string") return [{ type: "text", text: content }]
-  if (!Array.isArray(content)) return [{ type: "text", text: String(content) }]
-  const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = []
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue
-    const value = block as Record<string, unknown>
-    if (value.type === "text" && typeof value.text === "string") {
-      blocks.push({ type: "text", text: value.text })
-    } else if (value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string") {
-      blocks.push({ type: "image", data: value.data, mimeType: value.mimeType })
-    }
-  }
-  return blocks
 }

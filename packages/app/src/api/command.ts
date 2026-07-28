@@ -4,7 +4,7 @@
 
 import i18n from '../i18n'
 import { isPiServerUp, listSessionCommands } from '../pi/sessionApi'
-import { sessionProjectionStore } from '../pi/sessionProjectionStore'
+import { nativeSessionStore } from '../pi/nativeSessionStore'
 
 export interface Command {
   name: string
@@ -28,14 +28,14 @@ const commandCache = new Map<string, { data: Command[]; expiresAt: number }>()
 const commandInflight = new Map<string, Promise<Command[]>>()
 
 function getCommandCacheKey(directory?: string): string {
-  return `${sessionProjectionStore.getActiveSessionId() ?? 'none'}::${i18n.resolvedLanguage || i18n.language}::${directory ?? ''}`
+  return `${nativeSessionStore.getActiveSessionId() ?? 'none'}::${i18n.resolvedLanguage || i18n.language}::${directory ?? ''}`
 }
 
 async function fetchCommands(_directory?: string): Promise<Command[]> {
   // Pi session commands first
   try {
     if (await isPiServerUp()) {
-      const sid = sessionProjectionStore.getActiveSessionId()
+      const sid = nativeSessionStore.getActiveSessionId()
       if (sid) {
         const { commands } = await listSessionCommands(sid)
         const fromPi: Command[] = commands.map(c => ({

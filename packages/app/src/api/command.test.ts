@@ -9,8 +9,8 @@ vi.mock('../pi/sessionApi', () => ({
   listSessionCommands: (...args: unknown[]) => listMock(...args),
 }))
 
-vi.mock('../pi/sessionProjectionStore', () => ({
-  sessionProjectionStore: { getActiveSessionId: () => 'pi-session' },
+vi.mock('../pi/nativeSessionStore', () => ({
+  nativeSessionStore: { getActiveSessionId: () => 'pi-session' },
 }))
 
 describe('getCommands', () => {

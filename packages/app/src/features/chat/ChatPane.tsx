@@ -29,7 +29,7 @@ import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { autoApproveStore } from '../../store/autoApproveStore'
 import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
-import { sessionProjectionStore } from '../../pi/sessionProjectionStore'
+import { nativeSessionStore } from '../../pi/nativeSessionStore'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
 import { useTheme } from '../../hooks/useTheme'
 import type { Attachment } from '../../api'
@@ -167,8 +167,8 @@ export const ChatPane = memo(function ChatPane({
   const hiddenModelKeys = useHiddenModelKeys()
   // Pi thinking levels surface as "variants" when model has none
   const piRuntime = useSyncExternalStore(
-    cb => sessionProjectionStore.subscribe(cb),
-    () => sessionProjectionStore.getSnapshot(sessionId)?.runtime ?? null,
+    cb => nativeSessionStore.subscribe(cb),
+    () => nativeSessionStore.getSnapshot(sessionId)?.runtime ?? null,
   )
   const visibleModels = useMemo(() => {
     const base = models.filter(model => !hiddenModelKeys.includes(getModelKey(model)))
