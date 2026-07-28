@@ -27,7 +27,7 @@ const {
 }))
 
 vi.mock('../pi/sessionApi', () => ({
-  fetchPiNativeEntriesPage: (...args: unknown[]) => fetchNativePageMock(...args),
+  fetchPiNativeBranchPage: (...args: unknown[]) => fetchNativePageMock(...args),
 }))
 
 vi.mock('../pi/nativeSessionStore', () => ({

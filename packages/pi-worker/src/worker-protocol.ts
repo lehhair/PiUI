@@ -50,7 +50,7 @@ export interface PiBashResult {
   fullOutputPath?: string
 }
 
-export const PI_WORKER_PROTOCOL_VERSION = 12 as const
+export const PI_WORKER_PROTOCOL_VERSION = 13 as const
 export const PI_WORKER_HEARTBEAT_INTERVAL_MS = 5_000
 
 export type PiWorkerCapability =
@@ -134,6 +134,7 @@ export type WorkerCommand =
   | { type: "inspectSystemPrompt" }
   | { type: "inspectRuntime" }
   | { type: "getNativeEntriesPage"; cursor?: string; limit: number; maxBytes: number }
+  | { type: "getNativeBranchPage"; cursor?: string; limit: number; maxBytes: number }
   | { type: "getNativeTree" }
   | { type: "getNativeImageAttachment"; entryId: string; blockIndex: number }
   | { type: "inspectResources" }
@@ -227,6 +228,7 @@ export type WorkerResult =
   | { type: "boolean"; value: boolean }
   | { type: "runtimeInspection"; inspection: PiRuntimeInspectionV1 }
   | { type: "nativeEntriesPage"; page: PiNativeEntriesPageV1 }
+  | { type: "nativeBranchPage"; page: PiNativeEntriesPageV1 }
   | { type: "nativeTree"; tree: Array<{ [key: string]: PiNativeJsonValueV1 }> }
   | { type: "nativeImageAttachment"; mimeType: string; data: string; etag: string }
   | { type: "resources"; resources: PiResourceSnapshotV1 }

@@ -12,15 +12,15 @@ import { PiEventSocket } from "./eventSocket"
 import { clearPiSessionIndex } from "./piSessionIndex"
 import { nativeSessionStore } from "./nativeSessionStore"
 
-const { fetchSnapshot, fetchPiNativeEntriesPage, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
+const { fetchSnapshot, fetchPiNativeBranchPage, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
   fetchSnapshot: vi.fn<(id: string) => Promise<SessionSnapshotV1>>(),
-  fetchPiNativeEntriesPage: vi.fn<(id: string) => Promise<PiNativeEntriesPageV1>>(),
+  fetchPiNativeBranchPage: vi.fn<(id: string) => Promise<PiNativeEntriesPageV1>>(),
   fetchExtensionUiSnapshot: vi.fn<(id: string) => Promise<ExtensionUiSnapshotV1>>(),
 }))
 
 vi.mock("./sessionApi", async importOriginal => {
   const original = await importOriginal<typeof import("./sessionApi")>()
-  return { ...original, fetchSnapshot, fetchPiNativeEntriesPage, fetchExtensionUiSnapshot }
+  return { ...original, fetchSnapshot, fetchPiNativeBranchPage, fetchExtensionUiSnapshot }
 })
 
 class FakeWebSocket {
@@ -103,7 +103,7 @@ describe("PiEventSocket native session events", () => {
     clearPiSessionIndex()
     FakeWebSocket.instances = []
     fetchSnapshot.mockReset()
-    fetchPiNativeEntriesPage.mockReset()
+    fetchPiNativeBranchPage.mockReset()
     fetchExtensionUiSnapshot.mockReset()
     fetchExtensionUiSnapshot.mockImplementation(async sessionId => ({
       sessionId,
@@ -118,7 +118,7 @@ describe("PiEventSocket native session events", () => {
     applySnapshotToUi(initial, { nativePage: page(initial.native) })
     const resynced = snapshot(2, "a1")
     fetchSnapshot.mockResolvedValue(resynced)
-    fetchPiNativeEntriesPage.mockResolvedValue(page(resynced.native, "resynced"))
+    fetchPiNativeBranchPage.mockResolvedValue(page(resynced.native, "resynced"))
 
     const socket = new PiEventSocket()
     socket.connect()
@@ -134,7 +134,7 @@ describe("PiEventSocket native session events", () => {
 
     await vi.waitFor(() => expect(messageStore.getVisibleMessages("active").at(-1)?.parts[0]).toMatchObject({ text: "resynced" }))
     expect(fetchSnapshot).toHaveBeenCalledWith("active")
-    expect(fetchPiNativeEntriesPage).toHaveBeenCalledWith("active")
+    expect(fetchPiNativeBranchPage).toHaveBeenCalledWith("active")
     socket.close()
   })
 
@@ -142,7 +142,7 @@ describe("PiEventSocket native session events", () => {
     const initial = snapshot()
     applySnapshotToUi(initial, { nativePage: page(initial.native) })
     fetchSnapshot.mockResolvedValue(initial)
-    fetchPiNativeEntriesPage.mockResolvedValue(page(initial.native))
+    fetchPiNativeBranchPage.mockResolvedValue(page(initial.native))
     const socket = new PiEventSocket()
     socket.connect()
     const ws = FakeWebSocket.instances[0]!
@@ -176,7 +176,7 @@ describe("PiEventSocket native session events", () => {
     expect(messageStore.getIsStreaming("active")).toBe(true)
 
     const persisted = snapshot(2, "a1", 2)
-    fetchPiNativeEntriesPage.mockResolvedValue(page(persisted.native, "complete"))
+    fetchPiNativeBranchPage.mockResolvedValue(page(persisted.native, "complete"))
     send(ws, {
       channel: "event",
       event: {

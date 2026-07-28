@@ -325,6 +325,8 @@ async function execute(command: WorkerCommand): Promise<WorkerResult> {
       return { type: "runtimeInspection", inspection: await requireRuntime().inspectRuntime() }
     case "getNativeEntriesPage":
       return { type: "nativeEntriesPage", page: await requireRuntime().getNativeEntriesPage(command.cursor, command.limit, command.maxBytes) }
+    case "getNativeBranchPage":
+      return { type: "nativeBranchPage", page: await requireRuntime().getNativeBranchPage(command.cursor, command.limit, command.maxBytes) }
     case "getNativeTree":
       return { type: "nativeTree", tree: await requireRuntime().getNativeTree() }
     case "getNativeImageAttachment": {

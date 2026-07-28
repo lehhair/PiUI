@@ -14,7 +14,7 @@ import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import type { MessageError } from '../types/message'
 import { nativeSessionStore } from '../pi/nativeSessionStore'
-import { fetchPiNativeEntriesPage } from '../pi/sessionApi'
+import { fetchPiNativeBranchPage } from '../pi/sessionApi'
 import { appendPiNativeEntriesPageToUi, loadPiSessionToUi } from '../pi/applySnapshot'
 
 function toLoadMessageError(error: unknown): MessageError {
@@ -101,7 +101,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
     const cursor = messageStore.getHistoryCursor(sessionId)
     if (!cursor) return
     try {
-      const page = await fetchPiNativeEntriesPage(sessionId, cursor)
+      const page = await fetchPiNativeBranchPage(sessionId, cursor)
       appendPiNativeEntriesPageToUi(sessionId, page)
     } catch (error) {
       sessionErrorHandler('load more history', error)

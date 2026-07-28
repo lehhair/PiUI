@@ -242,6 +242,10 @@ export default function (pi) {
       const assistantEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "assistant")
       assert.ok(userEntry)
       assert.ok(assistantEntry)
+      assert.deepEqual(
+        session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024).items,
+        nativeActiveBranch(session.getNativeEnvelope()),
+      )
       const userMessage = userEntry.message
       assert.ok(userMessage && typeof userMessage === "object" && !Array.isArray(userMessage))
       assert.deepEqual(userMessage.content, [
@@ -591,6 +595,23 @@ function findTreeNode(
 function nativeRole(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number]): unknown {
   const message = entry.message
   return message && typeof message === "object" && !Array.isArray(message) ? message.role : undefined
+}
+
+function nativeActiveBranch(envelope: ReturnType<RealPiSession["getNativeEnvelope"]>) {
+  const byId = new Map(envelope.entries.flatMap(entry =>
+    typeof entry.id === "string" ? [[entry.id, entry] as const] : []
+  ))
+  const branch: typeof envelope.entries = []
+  const visited = new Set<string>()
+  let id = envelope.leafId
+  while (id && !visited.has(id)) {
+    visited.add(id)
+    const entry = byId.get(id)
+    if (!entry) break
+    branch.push(entry)
+    id = typeof entry.parentId === "string" ? entry.parentId : null
+  }
+  return branch.reverse()
 }
 
 function nativeMessage(

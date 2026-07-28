@@ -907,6 +907,16 @@ export class RealPiSession {
     )
   }
 
+  getNativeBranchPage(cursor: string | undefined, limit: number, maxBytes: number) {
+    const manager = this.runtime.session.sessionManager
+    return nativeEntriesPageFromEntries(
+      this.getNativeHead(),
+      manager.getBranch(),
+      { cursor, limit, maxBytes },
+      toNativeJsonObject,
+    )
+  }
+
   getNativeTree(): Array<{ [key: string]: PiNativeJsonValueV1 }> {
     const tree = toNativeJsonValue(this.runtime.session.sessionManager.getTree())
     if (!Array.isArray(tree) || tree.some(node => !isNativeJsonObject(node))) {

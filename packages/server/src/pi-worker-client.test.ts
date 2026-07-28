@@ -19,7 +19,7 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(fixture)
     try {
       const hello = await catalog.getHandshake()
-      assert.equal(hello.workerProtocolVersion, 12)
+      assert.equal(hello.workerProtocolVersion, 13)
       assert.equal(hello.piSdkVersion, "0.81.1")
       assert.equal(hello.generation, "fixture-generation")
       const first = await catalog.listAll()
@@ -73,6 +73,8 @@ describe("PiWorkerSession IPC", () => {
       assert.equal(nativeHeads.length, 1)
       let nativePage = await runtime.getNativeEntriesPage(undefined, 50, 1_000_000)
       assert.equal(nativePage.items[0]?.type, "message")
+      const branchPage = await runtime.getNativeBranchPage(undefined, 50, 1_000_000)
+      assert.deepEqual(branchPage.items, nativePage.items.slice(0, 1))
       assert.deepEqual(nativePage.items[0]?.futureField, {
         unknown: [1, "two", false, null],
       })

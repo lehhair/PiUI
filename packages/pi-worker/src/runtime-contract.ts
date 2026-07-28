@@ -43,6 +43,7 @@ export interface PiSessionRuntime {
   getLeafId(): string | null
   getNativeHead(): PiNativeSessionHeadV1
   getNativeTree(): Array<{ [key: string]: PiNativeJsonValueV1 }> | Promise<Array<{ [key: string]: PiNativeJsonValueV1 }>>
+  getNativeBranchPage(cursor: string | undefined, limit: number, maxBytes: number): PiNativeEntriesPageV1 | Promise<PiNativeEntriesPageV1>
   getNativeEntriesPage(cursor: string | undefined, limit: number, maxBytes: number): PiNativeEntriesPageV1 | Promise<PiNativeEntriesPageV1>
   getNativeImageAttachment(entryId: string, blockIndex: number): { mimeType: string; data: string; etag: string } | Promise<{ mimeType: string; data: string; etag: string }>
   getModel(): { provider: string; id: string; displayName: string } | undefined

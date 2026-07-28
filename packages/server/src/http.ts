@@ -2254,6 +2254,22 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
         }
       }
 
+      const sessionNativeBranch = p.match(/^\/api\/v1\/sessions\/([^/]+)\/native\/branch$/)
+      if (method === "GET" && sessionNativeBranch) {
+        try {
+          const limit = parsePageLimit(url.searchParams.get("limit"), 50, 100)
+          const maxBytes = parsePageLimit(url.searchParams.get("maxBytes"), 33_554_432, 33_554_432)
+          return sendJson(res, 200, await sessions.getNativeBranchPage(
+            decodeURIComponent(sessionNativeBranch[1]),
+            url.searchParams.get("cursor") ?? undefined,
+            limit,
+            maxBytes,
+          ))
+        } catch (error) {
+          return handleSessionCmdError(res, error)
+        }
+      }
+
       const sessionAttachment = p.match(
         /^\/api\/v1\/sessions\/([^/]+)\/native\/entries\/([^/]+)\/attachments\/(\d+)$/,
       )

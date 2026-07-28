@@ -367,6 +367,9 @@ describe("session mock snapshot (no LLM)", () => {
       const sourceId = created.data.snapshot.session.id as string
       const nativePage = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/entries`)
       assert.equal(nativePage.data.items[0]?.type, "message")
+      const nativeBranch = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/branch`)
+      assert.equal(nativeBranch.status, 200)
+      assert.deepEqual(nativeBranch.data.items, nativePage.data.items.slice(0, 1))
       const nativeTree = await json(port, "GET", `/api/v1/sessions/${sourceId}/native/tree`)
       assert.equal(nativeTree.status, 200)
       assert.deepEqual(nativeTree.data[0].entry, nativePage.data.items[0])

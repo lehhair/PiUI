@@ -26,7 +26,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 12,
+  workerProtocolVersion: 13,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -458,6 +458,29 @@ process.on("message", async request => {
       page: {
         head: { ...current.native, entryCount: fullNative.entries.length },
         items: fullNative.entries.slice(start, before),
+        beforeCursor: start > 0 ? Buffer.from(String(start)).toString("base64url") : undefined,
+        hasMore: start > 0,
+      },
+    }
+  } else if (command.type === "getNativeBranchPage") {
+    const current = session ?? snapshot()
+    const byId = new Map(fullNative.entries.map(entry => [entry.id, entry]))
+    const branch = []
+    let id = fullNative.leafId
+    while (id) {
+      const entry = byId.get(id)
+      if (!entry) break
+      branch.push(entry)
+      id = entry.parentId
+    }
+    branch.reverse()
+    const before = command.cursor ? Number(Buffer.from(command.cursor, "base64url").toString("utf8")) : branch.length
+    const start = Math.max(0, before - command.limit)
+    result = {
+      type: "nativeBranchPage",
+      page: {
+        head: { ...current.native, entryCount: fullNative.entries.length },
+        items: branch.slice(start, before),
         beforeCursor: start > 0 ? Buffer.from(String(start)).toString("base64url") : undefined,
         hasMore: start > 0,
       },
