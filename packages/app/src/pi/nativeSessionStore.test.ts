@@ -111,6 +111,52 @@ describe("nativeSessionStore", () => {
     expect(nativeSessionStore.getStreamingEntryIds("s1").size).toBe(0)
   })
 
+  it("does not erase an active transient message when a branch refresh races with streaming", () => {
+    const running = snapshot("s1", 1, "u-root")
+    running.runtime.isStreaming = true
+    nativeSessionStore.replace(running)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      hasMore: false,
+    })
+    nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_start",
+      message: { role: "assistant", content: [{ type: "text", text: "par" }] },
+    })
+
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      hasMore: false,
+    })
+    expect(nativeSessionStore.getStreamingEntryIds("s1").size).toBe(1)
+    expect(nativeSessionStore.applyNativeEvent("s1", {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
+    })).toBe(true)
+    expect(nativeSessionStore.getActiveBranch("s1").at(-1)?.message).toMatchObject({
+      content: [{ type: "text", text: "partial" }],
+    })
+  })
+
+  it("restores the current Pi streaming message from a native branch page", () => {
+    const running = snapshot("s1", 1, "u-root")
+    running.runtime.isStreaming = true
+    nativeSessionStore.replace(running)
+    nativeSessionStore.replaceFirstPage("s1", {
+      head: running.native,
+      items: [{ type: "message", id: "u-root", parentId: null, message: { role: "user", content: "root" } }],
+      liveMessage: { role: "assistant", content: [{ type: "text", text: "already streaming" }] },
+      hasMore: false,
+    })
+
+    const live = nativeSessionStore.getActiveBranch("s1").at(-1)
+    expect(live?.parentId).toBe("u-root")
+    expect(live?.message).toMatchObject({ role: "assistant" })
+    expect(nativeSessionStore.getStreamingEntryIds("s1").has(String(live?.id))).toBe(true)
+  })
+
   it("retains loaded history when a later first page contains only the new turn", () => {
     const initial = snapshot("s1", 1, "a-old")
     nativeSessionStore.replace(initial)

@@ -408,6 +408,11 @@ export default function (pi) {
 
       const prompt = session.prompt("initial")
       await partialStarted
+      const livePage = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      assert.ok(livePage.liveMessage && typeof livePage.liveMessage === "object" && !Array.isArray(livePage.liveMessage))
+      assert.equal(livePage.liveMessage.role, "assistant")
+      assert.ok(nativeContentText(livePage.liveMessage.content).length > 0)
+      assert.ok(nativeContentText(livePage.liveMessage.content).length < slowText.length)
       await session.steer("steer now")
       await session.followUp("follow up later")
       assert.deepEqual(session.getRuntimeUiState().queue.steering, ["steer now"])

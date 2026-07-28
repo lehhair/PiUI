@@ -909,10 +909,11 @@ export class RealPiSession {
 
   getNativeBranchPage(cursor: string | undefined, limit: number, maxBytes: number) {
     const manager = this.runtime.session.sessionManager
+    const liveMessage = toNativeJsonValue(this.runtime.session.agent.state.streamingMessage)
     return nativeEntriesPageFromEntries(
       this.getNativeHead(),
       manager.getBranch(),
-      { cursor, limit, maxBytes },
+      { cursor, limit, maxBytes, liveMessage },
       toNativeJsonObject,
     )
   }

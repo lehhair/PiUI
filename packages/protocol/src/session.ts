@@ -155,6 +155,8 @@ export interface PiNativeSessionHeadV1 {
 export interface PiNativeEntriesPageV1 {
   head: PiNativeSessionHeadV1
   items: Array<{ [key: string]: PiNativeJsonValueV1 }>
+  /** Current unpersisted Agent message; not part of SessionManager.getBranch(). */
+  liveMessage?: PiNativeJsonValueV1
   beforeCursor?: string
   hasMore: boolean
 }

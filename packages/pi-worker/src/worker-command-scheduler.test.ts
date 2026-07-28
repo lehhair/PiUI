@@ -56,6 +56,26 @@ describe("createWorkerCommandScheduler", () => {
     await prompt
   })
 
+  it("reads native session state while a prompt is streaming", async () => {
+    const gate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async ({ command }) => {
+      started.push(command.type)
+      if (command.type === "prompt") await gate.promise
+      return { type: "ok" }
+    })
+
+    const prompt = schedule(request({ type: "prompt", text: "hello" }))
+    await Promise.resolve()
+    await schedule(request({ type: "getNativeBranchPage", limit: 50, maxBytes: 1_000_000 }))
+    await schedule(request({ type: "getNativeEntriesPage", limit: 50, maxBytes: 1_000_000 }))
+    await schedule(request({ type: "getNativeTree" }))
+    assert.deepEqual(started, ["prompt", "getNativeBranchPage", "getNativeEntriesPage", "getNativeTree"])
+
+    gate.resolve()
+    await prompt
+  })
+
   it("runs extension slash commands immediately during a prompt", async () => {
     const gate = deferred()
     const started: string[] = []

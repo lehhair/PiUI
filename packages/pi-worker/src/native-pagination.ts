@@ -43,7 +43,7 @@ export function nativeEntriesPage(
 export function nativeEntriesPageFromEntries<T>(
   head: PiNativeSessionHeadV1,
   entries: readonly T[],
-  options: { cursor?: string; limit: number; maxBytes: number },
+  options: { cursor?: string; limit: number; maxBytes: number; liveMessage?: PiNativeJsonValueV1 },
   serialize: (entry: T) => { [key: string]: PiNativeJsonValueV1 },
 ): PiNativeEntriesPageV1 {
   const decoded = options.cursor ? decodeCursor(options.cursor) : undefined
@@ -52,6 +52,10 @@ export function nativeEntriesPageFromEntries<T>(
     ? entries.findIndex(entry => entryId(entry) === decoded.beforeId)
     : entries.length
   if (before < 0) throw staleCursor("native cursor anchor is no longer in the session")
+  const emptyPage = { head, items: [], liveMessage: options.liveMessage, hasMore: before > 0 }
+  if (Buffer.byteLength(JSON.stringify(emptyPage), "utf8") > options.maxBytes) {
+    throw Object.assign(new Error("native page metadata exceeds the byte limit"), { code: "FILE_TOO_LARGE" })
+  }
   const selected: Array<{ [key: string]: PiNativeJsonValueV1 }> = []
   let index = before - 1
   while (index >= 0 && selected.length < options.limit) {
@@ -64,7 +68,13 @@ export function nativeEntriesPageFromEntries<T>(
     const candidateCursor = candidateStart > 0 && candidate[0]
       ? encodeCursor({ v: 1, epoch: head.epoch, beforeId: String(candidate[0].id) })
       : undefined
-    const candidatePage = { head, items: candidate, beforeCursor: candidateCursor, hasMore: candidateStart > 0 }
+    const candidatePage = {
+      head,
+      items: candidate,
+      liveMessage: options.liveMessage,
+      beforeCursor: candidateCursor,
+      hasMore: candidateStart > 0,
+    }
     const candidateBytes = Buffer.byteLength(JSON.stringify(candidatePage), "utf8")
     if (candidateBytes > options.maxBytes) {
       if (!selected.length) throw Object.assign(new Error("native entry exceeds the page byte limit"), { code: "FILE_TOO_LARGE" })
@@ -77,6 +87,7 @@ export function nativeEntriesPageFromEntries<T>(
   return {
     head,
     items: selected,
+    liveMessage: options.liveMessage,
     beforeCursor: start > 0 && selected[0]
       ? encodeCursor({ v: 1, epoch: head.epoch, beforeId: String(selected[0].id) })
       : undefined,
