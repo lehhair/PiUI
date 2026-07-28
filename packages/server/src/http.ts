@@ -2337,6 +2337,10 @@ export function createAppServer(options: CreateAppServerOptions = {}) {
 
 function handleSessionCmdError(res: ServerResponse, e: unknown) {
   const code = e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : ""
+  const message = e instanceof Error ? e.message : String(e)
+  if (code.startsWith("WORKER_") || /Pi worker (?:exited|closed)|worker handshake timeout/i.test(message)) {
+    return sendProblem(res, 503, "SESSION_RUNTIME_CRASHED", message)
+  }
   if (code === "SESSION_NOT_FOUND") {
     return sendProblem(res, 404, "SESSION_NOT_FOUND", "session not found")
   }
@@ -2344,7 +2348,7 @@ function handleSessionCmdError(res: ServerResponse, e: unknown) {
     return sendProblem(res, 404, "WORKSPACE_NOT_FOUND", "workspace not found")
   }
   if (code === "SESSION_BUSY") {
-    return sendProblem(res, 409, "SESSION_BUSY", e instanceof Error ? e.message : String(e))
+    return sendProblem(res, 409, "SESSION_BUSY", message)
   }
   if (code === "SESSION_RUNTIME_CRASHED" || code === "RUNTIME_REPLACED" || code === "WORKER_RESULT_UNKNOWN") {
     return sendProblem(res, 503, code, e instanceof Error ? e.message : String(e))

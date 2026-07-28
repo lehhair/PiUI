@@ -109,4 +109,17 @@ describe('useSessionManager', () => {
     expect(fetchNativePageMock).toHaveBeenCalledWith('session-1', 'cursor-1')
     expect(appendNativePageMock).toHaveBeenCalledWith('session-1', page)
   })
+
+  it('does not auto-retry a stable cached load error on remount', () => {
+    messageStoreMock.getSessionState.mockReturnValue({
+      loadState: 'error',
+      isStale: false,
+      messages: [],
+    })
+
+    renderHook(() => useSessionManager({ sessionId: 'broken-session', directory: '/workspace' }))
+
+    expect(loadPiSessionMock).not.toHaveBeenCalled()
+    expect(messageStoreMock.setLoadState).not.toHaveBeenCalled()
+  })
 })

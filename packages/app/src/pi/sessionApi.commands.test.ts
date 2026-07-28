@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const fetchMock = vi.fn()
 
-function jsonResponse(value: unknown) {
+function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { 'content-type': 'application/json' },
   })
 }
@@ -61,5 +61,20 @@ describe('Pi session command transport', () => {
     })).resolves.toEqual({ snapshot: snapshots[0] })
     await expect(appendPiCustomEntry('session', 'metadata', { ok: true })).resolves.toEqual({ snapshot: snapshots[1] })
     await expect(waitForPiSessionIdle('session')).resolves.toEqual({ snapshot: snapshots[2] })
+  })
+
+  it('preserves the structured snapshot error returned by the server', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      code: 'SESSION_RUNTIME_CRASHED',
+      message: 'Pi worker exited unexpectedly',
+    }, 503))
+    const { fetchSnapshot } = await import('./sessionApi')
+
+    await expect(fetchSnapshot('session')).rejects.toMatchObject({
+      name: 'PiApiError',
+      status: 503,
+      code: 'SESSION_RUNTIME_CRASHED',
+      message: 'Pi worker exited unexpectedly',
+    })
   })
 })

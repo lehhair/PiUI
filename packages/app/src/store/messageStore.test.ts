@@ -344,6 +344,21 @@ describe('messageStore', () => {
     unsubscribeAll()
   })
 
+  it('stabilizes a load error instead of leaving the session in a retry loop', () => {
+    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'hello')])
+    messageStore.markAllSessionsStale()
+
+    messageStore.setLoadError('session-1', {
+      name: 'APIError',
+      data: { message: 'worker crashed', isRetryable: true },
+    })
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      loadState: 'error',
+      isStale: false,
+    })
+  })
+
   it('prepends older pages without duplicates and advances the history cursor', () => {
     messageStore.setUiMessages('session-1', [
       createMessageWithParts('message-3', 'three'),

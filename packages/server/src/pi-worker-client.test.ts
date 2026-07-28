@@ -140,7 +140,9 @@ describe("PiWorkerSession IPC", () => {
     const catalog = PiWorkerSession.createCatalog(noHandshakeFixture, { handshakeTimeoutMs: 20 })
     try {
       await new Promise<void>(resolve => setTimeout(resolve, 40))
-      await assert.rejects(catalog.getHandshake(), /handshake timeout/)
+      await assert.rejects(catalog.getHandshake(), error =>
+        (error as { code?: string }).code === "SESSION_RUNTIME_CRASHED" && /handshake timeout/.test(String(error))
+      )
     } finally {
       await catalog.dispose()
     }
@@ -181,7 +183,9 @@ describe("PiWorkerSession IPC", () => {
 
   it("rejects pending commands when the worker crashes", async () => {
     const runtime = await PiWorkerSession.open("/fixture", "/fixture/session.jsonl", fixture)
-    await assert.rejects(runtime.prompt("crash"), /exited unexpectedly/)
+    await assert.rejects(runtime.prompt("crash"), error =>
+      (error as { code?: string }).code === "SESSION_RUNTIME_CRASHED" && /exited unexpectedly/.test(String(error))
+    )
     await runtime.dispose()
   })
 

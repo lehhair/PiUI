@@ -436,6 +436,7 @@ class MessageStore {
     const state = this.ensureSession(sessionId)
     state.loadState = 'error'
     state.loadError = error
+    state.isStale = false
     this.notify([sessionId])
   }
 
