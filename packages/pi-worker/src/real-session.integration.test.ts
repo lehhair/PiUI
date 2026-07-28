@@ -206,7 +206,7 @@ export default function (pi) {
       const unsubscribeNative = session.onNativeEvent(
         event => nativeEvents.push(event as Record<string, unknown>),
       )
-      await session.prompt("ping")
+      await session.prompt("ping", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
       unsubscribeNative()
 
       // Native events carry lifecycle metadata only: message content, tool
@@ -233,21 +233,30 @@ export default function (pi) {
       const assistant = session.getProjection().timeline.find(item => item.type === "assistant")
       assert.ok(assistant?.content.some(block => block.type === "text" && block.text === "offline answer"))
 
-      const nativeEntries = session.getEntries()
-      const userEntry = nativeEntries.find(entry => entry.type === "message" && entry.role === "user")
-      const assistantEntry = nativeEntries.find(entry => entry.type === "message" && entry.role === "assistant")
+      const nativeEntries = session.getNativeEnvelope().entries
+      const userEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "user")
+      const assistantEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "assistant")
       assert.ok(userEntry)
       assert.ok(assistantEntry)
-      session.setLabel(assistantEntry.id, "offline checkpoint")
+      const userMessage = userEntry.message
+      assert.ok(userMessage && typeof userMessage === "object" && !Array.isArray(userMessage))
+      assert.deepEqual(userMessage.content, [
+        { type: "text", text: "ping" },
+        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      ])
+      const projectedUser = session.getProjection().timeline.find(item => item.type === "user")
+      assert.ok(projectedUser?.type === "user")
+      assert.deepEqual(projectedUser.attachments, [{ type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 5 }])
+      session.setLabel(String(assistantEntry.id), "offline checkpoint")
       session.setSessionName("Offline R3")
       assert.equal(session.getSessionName(), "Offline R3")
-      assert.equal(findTreeLabel(session.getTree(), assistantEntry.id), "offline checkpoint")
+      assert.equal(findTreeLabel(session.getNativeEnvelope().tree, String(assistantEntry.id)), "offline checkpoint")
       assert.throws(
         () => session!.setActiveTools(["piui-tool-that-does-not-exist"]),
         error => (error as { code?: string }).code === "INVALID_REQUEST",
       )
 
-      const navigation = await session.navigateTree(userEntry.id)
+      const navigation = await session.navigateTree(String(userEntry.id))
       assert.equal(navigation.editorText, "ping")
       const sourceSessionId = session.getSessionId()
       const replacement = await session.fork(assistantEntry.id, "at")
@@ -482,12 +491,12 @@ export default function (pi) {
       })
       await session.prompt("one")
       await session.prompt("two")
-      const target = session.getEntries()
-        .filter(entry => entry.type === "message" && entry.role === "assistant")
+      const target = session.getNativeEnvelope().entries
+        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
         .at(0)
       assert.ok(target)
 
-      const navigation = await session.navigateTree(target.id, {
+      const navigation = await session.navigateTree(String(target.id), {
         summarize: true,
         customInstructions: "Preserve the parser decision",
       })
@@ -496,8 +505,8 @@ export default function (pi) {
       assert.equal(navigation.aborted, undefined)
       assert.equal(navigation.summaryEntry?.type, "branch_summary")
       if (navigation.summaryEntry?.type !== "branch_summary") assert.fail("branch summary was not persisted")
-      assert.match(navigation.summaryEntry.summary, /abandoned branch summary/)
-      assert.ok(session.getEntries().some(entry => entry.type === "branch_summary"))
+      assert.match(String(navigation.summaryEntry.summary), /abandoned branch summary/)
+      assert.ok(session.getNativeEnvelope().entries.some(entry => entry.type === "branch_summary"))
       assert.ok(operationPhases.includes("retrying"))
       assert.equal(opened.faux.state.callCount, 4)
     } finally {
@@ -526,8 +535,8 @@ export default function (pi) {
       session = opened.session
       await session.prompt("one")
       await session.prompt("two")
-      const lastAssistant = session.getEntries()
-        .filter(entry => entry.type === "message" && entry.role === "assistant")
+      const lastAssistant = session.getNativeEnvelope().entries
+        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
         .at(-1)
       assert.ok(lastAssistant)
 
@@ -536,12 +545,12 @@ export default function (pi) {
       if (compacted.status !== "completed") assert.fail("manual compaction was skipped")
       assert.match(compacted.result.summary, /history summary/)
       assert.match(compacted.result.summary, /turn prefix summary/)
-      assert.equal(compacted.result.firstKeptEntryId, lastAssistant.id)
+      assert.equal(compacted.result.firstKeptEntryId, String(lastAssistant.id))
       assert.ok(compacted.result.tokensBefore > 0)
       assert.ok((compacted.result.estimatedTokensAfter ?? 0) > 0)
       assert.equal(opened.faux.state.callCount, 4)
       assert.equal(opened.faux.getPendingResponseCount(), 0)
-      assert.ok(session.getEntries().some(entry => entry.type === "compaction"))
+      assert.ok(session.getNativeEnvelope().entries.some(entry => entry.type === "compaction"))
     } finally {
       await session?.dispose()
       rmSync(cwd, { recursive: true, force: true })
@@ -550,16 +559,21 @@ export default function (pi) {
 })
 
 function findTreeLabel(
-  roots: ReturnType<RealPiSession["getTree"]>,
+  roots: ReturnType<RealPiSession["getNativeEnvelope"]>["tree"],
   entryId: string,
 ): string | undefined {
   const stack = [...roots]
   while (stack.length > 0) {
     const node = stack.pop()!
-    if (node.entry.id === entryId) return node.label
+    if (node.entryId === entryId) return node.label
     stack.push(...node.children)
   }
   return undefined
+}
+
+function nativeRole(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number]): unknown {
+  const message = entry.message
+  return message && typeof message === "object" && !Array.isArray(message) ? message.role : undefined
 }
 
 type ModelRuntimeOptions = NonNullable<Parameters<typeof ModelRuntime.create>[0]>

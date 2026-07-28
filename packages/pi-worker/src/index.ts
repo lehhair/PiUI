@@ -1,5 +1,6 @@
 export * from "./types.js"
 export * from "./projection.js"
+export * from "./native-pagination.js"
 export * from "./mock-runtime.js"
 export * from "./runtime-contract.js"
 export * from "./worker-protocol.js"

@@ -22,12 +22,14 @@ import {
   type SessionEntry,
   type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent"
+import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type {
   CompactionCommandResultV1,
   CompactionResultV1,
   CompactionStateV1,
-  PiSessionEntryV1,
-  PiSessionTreeNodeV1,
+  PiNativeJsonValueV1,
+  PiNativeSessionEnvelopeV1,
+  PiNativeTreeRefV1,
   PiToolInfoV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
@@ -63,6 +65,12 @@ import {
 import type { PiContentBlock, PiEntry, WorkerEvent } from "./types.js"
 import type { PiBashResult, PiImageInput, PiModelInfo } from "./worker-protocol.js"
 import { ExtensionUiBridge, type PiExtensionUiEvent } from "./extension-ui-bridge.js"
+import {
+  nativeEntriesPageFromEntries,
+  nativeImageAttachmentFromEntry,
+  nativeSessionHeadFromParts,
+  nativeTimelinePage,
+} from "./native-pagination.js"
 
 export interface PiRuntimeUiState {
   thinkingLevel: string
@@ -94,14 +102,18 @@ export interface PiRuntimeUiState {
 
 export interface PiSkillInfo {
   name: string
-  description?: string
-  source?: string
+  description: string
+  filePath: string
+  baseDir: string
+  sourceInfo: unknown
+  disableModelInvocation: boolean
 }
 
 export interface PiCommandInfo {
   name: string
   description?: string
-  source: "skill" | "prompt" | "extension" | "builtin"
+  source: "skill" | "prompt" | "extension"
+  sourceInfo: unknown
 }
 
 export interface PiSessionInfo {
@@ -306,14 +318,13 @@ function packageManagerForWorkspace(cwd: string): DefaultPackageManager {
 }
 
 function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): PiSettingsSnapshotV1 {
+  const global = jsonClone(manager.getGlobalSettings()) as Record<string, unknown>
+  const project = jsonClone(manager.getProjectSettings()) as Record<string, unknown>
   return {
     workspacePath: cwd,
     projectTrusted: trusted,
-    // Raw scope objects preserve unknown user-authored keys, which may hold
-    // credentials. Only the key names cross the worker boundary; the resolved
-    // values below come from typed SDK getters.
-    globalKeys: settingsKeys(manager.getGlobalSettings()),
-    projectKeys: settingsKeys(manager.getProjectSettings()),
+    global,
+    project,
     effective: {
       lastChangelogVersion: manager.getLastChangelogVersion(),
       sessionDir: manager.getSessionDir(),
@@ -330,6 +341,7 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
       providerRetry: manager.getProviderRetrySettings(),
       httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
       websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs(),
+      httpProxy: typeof global.httpProxy === "string" ? global.httpProxy : undefined,
       externalEditor: manager.getExternalEditorCommand(),
       hideThinkingBlock: manager.getHideThinkingBlock(),
       showCacheMissNotices: manager.getShowCacheMissNotices(),
@@ -367,11 +379,6 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
     },
     errors: manager.drainErrors().map(error => ({ scope: error.scope, message: error.error.message })),
   }
-}
-
-function settingsKeys(settings: unknown): string[] {
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return []
-  return Object.keys(settings as Record<string, unknown>).sort()
 }
 
 function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1): void {
@@ -525,6 +532,9 @@ export class RealPiSession {
   private projectionListeners = new Set<(projection: ProjectionState) => void>()
   private projectionDeltaListeners = new Set<(projection: ProjectionDelta) => void>()
   private nativeEventListeners = new Set<(event: unknown) => void>()
+  private nativeHeadListeners = new Set<(native: import("@piui/protocol").PiNativeSessionHeadV1) => void>()
+  private nativeRevision = 1
+  private nativeFingerprint = ""
   private resourceListeners = new Set<() => void>()
   /** last known runtime flags from events */
   private isCompactingFlag = false
@@ -539,7 +549,10 @@ export class RealPiSession {
     this.extensionUi = new ExtensionUiBridge(
       () => this.runtime.session.sessionManager.getSessionId(),
       () => undefined,
+      () => this.runtime.session.resourceLoader.getThemes().themes.flatMap(theme =>
+        theme.name ? [{ name: theme.name, path: theme.sourcePath }] : []),
     )
+    this.nativeFingerprint = this.getNativeFingerprint()
     this.bindStateEvents()
   }
 
@@ -557,6 +570,7 @@ export class RealPiSession {
         this.emitProjection()
         this.emitProjectionDelta()
       }
+      this.emitNativeEnvelopeIfChanged()
 
       if (event.type === "compaction_start") {
         this.isCompactingFlag = true
@@ -686,6 +700,8 @@ export class RealPiSession {
     runtime.setRebindSession(async session => {
       result.extensionUi.cancelAll("session_replaced")
       result.resetSessionShadowState()
+      result.nativeRevision += 1
+      result.nativeFingerprint = result.getNativeFingerprint()
       if (result.extensionsInitialized) {
         await session.bindExtensions(extensionBindings(
           result.extensionUi.context,
@@ -735,7 +751,7 @@ export class RealPiSession {
 
   static async listModels(): Promise<PiModelInfo[]> {
     const runtime = await ModelRuntime.create({ allowModelNetwork: false })
-    return (await runtime.getAvailable()).map(modelInfo)
+    return jsonClone(await runtime.getAvailable()) as PiModelInfo[]
   }
 
   static getSettings(cwd: string, agentDir = getAgentDir()): PiSettingsSnapshotV1 {
@@ -924,16 +940,93 @@ export class RealPiSession {
     return this.runtime.session.sessionManager.getSessionName()
   }
 
-  getEntries(): PiSessionEntryV1[] {
-    return this.runtime.session.sessionManager.getEntries().map(mapSessionEntry)
-  }
-
-  getTree(): PiSessionTreeNodeV1[] {
-    return mapSessionTree(this.runtime.session.sessionManager.getTree())
-  }
-
   getLeafId(): string | null {
     return this.runtime.session.sessionManager.getLeafId()
+  }
+
+  onNativeHead(listener: (native: import("@piui/protocol").PiNativeSessionHeadV1) => void): () => void {
+    this.nativeHeadListeners.add(listener)
+    return () => this.nativeHeadListeners.delete(listener)
+  }
+
+  getNativeEnvelope(): PiNativeSessionEnvelopeV1 {
+    const manager = this.runtime.session.sessionManager
+    const header = toNativeJsonValue(manager.getHeader())
+    const entries = toNativeJsonValue(manager.getEntries())
+    if (!Array.isArray(entries) || entries.some(entry => !isNativeJsonObject(entry))) {
+      throw Object.assign(new Error("Pi session entries are not JSON objects"), { code: "NATIVE_SESSION_NOT_JSON" })
+    }
+    const nativeEntries = entries.filter(isNativeJsonObject)
+    const version = isNativeJsonObject(header) && typeof header.version === "number" ? header.version : undefined
+    return {
+      namespace: "pi",
+      schemaVersion: 1,
+      sdkVersion: PI_PARITY_SDK_VERSION,
+      revision: this.nativeRevision,
+      sessionFormatVersion: version,
+      header: header ?? null,
+      leafId: manager.getLeafId(),
+      entries: nativeEntries,
+      tree: mapNativeTreeRefs(manager.getTree()),
+    }
+  }
+
+  getNativeHead() {
+    const manager = this.runtime.session.sessionManager
+    const header = toNativeJsonValue(manager.getHeader()) ?? null
+    const version = isNativeJsonObject(header) && typeof header.version === "number" ? header.version : undefined
+    return nativeSessionHeadFromParts({
+      sdkVersion: PI_PARITY_SDK_VERSION,
+      revision: this.nativeRevision,
+      sessionFormatVersion: version,
+      header,
+      leafId: manager.getLeafId(),
+      entryCount: manager.getEntries().length,
+    }, manager.getSessionId())
+  }
+
+  getNativeEntriesPage(cursor: string | undefined, limit: number, maxBytes: number) {
+    const manager = this.runtime.session.sessionManager
+    return nativeEntriesPageFromEntries(
+      this.getNativeHead(),
+      manager.getEntries(),
+      { cursor, limit, maxBytes },
+      toNativeJsonObject,
+    )
+  }
+
+  getNativeImageAttachment(entryId: string, blockIndex: number) {
+    const entry = this.runtime.session.sessionManager.getEntry(entryId)
+    if (!entry) throw Object.assign(new Error("native entry not found"), { code: "NOT_FOUND" })
+    return nativeImageAttachmentFromEntry(toNativeJsonObject(entry), blockIndex)
+  }
+
+  getTimelinePage(cursor: string | undefined, limit: number, maxBytes = 1_048_576) {
+    return nativeTimelinePage(projectNativeBranch(this.runtime.session.sessionManager.getBranch()).timeline, this.getNativeHead().epoch, {
+      cursor,
+      limit,
+      maxBytes,
+    })
+  }
+
+  getInitialTimelinePage() {
+    return this.getTimelinePage(undefined, 50)
+  }
+
+  private getNativeFingerprint(): string {
+    const manager = this.runtime.session.sessionManager
+    const entries = manager.getEntries()
+    const last = entries.at(-1)
+    return `${entries.length}:${manager.getLeafId() ?? ""}:${last?.id ?? ""}:${last?.timestamp ?? ""}`
+  }
+
+  private emitNativeEnvelopeIfChanged(): void {
+    const fingerprint = this.getNativeFingerprint()
+    if (fingerprint === this.nativeFingerprint) return
+    this.nativeFingerprint = fingerprint
+    this.nativeRevision += 1
+    const native = this.getNativeHead()
+    for (const listener of this.nativeHeadListeners) listener(native)
   }
 
   getModel() {
@@ -984,16 +1077,12 @@ export class RealPiSession {
       },
       retry: { ...this.retryState, autoEnabled: session.autoRetryEnabled },
       compaction: { ...this.compactionState, autoEnabled: session.autoCompactionEnabled },
-      tools: session.getAllTools().map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        source: toolSource(tool.sourceInfo),
-      })),
+      tools: jsonClone(session.getAllTools()),
       activeTools: session.getActiveToolNames?.() ?? [],
       model: this.getModel(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
       contextUsage: contextUsage ? {
-        contextTokens: contextUsage.tokens ?? undefined,
+        contextTokens: contextUsage.tokens,
         contextWindow: contextUsage.contextWindow,
         percent: contextUsage.percent,
       } : undefined,
@@ -1067,7 +1156,7 @@ export class RealPiSession {
     editorText?: string
     cancelled: boolean
     aborted?: boolean
-    summaryEntry?: PiSessionEntryV1
+    summaryEntry?: { [key: string]: PiNativeJsonValueV1 }
   }> {
     await this.runtime.session.waitForIdle()
     if (options.summarize) {
@@ -1102,17 +1191,19 @@ export class RealPiSession {
       editorText: result.editorText,
       cancelled: result.cancelled,
       aborted: result.aborted,
-      summaryEntry: result.summaryEntry ? mapSessionEntry(result.summaryEntry) : undefined,
+      summaryEntry: result.summaryEntry ? toNativeJsonObject(result.summaryEntry) : undefined,
     }
   }
 
   setLabel(entryId: string, label?: string): void {
     this.runtime.session.sessionManager.appendLabelChange(entryId, label)
+    this.emitNativeEnvelopeIfChanged()
     this.emitState()
   }
 
   setSessionName(name: string): void {
     this.runtime.session.setSessionName(name)
+    this.emitNativeEnvelopeIfChanged()
     this.emitState()
   }
 
@@ -1273,7 +1364,7 @@ export class RealPiSession {
   }
 
   async listAvailableModels(): Promise<PiModelInfo[]> {
-    return (await this.runtime.session.modelRuntime.getAvailable()).map(modelInfo)
+    return jsonClone(await this.runtime.session.modelRuntime.getAvailable()) as PiModelInfo[]
   }
 
   async sendCustomMessage(
@@ -1305,6 +1396,7 @@ export class RealPiSession {
     const normalized = customType.trim()
     if (!normalized) throw Object.assign(new Error("custom entry type required"), { code: "INVALID_REQUEST" })
     this.runtime.session.sessionManager.appendCustomEntry(normalized, data)
+    this.emitNativeEnvelopeIfChanged()
     this.emitState()
   }
 
@@ -1361,14 +1453,13 @@ export class RealPiSession {
     const session = this.runtime.session
     const manager = session.sessionManager
     return {
-      header: toJsonValue(manager.getHeader()),
-      entries: toJsonValue(manager.getEntries()) as unknown[],
-      branch: toJsonValue(manager.getBranch()) as unknown[],
-      contextEntries: toJsonValue(manager.buildContextEntries()) as unknown[],
-      context: toJsonValue(manager.buildSessionContext()),
-      agentMessages: toJsonValue(session.agent.state.messages) as unknown[],
+      native: this.getNativeEnvelope(),
+      branch: toNativeJsonArray(manager.getBranch()),
+      contextEntries: toNativeJsonArray(manager.buildContextEntries()),
+      context: toNativeJsonValue(manager.buildSessionContext()) ?? null,
+      agentMessages: toNativeJsonArray(session.agent.state.messages),
       lastAssistantText: session.getLastAssistantText(),
-      userMessagesForForking: toJsonValue(session.getUserMessagesForForking()) as unknown[],
+      userMessagesForForking: toNativeJsonArray(session.getUserMessagesForForking()),
     }
   }
 
@@ -1467,6 +1558,8 @@ export class RealPiSession {
   async reload(): Promise<void> {
     this.extensionUi.cancelAll("runtime_reloaded")
     await this.runtime.session.reload()
+    this.nativeFingerprint = ""
+    this.emitNativeEnvelopeIfChanged()
     this.projection = projectNativeBranch(this.runtime.session.sessionManager.getBranch())
     this.emitProjection()
     this.emitState()
@@ -1528,23 +1621,7 @@ export class RealPiSession {
   }
 
   listSkills(): PiSkillInfo[] {
-    try {
-      const loader = this.runtime.session.resourceLoader as unknown as {
-        skills?: Array<{ name: string; description?: string; source?: string }>
-        getSkills?: () =>
-          | Array<{ name: string; description?: string }>
-          | { skills: Array<{ name: string; description?: string; source?: string }> }
-      }
-      const raw = loader.getSkills?.() ?? loader.skills ?? []
-      const skills = Array.isArray(raw) ? raw : (raw.skills ?? [])
-      return skills.map(s => ({
-        name: s.name,
-        description: s.description,
-        source: (s as { source?: string }).source,
-      }))
-    } catch {
-      return []
-    }
+    return jsonClone(this.runtime.session.resourceLoader.getSkills().skills)
   }
 
   listCommands(): PiCommandInfo[] {
@@ -1556,6 +1633,7 @@ export class RealPiSession {
           name: command.invocationName,
           description: command.description,
           source: "extension",
+          sourceInfo: command.sourceInfo,
         })
       }
     }
@@ -1564,6 +1642,7 @@ export class RealPiSession {
         name: template.name,
         description: template.description,
         source: "prompt",
+        sourceInfo: template.sourceInfo,
       })
     }
     for (const skill of this.listSkills()) {
@@ -1571,6 +1650,7 @@ export class RealPiSession {
         name: `skill:${skill.name}`,
         description: skill.description,
         source: "skill",
+        sourceInfo: skill.sourceInfo,
       })
     }
     return out
@@ -1583,6 +1663,7 @@ export class RealPiSession {
     this.projectionListeners.clear()
     this.projectionDeltaListeners.clear()
     this.nativeEventListeners.clear()
+    this.nativeHeadListeners.clear()
     this.resourceListeners.clear()
     await this.runtime.dispose()
   }
@@ -1598,49 +1679,6 @@ export class RealPiSession {
   }
   _getAsst() {
     return this.currentAsstId
-  }
-}
-
-function mapSessionEntry(entry: SessionEntry): PiSessionEntryV1 {
-  const base = { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp, native: toJsonValue(entry) }
-  switch (entry.type) {
-    case "message": {
-      const message = entry.message as unknown as Record<string, unknown>
-      return {
-        ...base,
-        type: "message",
-        role: messageRole(message.role),
-        preview: previewText(extractText(message.content ?? message.result ?? message.summary)),
-      }
-    }
-    case "thinking_level_change":
-      return { ...base, type: entry.type, thinkingLevel: entry.thinkingLevel }
-    case "model_change":
-      return { ...base, type: entry.type, provider: entry.provider, modelId: entry.modelId }
-    case "compaction":
-      return {
-        ...base,
-        type: entry.type,
-        summary: entry.summary,
-        firstKeptEntryId: entry.firstKeptEntryId,
-        tokensBefore: entry.tokensBefore,
-      }
-    case "branch_summary":
-      return { ...base, type: entry.type, fromId: entry.fromId, summary: entry.summary }
-    case "custom":
-      return { ...base, type: entry.type, customType: entry.customType }
-    case "custom_message":
-      return {
-        ...base,
-        type: entry.type,
-        customType: entry.customType,
-        preview: previewText(extractText(entry.content)),
-        display: entry.display,
-      }
-    case "label":
-      return { ...base, type: entry.type, targetId: entry.targetId, label: entry.label }
-    case "session_info":
-      return { ...base, type: entry.type, name: entry.name }
   }
 }
 
@@ -1678,40 +1716,44 @@ function toJsonValue(value: unknown): unknown {
   }))
 }
 
-function mapSessionTree(nodes: SessionTreeNode[]): PiSessionTreeNodeV1[] {
-  const roots: PiSessionTreeNodeV1[] = nodes.map(node => ({
-    entry: mapSessionEntry(node.entry),
-    children: [] as PiSessionTreeNodeV1[],
+function mapNativeTreeRefs(nodes: SessionTreeNode[]): PiNativeTreeRefV1[] {
+  return nodes.map(node => ({
+    entryId: node.entry.id,
     label: node.label,
     labelTimestamp: node.labelTimestamp,
+    children: mapNativeTreeRefs(node.children),
   }))
-  const stack = nodes.map((source, index) => ({ source, target: roots[index] }))
-  while (stack.length > 0) {
-    const current = stack.pop()!
-    current.target.children = current.source.children.map(child => ({
-      entry: mapSessionEntry(child.entry),
-      children: [],
-      label: child.label,
-      labelTimestamp: child.labelTimestamp,
-    }))
-    current.source.children.forEach((child, index) => {
-      stack.push({ source: child, target: current.target.children[index] })
+}
+
+function toNativeJsonValue(value: unknown): PiNativeJsonValueV1 | undefined {
+  if (value === undefined) return undefined
+  try {
+    return JSON.parse(JSON.stringify(value)) as PiNativeJsonValueV1
+  } catch (cause) {
+    throw Object.assign(new Error("Pi native session data is not JSON serializable", { cause }), {
+      code: "NATIVE_SESSION_NOT_JSON",
     })
   }
-  return roots
 }
 
-function messageRole(value: unknown): Extract<PiSessionEntryV1, { type: "message" }>["role"] {
-  if (
-    value === "user" || value === "assistant" || value === "toolResult" || value === "bashExecution" ||
-    value === "branchSummary" || value === "compactionSummary" || value === "custom"
-  ) return value
-  return "custom"
+function isNativeJsonObject(value: PiNativeJsonValueV1 | undefined): value is { [key: string]: PiNativeJsonValueV1 } {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
-function previewText(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim()
-  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized
+function toNativeJsonObject(value: unknown): { [key: string]: PiNativeJsonValueV1 } {
+  const json = toNativeJsonValue(value)
+  if (!isNativeJsonObject(json)) {
+    throw Object.assign(new Error("Pi native session entry is not a JSON object"), { code: "NATIVE_SESSION_NOT_JSON" })
+  }
+  return json
+}
+
+function toNativeJsonArray(value: unknown): PiNativeJsonValueV1[] {
+  const json = toNativeJsonValue(value)
+  if (!Array.isArray(json)) {
+    throw Object.assign(new Error("Pi native runtime data is not a JSON array"), { code: "NATIVE_SESSION_NOT_JSON" })
+  }
+  return json
 }
 
 function resolveUserPath(input: string): string {
@@ -1751,39 +1793,8 @@ function pathKey(value: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
 }
 
-function modelInfo(model: {
-  id: string
-  name?: string
-  provider: string
-  family?: string
-  contextWindow?: number
-  maxTokens?: number
-  reasoning?: boolean
-  input?: string[]
-}): PiModelInfo {
-  return {
-    id: model.id,
-    name: model.name || model.id,
-    providerId: model.provider,
-    family: model.family || "",
-    contextLimit: model.contextWindow ?? 0,
-    outputLimit: model.maxTokens ?? 0,
-    supportsReasoning: Boolean(model.reasoning),
-    thinkingLevels: supportedThinkingLevels(model),
-    supportsImages: Array.isArray(model.input) && model.input.includes("image"),
-  }
-}
-
-function supportedThinkingLevels(model: {
-  reasoning?: boolean
-  thinkingLevelMap?: Partial<Record<string, unknown | null>>
-}): string[] {
-  if (!model.reasoning) return ["off"]
-  return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(level => {
-    const mapped = model.thinkingLevelMap?.[level]
-    if (mapped === null) return false
-    return level !== "xhigh" && level !== "max" || mapped !== undefined
-  })
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 function mapCompactionResult(result: {
@@ -1816,15 +1827,6 @@ function isRuntimeStateEvent(type: string): boolean {
     type === "summarization_retry_finished"
 }
 
-function toolSource(sourceInfo: unknown): string | undefined {
-  if (typeof sourceInfo === "string") return sourceInfo
-  if (!sourceInfo || typeof sourceInfo !== "object") return undefined
-  const source = sourceInfo as Record<string, unknown>
-  if (typeof source.type === "string") return source.type
-  if (typeof source.path === "string") return source.path
-  return undefined
-}
-
 function projectNativeBranch(entries: SessionEntry[]): ProjectionState {
   const projected: PiEntry[] = []
   for (const entry of entries) {
@@ -1839,7 +1841,7 @@ function projectNativeBranch(entries: SessionEntry[]): ProjectionState {
         id: entry.id,
         parentId: entry.parentId,
         timestamp,
-        message: { role: "user", content: extractText(message.content) },
+        message: { role: "user", content: toContentBlocks(message.content) },
       })
     } else if (role === "assistant") {
       projected.push({
@@ -1891,14 +1893,13 @@ function mapPiEventToWorker(event: { type: string; [k: string]: unknown }, ctx: 
       const id = `u-${now}-${Math.random().toString(36).slice(2, 7)}`
       ctx._setLastUser(id)
       out.push({ type: "message_start", entryId: id, role: "user", timestamp: now })
-      const text = extractText(message?.content)
       out.push({
         type: "message_end",
         entryId: id,
         role: "user",
         parentId: null,
         timestamp: now,
-        message: { role: "user", content: text },
+        message: { role: "user", content: toContentBlocks(message?.content) },
       })
     } else if (role === "assistant") {
       const id = `a-${now}-${Math.random().toString(36).slice(2, 7)}`
@@ -2032,6 +2033,8 @@ function toContentBlocks(content: unknown): PiContentBlock[] {
     const o = b as Record<string, unknown>
     if (o.type === "text" && typeof o.text === "string") {
       blocks.push({ type: "text", text: o.text })
+    } else if (o.type === "image" && typeof o.data === "string" && typeof o.mimeType === "string") {
+      blocks.push({ type: "image", data: o.data, mimeType: o.mimeType })
     } else if (o.type === "thinking" || o.type === "reasoning") {
       const t = typeof o.thinking === "string" ? o.thinking : typeof o.text === "string" ? o.text : ""
       blocks.push({ type: "thinking", thinking: t })

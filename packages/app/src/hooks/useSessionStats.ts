@@ -38,7 +38,7 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
       contextUsed,
       contextLimit: resolvedContextLimit,
       contextPercent: usage?.percent ?? (resolvedContextLimit > 0 ? (contextUsed / resolvedContextLimit) * 100 : 0),
-      contextEstimated: usage?.contextTokens === undefined,
+      contextEstimated: usage?.contextTokens == null,
     } : fallback
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev

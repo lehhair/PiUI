@@ -33,6 +33,7 @@ export interface SessionState {
   loadError?: MessageError
   /** 是否还有更多历史消息 */
   hasMoreHistory: boolean
+  historyCursor?: string
   /** session 目录 */
   directory: string
   /** session 标题 */

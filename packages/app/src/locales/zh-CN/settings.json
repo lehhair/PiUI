@@ -2,7 +2,7 @@
   "title": "设置",
   "subtitle": "自定义界面、行为和服务器配置",
   "closeSettings": "关闭设置",
-  "version": "OpenCodeUI v{{version}}",
+  "version": "Pi v{{version}}",
   "search": {
     "placeholder": "搜索设置",
     "clear": "清空设置搜索",

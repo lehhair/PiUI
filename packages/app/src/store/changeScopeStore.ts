@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 
-export type ChangeScopeMode = 'git' | 'branch' | 'session' | 'turn'
+export type ChangeScopeMode = 'git' | 'branch' | 'staged' | 'unstaged' | 'session' | 'turn'
 
 type Subscriber = () => void
 

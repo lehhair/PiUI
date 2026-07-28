@@ -32,6 +32,7 @@ export interface Attachment {
 
   // file/folder/image 用
   url?: string // file:// URL 或 data URL
+  requiresAuth?: boolean
   mime?: string // MIME 类型
   relativePath?: string // 相对路径（用于显示和 source.path）
 

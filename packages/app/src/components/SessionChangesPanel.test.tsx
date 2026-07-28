@@ -226,7 +226,7 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByRole('menuitemradio', { name: 'Branch changes' })).toHaveFocus()
+    expect(screen.getByRole('menuitemradio', { name: 'Unstaged' })).toHaveFocus()
   })
 
   it('does not offer unsupported Git initialization', async () => {

@@ -2,7 +2,7 @@
   "title": "Settings",
   "subtitle": "Customize UI, behavior, and server setup",
   "closeSettings": "Close settings",
-  "version": "OpenCodeUI v{{version}}",
+  "version": "Pi v{{version}}",
   "search": {
     "placeholder": "Search settings",
     "clear": "Clear settings search",

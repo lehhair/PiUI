@@ -17,7 +17,8 @@ import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHa
 import { useFolderProjectDrop } from './useFolderProjectDrop'
 import { FolderProjectDropOverlay } from './FolderProjectDropOverlay'
 import { useChatSession, useModels, useModelSelection } from '../../hooks'
-import { useServerStore } from '../../hooks/useServerStore'
+import { usePiBackendState } from '../../pi/serverMode'
+import { ExtensionUiSurface } from './ExtensionUiSurface'
 import { useCancelHint } from '../../hooks/useCancelHint'
 import { InlineToolRequestContext, type InlineToolRequestContextValue } from './InlineToolRequestContext'
 import { ChatViewportProvider, canUseSplitPane, useChatViewportMaybe, type ChatViewportValue } from './chatViewport'
@@ -162,8 +163,7 @@ export const ChatPane = memo(function ChatPane({
   // Models
   // ============================================
   const { models, isLoading: modelsLoading, refetch: refetchModels } = useModels()
-  const { activeServer, getHealth } = useServerStore()
-  const activeServerHealth = activeServer ? getHealth(activeServer.id) : null
+  const backendState = usePiBackendState()
   const hiddenModelKeys = useHiddenModelKeys()
   // Pi thinking levels surface as "variants" when model has none
   const piRuntime = useSyncExternalStore(
@@ -333,44 +333,28 @@ export const ChatPane = memo(function ChatPane({
   }, [chatAreaMountKey, setVisibleMessageIdsStable])
 
   const connectionError = useMemo<MessageError | undefined>(() => {
-    if (!activeServer) {
-      return {
-        name: 'APIError',
-        data: {
-          message: 'No active OpenCode server is selected',
-          isRetryable: false,
-        },
-      }
-    }
-
-    if (!activeServerHealth || activeServerHealth.status === 'checking' || activeServerHealth.status === 'online') {
+    if (backendState.status === 'booting' || backendState.status === 'online') {
       return undefined
     }
 
     const lines = [
-      `Server: ${activeServer.name}`,
-      `URL: ${activeServer.url}`,
-      `Status: ${activeServerHealth.status}`,
-      activeServerHealth.error ? `Error: ${activeServerHealth.error}` : '',
-      activeServerHealth.status === 'error' || activeServerHealth.status === 'offline'
-        ? 'Expected /global/health to return OpenCode health JSON.'
-        : '',
+      `PiUI backend status: ${backendState.status}`,
+      backendState.error ? `Error: ${backendState.error}` : '',
+      'Expected /api/v1/health to return a compatible PiUI protocol handshake.',
     ].filter(Boolean)
 
-    const responseBody = [lines.join('\n'), activeServerHealth.details ? `Raw diagnostics:\n${activeServerHealth.details}` : '']
-      .filter(Boolean)
-      .join('\n\n')
+    const responseBody = lines.join('\n')
 
     return {
       name: 'APIError',
       data: {
-        message: activeServerHealth.error || `Unable to connect to ${activeServer.name}`,
-        statusCode: activeServerHealth.status === 'unauthorized' ? 401 : undefined,
-        isRetryable: activeServerHealth.status !== 'unauthorized',
+        message: backendState.error || 'Unable to connect to the PiUI backend',
+        statusCode: backendState.status === 'unauthorized' ? 401 : undefined,
+        isRetryable: backendState.status !== 'unauthorized',
         responseBody,
       },
     }
-  }, [activeServer, activeServerHealth])
+  }, [backendState])
 
   const navigationCtx = useMemo(
     () => ({ navigateToSession, currentSessionId: routeSessionId, currentDirectory: effectiveDirectory }),
@@ -880,6 +864,7 @@ export const ChatPane = memo(function ChatPane({
             </div>
           </div>
         )}
+        <ExtensionUiSurface sessionId={routeSessionId} placement="aboveEditor" />
         <InputBox
           paneId={paneId}
           onSend={handleSend}
@@ -947,6 +932,7 @@ export const ChatPane = memo(function ChatPane({
               : undefined
           }
         />
+        <ExtensionUiSurface sessionId={routeSessionId} placement="belowEditor" />
       </div>
 
       {!inlineToolRequests && pendingPermissionRequests.length > 0 && (

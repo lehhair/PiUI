@@ -1,6 +1,6 @@
 {
-  "name": "OpenCode",
-  "short_name": "OpenCode",
+  "name": "Pi",
+  "short_name": "Pi",
   "description": "AI Coding Assistant",
   "start_url": "/",
   "display": "standalone",

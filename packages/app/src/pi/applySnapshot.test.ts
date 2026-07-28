@@ -43,7 +43,8 @@ const snap: SessionSnapshotV1 = {
       content: [{ type: "text", text: "pong" }],
     },
   ],
-  native: { namespace: "pi", schemaVersion: 1, leafId: "a", entries: [], tree: [] },
+  timelinePage: { hasMore: false },
+  native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: "a", entryCount: 0 },
 }
 
 describe("applySnapshotToUi", () => {

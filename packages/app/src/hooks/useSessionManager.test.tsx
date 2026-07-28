@@ -4,10 +4,12 @@ import { useSessionManager } from './useSessionManager'
 
 const {
   fetchSnapshotMock,
+  fetchTimelinePageMock,
   messageStoreMock,
   sessionErrorHandlerMock,
 } = vi.hoisted(() => ({
   fetchSnapshotMock: vi.fn(),
+  fetchTimelinePageMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -15,6 +17,8 @@ const {
     setMessages: vi.fn(),
     updateSessionMetadata: vi.fn(),
     prependMessages: vi.fn(),
+    prependUiMessages: vi.fn(),
+    getHistoryCursor: vi.fn(),
     setRevertState: vi.fn(),
   },
   sessionErrorHandlerMock: vi.fn(),
@@ -22,6 +26,14 @@ const {
 
 vi.mock('../pi/sessionApi', () => ({
   fetchSnapshot: (...args: unknown[]) => fetchSnapshotMock(...args),
+  fetchPiTimelinePage: (...args: unknown[]) => fetchTimelinePageMock(...args),
+}))
+
+vi.mock('../pi/sessionProjectionStore', () => ({
+  sessionProjectionStore: {
+    activate: vi.fn(),
+    getSnapshot: vi.fn(() => ({ session: { directory: '/workspace' }, runtime: {} })),
+  },
 }))
 
 vi.mock('../pi/applySnapshot', () => ({
@@ -39,12 +51,15 @@ vi.mock('../utils', () => ({
 describe('useSessionManager', () => {
   beforeEach(() => {
     fetchSnapshotMock.mockReset()
+    fetchTimelinePageMock.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
     messageStoreMock.setMessages.mockReset()
     messageStoreMock.updateSessionMetadata.mockReset()
     messageStoreMock.prependMessages.mockReset()
+    messageStoreMock.prependUiMessages.mockReset()
+    messageStoreMock.getHistoryCursor.mockReset()
     messageStoreMock.setRevertState.mockReset()
     sessionErrorHandlerMock.mockReset()
 
@@ -72,6 +87,25 @@ describe('useSessionManager', () => {
     expect(messageStoreMock.setLoadError).toHaveBeenCalledWith(
       'missing-session',
       expect.objectContaining({ name: 'APIError' }),
+    )
+  })
+
+  it('loads an older timeline page and prepends it in chronological order', async () => {
+    messageStoreMock.getSessionState.mockReturnValue({ loadState: 'loaded', isStale: false, messages: [{}] })
+    messageStoreMock.getHistoryCursor.mockReturnValue('cursor-1')
+    fetchTimelinePageMock.mockResolvedValue({
+      items: [{ type: 'user', id: 'older-user', entryId: 'older-entry', timestamp: 1, text: 'older' }],
+      hasMore: false,
+    })
+    const { result } = renderHook(() => useSessionManager({ sessionId: 'session-1', directory: '/workspace' }))
+
+    await result.current.loadMoreHistory()
+
+    expect(fetchTimelinePageMock).toHaveBeenCalledWith('session-1', 'cursor-1')
+    expect(messageStoreMock.prependUiMessages).toHaveBeenCalledWith(
+      'session-1',
+      [expect.objectContaining({ info: expect.objectContaining({ id: 'older-user' }) })],
+      { hasMoreHistory: false, historyCursor: undefined },
     )
   })
 })

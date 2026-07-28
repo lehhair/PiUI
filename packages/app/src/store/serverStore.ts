@@ -479,7 +479,7 @@ class ServerStore {
     const server = this.withRuntimeServerUrl(storedServer)
     const checkSeq = (this.healthCheckSeqMap.get(serverId) ?? 0) + 1
     this.healthCheckSeqMap.set(serverId, checkSeq)
-    const healthUrl = `${server.url}/global/health`
+    const healthUrl = `${server.url}/api/v1/health`
 
     const commitHealth = (health: ServerHealth) => {
       if (this.healthCheckSeqMap.get(serverId) === checkSeq) {
@@ -522,8 +522,8 @@ class ServerStore {
             latency,
             lastCheck: Date.now(),
             error: contentType.includes('text/html')
-              ? 'Server returned HTML instead of OpenCode health JSON. Check the URL path.'
-              : 'Server did not return OpenCode health JSON',
+              ? 'Server returned HTML instead of PiUI health JSON. Check the URL path.'
+              : 'Server did not return PiUI health JSON',
             details,
           }
           return commitHealth(health)
@@ -537,18 +537,18 @@ class ServerStore {
             status: 'error',
             latency,
             lastCheck: Date.now(),
-            error: 'Invalid OpenCode health JSON',
+            error: 'Invalid PiUI health JSON',
             details,
           }
           return commitHealth(health)
         }
 
-        if (!isRecord(data) || data.healthy !== true || typeof data.version !== 'string' || !data.version.trim()) {
+        if (!isRecord(data) || data.ok !== true || data.service !== 'piui-server' || data.protocolVersion !== 1) {
           const health: ServerHealth = {
             status: 'error',
             latency,
             lastCheck: Date.now(),
-            error: 'Not an OpenCode server',
+            error: 'Not a compatible PiUI server',
             details,
           }
           return commitHealth(health)
@@ -558,7 +558,9 @@ class ServerStore {
           status: 'online',
           latency,
           lastCheck: Date.now(),
-          version: data.version,
+          version: isRecord(data.protocolV2) && typeof data.protocolV2.piSdkVersion === 'string'
+            ? data.protocolV2.piSdkVersion
+            : undefined,
           details,
         }
         return commitHealth(health)

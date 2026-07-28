@@ -232,6 +232,7 @@ export interface FilePart extends PartBase {
   mime: string
   filename?: string
   url: string
+  requiresAuth?: boolean
   source?: FilePartSource
 }
 

@@ -7,6 +7,6 @@ export async function getSkills(sessionId?: string | null): Promise<SkillList> {
   return skills.map(skill => ({
     name: skill.name,
     description: skill.description,
-    location: skill.source,
+    location: skill.filePath,
   }))
 }

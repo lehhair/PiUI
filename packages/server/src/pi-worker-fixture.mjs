@@ -1,6 +1,7 @@
 import path from "node:path"
 
 let session
+let fullNative
 let listCount = 0
 let replacementCount = 0
 let runtimeCwd = "/fixture"
@@ -25,7 +26,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 8,
+  workerProtocolVersion: 10,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,
@@ -97,18 +98,52 @@ function snapshot(sessionId = "fixture-session", sessionFile = "/fixture/session
     id: "fixture-entry",
     parentId: null,
     timestamp: "2026-01-01T00:00:00.000Z",
-    role: "user",
-    preview: "fixture",
+    message: {
+      role: "user",
+      content: [
+        { type: "text", text: "fixture", textSignature: "text-signature" },
+        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      ],
+      metadata: { nested: { preserved: true } },
+    },
+    futureField: { unknown: [1, "two", false, null] },
+  }
+  const futureEntry = {
+    type: "future_pi_entry",
+    id: "future-entry",
+    parentId: entry.id,
+    timestamp: "2026-01-01T00:00:01.000Z",
+    payload: { untouched: { deep: ["value"] } },
+  }
+  fullNative = {
+    namespace: "pi",
+    schemaVersion: 1,
+    sdkVersion: "0.81.1",
+    revision: 1,
+    sessionFormatVersion: 3,
+    header: { type: "session", version: 3, id: sessionId },
+    entries: [entry, futureEntry],
+    tree: [{ entryId: entry.id, children: [] }],
+    leafId: entry.id,
   }
   return {
     sessionId,
     sessionFile,
     sessionName: "Fixture",
     projection: { timeline: [], isStreaming: false },
+    timelinePage: { hasMore: false },
     state: state(),
-    entries: [entry],
-    tree: [{ entry, children: [] }],
-    leafId: entry.id,
+    native: {
+      namespace: "pi",
+      schemaVersion: 1,
+      sdkVersion: "0.81.1",
+      revision: 1,
+      sessionFormatVersion: 3,
+      header: { type: "session", version: 3, id: sessionId },
+      epoch: Buffer.from(sessionId).toString("base64url"),
+      leafId: entry.id,
+      entryCount: 2,
+    },
   }
 }
 
@@ -167,15 +202,15 @@ process.on("message", async request => {
       }],
     }
   } else if (command.type === "listModels" || command.type === "listRuntimeModels") {
-    result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", providerId: "fixture", family: "fixture", contextLimit: 1, outputLimit: 1, supportsReasoning: false, thinkingLevels: ["off"], supportsImages: false }] }
+    result = { type: "models", models: [{ id: "fixture-model", name: "Fixture", api: "fixture", provider: "fixture", baseUrl: "", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1, maxTokens: 1 }] }
   } else if (command.type === "getSettings" || command.type === "patchSettings") {
     result = {
       type: "settings",
       settings: {
         workspacePath: command.cwd,
         projectTrusted: true,
-        globalKeys: [],
-        projectKeys: [],
+        global: {},
+        project: {},
         effective: command.type === "patchSettings" ? command.patch : {},
         errors: [],
       },
@@ -299,8 +334,22 @@ process.on("message", async request => {
       process.send?.({ kind: "response", id: request.id, generation, ok: true, result })
       return
     }
+    const images = command.images ?? []
+    const attachments = images.map((image, index) => ({
+      type: "image",
+      mimeType: image.mimeType,
+      blockIndex: index + 1,
+      byteLength: Buffer.from(image.data, "base64").byteLength,
+    }))
     const projection = {
-      timeline: [{ type: "user", id: "fixture-entry", entryId: "fixture-entry", timestamp: 1, text: command.text }],
+      timeline: [{
+        type: "user",
+        id: "fixture-entry",
+        entryId: "fixture-entry",
+        timestamp: 1,
+        text: command.text,
+        attachments: attachments.length ? attachments : undefined,
+      }],
       isStreaming: false,
     }
     process.send?.({
@@ -310,7 +359,13 @@ process.on("message", async request => {
       event: { type: "turn_start", turnIndex: 0 },
     })
     session = { ...(session ?? snapshot()), projection }
+    fullNative.entries[0].message.content = [
+      { type: "text", text: command.text },
+      ...images,
+    ]
     process.send?.({ kind: "event", generation, type: "projectionDelta", projection })
+    session.native.revision += 1
+    process.send?.({ kind: "event", generation, type: "nativeHead", native: session.native })
     result = { type: "session", session }
   } else if (command.type === "setThinkingLevel") {
     thinkingLevel = command.level
@@ -404,8 +459,7 @@ process.on("message", async request => {
     result = {
       type: "runtimeInspection",
       inspection: {
-        header: { type: "session", id: "fixture-session", cwd: runtimeCwd },
-        entries: [],
+        native: { ...fullNative, revision: (session ?? snapshot()).native.revision },
         branch: [],
         contextEntries: [],
         context: { messages: [], thinkingLevel, model: null },
@@ -414,6 +468,26 @@ process.on("message", async request => {
         userMessagesForForking: [],
       },
     }
+  } else if (command.type === "getNativeEntriesPage") {
+    const current = session ?? snapshot()
+    const before = command.cursor ? Number(Buffer.from(command.cursor, "base64url").toString("utf8")) : fullNative.entries.length
+    const start = Math.max(0, before - command.limit)
+    result = {
+      type: "nativeEntriesPage",
+      page: {
+        head: { ...current.native, entryCount: fullNative.entries.length },
+        items: fullNative.entries.slice(start, before),
+        beforeCursor: start > 0 ? Buffer.from(String(start)).toString("base64url") : undefined,
+        hasMore: start > 0,
+      },
+    }
+  } else if (command.type === "getNativeImageAttachment") {
+    const entry = fullNative.entries.find(item => item.id === command.entryId)
+    const block = entry?.message?.content?.[command.blockIndex]
+    if (!block || block.type !== "image") throw Object.assign(new Error("image not found"), { code: "NOT_FOUND" })
+    result = { type: "nativeImageAttachment", mimeType: block.mimeType, data: block.data, etag: '\"fixture-image\"' }
+  } else if (command.type === "getTimelinePage") {
+    result = { type: "timelinePage", page: { items: (session ?? snapshot()).projection.timeline, hasMore: false } }
   } else if (command.type === "inspectResources" || command.type === "extendResources") {
     result = {
       type: "resources",
@@ -452,14 +526,24 @@ process.on("message", async request => {
     session = { ...(session ?? snapshot()), state: state() }
     result = { type: "queue", ...cleared, session }
   } else if (command.type === "listSkills") {
-    result = { type: "skills", skills: [{ name: "fixture-skill", source: "fixture" }] }
+    result = { type: "skills", skills: [{ name: "fixture-skill", description: "Fixture skill", filePath: "/fixture/SKILL.md", baseDir: "/fixture", sourceInfo: { origin: "top-level" }, disableModelInvocation: false }] }
   } else if (command.type === "listCommands") {
-    result = { type: "commands", commands: [{ name: "fixture-command", source: "builtin" }] }
+    result = { type: "commands", commands: [{ name: "fixture-command", source: "extension", sourceInfo: { origin: "extension" } }] }
   } else if (command.type === "navigateTree") {
     result = { type: "navigation", cancelled: false, editorText: "fixture draft", session: session ?? snapshot() }
   } else if (command.type === "setLabel") {
     const current = session ?? snapshot()
-    current.tree[0].label = command.label
+    fullNative.tree[0].label = command.label
+    fullNative.entries.push({
+      type: "label",
+      id: `label-${fullNative.entries.length}`,
+      parentId: current.native.leafId,
+      timestamp: new Date().toISOString(),
+      targetId: command.entryId,
+      label: command.label,
+    })
+    current.native.revision += 1
+    current.native.entryCount = fullNative.entries.length
     session = current
     result = { type: "session", session }
   } else if (command.type === "setSessionName") {

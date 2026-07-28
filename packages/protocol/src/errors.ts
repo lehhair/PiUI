@@ -16,6 +16,7 @@ export type ErrorCode =
   | "GIT_BASE_NOT_FOUND"
   | "GIT_FAILED"
   | "STALE_REVISION"
+  | "STALE_CURSOR"
   | "SESSION_NOT_FOUND"
   | "SESSION_BUSY"
   | "SESSION_CONFLICT"

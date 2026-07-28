@@ -14,6 +14,7 @@ export interface PiSettingsEffectiveV1 {
   providerRetry: { timeoutMs?: number; maxRetries?: number; maxRetryDelayMs: number }
   httpIdleTimeoutMs: number
   websocketConnectTimeoutMs?: number
+  httpProxy?: string
   externalEditor?: string
   hideThinkingBlock: boolean
   showCacheMissNotices: boolean
@@ -53,10 +54,8 @@ export interface PiSettingsEffectiveV1 {
 export interface PiSettingsSnapshotV1 {
   workspacePath: string
   projectTrusted: boolean
-  /** Key names present in each scope. Values stay inside the worker because
-   *  Pi preserves unknown user-authored keys that may hold credentials. */
-  globalKeys: string[]
-  projectKeys: string[]
+  global: Record<string, unknown>
+  project: Record<string, unknown>
   effective: PiSettingsEffectiveV1
   errors: Array<{ scope: "global" | "project"; message: string }>
 }
@@ -143,11 +142,40 @@ export interface ProviderAuthInfoV1 {
   status: unknown
 }
 
+/** JSON form returned by Pi's ModelRuntime model APIs. */
+export interface PiNativeModelV1 {
+  id: string
+  name: string
+  api: string
+  provider: string
+  baseUrl: string
+  reasoning: boolean
+  thinkingLevelMap?: Partial<Record<PiThinkingLevelV1, unknown | null>>
+  input: Array<"text" | "image">
+  cost: {
+    input: number
+    output: number
+    cacheRead: number
+    cacheWrite: number
+    tiers?: Array<{
+      inputTokensAbove: number
+      input: number
+      output: number
+      cacheRead: number
+      cacheWrite: number
+    }>
+  }
+  contextWindow: number
+  maxTokens: number
+  headers?: Record<string, string>
+  compat?: unknown
+}
+
 export interface PiModelRuntimeSnapshotV1 {
   providers: ProviderAuthInfoV1[]
-  models: unknown[]
-  availableModels: unknown[]
-  availableSnapshot: unknown[]
+  models: PiNativeModelV1[]
+  availableModels: PiNativeModelV1[]
+  availableSnapshot: PiNativeModelV1[]
   credentials: unknown[]
   registeredProviderIds: string[]
   registeredProviderConfigs: Record<string, unknown>
@@ -251,12 +279,12 @@ export interface PiResourceExtensionPathsV1 {
 }
 
 export interface PiRuntimeInspectionV1 {
-  header: unknown
-  entries: unknown[]
-  branch: unknown[]
-  contextEntries: unknown[]
-  context: unknown
-  agentMessages: unknown[]
+  native: PiNativeSessionEnvelopeV1
+  branch: PiNativeJsonValueV1[]
+  contextEntries: PiNativeJsonValueV1[]
+  context: PiNativeJsonValueV1
+  agentMessages: PiNativeJsonValueV1[]
   lastAssistantText?: string
-  userMessagesForForking: unknown[]
+  userMessagesForForking: PiNativeJsonValueV1[]
 }
+import type { PiNativeJsonValueV1, PiNativeSessionEnvelopeV1 } from "./session.js"

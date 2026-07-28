@@ -56,7 +56,8 @@ function sampleSnapshot(): SessionSnapshotV1 {
         ],
       },
     ],
-    native: { namespace: "pi", schemaVersion: 1, leafId: "a1", entries: [], tree: [] },
+    timelinePage: { hasMore: false },
+    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: "a1", entryCount: 0 },
   }
 }
 
@@ -91,5 +92,20 @@ describe("timelineToUiMessages", () => {
     expect(visible[0]?.info.role).toBe("user")
     expect(visible[1]?.parts.length).toBeGreaterThanOrEqual(2)
     messageStore.clearAll()
+  })
+
+  it("renders a lazy user image attachment from the feed descriptor", () => {
+    const snapshot = sampleSnapshot()
+    const first = snapshot.timeline[0]
+    if (!first || first.type !== "user") throw new Error("user fixture missing")
+    first.attachments = [{ type: "image", mimeType: "image/png", blockIndex: 1, byteLength: 5 }]
+    const [user] = snapshotToUiMessages(snapshot)
+    expect(user?.parts).toContainEqual(expect.objectContaining({
+      type: "file",
+      mime: "image/png",
+      filename: "image-1.png",
+      url: "/api/v1/sessions/sess-1/native/entries/entry-u1/attachments/1",
+      requiresAuth: true,
+    }))
   })
 })

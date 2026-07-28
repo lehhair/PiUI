@@ -6,7 +6,7 @@ const heartbeatTimer = setInterval(() => {
 
 process.send?.({
   kind: "hello",
-  workerProtocolVersion: 8,
+  workerProtocolVersion: 10,
   piSdkVersion: "0.81.1",
   generation,
   processId: process.pid,

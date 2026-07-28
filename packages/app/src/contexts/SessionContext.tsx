@@ -163,7 +163,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         let workspacePath: string | undefined
         const dir = currentDirectory?.trim()
         if (dir && (/^[a-zA-Z]:[\\/]/.test(dir) || dir.startsWith('/'))) {
-          workspacePath = dir
+          workspacePath = await resolveWorkspacePath(dir) ?? undefined
         }
         const { summary, snapshot } = await createPiSession({
           title,
@@ -171,7 +171,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           workspacePath,
         })
         applySnapshotToUi(snapshot)
-        const session = snapshotToUiSession(snapshot, dir || undefined)
+        const session = snapshotToUiSession(snapshot, snapshot.session.directory)
         setSessions(prev => [session, ...prev.filter(s => s.id !== summary.id)])
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
         return session

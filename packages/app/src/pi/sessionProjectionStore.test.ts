@@ -40,7 +40,8 @@ function sample(id = "s1", sequence = 2, text = "hi"): SessionSnapshotV1 {
         content: [{ type: "text", text: "yo" }],
       },
     ],
-    native: { namespace: "pi", schemaVersion: 1, leafId: "a1", entries: [], tree: [] },
+    timelinePage: { hasMore: false },
+    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: "a1", entryCount: 0 },
   }
 }
 

@@ -32,23 +32,19 @@ describe('Pi project and model adapters', () => {
       models: [{
         id: 'model-1',
         name: 'Model One',
-        providerId: 'provider-1',
-        providerName: 'Provider One',
-        family: 'family',
-        contextLimit: 100,
-        outputLimit: 20,
-        supportsReasoning: true,
-        supportsImages: false,
-        supportsPdf: false,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsToolcall: true,
-        variants: ['high'],
+        provider: 'provider-1',
+        api: 'test-api',
+        baseUrl: 'https://example.test',
+        contextWindow: 100,
+        maxTokens: 20,
+        reasoning: true,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       }],
     })
 
     await expect(getActiveModels()).resolves.toEqual([
-      expect.objectContaining({ id: 'model-1', providerId: 'provider-1', variants: ['high'] }),
+      expect.objectContaining({ id: 'model-1', providerId: 'provider-1', variants: ['off', 'minimal', 'low', 'medium', 'high'] }),
     ])
   })
 

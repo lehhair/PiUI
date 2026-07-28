@@ -17,19 +17,24 @@ describe("listModelsForUi", () => {
     }
   })
 
-  it("returns Pi-native thinking levels with each model", async () => {
-    const result = await listModelsForUi("pi", async () => [{
+  it("returns the complete Pi-native model without mapping it", async () => {
+    const model = {
       id: "reasoning-model",
       name: "Reasoning model",
-      providerId: "test",
-      family: "test",
-      contextLimit: 100,
-      outputLimit: 10,
-      supportsReasoning: true,
-      thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"],
-      supportsImages: false,
-    }])
+      api: "test-api",
+      provider: "test",
+      baseUrl: "https://example.test",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh" },
+      input: ["text", "image"] as Array<"text" | "image">,
+      cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+      contextWindow: 100,
+      maxTokens: 10,
+      compat: { custom: true },
+      futureField: { retained: true },
+    }
+    const result = await listModelsForUi("pi", async () => [model])
 
-    assert.deepEqual(result.models[0]?.variants, ["off", "minimal", "low", "medium", "high", "xhigh"])
+    assert.deepEqual(result.models[0], model)
   })
 })

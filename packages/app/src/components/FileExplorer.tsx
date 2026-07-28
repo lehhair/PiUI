@@ -21,6 +21,10 @@ import {
   CloseIcon,
   CheckIcon,
   PencilIcon,
+  PlusIcon,
+  FileIcon,
+  FolderIcon,
+  TrashIcon,
 } from './Icons'
 import { CodePreview } from './CodePreview'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
@@ -40,12 +44,15 @@ import {
   type PreviewCategory,
 } from '../utils/mimeUtils'
 import { downloadFileContent } from '../utils/downloadUtils'
-import { searchText, searchFiles } from '../api/file'
+import { createDirectory, createFile, deleteEntry, moveEntry, searchText, searchFiles } from '../api/file'
 import type { FileContent, TextSearchMatch } from '../api/types'
 import { startInternalDrag } from '../lib/internalDragCore'
 import { toAbsolutePath } from '../features/mention'
 import { getDesktopPlatform, isTauri, isTauriMobile } from '../utils/tauri'
 import type { TargetLineRange } from './codeMirrorReadonlyExtensions'
+import { setFileEditorDirty } from '../store/unsavedFileStore'
+import { Dialog } from './ui/Dialog'
+import { Button } from './ui/Button'
 
 function canRevealInSystemExplorer(): boolean {
   return isTauri() && !isTauriMobile()
@@ -73,6 +80,16 @@ const MIN_PREVIEW_HEIGHT = 150
 
 const MARKDOWN_MIME_TYPES = new Set(['text/markdown', 'text/x-markdown', 'text/md', 'application/markdown'])
 const HTML_MIME_TYPES = new Set(['text/html', 'application/xhtml+xml'])
+
+type FileOperation =
+  | { kind: 'create-file'; parent: string }
+  | { kind: 'create-directory'; parent: string }
+  | { kind: 'rename'; path: string; type: 'file' | 'directory' }
+  | { kind: 'delete'; path: string; type: 'file' | 'directory' }
+
+function joinFilePath(parent: string, name: string): string {
+  return parent ? `${parent.replace(/\/$/, '')}/${name}` : name
+}
 const textEncoder = new TextEncoder()
 
 function isMarkdownPreview(language: string, mimeType?: string): boolean {
@@ -143,7 +160,17 @@ export const FileExplorer = memo(function FileExplorer({
   const [searchResults, setSearchResults] = useState<TextSearchMatch[]>([])
   const [fileResults, setFileResults] = useState<string[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
-  const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; absolutePath: string } | null>(null)
+  const [fileContextMenu, setFileContextMenu] = useState<{
+    x: number
+    y: number
+    path: string
+    absolutePath?: string
+    type: 'file' | 'directory'
+  } | null>(null)
+  const [fileOperation, setFileOperation] = useState<FileOperation | null>(null)
+  const [fileOperationValue, setFileOperationValue] = useState('')
+  const [fileOperationError, setFileOperationError] = useState<string | null>(null)
+  const [fileOperationBusy, setFileOperationBusy] = useState(false)
   const canRevealFiles = canRevealInSystemExplorer()
   const revealInSystemExplorerLabel = useMemo(() => getRevealInSystemExplorerLabel(t), [t])
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -218,23 +245,65 @@ export const FileExplorer = memo(function FileExplorer({
   )
 
   const handleFileContextMenu = useCallback(
-    (event: React.MouseEvent, path: string, absolute?: string) => {
-      if (!canRevealFiles) return
+    (event: React.MouseEvent, path: string, absolute?: string, type: 'file' | 'directory' = 'file') => {
       const absolutePath = resolveAbsolutePath(path, absolute)
-      if (!absolutePath) return
       event.preventDefault()
       event.stopPropagation()
-      setFileContextMenu({ x: event.clientX, y: event.clientY, absolutePath })
+      setFileContextMenu({ x: event.clientX, y: event.clientY, path, absolutePath: absolutePath ?? undefined, type })
     },
-    [canRevealFiles, resolveAbsolutePath],
+    [resolveAbsolutePath],
   )
 
   const handleRevealInSystemExplorer = useCallback(() => {
     if (!fileContextMenu) return
     const absolutePath = fileContextMenu.absolutePath
+    if (!absolutePath) return
     setFileContextMenu(null)
     void revealPathInSystemExplorer(absolutePath).catch(() => {})
   }, [fileContextMenu])
+
+  const openFileOperation = useCallback((operation: FileOperation) => {
+    setFileContextMenu(null)
+    setFileOperation(operation)
+    setFileOperationError(null)
+    setFileOperationValue(operation.kind === 'rename' ? operation.path.split('/').pop() ?? operation.path : '')
+  }, [])
+
+  const submitFileOperation = useCallback(async () => {
+    if (!directory || !fileOperation || fileOperationBusy) return
+    const value = fileOperationValue.trim()
+    if (fileOperation.kind !== 'delete' && (!value || value.includes('/') || value.includes('\\'))) {
+      setFileOperationError('Enter a single valid file or directory name')
+      return
+    }
+    setFileOperationBusy(true)
+    setFileOperationError(null)
+    try {
+      if (fileOperation.kind === 'create-file') {
+        await createFile(joinFilePath(fileOperation.parent, value), directory)
+      } else if (fileOperation.kind === 'create-directory') {
+        await createDirectory(joinFilePath(fileOperation.parent, value), directory)
+      } else if (fileOperation.kind === 'rename') {
+        const separator = fileOperation.path.lastIndexOf('/')
+        const parent = separator < 0 ? '' : fileOperation.path.slice(0, separator)
+        const target = joinFilePath(parent, value)
+        await moveEntry(fileOperation.path, target, directory)
+        if (previewFile?.path === fileOperation.path) {
+          layoutStore.closeFilePreview(panelTabId, fileOperation.path)
+          layoutStore.openFilePreview({ path: target, name: value }, position)
+        }
+      } else {
+        await deleteEntry(fileOperation.path, directory, fileOperation.type === 'directory')
+        layoutStore.closeFilePreview(panelTabId, fileOperation.path)
+      }
+      setFileOperation(null)
+      await refresh()
+    } catch (operationError) {
+      setFileOperationError(operationError instanceof Error ? operationError.message : 'File operation failed')
+    } finally {
+      setFileOperationBusy(false)
+    }
+  }, [directory, fileOperation, fileOperationBusy, fileOperationValue, panelTabId, position, previewFile?.path, refresh])
 
   useEffect(() => {
     if (!fileContextMenu) return
@@ -446,6 +515,25 @@ export const FileExplorer = memo(function FileExplorer({
           </div>
           <button
             type="button"
+            onClick={() => openFileOperation({ kind: 'create-file', parent: '' })}
+            aria-label="New file"
+            className="inline-flex h-6 w-6 items-center justify-center text-text-400 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors"
+            title="New file"
+          >
+            <FileIcon size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => openFileOperation({ kind: 'create-directory', parent: '' })}
+            aria-label="New directory"
+            className="relative inline-flex h-6 w-6 items-center justify-center text-text-400 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors"
+            title="New directory"
+          >
+            <FolderIcon size={12} />
+            <PlusIcon size={7} className="absolute right-0.5 bottom-0.5" />
+          </button>
+          <button
+            type="button"
             onClick={handleRefresh}
             disabled={isLoading}
             aria-label={t('common:refresh')}
@@ -467,7 +555,7 @@ export const FileExplorer = memo(function FileExplorer({
               error={searchError}
               onSelect={handleSearchResultClick}
               onSelectFile={handleFileResultClick}
-              onContextMenuFile={canRevealFiles ? handleFileContextMenu : undefined}
+              onContextMenuFile={handleFileContextMenu}
               directory={directory}
             />
           ) : isLoading && tree.length === 0 ? (
@@ -493,7 +581,7 @@ export const FileExplorer = memo(function FileExplorer({
                   expandedPaths={expandedPaths}
                   fileStatus={fileStatus}
                   onClick={handleFileClick}
-                  onContextMenu={canRevealFiles ? handleFileContextMenu : undefined}
+                  onContextMenu={handleFileContextMenu}
                 />
               ))}
             </div>
@@ -508,16 +596,51 @@ export const FileExplorer = memo(function FileExplorer({
             className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg p-1 min-w-[160px]"
             style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
           >
-            <button
-              type="button"
-              onClick={handleRevealInSystemExplorer}
-              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              {revealInSystemExplorerLabel}
+            {canRevealFiles ? (
+              <button type="button" onClick={handleRevealInSystemExplorer} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors">
+                {revealInSystemExplorerLabel}
+              </button>
+            ) : null}
+            {fileContextMenu.type === 'directory' ? (
+              <>
+                <button type="button" onClick={() => openFileOperation({ kind: 'create-file', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">New file</button>
+                <button type="button" onClick={() => openFileOperation({ kind: 'create-directory', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">New directory</button>
+              </>
+            ) : null}
+            <button type="button" onClick={() => openFileOperation({ kind: 'rename', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">Rename</button>
+            <button type="button" onClick={() => openFileOperation({ kind: 'delete', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-danger-100 hover:bg-danger-100/10 rounded-md flex items-center gap-2">
+              <TrashIcon size={12} />Delete
             </button>
           </div>,
           document.body,
         )}
+
+      <Dialog
+        isOpen={fileOperation !== null}
+        onClose={() => { if (!fileOperationBusy) setFileOperation(null) }}
+        title={fileOperation?.kind === 'delete' ? 'Delete entry' : fileOperation?.kind === 'rename' ? 'Rename entry' : fileOperation?.kind === 'create-directory' ? 'New directory' : 'New file'}
+        width={420}
+      >
+        <div className="space-y-3">
+          {fileOperation?.kind === 'delete' ? (
+            <p className="text-[length:var(--fs-sm)] text-text-200 break-all">Delete {fileOperation.path}{fileOperation.type === 'directory' ? ' and all of its contents' : ''}?</p>
+          ) : (
+            <input
+              autoFocus
+              value={fileOperationValue}
+              onChange={event => setFileOperationValue(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter') void submitFileOperation() }}
+              className="w-full h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100"
+              aria-label="File name"
+            />
+          )}
+          {fileOperationError ? <p className="text-[length:var(--fs-xs)] text-danger-100">{fileOperationError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setFileOperation(null)} disabled={fileOperationBusy}>Cancel</Button>
+            <Button variant={fileOperation?.kind === 'delete' ? 'danger' : 'primary'} size="sm" isLoading={fileOperationBusy} onClick={() => void submitFileOperation()}>{fileOperation?.kind === 'delete' ? 'Delete' : 'Apply'}</Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Resize Handle - 与标签栏同色 */}
       {showPreview && (
@@ -552,6 +675,8 @@ export const FileExplorer = memo(function FileExplorer({
             isResizing={isAnyResizing}
             directory={directory}
             onSave={savePreview}
+            onReload={loadPreview}
+            editorId={`${panelTabId}:${directory ?? ''}:${previewFile?.path ?? ''}`}
           />
         </div>
       )}
@@ -726,7 +851,7 @@ interface FileTreeItemProps {
   expandedPaths: Set<string>
   fileStatus: Map<string, { status: string }>
   onClick: (node: FileTreeNode) => void
-  onContextMenu?: (event: React.MouseEvent, path: string, absolute?: string) => void
+  onContextMenu?: (event: React.MouseEvent, path: string, absolute?: string, type?: 'file' | 'directory') => void
 }
 
 const FileTreeItem = memo(function FileTreeItem({
@@ -777,7 +902,7 @@ const FileTreeItem = memo(function FileTreeItem({
         type="button"
         onPointerDown={handlePointerDragStart}
         onClick={() => onClick(node)}
-        onContextMenu={event => onContextMenu?.(event, node.path, node.absolute)}
+        onContextMenu={event => onContextMenu?.(event, node.path, node.absolute, node.type)}
         className={`
           w-full flex items-center gap-1 px-2 py-0.5 text-left cursor-default
           select-none hover:bg-bg-200/50 transition-colors text-[length:var(--fs-sm)]
@@ -858,7 +983,9 @@ interface FilePreviewProps {
   onReorderPreview: (draggedPath: string, targetPath: string) => void
   isResizing?: boolean
   directory?: string
-  onSave: (path: string, text: string, etag?: string) => Promise<FileContent>
+  onSave: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileContent>
+  onReload: (path: string) => Promise<void>
+  editorId: string
 }
 
 function FilePreview({
@@ -877,6 +1004,8 @@ function FilePreview({
   isResizing = false,
   directory,
   onSave,
+  onReload,
+  editorId,
 }: FilePreviewProps) {
   const { t } = useTranslation(['components', 'common'])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -885,6 +1014,7 @@ function FilePreview({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [editEtag, setEditEtag] = useState<string | undefined>()
+  const [saveConflict, setSaveConflict] = useState(false)
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
@@ -894,6 +1024,7 @@ function FilePreview({
     if (!content || content.type !== 'text') return
     setDraft(content.encoding === 'base64' ? decodeBase64Text(content.content) : content.content)
     setSaveError(null)
+    setSaveConflict(false)
     setEditEtag(content.etag)
     setIsEditing(true)
   }, [content])
@@ -903,15 +1034,20 @@ function FilePreview({
     setSaveError(null)
   }, [])
 
-  const saveEditing = useCallback(async () => {
+  const saveEditing = useCallback(async (force = false) => {
     if (!path || isSaving) return
     setIsSaving(true)
     setSaveError(null)
     try {
-      await onSave(path, draft, editEtag)
+      if (force) await onSave(path, draft, editEtag, true)
+      else await onSave(path, draft, editEtag)
       setIsEditing(false)
+      setSaveConflict(false)
     } catch (saveFailure) {
       setSaveError(saveFailure instanceof Error ? saveFailure.message : 'Failed to save file')
+      setSaveConflict(Boolean(
+        saveFailure && typeof saveFailure === 'object' && 'code' in saveFailure && saveFailure.code === 'STALE_REVISION',
+      ))
     } finally {
       setIsSaving(false)
     }
@@ -923,11 +1059,28 @@ function FilePreview({
   const confirmDiscard = useCallback(() => !isDirty || window.confirm('Discard unsaved changes?'), [isDirty])
 
   useEffect(() => {
+    setFileEditorDirty(editorId, isDirty)
+    return () => setFileEditorDirty(editorId, false)
+  }, [editorId, isDirty])
+
+  useEffect(() => {
     if (!isDirty) return
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault() }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
   }, [isDirty])
+
+  useEffect(() => {
+    if (!isEditing) return
+    const saveShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void saveEditing(false)
+      }
+    }
+    window.addEventListener('keydown', saveShortcut)
+    return () => window.removeEventListener('keydown', saveShortcut)
+  }, [isEditing, saveEditing])
 
   // 下载当前文件
   const handleDownload = useCallback(() => {
@@ -1134,7 +1287,7 @@ function FilePreview({
               {content.type === 'text' && (isEditing ? (
                 <>
                   <button
-                    onClick={() => void saveEditing()}
+                    onClick={() => void saveEditing(false)}
                     disabled={isSaving}
                     className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
                     title={t('common:save')}
@@ -1191,7 +1344,17 @@ function FilePreview({
           </div>
         ) : isEditing ? (
           <div className="min-h-full flex flex-col">
-            {saveError && <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)]">{saveError}</div>}
+            {saveError && (
+              <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
+                <span>{saveError}</span>
+                {saveConflict ? (
+                  <span className="flex gap-2 shrink-0">
+                    <button className="text-text-200 hover:text-text-100" onClick={() => { if (path) { setIsEditing(false); void onReload(path) } }}>Reload</button>
+                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>Overwrite</button>
+                  </span>
+                ) : null}
+              </div>
+            )}
             <CodePreview
               code={draft}
               language={language || 'text'}

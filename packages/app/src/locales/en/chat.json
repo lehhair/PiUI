@@ -1,6 +1,6 @@
 {
   "header": {
-    "openCode": "OpenCode",
+    "openCode": "π",
     "newChat": "New Chat",
     "openSidebar": "Open sidebar",
     "clickToRename": "Click to rename",
@@ -123,7 +123,7 @@
   "sidebar": {
     "allProjects": "All projects",
     "global": "Global",
-    "globalProjectHint": "Non-Git workspace, usually where opencode started",
+    "globalProjectHint": "Non-Git workspace registered with PiUI",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
     "newChat": "New chat",

@@ -15,11 +15,18 @@ describe('Pi skill facade', () => {
 
   it('maps skills from the active Pi session', async () => {
     listSessionSkills.mockResolvedValue({
-      skills: [{ name: 'review', description: 'Review code', source: '/skills/review' }],
+      skills: [{
+        name: 'review',
+        description: 'Review code',
+        filePath: '/skills/review/SKILL.md',
+        baseDir: '/skills/review',
+        sourceInfo: { origin: 'top-level' },
+        disableModelInvocation: false,
+      }],
     })
 
     await expect(getSkills('session-1')).resolves.toEqual([
-      { name: 'review', description: 'Review code', location: '/skills/review' },
+      { name: 'review', description: 'Review code', location: '/skills/review/SKILL.md' },
     ])
     expect(listSessionSkills).toHaveBeenCalledWith('session-1')
   })

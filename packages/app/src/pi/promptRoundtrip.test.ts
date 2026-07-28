@@ -46,7 +46,8 @@ function snap(id: string, n: number): SessionSnapshotV1 {
       activeTools: [],
     },
     timeline,
-    native: { namespace: "pi", schemaVersion: 1, leafId: `a${n - 1}`, entries: [], tree: [] },
+    timelinePage: { hasMore: false },
+    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: `a${n - 1}`, entryCount: 0 },
   }
 }
 

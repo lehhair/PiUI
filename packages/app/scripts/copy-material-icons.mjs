@@ -8,11 +8,13 @@
 import { copyFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
+const require = createRequire(import.meta.url)
 
-const srcDir = resolve(root, 'node_modules/material-icon-theme/icons')
+const srcDir = resolve(dirname(require.resolve('material-icon-theme/package.json')), 'icons')
 const destDir = resolve(root, 'public/material-icons')
 
 if (!existsSync(srcDir)) {

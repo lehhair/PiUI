@@ -5,6 +5,44 @@ import type { ProviderAuthEventV1 } from "@piui/protocol"
 import { ProviderAuthHost } from "./provider-auth-host.ts"
 
 describe("ProviderAuthHost", () => {
+  it("keeps native model fields including maxTokens during inspection", async () => {
+    const model = {
+      id: "fixture-model",
+      name: "Fixture",
+      api: "fixture-api",
+      provider: "fixture",
+      baseUrl: "https://example.test",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+      contextWindow: 4096,
+      maxTokens: 512,
+      compat: { future: true },
+    }
+    const provider = { id: "fixture", name: "Fixture", auth: {} }
+    const runtime = {
+      getProviders: () => [provider],
+      getProvider: () => provider,
+      hasConfiguredAuth: () => true,
+      getProviderAuthStatus: () => ({ configured: true }),
+      checkAuth: async () => ({ configured: true }),
+      getRegisteredProviderIds: () => ["fixture"],
+      getRegisteredProviderConfig: () => ({ apiKey: "secret", maxTokens: 99 }),
+      getModels: () => [model],
+      getAvailable: async () => [model],
+      getAvailableSnapshot: () => [model],
+      listCredentials: async () => [{ providerId: "fixture", type: "api_key" }],
+      getError: () => undefined,
+    } as unknown as ModelRuntime
+
+    const snapshot = await new ProviderAuthHost(async () => runtime).inspect()
+    const registered = snapshot.registeredProviderConfigs.fixture as Record<string, unknown>
+    assert.deepEqual(snapshot.models[0], model)
+    assert.equal(snapshot.availableModels[0]?.maxTokens, 512)
+    assert.equal(registered.apiKey, "[redacted]")
+    assert.equal(registered.maxTokens, 99)
+  })
+
   it("preserves refresh errors and recreates the runtime after replacement", async () => {
     let creates = 0
     const host = new ProviderAuthHost(async () => {

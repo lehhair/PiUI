@@ -11,6 +11,11 @@ import { applySnapshotToUi } from "./applySnapshot"
 import { PiEventSocket } from "./eventSocket"
 import { clearPiSessionIndex } from "./piSessionIndex"
 import { sessionProjectionStore } from "./sessionProjectionStore"
+import {
+  getManagementEventSnapshot,
+  resetManagementEvents,
+  trackManagementProviders,
+} from "./managementEventStore"
 
 const { fetchSnapshot, fetchExtensionUiSnapshot } = vi.hoisted(() => ({
   fetchSnapshot: vi.fn<(id: string) => Promise<SessionSnapshotV1>>(),
@@ -69,7 +74,8 @@ function snapshot(id: string, sequence: number, text: string): SessionSnapshotV1
       activeTools: [],
     },
     timeline: [{ type: "user", id: `entry-${id}`, entryId: `entry-${id}`, timestamp: 1, text }],
-    native: { namespace: "pi", schemaVersion: 1, leafId: `entry-${id}`, entries: [], tree: [] },
+    timelinePage: { hasMore: false },
+    native: { namespace: "pi", schemaVersion: 1, sdkVersion: "0.81.1", revision: 1, epoch: "test", header: null, leafId: `entry-${id}`, entryCount: 0 },
   }
 }
 
@@ -102,6 +108,7 @@ describe("PiEventSocket", () => {
   beforeEach(() => {
     sessionProjectionStore.clear()
     clearPiSessionIndex()
+    resetManagementEvents()
     FakeWebSocket.instances = []
     fetchSnapshot.mockReset()
     fetchSnapshot.mockRejectedValue(new Error("not available in unit test"))
@@ -271,6 +278,38 @@ describe("PiEventSocket", () => {
     expect(gitListener).toHaveBeenCalledTimes(1)
     window.removeEventListener("piui:workspace-files-changed", fileListener)
     window.removeEventListener("piui:workspace-git-updated", gitListener)
+    socket.close()
+  })
+
+  it("subscribes to provider and resource streams and delivers management events", async () => {
+    applySnapshotToUi(snapshot("active", 1, "base"))
+    trackManagementProviders(["anthropic"])
+    const socket = new PiEventSocket()
+    socket.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws?.onopen?.()
+    const subscribe = JSON.parse(ws?.sent[0] ?? "{}") as { streams: Array<{ kind: string; id: string }> }
+    expect(subscribe.streams).toContainEqual({ kind: "provider", id: "anthropic" })
+    expect(subscribe.streams).toContainEqual({ kind: "resources", id: "/workspace" })
+
+    const providerKey = eventStreamKeyV2({ kind: "provider", id: "anthropic" })
+    const resourcesKey = eventStreamKeyV2({ kind: "resources", id: "/workspace" })
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "control", type: "resync_required", streams: {
+      [providerKey]: { cursor: { epoch: "provider-epoch", sequence: 0 }, reason: "missing_cursor" },
+      [resourcesKey]: { cursor: { epoch: "resources-epoch", sequence: 0 }, reason: "missing_cursor" },
+    } }) })
+    await vi.waitFor(() => expect(JSON.parse(ws?.sent.at(-1) ?? "{}").cursors?.[providerKey]?.sequence).toBe(0))
+
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: {
+      protocolVersion: 2, stream: { kind: "provider", id: "anthropic" }, cursor: { epoch: "provider-epoch", sequence: 1 }, eventId: "auth-1", timestamp: "2026-01-01T00:00:00.000Z", type: "provider.auth.flow",
+      payload: { type: "prompt", flowId: "flow-1", promptId: "prompt-1", providerId: "anthropic", prompt: { type: "text", message: "Code" } },
+    } }) })
+    ws?.onmessage?.({ data: JSON.stringify({ channel: "event", event: {
+      protocolVersion: 2, stream: { kind: "resources", id: "/workspace" }, cursor: { epoch: "resources-epoch", sequence: 1 }, eventId: "package-1", timestamp: "2026-01-01T00:00:00.000Z", type: "packages.progress",
+      payload: { commandId: "command-1", workspacePath: "/workspace", type: "progress", action: "install", source: "pkg", message: "working" },
+    } }) })
+    expect(getManagementEventSnapshot().flows["flow-1"].event?.type).toBe("prompt")
+    expect(getManagementEventSnapshot().packageProgress["command-1"].message).toBe("working")
     socket.close()
   })
 })

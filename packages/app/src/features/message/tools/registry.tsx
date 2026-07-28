@@ -64,6 +64,12 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   const { state } = part
   const inputObj = state.input as Record<string, unknown> | undefined
   const metadata = state.metadata as Record<string, unknown> | undefined
+  const nativeDetails = metadata?.nativeDetails && typeof metadata.nativeDetails === 'object'
+    ? metadata.nativeDetails as Record<string, unknown>
+    : undefined
+  const normalized = metadata?.normalized && typeof metadata.normalized === 'object'
+    ? metadata.normalized as Record<string, unknown>
+    : undefined
 
   const result: ExtractedToolData = {}
 
@@ -85,11 +91,15 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   if (!result.filePath && inputObj?.filePath) {
     result.filePath = String(inputObj.filePath)
   }
+  if (!result.filePath && typeof inputObj?.path === 'string') result.filePath = inputObj.path
 
   // Exit code
   if (metadata && typeof metadata.exit === 'number') {
     result.exitCode = metadata.exit
   }
+  if (result.exitCode === undefined && typeof normalized?.exitCode === 'number') result.exitCode = normalized.exitCode
+  const cwd = normalized?.cwd ?? metadata?.cwd ?? nativeDetails?.cwd
+  if (typeof cwd === 'string') result.cwd = cwd
 
   // Diff / Files (from metadata)
   if (metadata) {
@@ -170,6 +180,26 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
         result.diagnostics = filtered
       }
     }
+  }
+
+  const patch = normalized?.patch ?? nativeDetails?.patch ?? nativeDetails?.diff
+  if (!result.diff && typeof patch === 'string') result.diff = patch
+  const truncation = nativeDetails?.truncation as Record<string, unknown> | undefined
+  const limits = [nativeDetails?.matchLimitReached, nativeDetails?.resultLimitReached, nativeDetails?.entryLimitReached]
+    .filter(value => typeof value === 'number')
+  if (truncation?.truncated === true || limits.length > 0) {
+    const shown = typeof truncation?.outputLines === 'number' ? `${truncation.outputLines} lines shown` : 'Output truncated'
+    const fullPath = typeof nativeDetails?.fullOutputPath === 'string' ? ` · Full output: ${nativeDetails.fullOutputPath}` : ''
+    result.notice = `${shown}${fullPath}`
+  }
+  if (Array.isArray(metadata?.images)) {
+    result.images = metadata.images.flatMap(image => {
+      if (!image || typeof image !== 'object') return []
+      const value = image as Record<string, unknown>
+      return typeof value.url === 'string' && typeof value.mimeType === 'string'
+        ? [{ url: value.url, mimeType: value.mimeType, requiresAuth: value.requiresAuth === true }]
+        : []
+    })
   }
 
   // Output language from filePath
@@ -258,6 +288,12 @@ function editExtractData(part: ToolPart): ExtractedToolData {
       after: String(inputObj.newString),
     }
   }
+  if (!base.files && !base.diff && Array.isArray(inputObj?.edits) && inputObj.edits.length === 1) {
+    const edit = inputObj.edits[0] as Record<string, unknown>
+    if (typeof edit.oldText === 'string' && typeof edit.newText === 'string') {
+      base.diff = { before: edit.oldText, after: edit.newText }
+    }
+  }
 
   return base
 }
@@ -268,6 +304,11 @@ function editExtractData(part: ToolPart): ExtractedToolData {
 // ============================================
 
 export const toolRegistry: ToolRegistry = [
+  { match: exact('bash'), icon: <TerminalIcon />, extractData: bashExtractData, renderer: BashRenderer },
+  { match: exact('read'), icon: <FileReadIcon />, extractData: readExtractData },
+  { match: exact('write'), icon: <FileWriteIcon />, extractData: writeExtractData },
+  { match: exact('edit'), icon: <FileWriteIcon />, extractData: editExtractData },
+  { match: exact('grep', 'find', 'ls'), icon: <SearchIcon /> },
   // Bash / Terminal
   {
     match: (name: string) => includes('bash', 'cmd', 'terminal', 'shell')(name) || exact('sh')(name),

@@ -29,6 +29,8 @@ export interface ExtractedToolData {
   filePath?: string
   cwd?: string
   exitCode?: number
+  notice?: string
+  images?: Array<{ url: string; mimeType: string; requiresAuth?: boolean }>
 
   // LSP 诊断
   diagnostics?: DiagnosticInfo[]

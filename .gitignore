@@ -42,3 +42,4 @@ src-tauri/target/
 *.sw?
 packages/app/package-lock.json
 packages/app/dist
+packages/app/public/material-icons/

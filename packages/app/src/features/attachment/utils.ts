@@ -12,6 +12,7 @@ export function fromFilePart(
     type: 'file'
     mime: string
     url: string
+    requiresAuth?: boolean
     filename?: string
     source?: {
       text?: { value: string; start: number; end: number }
@@ -26,6 +27,7 @@ export function fromFilePart(
     type: isFolder ? 'folder' : 'file',
     displayName: part.filename || part.source?.path || 'file',
     url: part.url,
+    requiresAuth: part.requiresAuth,
     mime: part.mime,
     relativePath: part.source?.path,
     // content 优先使用传入的 synthetic content

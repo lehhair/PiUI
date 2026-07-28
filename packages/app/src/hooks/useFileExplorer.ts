@@ -43,7 +43,7 @@ export interface UseFileExplorerResult {
   previewError: string | null
   loadPreview: (path: string) => Promise<void>
   clearPreview: () => void
-  savePreview: (path: string, text: string, etag?: string) => Promise<FileContent>
+  savePreview: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileContent>
 
   // 文件状态
   fileStatus: Map<string, FileStatusItem>
@@ -95,12 +95,20 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
 
   // 用于防止过时请求
   const loadIdRef = useRef(0)
+  const loadedDirectoryRef = useRef<string | undefined>(undefined)
   const childLoadIdsRef = useRef<Map<string, number>>(new Map())
   const statusLoadIdRef = useRef(0)
 
   // 加载根目录
   const loadRoot = useCallback(async () => {
     if (!directory) return
+    if (loadedDirectoryRef.current !== directory) {
+      loadedDirectoryRef.current = directory
+      setTree([])
+      setFileStatus(new Map())
+      previewCacheRef.current.clear()
+      setPreviewContent(null)
+    }
 
     const loadId = ++loadIdRef.current
     setIsLoading(true)
@@ -209,8 +217,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
           updateTreeNode(prev, parentPath, node => ({
             ...node,
             isLoading: false,
-            isLoaded: true,
-            children: [],
+            isLoaded: false,
           })),
         )
       }
@@ -321,11 +328,15 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewPathRef.current = null
   }, [])
 
-  const savePreview = useCallback(async (path: string, text: string, etag?: string) => {
+  const savePreview = useCallback(async (path: string, text: string, etag?: string, force = false) => {
     if (!directory) throw new Error('No workspace is available')
     const current = previewCacheRef.current.get(path) ?? previewContent
     if (!current || current.type !== 'text') throw new Error('Only text files can be edited')
-    const saved = await saveFile(path, { ...current, content: text, etag: etag ?? current.etag }, directory)
+    const saved = await saveFile(path, {
+      ...current,
+      content: text,
+      etag: force ? undefined : etag ?? current.etag,
+    }, directory)
     previewCacheRef.current.set(path, saved)
     if (previewPathRef.current === path) setPreviewContent(saved)
     return saved
@@ -374,7 +385,11 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       }))
       if (parents.has('')) void loadRoot()
       for (const parent of parents) {
-        if (parent && expandedPaths.has(parent)) void loadChildren(parent)
+        if (!parent) continue
+        if (expandedPaths.has(parent)) void loadChildren(parent)
+        else {
+          setTree(prev => updateTreeNode(prev, parent, node => ({ ...node, isLoaded: false })))
+        }
       }
       const previewPath = previewPathRef.current
       if (previewPath && detail.changes.some(change => change.path === previewPath)) void loadPreview(previewPath)
