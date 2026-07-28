@@ -75,6 +75,7 @@ describe("app-local native session messages", () => {
   it("projects native streaming events without changing persisted entries", () => {
     const initial = snapshot(1, 1, "u1")
     applySnapshotToUi(initial, { nativePage: { ...page(initial.native), items: page().items.slice(0, 1) } })
+    const persistedUser = messageStore.getSessionState("s-apply")?.messages[0]
     applyPiNativeEventToUi("s-apply", {
       type: "message_start",
       message: { role: "assistant", content: [] },
@@ -87,6 +88,7 @@ describe("app-local native session messages", () => {
     expect(assistant?.parts[0]).toMatchObject({ type: "text", text: "partial" })
     expect(assistant?.isStreaming).toBe(true)
     expect(messageStore.getIsStreaming("s-apply")).toBe(true)
+    expect(messageStore.getSessionState("s-apply")?.messages[0]).toBe(persistedUser)
 
     applyPiNativeEventToUi("s-apply", { type: "agent_settled" })
     expect(messageStore.getIsStreaming("s-apply")).toBe(false)
@@ -106,5 +108,28 @@ describe("app-local native session messages", () => {
       expect.objectContaining({ type: "text", text: "ping" }),
       expect.objectContaining({ type: "text", text: "pong" }),
     ])
+  })
+
+  it("keeps every persisted message reference stable during live updates", () => {
+    applySnapshotToUi(snapshot(), { nativePage: page() })
+    const persisted = [...(messageStore.getSessionState("s-apply")?.messages ?? [])]
+
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "user", content: "next" },
+    })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    })
+    applyPiNativeEventToUi("s-apply", {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "streaming" }] },
+    })
+
+    const current = messageStore.getSessionState("s-apply")?.messages ?? []
+    expect(current[0]).toBe(persisted[0])
+    expect(current[1]).toBe(persisted[1])
+    expect(current.at(-1)?.parts[0]).toMatchObject({ type: "text", text: "streaming" })
   })
 })
