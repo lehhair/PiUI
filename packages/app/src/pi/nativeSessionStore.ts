@@ -92,6 +92,12 @@ class NativeSessionStore {
     return this.native.get(sessionId)?.liveTools ?? new Map()
   }
 
+  getTransientEntryIds(sessionId: string): ReadonlySet<string> {
+    return new Set(this.native.get(sessionId)?.transient.flatMap(entry =>
+      typeof entry.id === "string" ? [entry.id] : []
+    ) ?? [])
+  }
+
   getNativeEventStreaming(sessionId: string): boolean | undefined {
     return this.native.get(sessionId)?.nativeEventStreaming
   }

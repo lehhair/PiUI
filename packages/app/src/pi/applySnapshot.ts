@@ -50,6 +50,47 @@ function publishNativeMessages(sessionId: string): void {
   messageStore.setStreaming(sessionId, nativeStreaming ?? snapshot.runtime.isStreaming)
 }
 
+function publishNativeLiveMessages(sessionId: string): void {
+  const snapshot = nativeSessionStore.getSnapshot(sessionId)
+  if (!snapshot || !nativeSessionStore.hasNativePage(sessionId)) return
+  const history = nativeSessionStore.getHistoryState(sessionId)
+  const nativeStreaming = nativeSessionStore.getNativeEventStreaming(sessionId)
+  if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId)) {
+    messageStore.updateSessionMetadata(sessionId, {
+      title: snapshot.session.title,
+      directory: snapshot.session.directory,
+      hasMoreHistory: history.hasMore,
+      historyCursor: history.beforeCursor,
+    })
+    messageStore.setStreaming(sessionId, nativeStreaming ?? snapshot.runtime.isStreaming)
+    return
+  }
+  const transientIds = nativeSessionStore.getTransientEntryIds(sessionId)
+  const liveToolCallIds = new Set(nativeSessionStore.getLiveTools(sessionId).keys())
+  const model = snapshot.runtime.model
+    ? { providerID: snapshot.runtime.model.provider, modelID: snapshot.runtime.model.id }
+    : undefined
+  const messages = nativeEntriesToUiMessages(nativeSessionStore.getActiveBranch(sessionId), {
+    sessionId,
+    directory: snapshot.session.directory,
+    model,
+    streamingEntryIds: nativeSessionStore.getStreamingEntryIds(sessionId),
+    liveTools: nativeSessionStore.getLiveTools(sessionId),
+  })
+  for (const message of messages) {
+    const isTransient = transientIds.has(message.info.entryId ?? message.info.id)
+    const hasLiveTool = message.parts.some(part => part.type === "tool" && liveToolCallIds.has(part.callID))
+    if (isTransient || hasLiveTool) messageStore.upsertLocalMessage(message)
+  }
+  messageStore.updateSessionMetadata(sessionId, {
+    title: snapshot.session.title,
+    directory: snapshot.session.directory,
+    hasMoreHistory: history.hasMore,
+    historyCursor: history.beforeCursor,
+  })
+  messageStore.setStreaming(sessionId, nativeStreaming ?? snapshot.runtime.isStreaming)
+}
+
 /** Push a Pi snapshot into the UI stores consumed by ChatArea. */
 export function applySnapshotToUi(
   snapshot: SessionSnapshotV1,
@@ -93,7 +134,7 @@ export function appendPiNativeEntriesPageToUi(sessionId: string, page: PiNativeE
 export function applyPiNativeEventToUi(sessionId: string, event: unknown): boolean {
   const applied = nativeSessionStore.applyNativeEvent(sessionId, event)
   if (applied) {
-    publishNativeMessages(sessionId)
+    publishNativeLiveMessages(sessionId)
     if (nativeSessionStore.hasDisconnectedTransientBranch(sessionId) &&
       event && typeof event === "object" && !Array.isArray(event) && "type" in event && event.type === "message_start") {
       void refreshPiNativeBranch(sessionId).catch(() => undefined)
