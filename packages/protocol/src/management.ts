@@ -95,6 +95,7 @@ export interface PiSettingsPatchV1 {
   compactionEnabled?: boolean
   retryEnabled?: boolean
   httpIdleTimeoutMs?: number
+  httpProxy?: string | null
   hideThinkingBlock?: boolean
   showCacheMissNotices?: boolean
   quietStartup?: boolean

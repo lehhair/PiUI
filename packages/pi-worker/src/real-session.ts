@@ -3,6 +3,7 @@
  * Only used when PIUI_DRIVER=pi. Will call configured models.
  */
 import {
+  applyHttpProxySettings,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
@@ -10,17 +11,15 @@ import {
   getAgentDir,
   ModelRuntime,
   ProjectTrustStore,
+  resolveProjectTrusted,
   resolveModelScopeWithDiagnostics,
   SessionManager,
   SettingsManager,
   hasTrustRequiringProjectResources,
-  type LoadExtensionsResult,
   type ProjectTrustContext,
-  type ProjectTrustEventResult,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type SessionEntry,
-  type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type {
@@ -29,7 +28,6 @@ import type {
   CompactionStateV1,
   PiNativeJsonValueV1,
   PiNativeSessionEnvelopeV1,
-  PiNativeTreeRefV1,
   PiToolInfoV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
@@ -233,6 +231,7 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   sessionStartEvent,
 }) => {
   const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+  applyHttpProxySettings(globalSettings.getHttpProxy())
   const trustDiagnostics: string[] = []
   const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
   const services = await createAgentSessionServices({
@@ -240,12 +239,13 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
     agentDir,
     settingsManager,
     resourceLoaderReloadOptions: {
-      resolveProjectTrust: ({ extensionsResult }) => resolveProjectTrustForRpc({
+      resolveProjectTrust: ({ extensionsResult }) => resolveProjectTrusted({
         cwd,
-        agentDir,
+        trustStore: new ProjectTrustStore(agentDir),
         extensionsResult,
-        defaultDecision: globalSettings.getDefaultProjectTrust(),
-        onError: message => trustDiagnostics.push(message),
+        defaultProjectTrust: globalSettings.getDefaultProjectTrust(),
+        projectTrustContext: projectTrustContextForRpc(cwd),
+        onExtensionError: message => trustDiagnostics.push(message),
       }),
     },
   })
@@ -269,16 +269,9 @@ function settingsForWorkspace(cwd: string, agentDir = getAgentDir()): { manager:
   }
 }
 
-async function resolveProjectTrustForRpc(options: {
-  cwd: string
-  agentDir: string
-  extensionsResult: LoadExtensionsResult
-  defaultDecision: "always" | "never" | "ask"
-  onError: (message: string) => void
-}): Promise<boolean> {
-  if (!hasTrustRequiringProjectResources(options.cwd)) return true
-  const context: ProjectTrustContext = {
-    cwd: options.cwd,
+function projectTrustContextForRpc(cwd: string): ProjectTrustContext {
+  return {
+    cwd,
     mode: "rpc",
     hasUI: false,
     ui: {
@@ -288,22 +281,6 @@ async function resolveProjectTrustForRpc(options: {
       notify: () => {},
     },
   }
-  for (const extension of options.extensionsResult.extensions) {
-    for (const handler of extension.handlers.get("project_trust") ?? []) {
-      try {
-        const result = await handler({ type: "project_trust", cwd: options.cwd }, context) as ProjectTrustEventResult
-        if (!result || result.trusted === "undecided") continue
-        const trusted = result.trusted === "yes"
-        if (result.remember === true) new ProjectTrustStore(options.agentDir).set(options.cwd, trusted)
-        return trusted
-      } catch (error) {
-        options.onError(`Extension "${extension.path}" project_trust error: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-  }
-  const saved = new ProjectTrustStore(options.agentDir).get(options.cwd)
-  if (saved !== null) return saved
-  return options.defaultDecision === "always"
 }
 
 function configuredSessionDir(cwd: string, agentDir = getAgentDir()): string | undefined {
@@ -341,7 +318,7 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
       providerRetry: manager.getProviderRetrySettings(),
       httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
       websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs(),
-      httpProxy: typeof global.httpProxy === "string" ? global.httpProxy : undefined,
+      httpProxy: manager.getHttpProxy(),
       externalEditor: manager.getExternalEditorCommand(),
       hideThinkingBlock: manager.getHideThinkingBlock(),
       showCacheMissNotices: manager.getShowCacheMissNotices(),
@@ -398,6 +375,7 @@ function applySettingsPatch(manager: SettingsManager, patch: PiSettingsPatchV1):
     else if (key === "compactionEnabled") manager.setCompactionEnabled(expectBoolean(key, value))
     else if (key === "retryEnabled") manager.setRetryEnabled(expectBoolean(key, value))
     else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNonNegativeNumber(key, value))
+    else if (key === "httpProxy") manager.setHttpProxy(expectOptionalString(key, value))
     else if (key === "hideThinkingBlock") manager.setHideThinkingBlock(expectBoolean(key, value))
     else if (key === "showCacheMissNotices") manager.setShowCacheMissNotices(expectBoolean(key, value))
     else if (key === "shellPath") manager.setShellPath(expectOptionalString(key, value))
@@ -767,6 +745,7 @@ export class RealPiSession {
     const { manager, trusted } = settingsForWorkspace(cwd, agentDir)
     applySettingsPatch(manager, patch)
     await manager.flush()
+    if ("httpProxy" in patch) applyHttpProxySettings(manager.getHttpProxy())
     return settingsSnapshot(cwd, manager, trusted)
   }
 
@@ -957,6 +936,10 @@ export class RealPiSession {
       throw Object.assign(new Error("Pi session entries are not JSON objects"), { code: "NATIVE_SESSION_NOT_JSON" })
     }
     const nativeEntries = entries.filter(isNativeJsonObject)
+    const tree = toNativeJsonValue(manager.getTree())
+    if (!Array.isArray(tree) || tree.some(node => !isNativeJsonObject(node))) {
+      throw Object.assign(new Error("Pi session tree nodes are not JSON objects"), { code: "NATIVE_SESSION_NOT_JSON" })
+    }
     const version = isNativeJsonObject(header) && typeof header.version === "number" ? header.version : undefined
     return {
       namespace: "pi",
@@ -967,7 +950,7 @@ export class RealPiSession {
       header: header ?? null,
       leafId: manager.getLeafId(),
       entries: nativeEntries,
-      tree: mapNativeTreeRefs(manager.getTree()),
+      tree: tree.filter(isNativeJsonObject),
     }
   }
 
@@ -1625,35 +1608,7 @@ export class RealPiSession {
   }
 
   listCommands(): PiCommandInfo[] {
-    const out: PiCommandInfo[] = []
-    const runner = this.runtime.session.extensionRunner
-    if (runner) {
-      for (const command of runner.getRegisteredCommands()) {
-        out.push({
-          name: command.invocationName,
-          description: command.description,
-          source: "extension",
-          sourceInfo: command.sourceInfo,
-        })
-      }
-    }
-    for (const template of this.runtime.session.promptTemplates) {
-      out.push({
-        name: template.name,
-        description: template.description,
-        source: "prompt",
-        sourceInfo: template.sourceInfo,
-      })
-    }
-    for (const skill of this.listSkills()) {
-      out.push({
-        name: `skill:${skill.name}`,
-        description: skill.description,
-        source: "skill",
-        sourceInfo: skill.sourceInfo,
-      })
-    }
-    return out
+    return jsonClone(this.runtime.session.getCommands())
   }
 
   async dispose(): Promise<void> {
@@ -1713,15 +1668,6 @@ function toJsonValue(value: unknown): unknown {
     if (typeof item === "function" || typeof item === "symbol") return undefined
     if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
     return item
-  }))
-}
-
-function mapNativeTreeRefs(nodes: SessionTreeNode[]): PiNativeTreeRefV1[] {
-  return nodes.map(node => ({
-    entryId: node.entry.id,
-    label: node.label,
-    labelTimestamp: node.labelTimestamp,
-    children: mapNativeTreeRefs(node.children),
   }))
 }
 

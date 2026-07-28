@@ -79,11 +79,14 @@ describe("RealPiSession with the Pi SDK", () => {
     const agentDir = path.join(root, "agent")
     mkdirSync(cwd)
     mkdirSync(agentDir)
+    const previousHttpProxy = process.env.HTTP_PROXY
+    const previousHttpsProxy = process.env.HTTPS_PROXY
     try {
       const result = await RealPiSession.patchSettings(cwd, {
         defaultThinkingLevel: "max",
         transport: "websocket-cached",
         httpIdleTimeoutMs: 1234,
+        httpProxy: " http://127.0.0.1:7890 ",
         shellPath: null,
         packages: [
           "npm:plain-package",
@@ -94,6 +97,7 @@ describe("RealPiSession with the Pi SDK", () => {
       assert.equal(result.effective.defaultThinkingLevel, "max")
       assert.equal(result.effective.transport, "websocket-cached")
       assert.equal(result.effective.httpIdleTimeoutMs, 1234)
+      assert.equal(result.effective.httpProxy, "http://127.0.0.1:7890")
       assert.deepEqual(result.effective.packages, [
         "npm:plain-package",
         { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
@@ -111,7 +115,17 @@ describe("RealPiSession with the Pi SDK", () => {
         RealPiSession.patchSettings(cwd, { httpIdleTimeoutMs: -1 }, agentDir),
         /invalid Pi setting: httpIdleTimeoutMs/,
       )
+      await assert.rejects(
+        RealPiSession.patchSettings(cwd, { httpProxy: 42 } as never, agentDir),
+        /invalid Pi setting: httpProxy/,
+      )
+      const cleared = await RealPiSession.patchSettings(cwd, { httpProxy: null }, agentDir)
+      assert.equal(cleared.effective.httpProxy, undefined)
     } finally {
+      if (previousHttpProxy === undefined) delete process.env.HTTP_PROXY
+      else process.env.HTTP_PROXY = previousHttpProxy
+      if (previousHttpsProxy === undefined) delete process.env.HTTPS_PROXY
+      else process.env.HTTPS_PROXY = previousHttpsProxy
       rmSync(root, { recursive: true, force: true })
     }
   })
@@ -251,6 +265,7 @@ export default function (pi) {
       session.setSessionName("Offline R3")
       assert.equal(session.getSessionName(), "Offline R3")
       assert.equal(findTreeLabel(session.getNativeEnvelope().tree, String(assistantEntry.id)), "offline checkpoint")
+      assert.deepEqual(findTreeNode(session.getNativeEnvelope().tree, String(assistantEntry.id))?.entry, assistantEntry)
       assert.throws(
         () => session!.setActiveTools(["piui-tool-that-does-not-exist"]),
         error => (error as { code?: string }).code === "INVALID_REQUEST",
@@ -562,11 +577,26 @@ function findTreeLabel(
   roots: ReturnType<RealPiSession["getNativeEnvelope"]>["tree"],
   entryId: string,
 ): string | undefined {
+  const node = findTreeNode(roots, entryId)
+  return typeof node?.label === "string" ? node.label : undefined
+}
+
+function findTreeNode(
+  roots: ReturnType<RealPiSession["getNativeEnvelope"]>["tree"],
+  entryId: string,
+): ReturnType<RealPiSession["getNativeEnvelope"]>["tree"][number] | undefined {
   const stack = [...roots]
   while (stack.length > 0) {
     const node = stack.pop()!
-    if (node.entryId === entryId) return node.label
-    stack.push(...node.children)
+    const entry = node.entry
+    if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.id === entryId) {
+      return node
+    }
+    if (Array.isArray(node.children)) {
+      stack.push(...node.children.filter(
+        (child): child is typeof node => Boolean(child) && typeof child === "object" && !Array.isArray(child),
+      ))
+    }
   }
   return undefined
 }

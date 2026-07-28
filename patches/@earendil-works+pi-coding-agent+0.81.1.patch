@@ -1,0 +1,199 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts
+index 2d4c5d1..6c100b2 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts
+@@ -23,6 +23,7 @@ import { type PromptTemplate } from "./prompt-templates.ts";
+ import type { ResourceLoader } from "./resource-loader.ts";
+ import type { BranchSummaryEntry, SessionEntry, SessionManager } from "./session-manager.ts";
+ import type { SettingsManager } from "./settings-manager.ts";
++import type { SlashCommandInfo } from "./slash-commands.ts";
+ import { type BashOperations } from "./tools/bash.ts";
+ /** Parsed skill block from a user message */
+ export interface ParsedSkillBlock {
+@@ -304,6 +305,8 @@ export declare class AgentSession {
+      * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
+      */
+     getAllTools(): ToolInfo[];
++    /** Get all slash commands available for prompt invocation. */
++    getCommands(): SlashCommandInfo[];
+     getToolDefinition(name: string): ToolDefinition | undefined;
+     /**
+      * Set active tools by name.
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
+index 6379a7b..1fcde28 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
+@@ -619,6 +619,28 @@ export class AgentSession {
+             sourceInfo,
+         }));
+     }
++    /** Get all slash commands available for prompt invocation. */
++    getCommands() {
++        const extensionCommands = this._extensionRunner.getRegisteredCommands().map((command) => ({
++            name: command.invocationName,
++            description: command.description,
++            source: "extension",
++            sourceInfo: command.sourceInfo,
++        }));
++        const templates = this.promptTemplates.map((template) => ({
++            name: template.name,
++            description: template.description,
++            source: "prompt",
++            sourceInfo: template.sourceInfo,
++        }));
++        const skills = this._resourceLoader.getSkills().skills.map((skill) => ({
++            name: `skill:${skill.name}`,
++            description: skill.description,
++            source: "skill",
++            sourceInfo: skill.sourceInfo,
++        }));
++        return [...extensionCommands, ...templates, ...skills];
++    }
+     getToolDefinition(name) {
+         return this._toolDefinitions.get(name)?.definition;
+     }
+@@ -1826,27 +1848,6 @@ export class AgentSession {
+         this.agent.state.model = refreshedModel;
+     }
+     _bindExtensionCore(runner) {
+-        const getCommands = () => {
+-            const extensionCommands = runner.getRegisteredCommands().map((command) => ({
+-                name: command.invocationName,
+-                description: command.description,
+-                source: "extension",
+-                sourceInfo: command.sourceInfo,
+-            }));
+-            const templates = this.promptTemplates.map((template) => ({
+-                name: template.name,
+-                description: template.description,
+-                source: "prompt",
+-                sourceInfo: template.sourceInfo,
+-            }));
+-            const skills = this._resourceLoader.getSkills().skills.map((skill) => ({
+-                name: `skill:${skill.name}`,
+-                description: skill.description,
+-                source: "skill",
+-                sourceInfo: skill.sourceInfo,
+-            }));
+-            return [...extensionCommands, ...templates, ...skills];
+-        };
+         runner.bindCore({
+             sendMessage: (message, options) => {
+                 this.sendCustomMessage(message, options).catch((err) => {
+@@ -1886,7 +1887,7 @@ export class AgentSession {
+             getAllTools: () => this.getAllTools(),
+             setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
+             refreshTools: () => this._refreshToolRegistry(),
+-            getCommands,
++            getCommands: () => this.getCommands(),
+             setModel: async (model) => {
+                 if (!this._modelRuntime.hasConfiguredAuth(model.provider))
+                     return false;
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js
+index 6615475..aeaaa1a 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js
+@@ -10,6 +10,8 @@ export const HTTP_IDLE_TIMEOUT_CHOICES = [
+ ];
+ const originalGlobalFetch = globalThis.fetch;
+ let installedGlobalFetch;
++let settingsHttpProxy;
++let settingsHttpsProxy;
+ export function parseHttpIdleTimeoutMs(value) {
+     if (typeof value === "string") {
+         const trimmed = value.trim();
+@@ -35,10 +37,20 @@ export function formatHttpIdleTimeoutMs(timeoutMs) {
+ }
+ export function applyHttpProxySettings(httpProxy) {
+     const proxy = httpProxy?.trim();
+-    if (!proxy)
+-        return;
+-    process.env.HTTP_PROXY ??= proxy;
+-    process.env.HTTPS_PROXY ??= proxy;
++    if (process.env.HTTP_PROXY === undefined || process.env.HTTP_PROXY === settingsHttpProxy) {
++        if (proxy)
++            process.env.HTTP_PROXY = proxy;
++        else
++            delete process.env.HTTP_PROXY;
++        settingsHttpProxy = proxy;
++    }
++    if (process.env.HTTPS_PROXY === undefined || process.env.HTTPS_PROXY === settingsHttpsProxy) {
++        if (proxy)
++            process.env.HTTPS_PROXY = proxy;
++        else
++            delete process.env.HTTPS_PROXY;
++        settingsHttpsProxy = proxy;
++    }
+ }
+ const ignoreUndiciDispatcherError = (_error) => { };
+ // Undici can emit an internal Client "error" while terminating a mid-stream
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.d.ts
+index ec7dd26..8e8a497 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.d.ts
+@@ -216,6 +216,8 @@ export declare class SettingsManager {
+         baseDelayMs: number;
+     };
+     getHttpIdleTimeoutMs(): number;
++    getHttpProxy(): string | undefined;
++    setHttpProxy(httpProxy: string | undefined): void;
+     setHttpIdleTimeoutMs(timeoutMs: number): void;
+     getProviderRetrySettings(): {
+         timeoutMs?: number;
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
+index 4021796..95e3a8d 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
+@@ -560,6 +560,16 @@ export class SettingsManager {
+     getHttpIdleTimeoutMs() {
+         return parseTimeoutSetting(this.settings.httpIdleTimeoutMs, "httpIdleTimeoutMs") ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS;
+     }
++    getHttpProxy() {
++        const proxy = this.globalSettings.httpProxy?.trim();
++        return proxy || undefined;
++    }
++    setHttpProxy(httpProxy) {
++        const proxy = httpProxy?.trim();
++        this.globalSettings.httpProxy = proxy || undefined;
++        this.markModified("httpProxy");
++        this.save();
++    }
+     setHttpIdleTimeoutMs(timeoutMs) {
+         if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+             throw new Error(`Invalid httpIdleTimeoutMs setting: ${String(timeoutMs)}`);
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts
+index e91e38f..451eb6f 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts
+@@ -7,12 +7,14 @@ export { createEventBus, type EventBus, type EventBusController } from "./core/e
+ export type { AgentEndEvent, AgentSettledEvent, AgentStartEvent, AgentToolResult, AgentToolUpdateCallback, AppKeybinding, AutocompleteProviderFactory, BashToolCallEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BeforeProviderRequestEventResult, BuildSystemPromptOptions, CompactOptions, ContextEvent, ContextUsage, CustomToolCallEvent, EditToolCallEvent, EntryRenderer, EntryRenderOptions, ExecOptions, ExecResult, Extension, ExtensionActions, ExtensionAPI, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFactory, ExtensionFlag, ExtensionHandler, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions, FindToolCallEvent, GrepToolCallEvent, InlineExtension, InputEvent, InputEventResult, InputSource, KeybindingsManager, LoadExtensionsResult, LsToolCallEvent, MessageEndEvent, MessageRenderer, MessageRenderOptions, MessageStartEvent, MessageUpdateEvent, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventDecision, ProjectTrustEventResult, ProjectTrustHandler, ProviderConfig, ProviderModelConfig, ReadToolCallEvent, RegisteredCommand, RegisteredTool, ResolvedCommand, SessionBeforeCompactEvent, SessionBeforeForkEvent, SessionBeforeSwitchEvent, SessionBeforeTreeEvent, SessionCompactEvent, SessionInfoChangedEvent, SessionShutdownEvent, SessionStartEvent, SessionTreeEvent, SlashCommandInfo, SlashCommandSource, SourceInfo, TerminalInputHandler, ToolCallEvent, ToolCallEventResult, ToolDefinition, ToolExecutionEndEvent, ToolExecutionMode, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolInfo, ToolRenderResultOptions, ToolResultEvent, TurnEndEvent, TurnStartEvent, UserBashEvent, UserBashEventResult, WidgetPlacement, WorkingIndicatorOptions, WriteToolCallEvent, } from "./core/extensions/index.ts";
+ export { createExtensionRuntime, defineTool, discoverAndLoadExtensions, ExtensionRunner, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, wrapRegisteredTool, wrapRegisteredTools, } from "./core/extensions/index.ts";
+ export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
++export { applyHttpProxySettings, configureHttpDispatcher, DEFAULT_HTTP_IDLE_TIMEOUT_MS, formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES, parseHttpIdleTimeoutMs, } from "./core/http-dispatcher.ts";
+ export { convertToLlm } from "./core/messages.ts";
+ export { ModelRegistry } from "./core/model-registry.ts";
+ export { type ModelScopeDiagnostic, type ResolveCliModelResult, type ResolveModelScopeResult, resolveCliModel, resolveModelScopeWithDiagnostics, type ScopedModel, } from "./core/model-resolver.ts";
+ export { type CreateModelRuntimeOptions, ModelRuntime, type ModelRuntimeAuthOverrides, } from "./core/model-runtime.ts";
+ export type { PackageManager, PathMetadata, ProgressCallback, ProgressEvent, ResolvedPaths, ResolvedResource, } from "./core/package-manager.ts";
+ export { DefaultPackageManager } from "./core/package-manager.ts";
++export { type AppMode, type ResolveProjectTrustedOptions, resolveProjectTrusted, } from "./core/project-trust.ts";
+ export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
+ export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+ export { AgentSessionRuntime, type AgentSessionRuntimeDiagnostic, type AgentSessionServices, type CreateAgentSessionFromServicesOptions, type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory, type CreateAgentSessionRuntimeResult, type CreateAgentSessionServicesOptions, createAgentSession, createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices, createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createReadOnlyTools, createReadTool, createWriteTool, type PromptTemplate, } from "./core/sdk.ts";
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/index.js b/node_modules/@earendil-works/pi-coding-agent/dist/index.js
+index a2ee192..72533c8 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/index.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/index.js
+@@ -8,10 +8,12 @@ export { readStoredCredential } from "./core/auth-storage.js";
+ export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";
+ export { createEventBus } from "./core/event-bus.js";
+ export { createExtensionRuntime, defineTool, discoverAndLoadExtensions, ExtensionRunner, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, wrapRegisteredTool, wrapRegisteredTools, } from "./core/extensions/index.js";
++export { applyHttpProxySettings, configureHttpDispatcher, DEFAULT_HTTP_IDLE_TIMEOUT_MS, formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES, parseHttpIdleTimeoutMs, } from "./core/http-dispatcher.js";
+ export { convertToLlm } from "./core/messages.js";
+ export { ModelRegistry } from "./core/model-registry.js";
+ export { resolveCliModel, resolveModelScopeWithDiagnostics, } from "./core/model-resolver.js";
+ export { ModelRuntime, } from "./core/model-runtime.js";
+ export { DefaultPackageManager } from "./core/package-manager.js";
++export { resolveProjectTrusted, } from "./core/project-trust.js";
+ export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.js";
+ // SDK for programmatic usage

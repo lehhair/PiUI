@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "patch-package",
     "clean": "node scripts/clean.mjs",
     "dev:server": "npm run dev -w @piui/server",
     "dev:server:pi": "node scripts/dev-server-pi.mjs",
@@ -25,5 +26,8 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "patch-package": "8.0.1"
   }
 }
