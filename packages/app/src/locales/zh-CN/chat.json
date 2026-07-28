@@ -96,8 +96,10 @@
     "sendingMessage": "发送消息中",
     "sendMessage": "发送消息",
     "deliveryMode": "运行中消息模式",
-    "steer": "引导",
-    "followUp": "后续"
+    "steer": "纠正当前回复",
+    "steerHint": "把这条消息加入当前正在生成的回复，用于纠正或补充本轮回答",
+    "followUp": "回复后发送",
+    "followUpHint": "等待当前回复完成，再把这条消息作为下一轮发送"
   },
   "inputFooter": {
     "autoApproveOff": "自动放行：关闭",

@@ -96,6 +96,14 @@ class NativeSessionStore {
     return this.native.get(sessionId)?.nativeEventStreaming
   }
 
+  hasDisconnectedTransientBranch(sessionId: string): boolean {
+    const state = this.native.get(sessionId)
+    const snapshot = this.snapshots.get(sessionId)
+    if (!state || !snapshot || state.transient.length === 0 || snapshot.native.entryCount === 0) return false
+    const branch = this.getActiveBranch(sessionId)
+    return !branch.some(entry => typeof entry.id === "string" && state.entries.has(entry.id))
+  }
+
   getSessionIds(): string[] {
     return [...this.snapshots.keys()]
   }
@@ -123,7 +131,7 @@ class NativeSessionStore {
     if (!snapshot || page.head.epoch !== snapshot.native.epoch || page.head.revision < snapshot.native.revision) return false
     const state = this.ensureNative(sessionId)
     if (state.pageEpoch === page.head.epoch && state.pageRevision !== undefined && page.head.revision < state.pageRevision) return false
-    if (state.pageEpoch !== page.head.epoch || page.head.entryCount < state.entries.size) state.entries.clear()
+    if (state.pageEpoch !== page.head.epoch) state.entries.clear()
     for (const item of page.items) {
       if (typeof item.id === "string") state.entries.set(item.id, item as PiNativeEntry)
     }

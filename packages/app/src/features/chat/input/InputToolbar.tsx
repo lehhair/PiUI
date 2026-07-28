@@ -504,6 +504,7 @@ export function InputToolbar({
                   deliveryMode === 'steer' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
                 }`}
                 aria-pressed={deliveryMode === 'steer'}
+                title={t('inputToolbar.steerHint')}
                 onClick={() => onDeliveryModeChange?.('steer')}
               >
                 {t('inputToolbar.steer')}
@@ -516,6 +517,7 @@ export function InputToolbar({
                   deliveryMode === 'followUp' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
                 }`}
                 aria-pressed={deliveryMode === 'followUp'}
+                title={t('inputToolbar.followUpHint')}
                 onClick={() => onDeliveryModeChange?.('followUp')}
               >
                 {t('inputToolbar.followUp')}
