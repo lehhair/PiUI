@@ -40,9 +40,9 @@ POST   /api/v1/pi/commands/:name                 global command,如 models.list/
 POST   /api/v1/pi/sessions/:id/commands/:name    session command,如 prompt/branch.get/registry.get/invokeTool
 
 GET    /api/v1/host/health                       server 健康检查
-GET    /api/v1/host/capabilities                 server 自省(driver/事件流/版本)
-GET    /api/v1/host/commands/:id                 命令生命周期查询
-GET    /api/v1/host/workspaces ...               host 区:workspaces/files/git(自有能力)
+GET    /api/v1/host/registry                     当前 host capability registry
+POST   /api/v1/host/commands/:name               host command,如 workspaces.open/files.read/git.status
+GET    /api/v1/host/commands/:id                 Pi session 命令生命周期查询
 
 WS     /api/v1/events                            stream 订阅 + cursor/replay/resync
 ```
@@ -62,6 +62,17 @@ WS     /api/v1/events                            stream 订阅 + cursor/replay/r
 - session：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState, state.get, entries.get, branch.get, tree.get, registry.get, attachment.get`
 
 每个 capability 由 `registerPiCapability` 显式注册，registry 是唯一真相。返回字段包括：`name/scope/source/description/paramsSchema/resultSchema/queue/replacement/streaming/cancellable/idempotent/requiresRuntime/requiresTrust`。`paramsSchema` 是 JSON Schema 风格结构，供客户端生成表单和本地校验；result 保持 Pi 原生 JSON 透传，不重建中间模型。
+
+### Host 命令
+
+Host 区也使用 registry/dispatch，不保留 workspace/files/git REST shortcut。关键命令：
+
+- server/commands：`commands.get`
+- workspaces：`workspaces.list, workspaces.open, workspaces.close, workspaces.watch`
+- files：`files.list, files.read, files.write, files.create, files.move, files.delete, files.searchName, files.searchText`
+- git：`git.info, git.status, git.diff, git.fileDiff`
+
+每个 host capability 由 `registerHostCapability` 显式注册，返回字段包括：`name/domain/description/paramsSchema/resultSchema/queue/idempotent/mutatesWorkspace/emits`。
 
 扩展自省：
 - `POST /api/v1/pi/sessions/:id/commands/registry.get` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
@@ -93,6 +104,8 @@ npm run dev:server:pi    # 真 Pi(读 ~/.pi/agent 凭据,发消息消耗 token)
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/v1/host/health
+curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"rootPath":"/path/to/project"}' http://127.0.0.1:8787/api/v1/host/commands/workspaces.open
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
   -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/pi/commands/session.open
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \

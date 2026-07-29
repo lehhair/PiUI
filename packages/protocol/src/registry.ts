@@ -66,6 +66,30 @@ export type PiRegistrySnapshot = {
   sessionCommands: PiCapability[]
 }
 
+export type HostCapabilityDomain = "server" | "commands" | "workspaces" | "files" | "git"
+
+export type HostCapabilityQueue = "immediate" | "serialized"
+
+export type HostCapability = {
+  name: string
+  domain: HostCapabilityDomain
+  description?: string
+  paramsSchema?: JsonObject
+  resultSchema?: JsonObject
+  queue?: HostCapabilityQueue
+  idempotent?: boolean
+  mutatesWorkspace?: boolean
+  emits?: string[]
+  [extra: string]: JsonValue | undefined
+}
+
+export type HostRegistrySnapshot = {
+  protocolVersion: number
+  revision: number
+  service: "piui-server"
+  commands: HostCapability[]
+}
+
 export type SessionListEntry = {
   sessionId: string
   [extra: string]: JsonValue | undefined

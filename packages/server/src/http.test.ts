@@ -62,45 +62,52 @@ describe("http api", () => {
       rmSync(root, { recursive: true, force: true })
     })
 
-    const created = await request(port, "POST", "/api/v1/host/workspaces", { body: { rootPath: root } })
-    assert.equal(created.status, 201)
-    const workspacePath = created.json.workspace.path as string
+    const registry = await request(port, "GET", "/api/v1/host/registry")
+    assert.equal(registry.status, 200)
+    assert.ok(registry.json.commands.some((command: any) => command.name === "files.read"))
+    assert.ok(registry.json.commands.some((command: any) => command.name === "git.status"))
 
-    const list = await request(port, "GET", "/api/v1/host/workspaces")
+    const created = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { body: { rootPath: root } })
+    assert.equal(created.status, 200)
+    const workspacePath = created.json.data.workspace.path as string
+
+    const list = await request(port, "POST", "/api/v1/host/commands/workspaces.list")
     assert.equal(list.status, 200)
-    assert.ok(list.json.workspaces.some((ws: any) => ws.path === workspacePath))
+    assert.ok(list.json.data.workspaces.some((ws: any) => ws.path === workspacePath))
 
-    const encoded = encodeURIComponent(workspacePath)
-    const dir = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/list?path=`)
+    const dir = await request(port, "POST", "/api/v1/host/commands/files.list", { body: { workspacePath, path: "" } })
     assert.equal(dir.status, 200)
-    assert.ok(dir.json.entries.some((entry: any) => entry.name === "hello.txt"))
+    assert.ok(dir.json.data.entries.some((entry: any) => entry.name === "hello.txt"))
 
-    const read = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/read?path=hello.txt`)
+    const read = await request(port, "POST", "/api/v1/host/commands/files.read", { body: { workspacePath, path: "hello.txt" } })
     assert.equal(read.status, 200)
-    assert.equal(read.json.content, "hello piui")
-    const etag = read.json.etag as string
+    assert.equal(read.json.data.content, "hello piui")
+    const etag = read.json.data.etag as string
     assert.ok(etag)
 
-    const written = await request(port, "PUT", `/api/v1/host/workspaces/${encoded}/files/write?path=hello.txt`, {
-      body: { content: "updated", ifMatch: etag },
+    const written = await request(port, "POST", "/api/v1/host/commands/files.write", {
+      body: { workspacePath, path: "hello.txt", content: "updated", ifMatch: etag },
     })
     assert.equal(written.status, 200)
-    assert.equal(written.json.content, "updated")
+    assert.equal(written.json.data.content, "updated")
 
-    const stale = await request(port, "PUT", `/api/v1/host/workspaces/${encoded}/files/write?path=hello.txt`, {
-      body: { content: "stale write", ifMatch: etag },
+    const stale = await request(port, "POST", "/api/v1/host/commands/files.write", {
+      body: { workspacePath, path: "hello.txt", content: "stale write", ifMatch: etag },
     })
     assert.equal(stale.status, 409)
 
-    const search = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/search-name?q=index`)
+    const search = await request(port, "POST", "/api/v1/host/commands/files.searchName", { body: { workspacePath, query: "index" } })
     assert.equal(search.status, 200)
-    assert.ok(search.json.paths.some((p: string) => p.endsWith("index.ts")))
+    assert.ok(search.json.data.paths.some((p: string) => p.endsWith("index.ts")))
 
-    const gitStatus = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/git/status`)
+    const gitStatus = await request(port, "POST", "/api/v1/host/commands/git.status", { body: { workspacePath } })
     assert.equal(gitStatus.status, 200)
 
-    const outside = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/read?path=../outside.txt`)
+    const outside = await request(port, "POST", "/api/v1/host/commands/files.read", { body: { workspacePath, path: "../outside.txt" } })
     assert.ok([400, 403, 404].includes(outside.status))
+
+    const oldWorkspaceRoute = await request(port, "GET", "/api/v1/host/workspaces")
+    assert.equal(oldWorkspaceRoute.status, 404)
   })
 
   it("serves catalog commands and reports unknown commands", async () => {
@@ -132,8 +139,8 @@ describe("http api", () => {
     const settings = await request(port, "POST", "/api/v1/pi/commands/settings.get", { body: { cwd: mockHome } })
     assert.equal(settings.status, 200)
 
-    const created = await request(port, "POST", "/api/v1/host/workspaces", { body: { rootPath: mockHome } })
-    assert.equal(created.status, 201)
+    const created = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { body: { rootPath: mockHome } })
+    assert.equal(created.status, 200)
     const settingsNow = await request(port, "POST", "/api/v1/pi/commands/settings.get", { body: { cwd: mockHome } })
     assert.equal(settingsNow.status, 200)
     assert.equal(settingsNow.json.data.workspacePath, mockHome)
@@ -143,7 +150,7 @@ describe("http api", () => {
     assert.equal(trust.json.data.trusted, true)
 
     const unknown = await request(port, "POST", "/api/v1/pi/commands/does.not.exist")
-    assert.equal(unknown.status, 500)
+    assert.equal(unknown.status, 404)
     assert.equal(unknown.json.code, "UNKNOWN_COMMAND")
 
     const removedShortcut = await request(port, "GET", "/api/v1/pi/models")

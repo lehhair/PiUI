@@ -18,7 +18,7 @@ it("ends a stalled HTTP request at the shutdown deadline without forcing exit", 
     socket.once("connect", resolve)
     socket.once("error", reject)
   })
-  socket.write("POST /api/v1/host/workspaces HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\n{")
+  socket.write("POST /api/v1/host/commands/workspaces.open HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\n{")
 
   let timedOut = false
   let forcedExit = false
