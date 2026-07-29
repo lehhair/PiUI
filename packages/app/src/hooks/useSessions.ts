@@ -10,6 +10,7 @@ import {
 } from '../pi/nativeApi'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
+import { piSessionInfoStore } from '../pi/piSessionInfoStore'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -104,8 +105,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
       try {
         const nativeSessions = normalizedDirectory
-          ? await listPiNativeSessionsForCwd(normalizedDirectory)
-          : await listPiNativeSessions()
+          ? piSessionInfoStore.replaceForCwd(normalizedDirectory, await listPiNativeSessionsForCwd(normalizedDirectory))
+          : piSessionInfoStore.replaceAll(await listPiNativeSessions())
         const mapped = nativeSessions
           .map(piSessionInfoToUiSession)
           .filter((session): session is UiSession => session !== null)
@@ -225,17 +226,18 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     async (title?: string) => {
       if (!normalizedDirectory) throw new Error('A project directory is required')
       const opened = await openPiNativeSession(normalizedDirectory)
-      const now = new Date().toISOString()
-      const newSession = piSessionInfoToUiSession({
+      if (!opened.sessionFile) throw new Error('Pi did not return a session file')
+      const now = Date.now()
+      const newSession: UiSession = {
         id: opened.sessionId,
-        path: opened.sessionFile ?? undefined,
-        cwd: opened.cwd ?? normalizedDirectory,
-        name: title,
-        created: now,
-        modified: now,
+        path: opened.sessionFile,
+        directory: opened.cwd ?? normalizedDirectory,
+        title: title?.trim() || 'New chat',
+        createdAt: now,
+        updatedAt: now,
         messageCount: 0,
-        firstMessage: '',
-      })!
+        isNamed: Boolean(title?.trim()),
+      }
       trackPiSession(opened.sessionId, newSession.directory)
 
       if (searchRef.current) {

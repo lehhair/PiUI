@@ -1,17 +1,15 @@
 import type { UiSession } from '../types/session'
-import type { PiSessionListItem } from './nativeApi'
+import type { PiNativeSessionInfo } from './nativeApi'
 
-export function piSessionInfoToUiSession(item: PiSessionListItem): UiSession | null {
-  const id = firstString(item.id, item.sessionId)
-  const directory = firstString(item.cwd, item.workspacePath)
-  if (!id || !directory) return null
-  const name = firstString(item.name, item.title)
+export function piSessionInfoToUiSession(item: PiNativeSessionInfo): UiSession | null {
+  if (!item.id || !item.cwd || !item.path) return null
+  const name = firstString(item.name)
   const firstMessage = firstString(item.firstMessage)
-  const createdAt = parseTime(item.createdAt ?? item.created)
-  const updatedAt = parseTime(item.updatedAt ?? item.modified) || createdAt
+  const createdAt = parseTime(item.created)
+  const updatedAt = parseTime(item.modified) || createdAt
   return {
-    id,
-    directory,
+    id: item.id,
+    directory: item.cwd,
     title: name || firstMessage || 'New chat',
     firstMessage,
     messageCount: typeof item.messageCount === 'number' ? item.messageCount : undefined,
@@ -19,7 +17,7 @@ export function piSessionInfoToUiSession(item: PiSessionListItem): UiSession | n
     isNamed: Boolean(name),
     createdAt,
     updatedAt,
-    path: firstString(item.sessionFile, item.path),
+    path: item.path,
     parentSessionPath: typeof item.parentSessionPath === 'string' ? item.parentSessionPath : undefined,
   }
 }

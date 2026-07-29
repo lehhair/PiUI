@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PiNativeSessionInfo } from './nativeApi'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from './nativeSessionListModel'
 
 describe('Pi session list model', () => {
@@ -32,13 +33,15 @@ describe('Pi session list model', () => {
       firstMessage: 'Fix the parser',
       allMessagesText: 'Fix the parser regression in JSON mode',
       messageCount: 4,
+      created: '2026-07-28T10:00:00.000Z',
+      modified: '2026-07-29T10:00:00.000Z',
     })!
     expect(session.title).toBe('Fix the parser')
     expect(filterPiSessionList([session], 'regression')).toEqual([session])
   })
 
   it('drops malformed entries that cannot be opened', () => {
-    expect(piSessionInfoToUiSession({ id: 'missing-cwd' })).toBeNull()
+    expect(piSessionInfoToUiSession({ id: 'missing-cwd' } as PiNativeSessionInfo)).toBeNull()
   })
 
   it('links fork metadata without changing list order', () => {
@@ -47,6 +50,11 @@ describe('Pi session list model', () => {
       path: 'C:\\sessions\\parent.jsonl',
       cwd: 'C:\\repo',
       name: 'Main approach',
+      created: '2026-07-28T10:00:00.000Z',
+      modified: '2026-07-29T10:00:00.000Z',
+      firstMessage: '',
+      allMessagesText: '',
+      messageCount: 0,
     })!
     const fork = piSessionInfoToUiSession({
       id: 'fork',
@@ -54,6 +62,10 @@ describe('Pi session list model', () => {
       parentSessionPath: 'c:\\sessions\\parent.jsonl',
       cwd: 'C:\\repo',
       firstMessage: 'Try another approach',
+      allMessagesText: 'Try another approach',
+      created: '2026-07-28T10:00:00.000Z',
+      modified: '2026-07-29T10:00:00.000Z',
+      messageCount: 1,
     })!
     const linked = linkPiSessionForks([fork, parent])
     expect(linked.map(session => session.id)).toEqual(['fork', 'parent'])

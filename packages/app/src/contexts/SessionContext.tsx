@@ -6,6 +6,7 @@ import {
   postPiGlobalCommand,
 } from '../pi/nativeApi'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
+import { piSessionInfoStore } from '../pi/piSessionInfoStore'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
@@ -30,7 +31,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      const nativeSessions = await listPiNativeSessions()
+      const nativeSessions = piSessionInfoStore.replaceAll(await listPiNativeSessions())
       const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
       const next = linkPiSessionForks(mapped)
       if (requestId !== requestIdRef.current) return
