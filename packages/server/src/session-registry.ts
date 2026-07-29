@@ -64,6 +64,8 @@ export interface AppSession {
   nativeEntries: NativeEntry[]
   driver: DriverMode
   sessionFile?: string
+  /** Pi session header parentSession (fork/clone source file). Display-only. */
+  parentSessionPath?: string
   real?: PiSessionRuntime
   workerGeneration?: string
   runtimeError?: string
@@ -1281,14 +1283,14 @@ export class SessionRegistry {
     entryId: string,
     position: "before" | "at",
   ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
-    return this.replaceSession(sessionId, runtime => runtime.fork(entryId, position))
+    return this.replaceSession(sessionId, runtime => runtime.fork(entryId, position), { linkParent: true })
   }
 
   cloneSession(
     sessionId: string,
     entryId?: string,
   ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
-    return this.replaceSession(sessionId, runtime => runtime.clone(entryId))
+    return this.replaceSession(sessionId, runtime => runtime.clone(entryId), { linkParent: true })
   }
 
   async newSession(
@@ -1373,7 +1375,7 @@ export class SessionRegistry {
   private async replaceSession(
     sessionId: string,
     replace: (runtime: PiSessionRuntime) => Promise<SessionReplacementResultV1>,
-    options: { existingTargetId?: string } = {},
+    options: { existingTargetId?: string; linkParent?: boolean } = {},
   ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
     const source = await this.attach(sessionId)
     const runtime = source.real
@@ -1401,7 +1403,7 @@ export class SessionRegistry {
     runtime: PiSessionRuntime,
     sourceGeneration: string | undefined,
     replacement: SessionReplacementResultV1,
-    options: { existingTargetId?: string } = {},
+    options: { existingTargetId?: string; linkParent?: boolean } = {},
   ): Promise<{ source: AppSession; target: AppSession; replacement: SessionReplacementResultV1 }> {
     if (replacement.cancelled) return { source, target: source, replacement }
     if (!this.isCurrentRuntime(source, runtime, sourceGeneration)) throw runtimeReplacedError()
@@ -1452,6 +1454,7 @@ export class SessionRegistry {
         driver: "pi",
         sessionFile: targetSessionFile,
       }
+      if (options.linkParent && source.sessionFile) target.parentSessionPath = source.sessionFile
       target.cwd = targetCwd
       target.sessionFile = targetSessionFile
       target.driverSessionId = targetId
@@ -2105,6 +2108,7 @@ export class SessionRegistry {
       if (!existing.real) {
         existing.cwd = cwd
         existing.title = info.name ?? (info.firstMessage.slice(0, 48) || "New chat")
+        existing.parentSessionPath = info.parentSessionPath
         existing.createdAt = info.createdAt
         existing.updatedAt = info.updatedAt
         existing.sessionFile = info.path
@@ -2116,6 +2120,7 @@ export class SessionRegistry {
       cwd,
       driverSessionId: info.id,
       title: info.name ?? (info.firstMessage.slice(0, 48) || "New chat"),
+      parentSessionPath: info.parentSessionPath,
       createdAt: info.createdAt,
       updatedAt: info.updatedAt,
       epoch: randomUUID(),

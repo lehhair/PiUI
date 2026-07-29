@@ -6,6 +6,8 @@ export interface UiSession {
   title: string
   createdAt: number
   updatedAt: number
+  path?: string
+  parentSessionPath?: string
 }
 
 export interface PiSessionSummary {
@@ -15,6 +17,8 @@ export interface PiSessionSummary {
   title: string
   createdAt: string
   updatedAt: string
+  path?: string
+  parentSessionPath?: string
 }
 
 export type SessionStatus =

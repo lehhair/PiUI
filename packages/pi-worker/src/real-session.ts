@@ -111,6 +111,7 @@ export interface PiSessionInfo {
   path: string
   cwd: string
   name?: string
+  parentSessionPath?: string
   createdAt: string
   updatedAt: string
   messageCount: number
@@ -1698,6 +1699,7 @@ function sessionInfo(info: {
   path: string
   cwd: string
   name?: string
+  parentSessionPath?: string
   created: Date
   modified: Date
   messageCount: number
@@ -1708,6 +1710,7 @@ function sessionInfo(info: {
     path: info.path,
     cwd: info.cwd,
     name: info.name,
+    parentSessionPath: info.parentSessionPath,
     createdAt: info.created.toISOString(),
     updatedAt: info.modified.toISOString(),
     messageCount: info.messageCount,

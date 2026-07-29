@@ -247,6 +247,7 @@ describe("native Pi session discovery", () => {
     const result = await registry.forkSession("pi-fork-source", "source-entry", "at")
     assert.equal(result.target.title, "你好")
     assert.equal(result.source.title, "你好")
+    assert.equal(result.target.parentSessionPath, result.source.sessionFile)
   })
 
   it("detaches a source runtime after replacement lease commit failure", async () => {
