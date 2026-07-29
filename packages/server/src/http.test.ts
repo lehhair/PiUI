@@ -116,8 +116,14 @@ describe("http api", () => {
 
     const registry = await request(port, "GET", "/api/v1/pi/registry")
     assert.equal(registry.status, 200)
-    assert.ok(registry.json.globalCommands.some((command: any) => command.name === "models.list"))
+    assert.equal(registry.json.revision, 1)
+    const modelsList = registry.json.globalCommands.find((command: any) => command.name === "models.list")
+    assert.equal(modelsList?.queue, "immediate")
+    assert.equal(modelsList?.idempotent, true)
     assert.ok(registry.json.globalCommands.some((command: any) => command.name === "session.open"))
+    const prompt = registry.json.sessionCommands.find((command: any) => command.name === "prompt")
+    assert.equal(prompt?.paramsSchema.properties.text.type, "string")
+    assert.equal(prompt?.streaming, true)
 
     const models = await request(port, "POST", "/api/v1/pi/commands/models.list")
     assert.equal(models.status, 200)

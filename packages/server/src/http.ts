@@ -168,6 +168,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
             "session.head",
             "command.updated",
             "extension.ui",
+            "registry.updated",
             "provider.auth",
             "packages.progress",
             "sessions.updated",

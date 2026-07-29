@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
-import { isJsonObject, problemFromError } from "@piui/protocol"
+import { isJsonObject, problemFromError, PROTOCOL_VERSION } from "@piui/protocol"
 import { loadPiSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
@@ -23,6 +23,7 @@ import * as P from "./params.js"
 const workerGeneration = randomUUID()
 let runtime: SessionRuntime | undefined
 let loadedSdkInfo: { version: string; verified: boolean } | undefined
+let registryRevision = 1
 const runtimeUnsubs: Array<() => void> = []
 
 const driver = (process.env.PIUI_DRIVER ?? "mock").toLowerCase() === "pi" ? "pi" : "mock"
@@ -110,6 +111,16 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
       channel: "resources.updated",
       workspacePath: current.getCwd(),
     })))
+    runtimeUnsubs.push(current.onResourcesChanged(() => {
+      registryRevision += 1
+      send({
+        kind: "event",
+        generation: workerGeneration,
+        sessionId: current.getSessionId(),
+        channel: "registry.updated",
+        event: { revision: registryRevision, sessionId: current.getSessionId() },
+      })
+    }))
   }
 }
 
@@ -176,7 +187,8 @@ function describeRegistry(): PiRegistrySnapshot {
     queue: "immediate",
   }
   return {
-    protocolVersion: 1,
+    protocolVersion: PROTOCOL_VERSION,
+    revision: registryRevision,
     sdkVersion: loadedSdkInfo?.version ?? "unknown",
     driver,
     globalCommands: [registryDescribe, ...listCommandCapabilities("global")],

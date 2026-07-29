@@ -49,11 +49,17 @@ export type PiCapability = {
   resultSchema?: JsonObject
   queue?: PiCapabilityQueue
   replacement?: boolean
+  streaming?: boolean
+  cancellable?: boolean
+  idempotent?: boolean
+  requiresRuntime?: boolean
+  requiresTrust?: boolean
   [extra: string]: JsonValue | undefined
 }
 
 export type PiRegistrySnapshot = {
   protocolVersion: number
+  revision: number
   sdkVersion: string
   driver: "mock" | "pi"
   globalCommands: PiCapability[]
