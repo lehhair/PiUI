@@ -3,9 +3,6 @@ import { useTranslation } from 'react-i18next'
 import {
   CheckIcon,
   CloseIcon,
-  CopyIcon,
-  GitBranchIcon,
-  PencilIcon,
   RetryIcon,
   StopIcon,
   TrashIcon,
@@ -35,10 +32,13 @@ import {
 import { clearSessionEditorDraft, setSessionEditorDraft } from '../pi/sessionEditorDraftStore'
 import { nativeSessionStore } from '../pi/nativeSessionStore'
 import { SessionTreeCanvas } from './SessionTreeCanvas'
-import { SessionTreeDetail } from './SessionTreeDetail'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
+import { nativeEntriesToUiMessages, type PiNativeEntry } from '../pi/nativeEntriesToMessages'
+import { MessageRenderer } from '../features/message/MessageRenderer'
 import {
+  buildSessionTreeGraph,
   findSessionTreeNode,
+  sessionTreeEntryPreview,
   type NativeEntry,
   type NativeTreeNode,
 } from './sessionTreeGraph'
@@ -82,6 +82,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     isResizing,
     handleResizeStart,
     handleTouchResizeStart,
+    adjustSplitHeight,
     resetSplitHeight,
   } = useVerticalSplitResize({
     containerRef,
@@ -124,6 +125,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     nativeRevisionRef.current = revision
     void loadNativeTree()
   }, [loadNativeTree, snapshot?.native.epoch, snapshot?.native.revision])
+  const treeGraph = useMemo(
+    () => buildSessionTreeGraph(nativeTree, snapshot?.native.leafId ?? null, type => t(`sessionTree.entryTypes.${type}`)),
+    [nativeTree, snapshot?.native.leafId, t],
+  )
   useEffect(() => {
     if (nativeTree.length === 0) {
       setSelectedEntryId(null)
@@ -131,12 +136,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
       return
     }
     setSelectedEntryId(current => {
-      if (findSessionTreeNode(nativeTree, current)) return current
-      const leafId = snapshot?.native.leafId ?? null
-      if (findSessionTreeNode(nativeTree, leafId)) return leafId
-      return typeof nativeTree[0]?.entry.id === 'string' ? nativeTree[0].entry.id : null
+      if (current && treeGraph.nodeById.has(current)) return current
+      return treeGraph.nodes.find(node => node.data.currentLeaf)?.id ?? treeGraph.nodes[0]?.id ?? null
     })
-  }, [nativeTree, snapshot?.native.leafId])
+  }, [nativeTree.length, treeGraph])
   const [summarizeNavigation, setSummarizeNavigation] = useState(false)
   const [navigationInstructions, setNavigationInstructions] = useState('')
   const [replaceNavigationInstructions, setReplaceNavigationInstructions] = useState(false)
@@ -148,12 +151,31 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   )
   const selectedEntry = selectedNode?.entry
   const selectedEntryType = typeof selectedEntry?.type === 'string' ? selectedEntry.type : 'unknown'
+  const selectedPreview = selectedEntry
+    ? sessionTreeEntryPreview(selectedEntry, type => t(`sessionTree.entryTypes.${type}`))
+    : ''
   const selectedMessage = selectedEntryType === 'message' && selectedEntry?.message &&
     typeof selectedEntry.message === 'object' && !Array.isArray(selectedEntry.message)
     ? selectedEntry.message as NativeEntry
     : undefined
   const selectedRole = typeof selectedMessage?.role === 'string' ? selectedMessage.role : undefined
-  const selectedIsLeaf = selectedEntryId !== null && selectedEntryId === snapshot?.native.leafId
+  const selectedIsLeaf = treeGraph.nodes.some(node => node.id === selectedEntryId && node.data.currentLeaf)
+  const selectedDetailEntries = selectedEntryId ? treeGraph.detailEntriesById.get(selectedEntryId) ?? [] : []
+  const snapshotDirectory = snapshot?.session.directory
+  const snapshotModelProvider = snapshot?.runtime.model?.provider
+  const snapshotModelId = snapshot?.runtime.model?.id
+  const selectedDetailMessages = useMemo(() => {
+    if (!selectedEntryId || !snapshotDirectory) return []
+    return nativeEntriesToUiMessages(selectedDetailEntries as PiNativeEntry[], {
+      sessionId,
+      directory: snapshotDirectory,
+      model: snapshotModelProvider && snapshotModelId
+        ? { providerID: snapshotModelProvider, modelID: snapshotModelId }
+        : undefined,
+    })
+  }, [selectedDetailEntries, selectedEntryId, sessionId, snapshotDirectory, snapshotModelId, snapshotModelProvider])
+  const splitMaxHeight = Math.max(0, (containerRef.current?.clientHeight ?? 500) - 160)
+  const splitMinHeight = Math.min(180, splitMaxHeight)
 
   useEffect(() => {
     const handleCommandUpdate = (rawEvent: Event) => {
@@ -311,224 +333,215 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   }, [applyReplacement, capabilities.sessionImport, importCwd, importPath, runEntryCommand, sessionId])
 
   return (
-    <div ref={containerRef} className="flex h-full min-h-0 flex-col bg-bg-100">
+    <div className="flex h-full min-h-0 flex-col bg-bg-100">
       <details className="shrink-0 border-b border-border-200/40 bg-bg-100">
-        <summary className="cursor-pointer px-2.5 py-1.5 text-[length:var(--fs-sm)] font-medium text-text-300 hover:bg-bg-200/40 hover:text-text-100">
+        <summary className="cursor-pointer px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-300 hover:bg-bg-200/40 hover:text-text-100">
           {t('sessionTree.sessionControls')}
         </summary>
-        <div className="max-h-[40vh] overflow-y-auto border-t border-border-200/40">
+        <div className="max-h-[45vh] overflow-y-auto border-t border-border-200/40">
       {snapshot && (capabilities.compactionManage || capabilities.retryManage) ? (
-        <details className="border-b border-border-200/40 px-2.5 py-1.5">
-          <summary className="cursor-pointer text-[length:var(--fs-xs)] font-medium text-text-200">
-            {t('sessionTree.runtimeStatus')}
-          </summary>
-          <div className="mt-1.5 space-y-1.5">
-            {capabilities.compactionManage ? (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={event => {
-                  event.preventDefault()
-                  void runRuntimeCommand('compact', () => compactSession(
-                    sessionId,
-                    compactInstructions.trim() || undefined,
-                  ), true)
-                }}
-              >
-                <input
-                  value={compactInstructions}
-                  onChange={event => setCompactInstructions(event.target.value)}
-                  placeholder={t('sessionTree.compactInstructions')}
-                  className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 outline-none focus:border-accent-main-100"
-                />
-                {snapshot.runtime.compaction.operation.type === 'none' ? (
-                  <IconButton
-                    type="submit"
-                    aria-label={t('sessionTree.compact')}
-                    title={t('sessionTree.compact')}
-                    size="sm"
-                    disabled={runtimePending !== null}
-                  >
-                    <RetryIcon size={12} />
-                  </IconButton>
-                ) : (
-                  <IconButton
-                    aria-label={t('sessionTree.stopSummary')}
-                    title={t('sessionTree.stopSummary')}
-                    size="sm"
-                    disabled={runtimePending !== null}
-                    onClick={() => void runRuntimeCommand(
-                      'abort-summary',
-                      () => snapshot.runtime.compaction.operation.type === 'branchSummary'
-                        ? abortPiBranchSummary(sessionId)
-                        : abortPiCompaction(sessionId),
-                    )}
-                  >
-                    <StopIcon size={12} />
-                  </IconButton>
-                )}
-              </form>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[length:var(--fs-xs)] text-text-300">
-              {capabilities.compactionManage ? (
-                <label className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={snapshot.runtime.compaction.autoEnabled}
-                    disabled={runtimePending !== null}
-                    onChange={event => void runRuntimeCommand(
-                      'auto-compaction',
-                      () => setPiAutoCompaction(sessionId, event.target.checked),
-                    )}
-                  />
-                  {t('sessionTree.autoCompaction')}
-                </label>
-              ) : null}
-              {capabilities.retryManage ? (
-                <label className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={snapshot.runtime.retry.autoEnabled}
-                    disabled={runtimePending !== null}
-                    onChange={event => void runRuntimeCommand(
-                      'auto-retry',
-                      () => setPiAutoRetry(sessionId, event.target.checked),
-                    )}
-                  />
-                  {t('sessionTree.autoRetry')}
-                </label>
-              ) : null}
-              {snapshot.runtime.retry.phase === 'waiting' || snapshot.runtime.retry.phase === 'running' ? (
-                <button
-                  type="button"
-                  className="text-danger-100 hover:underline"
-                  onClick={() => void runRuntimeCommand('abort-retry', () => abortPiRetry(sessionId))}
+        <div className="shrink-0 border-b border-border-200/40 px-3 py-2">
+          <h3 className="mb-2 text-[length:var(--fs-xs)] font-medium text-text-300">{t('sessionTree.runtimeControls')}</h3>
+          {capabilities.compactionManage ? (
+            <form
+              className="flex items-center gap-1"
+              onSubmit={event => {
+                event.preventDefault()
+                void runRuntimeCommand('compact', () => compactSession(
+                  sessionId,
+                  compactInstructions.trim() || undefined,
+                ), true)
+              }}
+            >
+               <input
+                 value={compactInstructions}
+                 onChange={event => setCompactInstructions(event.target.value)}
+                 aria-label={t('sessionTree.compactInstructions')}
+                 placeholder={t('sessionTree.compactInstructions')}
+                 autoComplete="off"
+                 className="h-8 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+              />
+              {snapshot.runtime.compaction.operation.type === 'none' ? (
+                <IconButton
+                  type="submit"
+                  aria-label={t('sessionTree.compact')}
+                  title={t('sessionTree.compact')}
+                  disabled={runtimePending !== null}
                 >
-                  {t('sessionTree.stopRetry', {
-                    attempt: snapshot.runtime.retry.attempt,
-                    max: snapshot.runtime.retry.maxAttempts,
-                  })}
-                </button>
-              ) : null}
-            </div>
-            {snapshot.runtime.compaction.operation.type !== 'none' ? (
-              <p className="text-[length:var(--fs-xs)] text-text-400">
-                {snapshot.runtime.compaction.operation.type === 'branchSummary'
-                  ? t('sessionTree.summarizingBranch')
-                  : t('sessionTree.compacting')}
-              </p>
-            ) : snapshot.runtime.compaction.lastNotice ? (
-              <p className="text-[length:var(--fs-xs)] text-text-400">
-                {snapshot.runtime.compaction.lastNotice}
-              </p>
-            ) : snapshot.runtime.compaction.lastError ? (
-              <p className="text-[length:var(--fs-xs)] text-danger-100">
-                {snapshot.runtime.compaction.lastError}
-              </p>
-            ) : snapshot.runtime.compaction.lastResult ? (
-              <p
-                className="truncate text-[length:var(--fs-xs)] text-text-400"
-                title={snapshot.runtime.compaction.lastResult.summary}
-              >
-                {t('sessionTree.compactionResult', {
-                  before: snapshot.runtime.compaction.lastResult.tokensBefore,
-                  after: snapshot.runtime.compaction.lastResult.estimatedTokensAfter ?? '?',
-                })}
-              </p>
+                  <RetryIcon size={14} />
+                </IconButton>
+              ) : (
+                <IconButton
+                  aria-label={t('sessionTree.stopSummary')}
+                  title={t('sessionTree.stopSummary')}
+                  disabled={runtimePending !== null}
+                  onClick={() => void runRuntimeCommand(
+                    'abort-summary',
+                    () => snapshot.runtime.compaction.operation.type === 'branchSummary'
+                      ? abortPiBranchSummary(sessionId)
+                      : abortPiCompaction(sessionId),
+                  )}
+                >
+                  <StopIcon size={14} />
+                </IconButton>
+              )}
+            </form>
+          ) : null}
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[length:var(--fs-xs)] text-text-300">
+            {capabilities.compactionManage ? (
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={snapshot.runtime.compaction.autoEnabled}
+                  disabled={runtimePending !== null}
+                  onChange={event => void runRuntimeCommand(
+                    'auto-compaction',
+                    () => setPiAutoCompaction(sessionId, event.target.checked),
+                  )}
+                />
+                {t('sessionTree.autoCompaction')}
+              </label>
             ) : null}
-            {snapshot.runtime.retry.phase === 'waiting' ? (
-              <p className="text-[length:var(--fs-xs)] text-text-400">
-                {t('sessionTree.retryWaiting', {
+            {capabilities.retryManage ? (
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={snapshot.runtime.retry.autoEnabled}
+                  disabled={runtimePending !== null}
+                  onChange={event => void runRuntimeCommand(
+                    'auto-retry',
+                    () => setPiAutoRetry(sessionId, event.target.checked),
+                  )}
+                />
+                {t('sessionTree.autoRetry')}
+              </label>
+            ) : null}
+            {snapshot.runtime.retry.phase === 'waiting' || snapshot.runtime.retry.phase === 'running' ? (
+              <button
+                type="button"
+                className="text-danger-100 hover:underline"
+                onClick={() => void runRuntimeCommand('abort-retry', () => abortPiRetry(sessionId))}
+              >
+                {t('sessionTree.stopRetry', {
                   attempt: snapshot.runtime.retry.attempt,
                   max: snapshot.runtime.retry.maxAttempts,
-                  delay: snapshot.runtime.retry.delayMs,
-                  error: snapshot.runtime.retry.errorMessage,
                 })}
-              </p>
-            ) : snapshot.runtime.retry.phase === 'running' ? (
-              <p className="text-[length:var(--fs-xs)] text-text-400">
-                {t('sessionTree.retryRunning', {
-                  attempt: snapshot.runtime.retry.attempt,
-                  max: snapshot.runtime.retry.maxAttempts,
-                })}
-              </p>
-            ) : snapshot.runtime.retry.phase === 'finished' && !snapshot.runtime.retry.success ? (
-              <p className="text-[length:var(--fs-xs)] text-danger-100">
-                {snapshot.runtime.retry.finalError ?? t('sessionTree.retryFailed')}
-              </p>
-            ) : snapshot.runtime.retry.phase === 'finished' ? (
-              <p className="text-[length:var(--fs-xs)] text-text-400">
-                {t('sessionTree.retrySucceeded', { attempt: snapshot.runtime.retry.attempt })}
-              </p>
+              </button>
             ) : null}
           </div>
-        </details>
+          {snapshot.runtime.compaction.operation.type !== 'none' ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400">
+              {snapshot.runtime.compaction.operation.type === 'branchSummary'
+                ? t('sessionTree.summarizingBranch')
+                : t('sessionTree.compacting')}
+            </p>
+          ) : snapshot.runtime.compaction.lastNotice ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400">
+              {snapshot.runtime.compaction.lastNotice}
+            </p>
+          ) : snapshot.runtime.compaction.lastError ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-danger-100">
+              {snapshot.runtime.compaction.lastError}
+            </p>
+          ) : snapshot.runtime.compaction.lastResult ? (
+            <p
+              className="mt-1 truncate text-[length:var(--fs-xs)] text-text-400"
+              title={snapshot.runtime.compaction.lastResult.summary}
+            >
+              {t('sessionTree.compactionResult', {
+                before: snapshot.runtime.compaction.lastResult.tokensBefore,
+                after: snapshot.runtime.compaction.lastResult.estimatedTokensAfter ?? '?',
+              })}
+            </p>
+          ) : null}
+          {snapshot.runtime.retry.phase === 'waiting' ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400">
+              {t('sessionTree.retryWaiting', {
+                attempt: snapshot.runtime.retry.attempt,
+                max: snapshot.runtime.retry.maxAttempts,
+                delay: snapshot.runtime.retry.delayMs,
+                error: snapshot.runtime.retry.errorMessage,
+              })}
+            </p>
+          ) : snapshot.runtime.retry.phase === 'running' ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400">
+              {t('sessionTree.retryRunning', {
+                attempt: snapshot.runtime.retry.attempt,
+                max: snapshot.runtime.retry.maxAttempts,
+              })}
+            </p>
+          ) : snapshot.runtime.retry.phase === 'finished' && !snapshot.runtime.retry.success ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-danger-100">
+              {snapshot.runtime.retry.finalError ?? t('sessionTree.retryFailed')}
+            </p>
+          ) : snapshot.runtime.retry.phase === 'finished' ? (
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-400">
+              {t('sessionTree.retrySucceeded', { attempt: snapshot.runtime.retry.attempt })}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {snapshot && capabilities.queueManage ? (
-        <details className="border-b border-border-200/40 px-2.5 py-1.5">
-          <summary className="cursor-pointer text-[length:var(--fs-xs)] font-medium text-text-200">
-            {t('sessionTree.queue')} ({snapshot.runtime.queue.steering.length + snapshot.runtime.queue.followUp.length})
-          </summary>
-          <div className="mt-1.5 space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[length:var(--fs-xs)] font-medium text-text-300">{t('sessionTree.queue')}</span>
-              <IconButton
-                size="sm"
-                aria-label={t('sessionTree.clearQueue')}
-                title={t('sessionTree.clearQueue')}
-                disabled={runtimePending !== null ||
-                  snapshot.runtime.queue.steering.length + snapshot.runtime.queue.followUp.length === 0}
-                onClick={() => void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId))}
-              >
-                <TrashIcon size={11} />
-              </IconButton>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(['steering', 'followUp'] as const).map(kind => (
-                <div key={kind} className="min-w-0">
-                  <label className="flex items-center justify-between gap-1 text-[length:var(--fs-xs)] text-text-400">
-                    <span>{t(`sessionTree.${kind}`)}</span>
-                    <select
-                      aria-label={t(`sessionTree.${kind}Mode`)}
-                      value={kind === 'steering'
-                        ? snapshot.runtime.queue.steeringMode
-                        : snapshot.runtime.queue.followUpMode}
-                      disabled={runtimePending !== null}
-                      className="h-6 max-w-20 rounded border border-border-200 bg-bg-100 px-0.5 text-[length:var(--fs-xxs)] text-text-200"
-                      onChange={event => void runRuntimeCommand('queue-mode', () => setPiQueueModes(sessionId, {
-                        [kind === 'steering' ? 'steeringMode' : 'followUpMode']:
-                          event.target.value as 'all' | 'one-at-a-time',
-                      }))}
-                    >
-                      <option value="one-at-a-time">{t('sessionTree.oneAtATime')}</option>
-                      <option value="all">{t('sessionTree.allAtOnce')}</option>
-                    </select>
-                  </label>
-                  <div className="mt-0.5 space-y-0.5">
-                    {snapshot.runtime.queue[kind].map((message, index) => (
-                      <div key={`${kind}-${index}-${message}`} className="truncate text-[length:var(--fs-xs)] text-text-300" title={message}>
-                        {message}
-                      </div>
-                    ))}
-                    {snapshot.runtime.queue[kind].length === 0 ? (
-                      <span className="text-[length:var(--fs-xs)] text-text-500">{t('sessionTree.queueEmpty')}</span>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="shrink-0 border-b border-border-200/40 px-3 py-2 text-[length:var(--fs-xs)]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-text-200">{t('sessionTree.queue')}</span>
+            <IconButton
+              size="sm"
+              aria-label={t('sessionTree.clearQueue')}
+              title={t('sessionTree.clearQueue')}
+              disabled={runtimePending !== null ||
+                snapshot.runtime.queue.steering.length + snapshot.runtime.queue.followUp.length === 0}
+              onClick={() => void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId))}
+            >
+              <TrashIcon size={13} />
+            </IconButton>
           </div>
-        </details>
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            {(['steering', 'followUp'] as const).map(kind => (
+              <div key={kind} className="min-w-0">
+                <label className="flex items-center justify-between gap-1 text-text-400">
+                  <span>{t(`sessionTree.${kind}`)}</span>
+                  <select
+                    aria-label={t(`sessionTree.${kind}Mode`)}
+                    value={kind === 'steering'
+                      ? snapshot.runtime.queue.steeringMode
+                      : snapshot.runtime.queue.followUpMode}
+                    disabled={runtimePending !== null}
+                    className="h-7 max-w-28 rounded border border-border-200 bg-bg-100 px-1 text-text-200"
+                    onChange={event => void runRuntimeCommand('queue-mode', () => setPiQueueModes(sessionId, {
+                      [kind === 'steering' ? 'steeringMode' : 'followUpMode']:
+                        event.target.value as 'all' | 'one-at-a-time',
+                    }))}
+                  >
+                    <option value="one-at-a-time">{t('sessionTree.oneAtATime')}</option>
+                    <option value="all">{t('sessionTree.allAtOnce')}</option>
+                  </select>
+                </label>
+                <div className="mt-1 space-y-1">
+                  {snapshot.runtime.queue[kind].map((message, index) => (
+                    <div key={`${kind}-${index}-${message}`} className="truncate text-text-300" title={message}>
+                      {message}
+                    </div>
+                  ))}
+                  {snapshot.runtime.queue[kind].length === 0 ? (
+                    <span className="text-text-500">{t('sessionTree.queueEmpty')}</span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {snapshot && capabilities.toolsManage ? (
-        <details className="border-b border-border-200/40 px-2.5 py-1.5">
-          <summary className="cursor-pointer text-[length:var(--fs-xs)] font-medium text-text-200">
+        <details className="shrink-0 border-b border-border-200/40 px-3 py-2">
+          <summary className="cursor-pointer text-[length:var(--fs-sm)] font-medium text-text-200">
             {t('sessionTree.activeTools', { active: snapshot.runtime.activeTools.length, total: snapshot.runtime.tools.length })}
           </summary>
-          <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5">
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
             {snapshot.runtime.tools.map(tool => (
-              <label key={tool.name} className="flex min-w-0 items-start gap-1 text-[length:var(--fs-xs)] text-text-300">
+              <label key={tool.name} className="flex min-w-0 items-start gap-1.5 text-[length:var(--fs-xs)] text-text-300">
                 <input
                   type="checkbox"
                   checked={snapshot.runtime.activeTools.includes(tool.name)}
@@ -543,67 +556,65 @@ export const SessionTreePanel = memo(function SessionTreePanel({
       ) : null}
 
       {capabilities.sessionImport ? (
-        <details className="border-b border-border-200/40 px-2.5 py-1.5">
-          <summary className="cursor-pointer text-[length:var(--fs-xs)] font-medium text-text-200">
-            {t('sessionTree.import')}
-          </summary>
-          <div className="mt-1.5">
-            {importOpen ? (
-              <form
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1"
-                onSubmit={event => {
-                  event.preventDefault()
-                  handleImport()
-                }}
+        <div className="shrink-0 border-b border-border-200/40 px-2 py-2">
+          {importOpen ? (
+            <form
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1"
+              onSubmit={event => {
+                event.preventDefault()
+                handleImport()
+              }}
+            >
+              <input
+                autoFocus
+                value={importPath}
+                onChange={event => setImportPath(event.target.value)}
+                aria-label={t('sessionTree.importPath')}
+                placeholder={t('sessionTree.importPath')}
+                autoComplete="off"
+                className="h-8 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100"
+              />
+              <IconButton aria-label={t('sessionTree.runImport')} title={t('sessionTree.runImport')} type="submit">
+                <UploadIcon size={14} />
+              </IconButton>
+              <IconButton
+                aria-label={t('sessionTree.cancel')}
+                title={t('sessionTree.cancel')}
+                onClick={() => setImportOpen(false)}
               >
-                <input
-                  autoFocus
-                  value={importPath}
-                  onChange={event => setImportPath(event.target.value)}
-                  placeholder={t('sessionTree.importPath')}
-                  className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 outline-none focus:border-accent-main-100"
-                />
-                <IconButton aria-label={t('sessionTree.runImport')} title={t('sessionTree.runImport')} type="submit" size="sm">
-                  <UploadIcon size={12} />
-                </IconButton>
-                <IconButton
-                  aria-label={t('sessionTree.cancel')}
-                  title={t('sessionTree.cancel')}
-                  size="sm"
-                  onClick={() => setImportOpen(false)}
-                >
-                  <CloseIcon size={12} />
-                </IconButton>
-                <input
-                  value={importCwd}
-                  onChange={event => setImportCwd(event.target.value)}
-                  placeholder={t('sessionTree.importCwd')}
-                  className="col-span-3 h-7 min-w-0 rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 outline-none focus:border-accent-main-100"
-                />
-              </form>
-            ) : (
-              <button
-                type="button"
-                className="flex h-7 items-center gap-1.5 rounded px-1.5 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-200/50 hover:text-text-100"
-                onClick={() => setImportOpen(true)}
-              >
-                <UploadIcon size={12} />
-                {t('sessionTree.import')}
-              </button>
-            )}
-          </div>
-        </details>
+                <CloseIcon size={14} />
+              </IconButton>
+              <input
+                value={importCwd}
+                onChange={event => setImportCwd(event.target.value)}
+                aria-label={t('sessionTree.importCwd')}
+                placeholder={t('sessionTree.importCwd')}
+                autoComplete="off"
+                className="col-span-3 h-8 min-w-0 rounded border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100"
+              />
+            </form>
+          ) : (
+            <button
+              type="button"
+              className="flex h-8 items-center gap-2 rounded px-2 text-[length:var(--fs-sm)] text-text-300 hover:bg-bg-200/50 hover:text-text-100"
+              onClick={() => setImportOpen(true)}
+            >
+              <UploadIcon size={14} />
+              {t('sessionTree.import')}
+            </button>
+          )}
+        </div>
       ) : null}
         </div>
       </details>
 
       {error ? (
-        <div role="alert" className="shrink-0 border-b border-danger-100/30 px-2.5 py-1.5 text-[length:var(--fs-xs)] text-danger-100">
+        <div role="alert" className="shrink-0 border-b border-danger-100/30 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
           {error}
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 flex flex-col">
+      <div ref={containerRef} className="min-h-0 flex-1 flex flex-col">
         <div
           ref={canvasRef}
           className="shrink-0 overflow-hidden"
@@ -615,8 +626,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         >
           <SessionTreeCanvas
             sessionId={sessionId}
-            tree={nativeTree}
-            leafId={snapshot?.native.leafId ?? null}
+            graph={treeGraph}
             selectedEntryId={selectedEntryId}
             pendingEntryId={pendingEntryId}
             loading={nativeLoading}
@@ -628,43 +638,60 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         {detailOpen && selectedNode && selectedEntryId ? (
           <>
             <div
-              className={`h-1 cursor-row-resize shrink-0 relative transition-colors ${
+              role="separator"
+              tabIndex={0}
+              aria-orientation="horizontal"
+              aria-label={t('sessionTree.resizeDetail')}
+              aria-valuemin={splitMinHeight}
+              aria-valuemax={splitMaxHeight}
+              aria-valuenow={Math.round(canvasHeight ?? splitMinHeight)}
+              className={`h-2 cursor-row-resize shrink-0 relative transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 ${
                 isResizing ? 'bg-accent-main-100' : 'bg-bg-200/60 hover:bg-accent-main-100/50'
               }`}
               onMouseDown={handleResizeStart}
               onTouchStart={handleTouchResizeStart}
+              onKeyDown={event => {
+                if (event.key === 'ArrowUp') { event.preventDefault(); adjustSplitHeight(-24) }
+                if (event.key === 'ArrowDown') { event.preventDefault(); adjustSplitHeight(24) }
+              }}
             />
             <section className="flex min-h-0 flex-1 flex-col bg-bg-100" style={{ minHeight: 160 }} aria-label={t('sessionTree.selectedEntry')}>
-              <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border-200/40 px-2.5">
+              <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-200/40 px-3">
                 <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">
                   {selectedNode.label || t(selectedRole ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}` : `sessionTree.entryTypes.${selectedEntryType}`)}
                 </span>
                 {selectedIsLeaf ? (
-                  <span className="shrink-0 rounded bg-accent-main-100/12 px-1 py-0.5 text-[length:var(--fs-xxs)] font-medium text-accent-main-100">
+                  <span className="shrink-0 rounded bg-accent-main-100/12 px-1.5 py-0.5 text-[length:var(--fs-xs)] font-medium text-accent-main-100">
                     {t('sessionTree.current')}
                   </span>
                 ) : null}
-                <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                <div className="ml-auto flex shrink-0 items-center gap-1">
                   <IconButton aria-label={t('sessionTree.closeDetail')} title={t('sessionTree.closeDetail')} size="sm" onClick={() => { setDetailOpen(false); resetSplitHeight() }}>
-                    <CloseIcon size={11} />
+                    <CloseIcon size={12} />
                   </IconButton>
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-auto px-2.5 py-1.5">
-                <SessionTreeDetail
-                  sessionId={sessionId}
-                  directory={snapshot?.session.directory ?? '/'}
-                  node={selectedNode}
-                />
+              <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+                {selectedDetailMessages.length > 0 ? (
+                  <div className="space-y-3">
+                    {selectedDetailMessages.map(message => (
+                      <MessageRenderer key={message.info.id} message={message} isTurnLatestAssistant />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="break-words whitespace-pre-wrap text-[length:var(--fs-xs)] leading-relaxed text-text-300">
+                    {selectedPreview}
+                  </p>
+                )}
                 {selectedNode.label ? (
-                  <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">
+                  <p className="mt-1.5 text-[length:var(--fs-xs)] text-text-500">
                     {t('sessionTree.labelLine', { label: selectedNode.label, time: selectedNode.labelTimestamp ?? '' })}
                   </p>
                 ) : null}
 
                 {capabilities.sessionNavigate && !selectedIsLeaf ? (
-                  <p className="mt-1.5 rounded border border-border-200/40 bg-bg-200/30 px-2 py-1.5 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+                  <p className="mt-2 rounded border border-border-200/40 bg-bg-200/30 px-2.5 py-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
                     {selectedRole === 'user' || selectedEntryType === 'custom_message'
                       ? t('sessionTree.navigateUserHint')
                       : t('sessionTree.navigateEntryHint')}
@@ -672,9 +699,9 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 ) : null}
               </div>
 
-              <div className="shrink-0 border-t border-border-200/40 px-2.5 py-1.5">
+              <div className="shrink-0 border-t border-border-200/40 px-3 py-2">
                 {editingEntryId === selectedEntryId ? (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <input
                       autoFocus
                       value={editingLabel}
@@ -686,52 +713,67 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                       aria-label={t('sessionTree.labelPlaceholder')}
                       placeholder={t('sessionTree.labelPlaceholder')}
                       autoComplete="off"
-                      className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                      className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
                     />
                     <IconButton aria-label={t('common:save')} title={t('common:save')} size="sm" onClick={() => handleSubmitLabel(selectedEntryId)}>
-                      <CheckIcon size={12} />
+                      <CheckIcon size={13} />
                     </IconButton>
                     <IconButton aria-label={t('sessionTree.cancel')} title={t('sessionTree.cancel')} size="sm" onClick={() => setEditingEntryId(null)}>
-                      <CloseIcon size={12} />
+                      <CloseIcon size={13} />
                     </IconButton>
                   </div>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {capabilities.sessionNavigate && !selectedIsLeaf ? (
                       <button
                         type="button"
                         disabled={pendingEntryId !== null}
                         onClick={() => handleNavigate(selectedEntryId)}
-                        className="h-6 rounded bg-accent-main-100 px-2 text-[length:var(--fs-xs)] font-medium text-bg-100 hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100/60 disabled:opacity-50"
+                        className="h-7 rounded-md bg-accent-main-100 px-2.5 text-[length:var(--fs-xs)] font-medium text-bg-100 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main-100/60 disabled:opacity-50"
                       >
                         {t('sessionTree.navigate')}
                       </button>
                     ) : null}
-                    <IconButton aria-label={t('sessionTree.label')} title={t('sessionTree.label')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}>
-                      <PencilIcon size={11} />
-                    </IconButton>
+                    <button
+                      type="button"
+                      disabled={pendingEntryId !== null}
+                      onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}
+                      className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
+                    >
+                      {t('sessionTree.label')}
+                    </button>
                     {capabilities.fork ? (
-                      <IconButton aria-label={t('sessionTree.fork')} title={t('sessionTree.fork')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleFork(selectedEntryId)}>
-                        <GitBranchIcon size={11} />
-                      </IconButton>
+                      <button
+                        type="button"
+                        disabled={pendingEntryId !== null}
+                        onClick={() => handleFork(selectedEntryId)}
+                        className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
+                      >
+                        {t('sessionTree.fork')}
+                      </button>
                     ) : null}
                     {capabilities.sessionClone ? (
-                      <IconButton aria-label={t('sessionTree.clone')} title={t('sessionTree.clone')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleClone(selectedEntryId)}>
-                        <CopyIcon size={11} />
-                      </IconButton>
+                      <button
+                        type="button"
+                        disabled={pendingEntryId !== null}
+                        onClick={() => handleClone(selectedEntryId)}
+                        className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
+                      >
+                        {t('sessionTree.clone')}
+                      </button>
                     ) : null}
                     {capabilities.sessionNavigate && capabilities.compactionManage && !selectedIsLeaf ? (
                       <details className="text-[length:var(--fs-xs)] text-text-300">
                         <summary className="cursor-pointer select-none hover:text-text-100">{t('sessionTree.navigationOptions')}</summary>
-                        <div className="mt-1.5 space-y-1.5 border-l border-border-200 pl-1.5">
-                          <label className="flex items-center gap-1">
+                        <div className="mt-2 space-y-2 border-l border-border-200 pl-2">
+                          <label className="flex items-center gap-2">
                             <input type="checkbox" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
                             {t('sessionTree.summarizeNavigation')}
                           </label>
                           {summarizeNavigation ? (
                             <>
                               <input
-                                className="h-6 w-full rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                                className="h-7 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
                                 value={navigationInstructions}
                                 aria-label={t('sessionTree.branchSummaryInstructions')}
                                 placeholder={t('sessionTree.branchSummaryInstructions')}
@@ -739,14 +781,14 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                                 onChange={event => setNavigationInstructions(event.target.value)}
                               />
                               <input
-                                className="h-6 w-full rounded border border-border-200 bg-bg-100 px-1.5 text-[length:var(--fs-xs)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                                className="h-7 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
                                 value={navigationLabel}
                                 aria-label={t('sessionTree.optionalBranchLabel')}
                                 placeholder={t('sessionTree.optionalBranchLabel')}
                                 autoComplete="off"
                                 onChange={event => setNavigationLabel(event.target.value)}
                               />
-                              <label className="flex items-center gap-1">
+                              <label className="flex items-center gap-2">
                                 <input type="checkbox" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />
                                 {t('sessionTree.replaceDefaultInstructions')}
                               </label>

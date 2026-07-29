@@ -24,6 +24,7 @@ interface UseVerticalSplitResizeResult {
   resetSplitHeight: () => void
   handleResizeStart: (event: ReactMouseEvent) => void
   handleTouchResizeStart: (event: ReactTouchEvent) => void
+  adjustSplitHeight: (delta: number) => void
 }
 
 export function useVerticalSplitResize({
@@ -66,8 +67,9 @@ export function useVerticalSplitResize({
 
       const deltaY = currentY - startY
       const nextHeight = startHeight + deltaY
-      const maxHeight = containerHeight - minSecondaryHeight
-      const clampedHeight = Math.min(Math.max(nextHeight, minPrimaryHeight), maxHeight)
+      const maxHeight = Math.max(0, containerHeight - minSecondaryHeight)
+      const effectiveMinHeight = Math.min(minPrimaryHeight, maxHeight)
+      const clampedHeight = Math.min(Math.max(nextHeight, effectiveMinHeight), maxHeight)
 
       primaryEl.style.setProperty(cssVariableName, `${clampedHeight}px`)
       currentHeightRef.current = clampedHeight
@@ -160,11 +162,26 @@ export function useVerticalSplitResize({
     [applyHeight, containerRef, defaultPrimaryHeightRatio, finishResize, primaryRef],
   )
 
+  const adjustSplitHeight = useCallback((delta: number) => {
+    const container = containerRef.current
+    const primary = primaryRef.current
+    if (!container || !primary) return
+    const containerHeight = container.getBoundingClientRect().height
+    const current = currentHeightRef.current ?? primary.getBoundingClientRect().height
+    const maxHeight = Math.max(0, containerHeight - minSecondaryHeight)
+    const effectiveMinHeight = Math.min(minPrimaryHeight, maxHeight)
+    const next = Math.min(Math.max(current + delta, effectiveMinHeight), maxHeight)
+    primary.style.setProperty(cssVariableName, `${next}px`)
+    currentHeightRef.current = next
+    setSplitHeight(next)
+  }, [containerRef, cssVariableName, minPrimaryHeight, minSecondaryHeight, primaryRef])
+
   return {
     splitHeight,
     isResizing,
     resetSplitHeight,
     handleResizeStart,
     handleTouchResizeStart,
+    adjustSplitHeight,
   }
 }
