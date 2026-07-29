@@ -58,7 +58,6 @@ vi.mock('./parts', () => ({
   AgentPartView: () => null,
   SyntheticTextPartView: () => null,
   StepFinishPartView: () => null,
-  SubtaskPartView: () => null,
   RetryPartView: () => null,
   CompactionPartView: () => <div>History compacted</div>,
   MessageErrorView: () => null,

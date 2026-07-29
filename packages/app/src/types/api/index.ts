@@ -34,13 +34,11 @@ export type {
   StepFinishPart,
   SnapshotPart,
   PatchPart,
-  SubtaskPart,
   RetryPart,
   CompactionPart,
   TextPartInput,
   FilePartInput,
   AgentPartInput,
-  SubtaskPartInput,
 } from './message'
 
 // Model types

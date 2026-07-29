@@ -44,7 +44,7 @@ function isToolOnlyFollowUp(msg: Message): boolean {
     if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
     if (isVisibleThinking(p) || isVisibleText(p)) return false
     if (p.type === 'tool') sawTool = true
-    else if (p.type === 'subtask' || p.type === 'retry' || p.type === 'compaction') return false
+    else if (p.type === 'retry' || p.type === 'compaction') return false
   }
   return sawTool
 }
@@ -64,7 +64,7 @@ function isMergeableTrailing(msg: Message): boolean {
       sawVisibleText = true
       continue
     }
-    if (p.type === 'subtask' || p.type === 'retry' || p.type === 'compaction') return false
+    if (p.type === 'retry' || p.type === 'compaction') return false
   }
   return sawTool && sawVisibleText
 }

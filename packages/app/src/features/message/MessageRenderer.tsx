@@ -22,7 +22,6 @@ import {
   AgentPartView,
   SyntheticTextPartView,
   StepFinishPartView,
-  SubtaskPartView,
   RetryPartView,
   CompactionPartView,
   MessageErrorView,
@@ -893,8 +892,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
                     completedAt={showTiming ? completed : undefined}
                   />
                 )
-              case 'subtask':
-                return <SubtaskPartView key={part.id} part={part} />
               case 'retry':
                 return <RetryPartView key={part.id} part={part} />
               case 'compaction':

@@ -88,11 +88,6 @@ vi.mock('../store', () => ({
     claimAutoReply: (requestId: string) => claimAutoReplyMock(requestId),
     releaseAutoReply: (requestId: string) => releaseAutoReplyMock(requestId),
   },
-  childSessionStore: {
-    getChildSessionIds: vi.fn(() => []),
-    registerChildSession: vi.fn(),
-    getSessionAndDescendants: vi.fn(() => []),
-  },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
   activeSessionStore: {
     getSnapshot: () => ({ statusMap: activeSessionStatusMap }),
