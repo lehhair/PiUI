@@ -1,6 +1,7 @@
 import type { JsonObject } from '@piui/protocol'
 import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
+import { mergeLatestBranchPage } from '../branchMerge.js'
 
 /**
  * Load all Pi sessions globally.
@@ -106,6 +107,24 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
     console.error('Failed to load more branch entries:', error)
     throw error
   }
+}
+
+/**
+ * Refresh branch with the latest page, merging local pagination history.
+ * Used by the event stream when head revision changes.
+ */
+export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const latest = await transport.getPiBranchPage(sessionId, { limit: 200 }, signal)
+  piBranchStore.setData(mergeLatestBranchPage(piBranchStore.getData(), latest))
+}
+
+/**
+ * Refresh runtime state only.
+ * Used by the event stream when state-only events arrive.
+ */
+export async function refreshPiSessionState(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const state = await transport.getPiSessionState(sessionId, signal)
+  piSessionStateStore.setState(state as JsonObject)
 }
 
 /**
