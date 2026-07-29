@@ -40,7 +40,7 @@ import {
   type ConnectionInfo,
 } from '../../../api'
 import type { UiSession } from '../../../types/session'
-import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
+import { getDirectoryName, isSameDirectory, normalizeForComparison, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
 import { usePiCapabilities } from '../../../pi/capabilities'
 
@@ -462,7 +462,25 @@ export function SidePanel({
   // ---- 子 session 展示数据 ----
   const rootSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
 
-  const findParentId = useCallback((id: string) => childSessionStore.getSessionInfo(id)?.parentID, [])
+  const sessionIdByPath = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const session of sessions) {
+      if (session.path) map.set(normalizeForComparison(session.path), session.id)
+    }
+    return map
+  }, [sessions])
+
+  const findParentId = useCallback(
+    (id: string) => {
+      const parentPath = sessionLookup.get(id)?.parentSessionPath
+      if (parentPath) {
+        const parentId = sessionIdByPath.get(normalizeForComparison(parentPath))
+        if (parentId) return parentId
+      }
+      return childSessionStore.getSessionInfo(id)?.parentID
+    },
+    [sessionLookup, sessionIdByPath],
+  )
 
   // 开关开 → 拉 /children 全量：选中的 root 或选中子 session 时保持其父展开
   const expandedChildSessionIds = useMemo(() => {

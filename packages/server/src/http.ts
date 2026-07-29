@@ -52,6 +52,8 @@ function sessionSummary(
     title: s.title,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
+    path: s.sessionFile,
+    parentSessionPath: s.parentSessionPath,
   }
 }
 

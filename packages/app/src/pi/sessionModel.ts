@@ -14,6 +14,8 @@ export function toUiSession(summary: PiSessionSummary, directory?: string): UiSe
     id: summary.id,
     directory: directory ?? summary.directory,
     title: summary.title || "New chat",
+    path: summary.path,
+    parentSessionPath: summary.parentSessionPath,
     ...sessionTimestamps(summary),
   }
 }
