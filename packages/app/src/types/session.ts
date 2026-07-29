@@ -4,10 +4,16 @@ export interface UiSession {
   id: string
   directory: string
   title: string
+  firstMessage?: string
+  messageCount?: number
+  searchText?: string
+  isNamed?: boolean
   createdAt: number
   updatedAt: number
   path?: string
   parentSessionPath?: string
+  forkParentId?: string
+  forkParentTitle?: string
 }
 
 export interface PiSessionSummary {

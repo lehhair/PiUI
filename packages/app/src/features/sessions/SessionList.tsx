@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useSyncExternalStore, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SearchIcon, PencilIcon, TrashIcon, ComposeIcon, PinIcon } from '../../components/Icons'
+import { SearchIcon, PencilIcon, TrashIcon, ComposeIcon, PinIcon, MessageSquareIcon, GitBranchIcon } from '../../components/Icons'
 import { getSelectionRoundClass } from './selectionRound'
 import { formatRelativeTime } from '../../utils/dateUtils'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
@@ -436,6 +436,13 @@ export function SessionListItem({
     () => pinnedEntries.some(entry => entry.sessionId === session.id),
     [pinnedEntries, session.id],
   )
+  const sessionTitleDetails = [
+    session.title,
+    session.isNamed && session.firstMessage ? session.firstMessage : undefined,
+    session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined,
+    session.directory,
+    typeof session.messageCount === 'number' ? `${session.messageCount} messages` : undefined,
+  ].filter(Boolean).join('\n')
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -619,8 +626,9 @@ export function SessionListItem({
   // 标题 + 时间 + 活跃状态圆点
   // ============================================
   if (isMinimal) {
-    const statusIndicatorTitle =
-      activeStatus?.label || (hasUnreadCompletedNotification ? t('chat:notification.completed') : undefined)
+    const statusIndicatorTitle = activeStatus?.label ||
+      (hasUnreadCompletedNotification ? t('chat:notification.completed') : undefined) ||
+      (session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined)
 
     return (
       <div
@@ -656,6 +664,8 @@ export function SessionListItem({
             </>
           ) : hasUnreadCompletedNotification ? (
             <span className="absolute w-1.5 h-1.5 rounded-full bg-accent-main-100" />
+          ) : session.parentSessionPath ? (
+            <GitBranchIcon size={10} className="text-text-500" aria-hidden="true" />
           ) : null}
         </span>
 
@@ -676,7 +686,7 @@ export function SessionListItem({
           >
             <span
               className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)]"
-              title={session.title || t('sessions.untitledChat')}
+              title={sessionTitleDetails || t('sessions.untitledChat')}
             >
               {session.title || t('sessions.untitledChat')}
             </span>
@@ -787,7 +797,7 @@ export function SessionListItem({
                 ? 'text-text-100'
                 : 'text-text-200 group-hover:text-text-100'
             }`}
-            title={session.title || t('sessions.untitledChat')}
+            title={sessionTitleDetails || t('sessions.untitledChat')}
           >
             {session.title || t('sessions.untitledChat')}
           </p>
@@ -818,6 +828,27 @@ export function SessionListItem({
             ) : null}
             {session.updatedAt > 0 && (
               <span className="shrink-0 opacity-60">{formatRelativeTime(session.updatedAt)}</span>
+            )}
+            {session.parentSessionPath && (
+              <>
+                <span className="opacity-30 shrink-0">·</span>
+                <span
+                  className="flex min-w-0 max-w-24 shrink items-center gap-0.5 opacity-60"
+                  title={`Forked from ${session.forkParentTitle || session.parentSessionPath}`}
+                >
+                  <GitBranchIcon size={10} className="shrink-0" aria-hidden="true" />
+                  <span className="truncate">{session.forkParentTitle || 'Fork'}</span>
+                </span>
+              </>
+            )}
+            {typeof session.messageCount === 'number' && session.messageCount > 0 && (
+              <>
+                <span className="opacity-30 shrink-0">·</span>
+                <span className="flex shrink-0 items-center gap-0.5 opacity-55" title={`${session.messageCount} messages`}>
+                  <MessageSquareIcon size={10} aria-hidden="true" />
+                  <span>{session.messageCount}</span>
+                </span>
+              </>
             )}
             {showDirectory && session.directory && (
               <>

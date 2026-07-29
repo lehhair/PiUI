@@ -97,7 +97,7 @@ function bootstrap() {
 
 async function startApp() {
   // Do not mount legacy OpenCode consumers before the PiUI backend decision.
-  const { initializePiBackend, installPiBackendServerSwitch, seedMockChatIfEnabled } = await import('./pi/bootstrapMockChat')
+  const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
   installPiBackendServerSwitch()
   const backend = await initializePiBackend()
   bootstrap()
@@ -105,8 +105,6 @@ async function startApp() {
   // PiUI never auto-starts OpenCode. Real Pi also never creates a session on launch.
   if (isNativeTauri) {
     console.info('[PiUI] native shell — opencode auto-start disabled')
-  } else if (backend.available && backend.driver === 'mock') {
-    void seedMockChatIfEnabled()
   } else if (!backend.available) {
     console.info('[PiUI] browser shell — PiUI server unavailable')
   }

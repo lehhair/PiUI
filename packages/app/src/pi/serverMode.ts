@@ -1,12 +1,10 @@
 import { useSyncExternalStore } from "react"
-import type { ProtocolHandshakeV2 } from "@piui/protocol"
 
 export type PiBackendStatus = "booting" | "online" | "offline" | "unauthorized"
 
 export interface PiBackendState {
   status: PiBackendStatus
   driver?: "mock" | "pi"
-  handshake?: ProtocolHandshakeV2
   error?: string
   checkedAt?: number
 }

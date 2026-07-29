@@ -96,7 +96,7 @@ const fetch = piFetch
 
 export async function isPiServerUp(): Promise<boolean> {
   try {
-    const res = await piFetch(`${getApiBase()}/api/v1/health`, { signal: AbortSignal.timeout(1500) })
+    const res = await piFetch(`${getApiBase()}/api/v1/host/health`, { signal: AbortSignal.timeout(1500) })
     if (!res.ok) return false
     const body = (await res.json()) as { service?: string; protocolVersion?: number }
     return body.service === "piui-server" && body.protocolVersion === 1

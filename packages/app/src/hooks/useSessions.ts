@@ -2,8 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { autoDetectPathStyle, isSameDirectory } from '../utils'
-import { createPiSession, deletePiSession, listPiSessions, resolveWorkspacePath } from '../pi/sessionApi'
-import { toUiSession } from '../pi/sessionModel'
+import {
+  listPiNativeSessions,
+  listPiNativeSessionsForCwd,
+  openPiNativeSession,
+  postPiGlobalCommand,
+} from '../pi/nativeApi'
+import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
+import { trackPiSession } from '../pi/piSessionIndex'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -97,14 +103,16 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       }
 
       try {
-        const workspacePath = normalizedDirectory ? await resolveWorkspacePath(normalizedDirectory) : null
-        const all = (await listPiSessions(workspacePath ?? undefined))
-          .map(summary => toUiSession(summary, normalizedDirectory))
+        const nativeSessions = normalizedDirectory
+          ? await listPiNativeSessionsForCwd(normalizedDirectory)
+          : await listPiNativeSessions()
+        const mapped = nativeSessions
+          .map(piSessionInfoToUiSession)
+          .filter((session): session is UiSession => session !== null)
+        const all = linkPiSessionForks(mapped)
         const searchTerm = queryParams.search?.trim().toLowerCase()
-        const data = all
-          .filter(session => matchesDirectory(session))
-          .filter(session => !searchTerm || session.title.toLowerCase().includes(searchTerm))
-          .slice(0, currentLimitRef.current)
+        const matching = filterPiSessionList(all.filter(session => matchesDirectory(session)), searchTerm ?? '')
+        const data = matching.slice(0, currentLimitRef.current)
 
         // 检查是否是最新的请求
         if (requestId !== requestIdRef.current) return
@@ -114,7 +122,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
 
         setSessions(data)
-        setHasMore(data.length >= currentLimitRef.current)
+        setHasMore(matching.length > data.length)
       } catch (e) {
         if (requestId !== requestIdRef.current) return
         setError(e instanceof Error ? e : new Error('Failed to fetch sessions'))
@@ -215,10 +223,20 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 创建新会话
   const create = useCallback(
     async (title?: string) => {
-      // 创建时也要传 directory
-      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      const { summary } = await createPiSession({ title, workspacePath: workspacePath ?? undefined })
-      const newSession = toUiSession(summary, normalizedDirectory)
+      if (!normalizedDirectory) throw new Error('A project directory is required')
+      const opened = await openPiNativeSession(normalizedDirectory)
+      const now = new Date().toISOString()
+      const newSession = piSessionInfoToUiSession({
+        id: opened.sessionId,
+        path: opened.sessionFile ?? undefined,
+        cwd: opened.cwd ?? normalizedDirectory,
+        name: title,
+        created: now,
+        modified: now,
+        messageCount: 0,
+        firstMessage: '',
+      })!
+      trackPiSession(opened.sessionId, newSession.directory)
 
       if (searchRef.current) {
         void fetchSessionsRef.current({ search: searchRef.current || undefined })
@@ -229,6 +247,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         })
       }
 
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+
       return newSession
     },
     [normalizedDirectory],
@@ -237,11 +257,14 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 删除会话
   const remove = useCallback(
     async (sessionId: string) => {
-      await deletePiSession(sessionId)
+      const session = sessions.find(item => item.id === sessionId)
+      if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
+      await postPiGlobalCommand('session.delete', { cwd: session.directory, sessionFile: session.path })
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     },
-    [],
+    [sessions],
   )
 
   const patchLocalSession = useCallback((sessionId: string, patch: Partial<UiSession>) => {
