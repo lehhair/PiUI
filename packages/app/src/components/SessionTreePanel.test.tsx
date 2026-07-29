@@ -240,14 +240,13 @@ describe('SessionTreePanel', () => {
     })
     render(<SessionTreePanel sessionId="session-1" mode="controls" />)
 
-    fireEvent.click(screen.getByText('Import JSONL'))
     fireEvent.change(screen.getByPlaceholderText('Path to a Pi JSONL file'), {
       target: { value: 'C:\\backups\\old.jsonl' },
     })
     fireEvent.change(screen.getByPlaceholderText('Working directory override (optional)'), {
       target: { value: 'C:\\work\\project' },
     })
-    fireEvent.click(screen.getByTitle('Import'))
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     await waitFor(() =>
       expect(mocks.importSession).toHaveBeenCalledWith(
@@ -299,31 +298,35 @@ describe('SessionTreePanel', () => {
     mocks.clearQueue.mockResolvedValue({ snapshot: runtimeSnapshot, cleared: { steering: [], followUp: [] } })
     mocks.abortRetry.mockResolvedValue({ snapshot: runtimeSnapshot })
     mocks.setActiveTools.mockResolvedValue({ snapshot: runtimeSnapshot })
+    mocks.setQueueModes.mockResolvedValue({ snapshot: runtimeSnapshot })
     mocks.compact.mockResolvedValue({ accepted: true, snapshot: runtimeSnapshot })
     mocks.navigate.mockResolvedValue({ snapshot: runtimeSnapshot, cancelled: false })
 
     render(<SessionTreePanel sessionId="session-1" mode="controls" />)
 
-    expect(screen.getByText('Session Controls')).toBeInTheDocument()
+    expect(screen.getByLabelText('Session Controls')).toBeInTheDocument()
     expect(mocks.fetchNativeTree).not.toHaveBeenCalled()
-    expect(screen.getByText('Correct the parser')).toBeInTheDocument()
-    expect(screen.getByText('Run the tests')).toBeInTheDocument()
-    fireEvent.click(screen.getByTitle('Clear queued messages'))
+    fireEvent.click(screen.getByRole('button', { name: /Clear queue/ }))
     await waitFor(() => expect(mocks.clearQueue).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).not.toBeDisabled())
 
-    fireEvent.click(screen.getByText('Stop retry 2/3'))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(mocks.abortRetry).toHaveBeenCalledWith('session-1'))
 
-    fireEvent.click(screen.getByText('Tools (1/2 active)'))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'bash' }))
+    expect(screen.getByText('1/2 active')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'bash' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('switch', { name: 'bash' }))
     await waitFor(() => expect(mocks.setActiveTools).toHaveBeenCalledWith('session-1', ['read', 'bash']))
 
-    fireEvent.change(screen.getByPlaceholderText('Compaction instructions (optional)'), {
+    fireEvent.click(screen.getAllByRole('tab', { name: 'All' })[0])
+    await waitFor(() => expect(mocks.setQueueModes).toHaveBeenCalledWith('session-1', { steeringMode: 'all' }))
+
+    fireEvent.change(screen.getByPlaceholderText('What to keep during compaction (optional)…'), {
       target: { value: 'Keep API decisions' },
     })
-    fireEvent.click(screen.getByTitle('Compact context'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Compact now' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Compact now' }))
     await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith('session-1', 'Keep API decisions'))
-
   })
 
   it('keeps runtime controls out of the tree mode', async () => {
