@@ -43,12 +43,12 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
   const isUser = data.role === 'user'
   const isAssistant = data.role === 'assistant'
   const stateClass = data.currentLeaf
-    ? 'border-accent-main-100 bg-accent-main-100/10 shadow-[0_0_0_2px_hsl(var(--accent-main-100)/0.22)]'
+    ? 'border-accent-main-100 bg-accent-main-100/10 shadow-[0_0_0_1px_hsl(var(--accent-main-100)/0.3)]'
     : data.activePath
-      ? 'border-accent-main-100/60 bg-bg-100 shadow-sm'
+      ? 'border-accent-main-100/50 bg-bg-100'
       : selected
-        ? 'border-text-300 bg-bg-100 shadow-[0_0_0_1px_hsl(var(--text-300)/0.4)]'
-        : 'border-border-200 bg-bg-100 shadow-sm'
+        ? 'border-text-300 bg-bg-100 shadow-[0_0_0_1px_hsl(var(--text-300)/0.3)]'
+        : 'border-border-200/60 bg-bg-100'
   const roleClass = isUser
     ? 'border-l-accent-main-100'
     : isAssistant
@@ -58,29 +58,29 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
 
   return (
     <div
-      className={`relative h-full w-[240px] overflow-hidden rounded-md border border-l-[3px] ${roleClass} ${stateClass}`}
+      className={`relative h-full w-[200px] overflow-hidden rounded border border-l-2 ${roleClass} ${stateClass}`}
       title={data.preview}
     >
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
-      <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2">
-        <RoleIcon size={13} className="shrink-0 text-text-400" aria-hidden="true" />
+      <Handle type="target" position={Position.Top} className="!h-1.5 !w-1.5 !border-bg-100 !bg-border-200" />
+      <div className="flex min-w-0 items-center gap-1.5 px-2 pt-1.5">
+        <RoleIcon size={11} className="shrink-0 text-text-400" aria-hidden="true" />
         <span className="min-w-0 truncate text-[length:var(--fs-xs)] font-medium text-text-300">
           {data.label || roleLabel(data, t)}
         </span>
         {data.currentLeaf ? (
-          <span className="ml-auto shrink-0 text-[length:var(--fs-xs)] font-medium text-accent-main-100">
+          <span className="ml-auto shrink-0 text-[length:var(--fs-xxs)] font-medium text-accent-main-100">
             {t('sessionTree.currentShort')}
           </span>
         ) : data.branchCount > 1 ? (
-          <span className="ml-auto shrink-0 tabular-nums text-[length:var(--fs-xs)] text-text-500">
-            {t('sessionTree.branches', { count: data.branchCount })}
+          <span className="ml-auto shrink-0 tabular-nums text-[length:var(--fs-xxs)] text-text-500">
+            {data.branchCount}
           </span>
         ) : null}
       </div>
-      <p className={`${data.compact ? 'line-clamp-1' : 'line-clamp-2'} break-words px-2.5 pb-2 pt-1.5 text-[length:var(--fs-sm)] leading-snug text-text-100`}>
+      <p className={`${data.compact ? 'line-clamp-1' : 'line-clamp-2'} break-words px-2 pb-1.5 pt-1 text-[length:var(--fs-xs)] leading-snug text-text-100`}>
         {data.preview}
       </p>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
+      <Handle type="source" position={Position.Bottom} className="!h-1.5 !w-1.5 !border-bg-100 !bg-border-200" />
     </div>
   )
 })
@@ -117,7 +117,7 @@ function CanvasContent({
   const focusCurrent = useCallback(() => {
     const current = nodes.find(node => node.data.currentLeaf)
     if (!current) return
-    void setCenter(current.position.x + 120, current.position.y + (current.height ?? 76) / 2, {
+    void setCenter(current.position.x + 100, current.position.y + (current.height ?? 48) / 2, {
       zoom: 1,
       duration: 250,
     })
@@ -130,12 +130,12 @@ function CanvasContent({
     const frame = requestAnimationFrame(() => {
       const current = nodes.find(node => node.data.currentLeaf)
       if (current) {
-        void setCenter(current.position.x + 120, current.position.y + (current.height ?? 76) / 2, {
+        void setCenter(current.position.x + 100, current.position.y + (current.height ?? 48) / 2, {
           zoom: 0.9,
         })
         onSelectEntry(current.id)
       } else {
-        void fitView({ padding: 0.2, minZoom: 0.35, maxZoom: 1.2 })
+        void fitView({ padding: 0.15, minZoom: 0.3, maxZoom: 1.5 })
       }
     })
     return () => cancelAnimationFrame(frame)
@@ -143,28 +143,29 @@ function CanvasContent({
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-bg-100">
-      <div className="absolute left-2 right-2 top-2 z-10 flex min-w-0 items-center gap-1.5">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border-200 bg-bg-100/95 px-2 shadow-sm focus-within:border-accent-main-100">
-          <Search size={14} className="shrink-0 text-text-500" aria-hidden="true" />
+      <div className="absolute left-2 right-2 top-2 z-10 flex min-w-0 items-center gap-1">
+        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded border border-border-200 bg-bg-100/95 px-1.5 focus-within:border-accent-main-100">
+          <Search size={12} className="shrink-0 text-text-500" aria-hidden="true" />
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
             aria-label={t('sessionTree.search')}
             placeholder={t('sessionTree.searchPlaceholder')}
             autoComplete="off"
-            className="min-w-0 flex-1 bg-transparent text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-500"
+            className="min-w-0 flex-1 bg-transparent text-[length:var(--fs-xs)] text-text-100 outline-none placeholder:text-text-500"
           />
-          <span className="shrink-0 tabular-nums text-[length:var(--fs-xs)] text-text-500">{nodes.length}</span>
+          <span className="shrink-0 tabular-nums text-[length:var(--fs-xxs)] text-text-500">{nodes.length}</span>
         </label>
-        <IconButton aria-label={t('sessionTree.focusCurrent')} title={t('sessionTree.focusCurrent')} onClick={focusCurrent}>
-          <Focus size={15} />
+        <IconButton aria-label={t('sessionTree.focusCurrent')} title={t('sessionTree.focusCurrent')} size="sm" onClick={focusCurrent}>
+          <Focus size={13} />
         </IconButton>
         <IconButton
           aria-label={t('sessionTree.fitView')}
           title={t('sessionTree.fitView')}
-          onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 250 })}
+          size="sm"
+          onClick={() => void fitView({ padding: 0.15, minZoom: 0.2, maxZoom: 1.5, duration: 200 })}
         >
-          <Maximize2 size={15} />
+          <Maximize2 size={13} />
         </IconButton>
       </div>
 
@@ -179,36 +180,36 @@ function CanvasContent({
         panOnDrag
         zoomOnPinch
         zoomOnScroll
-        minZoom={0.15}
-        maxZoom={2}
+        minZoom={0.1}
+        maxZoom={3}
         fitView={false}
         proOptions={{ hideAttribution: true }}
         className="session-tree-flow"
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1.4} color="hsl(var(--border-200) / 0.65)" />
+        <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="hsl(var(--border-200) / 0.4)" />
       </ReactFlow>
 
-      <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1">
+      <div className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5">
         <IconButton aria-label={t('sessionTree.zoomIn')} title={t('sessionTree.zoomIn')} size="sm" onClick={() => zoomIn()}>
-          <Plus size={13} />
+          <Plus size={11} />
         </IconButton>
         <IconButton aria-label={t('sessionTree.zoomOut')} title={t('sessionTree.zoomOut')} size="sm" onClick={() => zoomOut()}>
-          <Minus size={13} />
+          <Minus size={11} />
         </IconButton>
       </div>
 
       {loading && nodes.length === 0 ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-sm)] text-text-400" role="status">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-xs)] text-text-400" role="status">
           {t('sessionTree.loading')}
         </div>
       ) : null}
       {!loading && nodes.length === 0 && !error ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[length:var(--fs-sm)] text-text-400">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[length:var(--fs-xs)] text-text-400">
           {t('sessionTree.empty')}
         </div>
       ) : null}
       {error ? (
-        <div className="absolute bottom-2 left-2 right-2 rounded-md border border-danger-100/30 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100" role="alert">
+        <div className="absolute bottom-2 left-2 right-2 rounded border border-danger-100/30 bg-bg-100 px-2 py-1.5 text-[length:var(--fs-xxs)] text-danger-100" role="alert">
           {error}
         </div>
       ) : null}

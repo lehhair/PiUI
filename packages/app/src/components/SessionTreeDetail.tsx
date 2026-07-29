@@ -7,7 +7,6 @@ interface SessionTreeDetailProps {
   sessionId: string
   directory: string
   node: NativeTreeNode
-  selectedEntryId: string
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -72,7 +71,7 @@ function ToolExecutionDetail({ toolName, args, results, t }: {
   const exitCode = typeof details.exitCode === 'number' ? details.exitCode : undefined
 
   return (
-    <div className="rounded-md border border-border-200/50 bg-bg-200/30 px-3 py-2">
+    <div className="rounded border border-border-200/50 bg-bg-200/30 px-2.5 py-1.5">
       <div className="flex items-center gap-2 text-[length:var(--fs-xs)] font-medium text-text-300">
         <span className="rounded bg-bg-300/60 px-1.5 py-0.5 text-text-200">{toolName}</span>
         {hasResult ? (
@@ -84,26 +83,26 @@ function ToolExecutionDetail({ toolName, args, results, t }: {
         )}
       </div>
       {args && Object.keys(asRecord(args)).length > 0 ? (
-        <pre className="mt-1.5 overflow-x-auto text-[length:var(--fs-xxs)] leading-relaxed text-text-400 whitespace-pre-wrap break-words">
+        <pre className="mt-1 overflow-x-auto text-[length:var(--fs-xxs)] leading-relaxed text-text-400 whitespace-pre-wrap break-words">
           {JSON.stringify(args, null, 2)}
         </pre>
       ) : null}
       {output ? (
-        <div className="mt-1.5 max-h-32 overflow-y-auto">
+        <div className="mt-1 max-h-24 overflow-y-auto">
           <pre className="text-[length:var(--fs-xxs)] leading-relaxed text-text-300 whitespace-pre-wrap break-words">
             {output}
           </pre>
         </div>
       ) : null}
       {patch ? (
-        <div className="mt-1.5 max-h-24 overflow-y-auto rounded border border-border-200/30 bg-bg-100/50 p-2">
+        <div className="mt-1 max-h-20 overflow-y-auto rounded border border-border-200/30 bg-bg-100/50 p-1.5">
           <pre className="text-[length:var(--fs-xxs)] leading-relaxed text-text-400 whitespace-pre-wrap break-words font-mono">
             {patch}
           </pre>
         </div>
       ) : null}
       {cwd || exitCode !== undefined ? (
-        <div className="mt-1 flex items-center gap-3 text-[length:var(--fs-xxs)] text-text-500">
+        <div className="mt-1 flex items-center gap-2 text-[length:var(--fs-xxs)] text-text-500">
           {cwd ? <span>cwd: {cwd}</span> : null}
           {exitCode !== undefined ? <span>exit: {exitCode}</span> : null}
         </div>
@@ -180,7 +179,7 @@ export const SessionTreeDetail = memo(function SessionTreeDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+      <div className="min-h-0 flex-1 overflow-auto px-2.5 py-1.5">
         {fullText ? (
           <div className="mb-2 break-words text-[length:var(--fs-xs)] leading-relaxed text-text-200 whitespace-pre-wrap">
             {fullText}
@@ -188,7 +187,7 @@ export const SessionTreeDetail = memo(function SessionTreeDetail({
         ) : null}
 
         {isAssistant && toolCalls.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {toolCalls.map(call => (
               <ToolExecutionDetail
                 key={call.id}
@@ -202,15 +201,15 @@ export const SessionTreeDetail = memo(function SessionTreeDetail({
         ) : null}
 
         {isAssistant && assistantMessage?.isStreaming ? (
-          <p className="mt-2 text-[length:var(--fs-xs)] text-text-500">{t('sessionTree.streaming')}</p>
+          <p className="mt-1.5 text-[length:var(--fs-xs)] text-text-500">{t('sessionTree.streaming')}</p>
         ) : null}
 
         {isAssistant && assistantMessage?.info.role === 'assistant' && assistantMessage.info.finish === 'aborted' ? (
-          <p className="mt-2 text-[length:var(--fs-xs)] text-danger-100">{t('sessionTree.aborted')}</p>
+          <p className="mt-1.5 text-[length:var(--fs-xs)] text-danger-100">{t('sessionTree.aborted')}</p>
         ) : null}
 
         {isAssistant && assistantMessage?.info.role === 'assistant' && assistantMessage.info.finish === 'error' ? (
-          <p className="mt-2 text-[length:var(--fs-xs)] text-danger-100">{t('sessionTree.error')}</p>
+          <p className="mt-1.5 text-[length:var(--fs-xs)] text-danger-100">{t('sessionTree.error')}</p>
         ) : null}
 
         {isEvent && fullText ? null : isEvent ? (

@@ -231,7 +231,7 @@ describe('SessionTreePanel', () => {
     })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click(screen.getByText('Import JSONL'))
+    fireEvent.click(screen.getByText('Import JSONL', { selector: 'button' }))
     fireEvent.change(screen.getByPlaceholderText('Path to a Pi JSONL file'), {
       target: { value: 'C:\\backups\\old.jsonl' },
     })

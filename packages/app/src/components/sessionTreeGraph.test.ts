@@ -39,8 +39,8 @@ describe('buildSessionTreeGraph', () => {
     expect(rootNode.data.activePath).toBe(true)
     expect(activeNode.data.currentLeaf).toBe(true)
     expect(alternateNode.data.activePath).toBe(false)
-    expect(graph.edges.find(edge => edge.target === 'assistant-active')?.style).toMatchObject({ strokeWidth: 2.5 })
-    expect(graph.edges.find(edge => edge.target === 'assistant-alternate')?.style).toMatchObject({ strokeWidth: 1.5 })
+    expect(graph.edges.find(edge => edge.target === 'assistant-active')?.style).toMatchObject({ strokeWidth: 2 })
+    expect(graph.edges.find(edge => edge.target === 'assistant-alternate')?.style).toMatchObject({ strokeWidth: 1 })
   })
 
   it('keeps multiple roots and normalizes long multiline previews', () => {
