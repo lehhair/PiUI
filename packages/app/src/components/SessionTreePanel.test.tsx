@@ -30,20 +30,20 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
 vi.mock('./SessionTreeCanvas', () => ({
-  SessionTreeCanvas: ({ tree, selectedEntryId, onSelectEntry }: {
-    tree: Array<{ entry: { id?: unknown }; children: unknown[]; label?: string }>
+  SessionTreeCanvas: ({ graph, selectedEntryId, onSelectEntry }: {
+    graph: { nodes: Array<{ id: string; data: { label?: string } }> }
     selectedEntryId: string | null
     onSelectEntry: (entryId: string) => void
   }) => (
     <div aria-label="Session Tree">
-      {tree.flatMap(root => [root, ...(root.children as typeof tree)]).map(node => (
+      {graph.nodes.map(node => (
         <button
           type="button"
-          key={String(node.entry.id)}
-          aria-pressed={selectedEntryId === node.entry.id}
-          onClick={() => onSelectEntry(String(node.entry.id))}
+          key={node.id}
+          aria-pressed={selectedEntryId === node.id}
+          onClick={() => onSelectEntry(node.id)}
         >
-          {node.label ?? String(node.entry.id)}
+          {node.data.label ?? node.id}
         </button>
       ))}
     </div>
@@ -139,6 +139,15 @@ describe('SessionTreePanel', () => {
     render(<SessionTreePanel sessionId="session-1" />)
 
     fireEvent.click(await screen.findByText('user-entry'))
+    const separator = screen.getByRole('separator', { name: 'Resize canvas and details' })
+    expect(separator).toHaveAttribute('aria-orientation', 'horizontal')
+    expect(separator).toHaveAttribute('tabindex', '0')
+    const min = Number(separator.getAttribute('aria-valuemin'))
+    const max = Number(separator.getAttribute('aria-valuemax'))
+    const now = Number(separator.getAttribute('aria-valuenow'))
+    expect(now).toBeGreaterThanOrEqual(min)
+    expect(now).toBeLessThanOrEqual(max)
+    fireEvent.keyDown(separator, { key: 'ArrowDown' })
     fireEvent.click(screen.getByText('Return here'))
 
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry'))
@@ -163,12 +172,12 @@ describe('SessionTreePanel', () => {
     render(<SessionTreePanel sessionId="session-1" onNavigateSession={onNavigateSession} />)
 
     fireEvent.click(await screen.findByText('user-entry'))
-    fireEvent.click(screen.getByTitle('Edit label'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit label' }))
     fireEvent.change(screen.getByPlaceholderText('Branch label'), { target: { value: 'checkpoint' } })
     fireEvent.keyDown(screen.getByPlaceholderText('Branch label'), { key: 'Enter' })
     await waitFor(() => expect(mocks.setLabel).toHaveBeenCalledWith('session-1', 'user-entry', 'checkpoint'))
 
-    fireEvent.click(screen.getByTitle('Fork here'))
+    fireEvent.click(screen.getByRole('button', { name: 'Fork here' }))
     await waitFor(() => expect(mocks.fork).toHaveBeenCalledWith('session-1', 'user-entry', 'at'))
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(sourceSnapshot, { activate: false })
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(targetSnapshot)
@@ -205,7 +214,7 @@ describe('SessionTreePanel', () => {
     render(<SessionTreePanel sessionId="session-1" />)
 
     fireEvent.click(await screen.findByText('working branch'))
-    fireEvent.click(screen.getByTitle('Edit label'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit label' }))
     const input = screen.getByPlaceholderText('Branch label')
     expect(input).toHaveValue('working branch')
     fireEvent.change(input, { target: { value: 'current checkpoint' } })
@@ -231,7 +240,7 @@ describe('SessionTreePanel', () => {
     })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click(screen.getByText('Import JSONL', { selector: 'button' }))
+    fireEvent.click(screen.getByText('Import JSONL'))
     fireEvent.change(screen.getByPlaceholderText('Path to a Pi JSONL file'), {
       target: { value: 'C:\\backups\\old.jsonl' },
     })
