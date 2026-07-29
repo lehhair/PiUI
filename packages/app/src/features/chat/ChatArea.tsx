@@ -75,6 +75,7 @@ function sessionCacheKey(sessionId: string, processCollapseEnabled: boolean): st
 
 interface ChatAreaProps {
   messages: Message[]
+  queuedSteering?: readonly string[]
   queuedFollowUps?: readonly string[]
   pageRecords?: StableChatPage[]
   visibleMessages?: Message[]
@@ -166,11 +167,13 @@ const MessageBody = memo(function MessageBody({
   )
 })
 
-export const NextTurnQueue = memo(function NextTurnQueue({
+export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
+  kind,
   items,
   maxWidthClass,
   paddingClass,
 }: {
+  kind: 'current' | 'next'
   items: readonly string[]
   maxWidthClass: string
   paddingClass: string
@@ -178,10 +181,12 @@ export const NextTurnQueue = memo(function NextTurnQueue({
   const { t } = useTranslation('chat')
   if (items.length === 0) return null
 
-  const label = t('chatArea.nextTurnQueue', { count: items.length })
+  const label = t(kind === 'current' ? 'chatArea.currentTurnQueue' : 'chatArea.nextTurnQueue', {
+    count: items.length,
+  })
   return (
     <section
-      data-next-turn-queue="true"
+      data-message-queue={kind}
       aria-label={label}
       className={`w-full ${maxWidthClass} mx-auto ${paddingClass} pt-3 pb-2`}
     >
@@ -352,7 +357,7 @@ export const ChatArea = memo(
   forwardRef<ChatAreaHandle, ChatAreaProps>(
     (
       {
-        messages, queuedFollowUps = [], visibleMessages: visibleMessagesProp,
+        messages, queuedSteering = [], queuedFollowUps = [], visibleMessages: visibleMessagesProp,
         forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
         sessionId, isStreaming = false, allowStreamingLayoutAnimation = false,
@@ -781,7 +786,7 @@ export const ChatArea = memo(
 
       // retry/error 出现消失、输入框高度变 → 底部 footer 高度变，贴底时要跟着滚
       // 否则重试条进出后 scrollTop 停在旧位置，看起来没贴底
-      const footerPinKey = `${retryStatus ? 'r' : ''}|${loadError || connectionError ? 'e' : ''}|${queuedFollowUps.join('\u0000')}|${spacerHeight}`
+      const footerPinKey = `${retryStatus ? 'r' : ''}|${loadError || connectionError ? 'e' : ''}|${queuedSteering.join('\u0000')}|${queuedFollowUps.join('\u0000')}|${spacerHeight}`
       useLayoutEffect(() => {
         if (!shouldAnchorBottom() || prependLoading.current) return
         pinToBottom()
@@ -970,7 +975,18 @@ export const ChatArea = memo(
               })}
             </div>
 
-            <NextTurnQueue items={queuedFollowUps} maxWidthClass={maxWidthClass} paddingClass={paddingClass} />
+            <QueuedUserMessageQueue
+              kind="current"
+              items={queuedSteering}
+              maxWidthClass={maxWidthClass}
+              paddingClass={paddingClass}
+            />
+            <QueuedUserMessageQueue
+              kind="next"
+              items={queuedFollowUps}
+              maxWidthClass={maxWidthClass}
+              paddingClass={paddingClass}
+            />
 
             {/* 顺序必须是：消息 → 下一轮队列 → 重试/错误提示 → 输入框占位。
                 旧 Virtuoso Footer 就是这样；换 virtualizer 后 paddingEnd 在前、提示在后，会叠到输入框下。 */}

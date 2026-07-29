@@ -13,6 +13,7 @@
   "chatArea": {
     "loadingSession": "加载会话中...",
     "loadingHistory": "加载历史记录...",
+    "currentTurnQueue": "等待本轮追加 · {{count}}",
     "nextTurnQueue": "等待下一轮 · {{count}}",
     "dropFolderToAddProject": "添加为项目",
     "dropFolderToAddProjectHint": "将文件夹放到此处"
