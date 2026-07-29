@@ -52,42 +52,14 @@ export type {
   ModelCycleResult,
 } from '@earendil-works/pi-coding-agent'
 
-// Custom messages (defined in SDK but not re-exported from index)
-// These are the actual message types used by the coding agent
-export type BashExecutionMessage = {
-  role: 'bashExecution'
-  command: string
-  output: string
-  exitCode: number | undefined
-  cancelled: boolean
-  truncated: boolean
-  fullOutputPath?: string
-  timestamp: number
-  excludeFromContext?: boolean
-}
-
-export type CustomMessage<T = unknown> = {
-  role: 'custom'
-  customType: string
-  content: string | (TextContent | ImageContent)[]
-  display: boolean
-  details?: T
-  timestamp: number
-}
-
-export type BranchSummaryMessage = {
-  role: 'branchSummary'
-  summary: string
-  fromId: string
-  timestamp: number
-}
-
-export type CompactionSummaryMessage = {
-  role: 'compactionSummary'
-  summary: string
-  tokensBefore: number
-  timestamp: number
-}
+// Custom messages (bashExecution, custom, branchSummary, compactionSummary)
+// The coding agent merges these into AgentMessage via declaration merging
+// (see SDK core/messages.d.ts). Extract them from the union — zero hand-written
+// structure, SDK upgrades propagate automatically.
+export type BashExecutionMessage = Extract<AgentMessage, { role: 'bashExecution' }>
+export type CustomMessage = Extract<AgentMessage, { role: 'custom' }>
+export type BranchSummaryMessage = Extract<AgentMessage, { role: 'branchSummary' }>
+export type CompactionSummaryMessage = Extract<AgentMessage, { role: 'compactionSummary' }>
 
 // Registry
 export type {
