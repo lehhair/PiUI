@@ -75,6 +75,7 @@ function sessionCacheKey(sessionId: string, processCollapseEnabled: boolean): st
 
 interface ChatAreaProps {
   messages: Message[]
+  queuedFollowUps?: readonly string[]
   pageRecords?: StableChatPage[]
   visibleMessages?: Message[]
   forkTargetIdMap?: Map<string, string | undefined>
@@ -162,6 +163,44 @@ const MessageBody = memo(function MessageBody({
         </div>
       </div>
     </div>
+  )
+})
+
+export const NextTurnQueue = memo(function NextTurnQueue({
+  items,
+  maxWidthClass,
+  paddingClass,
+}: {
+  items: readonly string[]
+  maxWidthClass: string
+  paddingClass: string
+}) {
+  const { t } = useTranslation('chat')
+  if (items.length === 0) return null
+
+  const label = t('chatArea.nextTurnQueue', { count: items.length })
+  return (
+    <section
+      data-next-turn-queue="true"
+      aria-label={label}
+      className={`w-full ${maxWidthClass} mx-auto ${paddingClass} pt-3 pb-2`}
+    >
+      <div className="flex items-center gap-3 pb-3 text-[length:var(--fs-sm)] text-text-500" role="status">
+        <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
+        <span className="shrink-0">{label}</span>
+        <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
+      </div>
+      <div className="flex flex-col items-end gap-2">
+        {items.map((text, index) => (
+          <div
+            key={`${index}:${text}`}
+            className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200"
+          >
+            {text}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 })
 
@@ -313,7 +352,7 @@ export const ChatArea = memo(
   forwardRef<ChatAreaHandle, ChatAreaProps>(
     (
       {
-        messages, visibleMessages: visibleMessagesProp,
+        messages, queuedFollowUps = [], visibleMessages: visibleMessagesProp,
         forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
         sessionId, isStreaming = false, allowStreamingLayoutAnimation = false,
@@ -742,7 +781,7 @@ export const ChatArea = memo(
 
       // retry/error 出现消失、输入框高度变 → 底部 footer 高度变，贴底时要跟着滚
       // 否则重试条进出后 scrollTop 停在旧位置，看起来没贴底
-      const footerPinKey = `${retryStatus ? 'r' : ''}|${loadError || connectionError ? 'e' : ''}|${spacerHeight}`
+      const footerPinKey = `${retryStatus ? 'r' : ''}|${loadError || connectionError ? 'e' : ''}|${queuedFollowUps.join('\u0000')}|${spacerHeight}`
       useLayoutEffect(() => {
         if (!shouldAnchorBottom() || prependLoading.current) return
         pinToBottom()
@@ -931,7 +970,9 @@ export const ChatArea = memo(
               })}
             </div>
 
-            {/* 顺序必须是：消息 → 重试/错误提示 → 输入框占位。
+            <NextTurnQueue items={queuedFollowUps} maxWidthClass={maxWidthClass} paddingClass={paddingClass} />
+
+            {/* 顺序必须是：消息 → 下一轮队列 → 重试/错误提示 → 输入框占位。
                 旧 Virtuoso Footer 就是这样；换 virtualizer 后 paddingEnd 在前、提示在后，会叠到输入框下。 */}
             {retryStatus && (
               <div className={`w-full ${maxWidthClass} mx-auto ${paddingClass}`}>

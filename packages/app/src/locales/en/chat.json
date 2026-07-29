@@ -13,6 +13,7 @@
   "chatArea": {
     "loadingSession": "Loading session...",
     "loadingHistory": "Loading history...",
+    "nextTurnQueue": "Waiting for next turn · {{count}}",
     "dropFolderToAddProject": "Add as project",
     "dropFolderToAddProjectHint": "Drop a folder here"
   },
