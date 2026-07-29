@@ -34,6 +34,32 @@ export type RegistrySnapshot = {
   eventHandlers: string[]
 }
 
+export type PiCapabilityScope = "global" | "session"
+
+export type PiCapabilitySource = "pi-sdk" | "pi-extension" | "piui-adapter"
+
+export type PiCapabilityQueue = "immediate" | "serialized"
+
+export type PiCapability = {
+  name: string
+  scope: PiCapabilityScope
+  source: PiCapabilitySource
+  description?: string
+  paramsSchema?: JsonObject
+  resultSchema?: JsonObject
+  queue?: PiCapabilityQueue
+  replacement?: boolean
+  [extra: string]: JsonValue | undefined
+}
+
+export type PiRegistrySnapshot = {
+  protocolVersion: number
+  sdkVersion: string
+  driver: "mock" | "pi"
+  globalCommands: PiCapability[]
+  sessionCommands: PiCapability[]
+}
+
 export type SessionListEntry = {
   sessionId: string
   [extra: string]: JsonValue | undefined

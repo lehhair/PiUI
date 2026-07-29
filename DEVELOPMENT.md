@@ -13,7 +13,7 @@
 
 ```text
 浏览器/客户端
-  │  HTTP(命令口 + 只读查询) / WS(事件订阅)
+  │  HTTP(registry + 命令口) / WS(事件订阅)
   ▼
 packages/server     分发层:不感知 Pi 语义,只转发
   │  IPC(统一命令消息 + 事件 + hostCall)
@@ -28,27 +28,16 @@ packages/pi-worker  唯一懂 Pi 的进程:命令表 → AgentSession
 
 1. **零数据转换**:worker→server→客户端的会话数据只做 JSON 结构化复制，不可序列化直接报错
 2. **零协议发明**:命令对齐 SDK 方法语义（prompt/steer/followUp/compact/fork/…)，事件就是 Pi 原生事件
-3. **零能力白名单**:API 面 = 运行时枚举的注册表（getAllTools/getCommands/extensions),capabilities 动态生成
+3. **零能力白名单**:Pi 能力注册进 registry，HTTP 只按 capability name 分发；扩展 tools/commands 由 Pi runtime 枚举
 4. **SDK 可替换**:worker 经 sdk-host 动态加载 SDK，默认 bundle 验证版（0.81.1),`PIUI_SDK_PATH` 可指外部版本
 5. **mock 在 worker 内**:server 不感知 driver;mock 会话写独立 JSONL 目录（PIUI_MOCK_DIR)，格式与 Pi 相同
 
 ### HTTP 面
 
 ```text
-GET    /api/v1/pi/models                         models.list(catalog)
-GET    /api/v1/pi/providers                      providers.list(catalog)
-GET    /api/v1/pi/settings?cwd=                  settings.get(catalog)
-PATCH  /api/v1/pi/settings?cwd=                  settings.patch(catalog)
-GET    /api/v1/pi/trust?cwd=                     trust.get(catalog)
-PUT    /api/v1/pi/trust?cwd=                     trust.set(catalog)
-POST   /api/v1/pi/commands                       catalog 统一命令口(settings/trust/packages/...)
-GET    /api/v1/pi/sessions?cwd=                  列表(Pi 原生条目)+ attached
-POST   /api/v1/pi/sessions                       {cwd, sessionFile?} → attach
-GET    /api/v1/pi/sessions/:id                   state
-DELETE /api/v1/pi/sessions/:id                   detach
-GET    /api/v1/pi/sessions/:id/{entries,branch,tree,registry}
-GET    /api/v1/pi/sessions/:id/entries/:entryId/attachments/:index
-POST   /api/v1/pi/sessions/:id/commands          {id?, type, params?} → 202(幂等,串行)
+GET    /api/v1/pi/registry                       当前 Pi capability registry
+POST   /api/v1/pi/commands/:name                 global command,如 models.list/settings.get/session.open
+POST   /api/v1/pi/sessions/:id/commands/:name    session command,如 prompt/branch.get/registry.get/invokeTool
 
 GET    /api/v1/host/health                       server 健康检查
 GET    /api/v1/host/capabilities                 server 自省(driver/事件流/版本)
@@ -66,14 +55,15 @@ WS     /api/v1/events                            stream 订阅 + cursor/replay/r
 - `extension.ui` / `provider.auth` / `packages.progress` / `sessions.updated` / `resources.updated`
 - `workspace.files` / `workspace.git`:host 区文件与 Git 变化
 
-### 关键命令（POST /api/v1/pi/sessions/:id/commands 的 type)
+### 关键命令（capability name)
 
-核心 40+：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState`
+- global：`registry.describe, session.open, session.attached, session.list, session.listAll, session.delete, models.list, settings.get, settings.patch, trust.get, trust.set, providers.*, modelRuntime.*, packages.*`
+- session：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState, state.get, entries.get, branch.get, tree.get, registry.get, attachment.get`
 
 扩展自省：
-- `GET .../registry` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
-- `invokeTool {name, arguments}` → 直接执行扩展 tool(ctx.ui 交互走 extension.ui 桥)
-- `invokeCommand {name, args}` → 执行扩展 slash command
+- `POST /api/v1/pi/sessions/:id/commands/registry.get` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
+- `POST /api/v1/pi/sessions/:id/commands/invokeTool` + `{name, arguments}` → 直接执行扩展 tool(ctx.ui 交互走 extension.ui 桥)
+- `POST /api/v1/pi/sessions/:id/commands/invokeCommand` + `{name, args}` → 执行扩展 slash command
 
 ## 包职责
 
@@ -101,10 +91,10 @@ npm run dev:server:pi    # 真 Pi(读 ~/.pi/agent 凭据,发消息消耗 token)
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/v1/host/health
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
-  -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/pi/sessions
+  -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/pi/commands/session.open
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
-  -d '{"id":"c1","type":"prompt","params":{"text":"hi"}}' \
-  http://127.0.0.1:8787/api/v1/pi/sessions/$SID/commands
+  -d '{"id":"c1","params":{"text":"hi"}}' \
+  http://127.0.0.1:8787/api/v1/pi/sessions/$SID/commands/prompt
 ```
 
 ### 环境变量

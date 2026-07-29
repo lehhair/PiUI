@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "@piui/protocol"
+import type { JsonObject, JsonValue, PiCapability, PiCapabilityScope } from "@piui/protocol"
 import type { CatalogProvider, SessionRuntime } from "./runtime.js"
 import * as P from "./params.js"
 
@@ -44,6 +44,14 @@ export type CommandHandler = (ctx: CommandContext, params: JsonObject) => Promis
 
 const QUEUE_MODES = ["all", "one-at-a-time"] as const
 const REPLACEMENT_OPS = { fork: true, clone: true, newSession: true, switchSession: true, importSession: true }
+const SESSION_QUERY_COMMANDS = new Set([
+  "state.get",
+  "entries.get",
+  "branch.get",
+  "tree.get",
+  "registry.get",
+  "attachment.get",
+])
 
 export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   prompt: async (ctx, p) => {
@@ -262,3 +270,172 @@ export function isReplacementCommand(type: string): boolean {
 export function listCommandTypes(): string[] {
   return Object.keys(COMMAND_HANDLERS)
 }
+
+export function getCommandCapability(name: string): PiCapability | undefined {
+  return COMMAND_CAPABILITIES.find(capability => capability.name === name)
+}
+
+export function listCommandCapabilities(scope?: PiCapabilityScope): PiCapability[] {
+  return COMMAND_CAPABILITIES
+    .filter(capability => !scope || capability.scope === scope)
+    .map(capability => ({ ...capability }))
+}
+
+function commandScope(name: string): PiCapabilityScope {
+  if (SESSION_QUERY_COMMANDS.has(name)) return "session"
+  if (name.startsWith("session.") || name.startsWith("models.") || name.startsWith("settings.") ||
+    name.startsWith("trust.") || name.startsWith("providers.") || name.startsWith("modelRuntime.") ||
+    name.startsWith("packages.")) {
+    return "global"
+  }
+  return "session"
+}
+
+function commandSource(name: string): PiCapability["source"] {
+  if (name === "invokeTool" || name === "invokeCommand") return "pi-extension"
+  return "pi-sdk"
+}
+
+function commandDescription(name: string): string {
+  return DESCRIPTIONS[name] ?? name
+}
+
+const DESCRIPTIONS: Record<string, string> = {
+  prompt: "Send a user prompt to the current Pi session",
+  steer: "Queue steering text for the current Pi session",
+  followUp: "Queue a follow-up message for the current Pi session",
+  sendUserMessage: "Append and optionally deliver a user message",
+  abort: "Abort the current Pi turn",
+  newSession: "Create a new Pi session from the current runtime",
+  switchSession: "Switch the runtime to another Pi session file",
+  fork: "Fork the current Pi session at an entry",
+  clone: "Clone the current Pi session",
+  importSession: "Import a Pi session file",
+  setSessionName: "Set the current Pi session name",
+  setModel: "Set provider and model for the current Pi session",
+  cycleModel: "Cycle the selected model",
+  setScopedModels: "Set scoped model patterns",
+  setThinkingLevel: "Set the thinking level",
+  cycleThinkingLevel: "Cycle the thinking level",
+  setSteeringMode: "Set steering queue delivery mode",
+  setFollowUpMode: "Set follow-up queue delivery mode",
+  clearQueue: "Clear pending steering and follow-up queues",
+  compact: "Start Pi compaction",
+  abortCompaction: "Abort active compaction",
+  abortBranchSummary: "Abort active branch summary",
+  setAutoCompaction: "Toggle automatic compaction",
+  setAutoRetry: "Toggle automatic retry",
+  abortRetry: "Abort active retry",
+  bash: "Run a bash command through the Pi runtime",
+  abortBash: "Abort active bash execution",
+  setActiveTools: "Set active Pi tools",
+  invokeTool: "Invoke a registered Pi tool by name",
+  invokeCommand: "Invoke a registered Pi slash command by name",
+  navigateTree: "Navigate the Pi session tree",
+  setLabel: "Set an entry label",
+  sendCustomMessage: "Send a custom Pi message",
+  appendCustomEntry: "Append a custom Pi entry",
+  exportHtml: "Export the session as HTML",
+  exportJsonl: "Export the session as JSONL",
+  waitForIdle: "Wait until the Pi runtime is idle",
+  reload: "Reload Pi runtime resources",
+  respondExtensionUi: "Respond to a pending Pi extension UI request",
+  setExtensionEditorState: "Set Pi extension editor state",
+  "state.get": "Read current Pi session state",
+  "entries.get": "Read a page of Pi session entries",
+  "branch.get": "Read a page of the active Pi branch",
+  "tree.get": "Read the Pi session tree",
+  "registry.get": "Read runtime tools, commands, extensions, and handlers",
+  "attachment.get": "Read an attachment from a Pi entry",
+  "session.list": "List Pi sessions for a workspace",
+  "session.listAll": "List all Pi sessions",
+  "session.delete": "Delete a Pi session file",
+  "models.list": "List Pi models",
+  "settings.get": "Read Pi settings for a workspace",
+  "settings.patch": "Patch Pi settings for a workspace",
+  "trust.get": "Read Pi project trust state",
+  "trust.set": "Set Pi project trust state",
+  "providers.list": "List Pi providers",
+  "providers.startAuth": "Start provider authentication",
+  "providers.respondAuth": "Respond to provider authentication prompt",
+  "providers.cancelAuth": "Cancel provider authentication",
+  "providers.logout": "Log out from a provider",
+  "modelRuntime.inspect": "Inspect the Pi model runtime",
+  "modelRuntime.setApiKey": "Set a runtime provider API key",
+  "modelRuntime.removeApiKey": "Remove a runtime provider API key",
+  "modelRuntime.reload": "Reload model runtime config",
+  "modelRuntime.refresh": "Refresh model runtime state",
+  "packages.list": "List configured Pi packages",
+  "packages.manage": "Install, remove, or update Pi packages",
+  "packages.resolve": "Resolve Pi packages for a workspace",
+  "packages.resolveSources": "Resolve explicit Pi package sources",
+  "packages.changeSource": "Add or remove a Pi package source",
+  "packages.installedPath": "Read installed Pi package path",
+  "packages.checkUpdates": "Check Pi package updates",
+}
+
+function paramsSchema(name: string): JsonObject {
+  const required = REQUIRED_PARAMS[name] ?? []
+  return {
+    type: "object",
+    additionalProperties: true,
+    required,
+    properties: Object.fromEntries(required.map(key => [key, { type: "string" }])),
+  }
+}
+
+const REQUIRED_PARAMS: Record<string, string[]> = {
+  prompt: ["text"],
+  steer: ["text"],
+  followUp: ["text"],
+  sendUserMessage: ["text"],
+  switchSession: ["sessionPath"],
+  fork: ["entryId"],
+  importSession: ["inputPath"],
+  setSessionName: ["name"],
+  setModel: ["provider", "modelId"],
+  setThinkingLevel: ["level"],
+  bash: ["command"],
+  invokeTool: ["name"],
+  invokeCommand: ["name"],
+  navigateTree: ["entryId"],
+  setLabel: ["entryId"],
+  sendCustomMessage: ["customType", "content", "display"],
+  exportHtml: ["outputPath"],
+  exportJsonl: ["outputPath"],
+  respondExtensionUi: ["requestId"],
+  setExtensionEditorState: ["text"],
+  "attachment.get": ["entryId", "blockIndex"],
+  "session.list": ["cwd"],
+  "session.delete": ["cwd", "sessionFile"],
+  "settings.get": ["cwd"],
+  "settings.patch": ["cwd"],
+  "trust.get": ["cwd"],
+  "trust.set": ["cwd"],
+  "providers.startAuth": ["providerId"],
+  "providers.respondAuth": ["flowId", "promptId", "value"],
+  "providers.cancelAuth": ["flowId"],
+  "providers.logout": ["providerId"],
+  "modelRuntime.setApiKey": ["providerId", "apiKey"],
+  "modelRuntime.removeApiKey": ["providerId"],
+  "packages.list": ["cwd"],
+  "packages.manage": ["cwd", "commandId"],
+  "packages.resolve": ["cwd"],
+  "packages.resolveSources": ["cwd"],
+  "packages.changeSource": ["cwd", "source"],
+  "packages.installedPath": ["cwd", "source"],
+  "packages.checkUpdates": ["cwd"],
+}
+
+const COMMAND_CAPABILITIES: PiCapability[] = Object.keys(COMMAND_HANDLERS).map(name => {
+  const scope = commandScope(name)
+  return {
+    name,
+    scope,
+    source: commandSource(name),
+    description: commandDescription(name),
+    paramsSchema: paramsSchema(name),
+    queue: scope === "session" && !SESSION_QUERY_COMMANDS.has(name) ? "serialized" : "immediate",
+    replacement: isReplacementCommand(name) || undefined,
+  }
+})

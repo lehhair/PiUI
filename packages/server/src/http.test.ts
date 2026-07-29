@@ -114,31 +114,33 @@ describe("http api", () => {
       rmSync(mockHome, { recursive: true, force: true })
     })
 
-    const models = await request(port, "GET", "/api/v1/pi/models")
+    const registry = await request(port, "GET", "/api/v1/pi/registry")
+    assert.equal(registry.status, 200)
+    assert.ok(registry.json.globalCommands.some((command: any) => command.name === "models.list"))
+    assert.ok(registry.json.globalCommands.some((command: any) => command.name === "session.open"))
+
+    const models = await request(port, "POST", "/api/v1/pi/commands/models.list")
     assert.equal(models.status, 200)
     assert.ok(models.json.data.some((model: any) => model.provider === "mock"))
 
-    const settings = await request(port, "GET", `/api/v1/pi/settings?cwd=${encodeURIComponent(mockHome)}`)
+    const settings = await request(port, "POST", "/api/v1/pi/commands/settings.get", { body: { cwd: mockHome } })
     assert.equal(settings.status, 200)
 
     const created = await request(port, "POST", "/api/v1/host/workspaces", { body: { rootPath: mockHome } })
     assert.equal(created.status, 201)
-    const encoded = encodeURIComponent(mockHome)
-    const settingsNow = await request(port, "GET", `/api/v1/pi/settings?cwd=${encoded}`)
+    const settingsNow = await request(port, "POST", "/api/v1/pi/commands/settings.get", { body: { cwd: mockHome } })
     assert.equal(settingsNow.status, 200)
     assert.equal(settingsNow.json.data.workspacePath, mockHome)
 
-    const trust = await request(port, "GET", `/api/v1/pi/trust?cwd=${encoded}`)
+    const trust = await request(port, "POST", "/api/v1/pi/commands/trust.get", { body: { cwd: mockHome } })
     assert.equal(trust.status, 200)
     assert.equal(trust.json.data.trusted, true)
 
-    const unknown = await request(port, "POST", "/api/v1/pi/commands", {
-      body: { type: "does.not.exist", params: {} },
-    })
+    const unknown = await request(port, "POST", "/api/v1/pi/commands/does.not.exist")
     assert.equal(unknown.status, 500)
     assert.equal(unknown.json.code, "UNKNOWN_COMMAND")
 
-    const badCommand = await request(port, "POST", "/api/v1/pi/commands", { body: { params: {} } })
-    assert.equal(badCommand.status, 400)
+    const removedShortcut = await request(port, "GET", "/api/v1/pi/models")
+    assert.equal(removedShortcut.status, 404)
   })
 })
