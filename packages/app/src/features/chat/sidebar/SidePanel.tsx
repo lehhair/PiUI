@@ -339,14 +339,55 @@ export function SidePanel({
     return map
   }, [sessions, fetchedSessions])
 
+  // ---- fork 父子嵌套数据（须在 orderedSessions 之前声明）----
+  const rootSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
+
+  const sessionIdByPath = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const session of sessions) {
+      if (session.path) map.set(normalizeForComparison(session.path), session.id)
+    }
+    return map
+  }, [sessions])
+
+  // 开关开时把 fork 子 session 从顶层摘到父下面（置顶的不动）
+  const forkChildIds = useMemo(() => {
+    if (search || !sidebarShowChildSessions) return undefined
+    const pinnedIds = new Set(pinnedEntries.map(entry => entry.sessionId))
+    const ids = new Set<string>()
+    for (const session of sessions) {
+      if (!session.parentSessionPath || pinnedIds.has(session.id)) continue
+      const pid = sessionIdByPath.get(normalizeForComparison(session.parentSessionPath))
+      if (pid && pid !== session.id && rootSessionIds.has(pid)) ids.add(session.id)
+    }
+    return ids
+  }, [search, sidebarShowChildSessions, pinnedEntries, sessions, sessionIdByPath, rootSessionIds])
+
+  const forkChildrenByParent = useMemo(() => {
+    if (!forkChildIds || forkChildIds.size === 0) return undefined
+    const map = new Map<string, UiSession[]>()
+    for (const session of sessions) {
+      if (!forkChildIds.has(session.id) || !session.parentSessionPath) continue
+      const pid = sessionIdByPath.get(normalizeForComparison(session.parentSessionPath))
+      if (!pid) continue
+      let arr = map.get(pid)
+      if (!arr) {
+        arr = []
+        map.set(pid, arr)
+      }
+      arr.push(session)
+    }
+    return map.size > 0 ? map : undefined
+  }, [forkChildIds, sessions, sessionIdByPath])
+
   const orderedSessions = useMemo(() => {
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
     const pinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
       .filter((session): session is UiSession => Boolean(session))
-    const rest = sessions.filter(s => !pinnedSet.has(s.id))
+    const rest = sessions.filter(s => !pinnedSet.has(s.id) && !forkChildIds?.has(s.id))
     return [...pinned, ...rest]
-  }, [pinnedEntries, sessionLookup, sessions])
+  }, [pinnedEntries, sessionLookup, sessions, forkChildIds])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
@@ -460,16 +501,6 @@ export function SidePanel({
   }, [missingSessionsKey, sessionLookup])
 
   // ---- 子 session 展示数据 ----
-  const rootSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
-
-  const sessionIdByPath = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const session of sessions) {
-      if (session.path) map.set(normalizeForComparison(session.path), session.id)
-    }
-    return map
-  }, [sessions])
-
   const findParentId = useCallback(
     (id: string) => {
       const parentPath = sessionLookup.get(id)?.parentSessionPath
@@ -518,6 +549,19 @@ export function SidePanel({
         if (s) add(pid, s)
       }
     }
+    if (forkChildrenByParent) {
+      for (const [pid, children] of forkChildrenByParent) {
+        // fork children 数据就在本地 sessions 里，不走 fetchAll 分支
+        for (const child of children) {
+          let arr = map.get(pid)
+          if (!arr) {
+            arr = []
+            map.set(pid, arr)
+          }
+          if (!arr.some(s => s.id === child.id)) arr.push(child)
+        }
+      }
+    }
     return map.size > 0 ? map : undefined
   }, [
     search,
@@ -528,6 +572,7 @@ export function SidePanel({
     expandedChildSessionIds,
     sessionLookup,
     findParentId,
+    forkChildrenByParent,
   ])
 
   const activeSessionTree = useMemo(

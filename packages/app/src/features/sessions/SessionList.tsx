@@ -250,7 +250,10 @@ export function SessionList({
                               <SessionChildrenSlot
                                 parentSession={session}
                                 selectedSessionId={selectedId}
-                                fetchAll={expandedChildSessionIds?.has(session.id)}
+                                fetchAll={
+                                  !inlineChildSessions?.has(session.id) &&
+                                  expandedChildSessionIds?.has(session.id)
+                                }
                                 children={inlineChildSessions?.get(session.id)}
                                 onSelect={onSelectChildSession}
                                 isEditMode={isEditMode}
@@ -279,8 +282,9 @@ export function SessionList({
             )}
             {sessions.map((session, index) => {
               const inlineChildren = inlineChildSessions?.get(session.id)
-              const shouldFetchAll = expandedChildSessionIds?.has(session.id)
-              const hasChildren = shouldFetchAll || (inlineChildren && inlineChildren.length > 0)
+              const hasInlineChildren = Boolean(inlineChildren && inlineChildren.length > 0)
+              const shouldFetchAll = !hasInlineChildren && expandedChildSessionIds?.has(session.id)
+              const hasChildren = shouldFetchAll || hasInlineChildren
               const showPinnedDivider = pinnedDividerAfterIds?.has(session.id)
               const showUnavailableAfter = hasUnavailablePinned && index === lastAvailablePinnedIndex
               const isChecked = selectedSessionIds?.has(session.id) ?? false
