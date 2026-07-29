@@ -167,6 +167,29 @@ describe('SessionChangesPanel', () => {
     expect(screen.getAllByText('branch.ts').length).toBeGreaterThan(0)
   })
 
+  it('hides the branch scope for unborn repositories', async () => {
+    getVcsInfo.mockResolvedValue({
+      branch: 'master',
+      unborn: true,
+    })
+    renderSessionChangesPanel()
+
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Change mode:/ }))
+
+    await act(async () => {
+      vi.advanceTimersByTime(48)
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText('Branch changes')).not.toBeInTheDocument()
+  })
+
   it('supports keyboard navigation in the change mode menu and exposes toggle state', async () => {
     renderSessionChangesPanel()
 

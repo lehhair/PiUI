@@ -96,6 +96,25 @@ describe("Git workspace API", () => {
     assert.match(file.patch, /^\+new$/m)
   })
 
+  it("counts untracked text lines as additions and skips binary counts", async () => {
+    const root = repository()
+    writeFileSync(path.join(root, "new file.txt"), "new\ncontent\nlast-no-newline")
+    writeFileSync(path.join(root, "blob.dat"), Buffer.from([0, 1, 2]))
+    writeFileSync(path.join(root, "empty.txt"), "")
+    invalidateGitCache(root)
+    const diff = await getGitDiff(root, "git")
+    const text = diff.files.find(file => file.file === "new file.txt")
+    assert.equal(text?.status, "untracked")
+    assert.equal(text?.additions, 3)
+    assert.equal(text?.deletions, 0)
+    const blob = diff.files.find(file => file.file === "blob.dat")
+    assert.equal(blob?.binary, true)
+    assert.equal(blob?.additions, 0)
+    const empty = diff.files.find(file => file.file === "empty.txt")
+    assert.equal(empty?.binary, false)
+    assert.equal(empty?.additions, 0)
+  })
+
   it("resolves a local default branch and compares committed branch changes", async () => {
     const root = repository()
     git(root, "checkout", "-b", "feature")

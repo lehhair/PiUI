@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import fs from "node:fs/promises"
 import path from "node:path"
 import type {
   GitDiffItemV1,
@@ -203,16 +204,56 @@ export function getGitDiff(cwd: string, mode: GitDiffModeV1, signal?: AbortSigna
     const files = combineDiff(text(namesResult.stdout), text(numbersResult.stdout))
     if (mode === "git") {
       const status = await getGitStatus(cwd, signal)
-      for (const item of status.items) {
-        if (item.status === "untracked" && !files.some(file => file.file === item.path)) {
-          files.push({ file: item.path, status: "untracked", additions: 0, deletions: 0, binary: false })
-        }
-      }
+      const missing = status.items.filter(item =>
+        item.status === "untracked" && !files.some(file => file.file === item.path))
+      const extras = await Promise.all(missing.map(async item => ({
+        file: item.path,
+        status: "untracked" as const,
+        ...(await countUntrackedStats(cwd, item.path, signal)),
+      })))
+      files.push(...extras)
     }
     files.sort((a, b) => a.file.localeCompare(b.file))
     return { mode, baseRef: comparison.baseRef, baseCommit: comparison.baseCommit, files }
   }
   return cachedResult(cwd, `diff:${mode}`, signal, load)
+}
+
+const MAX_UNTRACKED_STAT_BYTES = 32 * 1024 * 1024
+
+function cancelledError(): Error {
+  return Object.assign(new Error("git request cancelled"), { code: "REQUEST_ABORTED" })
+}
+
+// untracked 文件不在 git diff 输出里，统计等价于“整文件新增”
+async function countUntrackedStats(
+  cwd: string,
+  relative: string,
+  signal?: AbortSignal,
+): Promise<{ additions: number; deletions: number; binary: boolean }> {
+  try {
+    if (signal?.aborted) throw cancelledError()
+    const absolute = path.join(cwd, relative)
+    const stat = await fs.stat(absolute)
+    if (!stat.isFile() || stat.size > MAX_UNTRACKED_STAT_BYTES) {
+      return { additions: 0, deletions: 0, binary: false }
+    }
+    const content = await fs.readFile(absolute)
+    if (signal?.aborted) throw cancelledError()
+    if (content.subarray(0, 8000).includes(0)) {
+      return { additions: 0, deletions: 0, binary: true }
+    }
+    if (content.length === 0) return { additions: 0, deletions: 0, binary: false }
+    let lines = 0
+    for (const byte of content) {
+      if (byte === 0x0a) lines += 1
+    }
+    if (content[content.length - 1] !== 0x0a) lines += 1
+    return { additions: lines, deletions: 0, binary: false }
+  } catch (error) {
+    if ((error as { code?: string }).code === "REQUEST_ABORTED") throw error
+    return { additions: 0, deletions: 0, binary: false }
+  }
 }
 
 export async function getGitFileDiff(
