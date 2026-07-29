@@ -255,6 +255,7 @@ export function SessionList({
                                   expandedChildSessionIds?.has(session.id)
                                 }
                                 children={inlineChildSessions?.get(session.id)}
+                                childrenByParent={inlineChildSessions}
                                 onSelect={onSelectChildSession}
                                 isEditMode={isEditMode}
                                 selectedSessionIds={selectedSessionIds}
@@ -320,6 +321,7 @@ export function SessionList({
                       selectedSessionId={selectedId}
                       fetchAll={shouldFetchAll}
                       children={inlineChildren}
+                      childrenByParent={inlineChildSessions}
                       onSelect={onSelectChildSession}
                       isEditMode={isEditMode}
                       selectedSessionIds={selectedSessionIds}
