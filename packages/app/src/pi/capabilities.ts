@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react"
-import type { CapabilityManifestV2, PiCapabilityId } from "@piui/protocol"
+import type { PiRegistrySnapshot } from "@piui/protocol"
 
 export interface PiCapabilities {
   pty: boolean
@@ -50,49 +50,21 @@ const unavailable: PiCapabilities = {
 }
 
 let current = unavailable
-let currentManifest: CapabilityManifestV2 | undefined
 const listeners = new Set<() => void>()
 
 export function setPiCapabilities(value: Partial<PiCapabilities> | undefined) {
-  if (!value) currentManifest = undefined
   current = { ...unavailable, ...value }
   for (const listener of listeners) listener()
 }
 
-export function setPiCapabilityManifest(manifest: CapabilityManifestV2) {
-  currentManifest = manifest
-  const enabled = (id: PiCapabilityId) => manifest.capabilities[id]?.enabled === true
-  setPiCapabilities({
-    pty: enabled("pty"),
-    share: enabled("session.share"),
-    fork: enabled("session.fork"),
-    sessionTree: enabled("session.tree"),
-    sessionNavigate: enabled("session.navigate"),
-    sessionDelete: enabled("session.delete"),
-    sessionClone: enabled("session.clone"),
-    sessionImport: enabled("session.import"),
-    promptSteer: enabled("prompt.steer"),
-    promptFollowUp: enabled("prompt.followUp"),
-    queueManage: enabled("queue.manage"),
-    retryManage: enabled("retry.manage"),
-    compactionManage: enabled("compaction.manage"),
-    toolsManage: enabled("tools.manage"),
-    fileWrite: enabled("files.write"),
-    gitDiff: enabled("git.diff"),
-    sessionRename: enabled("session.name"),
-    sessionArchive: enabled("session.archive"),
-    mcp: enabled("integrations.mcp"),
-    worktree: enabled("git.worktree"),
-    config: enabled("settings.manage"),
-  })
-}
-
-export function getPiCapabilityManifest(): CapabilityManifestV2 | undefined {
-  return currentManifest
-}
-
-export function usePiCapabilityManifest(): CapabilityManifestV2 | undefined {
-  return useSyncExternalStore(subscribe, getPiCapabilityManifest, getPiCapabilityManifest)
+export function setPiRegistryCapabilities(registry: PiRegistrySnapshot | undefined) {
+  if (!registry) {
+    setPiCapabilities(undefined)
+    return
+  }
+  // UI gates are enabled only after their native adapters are wired. The
+  // registry itself remains available through nativeStatus for discovery.
+  setPiCapabilities({})
 }
 
 export function getPiCapabilities(): PiCapabilities {

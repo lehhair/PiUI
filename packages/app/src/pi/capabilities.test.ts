@@ -1,34 +1,23 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { getPiCapabilities, setPiCapabilities, setPiCapabilityManifest } from "./capabilities"
+import { getPiCapabilities, setPiCapabilities, setPiRegistryCapabilities } from "./capabilities"
 
-describe("Pi capability manifest", () => {
+describe("Pi capability registry", () => {
   beforeEach(() => setPiCapabilities(undefined))
 
-  it("maps versioned native capabilities onto current UI gates", () => {
-    setPiCapabilityManifest({
-      protocolVersion: 2,
-      revision: "test",
-      capabilities: {
-        "session.fork": { enabled: true, version: 1, scope: "session" },
-        "session.tree": { enabled: true, version: 1, scope: "session" },
-        "session.navigate": { enabled: true, version: 1, scope: "session" },
-        "session.clone": { enabled: true, version: 1, scope: "session" },
-        "session.import": { enabled: true, version: 1, scope: "session" },
-        "files.write": { enabled: true, version: 1, scope: "workspace" },
-        "git.diff": { enabled: true, version: 1, scope: "workspace" },
-        "session.delete": { enabled: false, version: 1, scope: "session", reason: "not durable" },
-      },
+  it("keeps UI gates disabled until each native adapter is wired", () => {
+    setPiRegistryCapabilities({
+      protocolVersion: 1,
+      revision: 1,
+      sdkVersion: "test",
+      driver: "mock",
+      globalCommands: [],
+      sessionCommands: [{
+        name: "fork",
+        scope: "session",
+        source: "pi-sdk",
+      }],
     })
 
-    expect(getPiCapabilities()).toMatchObject({
-      fork: true,
-      sessionTree: true,
-      sessionNavigate: true,
-      sessionClone: true,
-      sessionImport: true,
-      fileWrite: true,
-      gitDiff: true,
-    })
-    expect(getPiCapabilities().sessionRename).toBe(false)
+    expect(getPiCapabilities().fork).toBe(false)
   })
 })

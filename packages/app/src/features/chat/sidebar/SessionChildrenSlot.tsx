@@ -1,29 +1,17 @@
-// SessionChildrenSlot — 子 session 渲染
-// fetchAll=true → /children 拉全量，children 有值 → 直接渲染
-// 删除/重命名自己管自己的状态，和主列表行为完全一致
-
-import { useState, useEffect, useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
-import { updateSession, deleteSession as apiDeleteSession } from '../../../api'
+import { useMemo } from 'react'
 import type { UiSession } from '../../../types/session'
-import { SpinnerIcon } from '../../../components/Icons'
-import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
-import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
-import { uiErrorHandler } from '../../../utils'
 import { SessionListItem } from '../../sessions'
+import { flattenSessionHierarchy } from '../../../pi/sessionHierarchy'
 
 interface SessionChildrenSlotProps {
   parentSession: UiSession
   selectedSessionId: string | null
   fetchAll?: boolean
   children?: UiSession[]
-  /** 全量 children map，用于 fork 的 fork 这类多级嵌套递归渲染 */
   childrenByParent?: Map<string, UiSession[]>
   onSelect: (session: UiSession) => void
-  /** 删除子 session 后如果它正好被选中，通知外部切走 */
   onDeleteSelected?: () => void
-  // ---- 编辑模式 ----
   isEditMode?: boolean
   selectedSessionIds?: Set<string>
   onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void
@@ -31,127 +19,67 @@ interface SessionChildrenSlotProps {
 
 export function SessionChildrenSlot({
   parentSession,
-  selectedSessionId,
-  fetchAll,
-  children: givenChildren,
+  children = [],
   childrenByParent,
+  selectedSessionId,
   onSelect,
-  onDeleteSelected,
   isEditMode = false,
   selectedSessionIds,
   onToggleSessionSelection,
 }: SessionChildrenSlotProps) {
-  const { t } = useTranslation(['chat', 'common'])
   const { preferTouchUi } = useInputCapabilities()
-  const [fetched, setFetched] = useState<UiSession[]>([])
-  const [loading, setLoading] = useState(false)
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; sessionId: string | null }>({
-    isOpen: false,
-    sessionId: null,
-  })
+  const rows = useMemo(
+    () => flattenSessionHierarchy(parentSession.id, children, childrenByParent),
+    [parentSession.id, children, childrenByParent],
+  )
 
-  useEffect(() => {
-    if (!fetchAll) {
-      const frameId = requestAnimationFrame(() => setLoading(false))
-      return () => cancelAnimationFrame(frameId)
-    }
-
-    const frameId = requestAnimationFrame(() => {
-      setFetched([])
-      setLoading(false)
-    })
-    return () => cancelAnimationFrame(frameId)
-  }, [fetchAll, parentSession.id, parentSession.directory])
-
-  const handleRename = useCallback(async (childId: string, newTitle: string) => {
-    try {
-      await updateSession(childId, { title: newTitle })
-      pinnedSessionsStore.update(childId, { title: newTitle })
-      setFetched(prev => prev.map(s => (s.id === childId ? { ...s, title: newTitle } : s)))
-    } catch (e) {
-      uiErrorHandler('rename session', e)
-    }
-  }, [])
-
-  const handleDeleteConfirmed = useCallback(async () => {
-    const id = deleteConfirm.sessionId
-    if (!id) return
-    setDeleteConfirm({ isOpen: false, sessionId: null })
-    try {
-      await apiDeleteSession(id)
-      pinnedSessionsStore.unpin(id)
-      setFetched(prev => prev.filter(s => s.id !== id))
-      if (selectedSessionId === id) onDeleteSelected?.()
-    } catch (e) {
-      uiErrorHandler('delete session', e)
-    }
-  }, [deleteConfirm.sessionId, selectedSessionId, onDeleteSelected])
-
-  const list = fetchAll ? fetched : givenChildren
-
-  if (!list?.length && !loading) return null
+  if (rows.length === 0) return null
 
   return (
-    <div className="ml-3">
-      {loading ? (
-        <div className="flex items-center py-1.5 px-2">
-          <SpinnerIcon size={10} className="animate-spin text-text-500" />
-        </div>
-      ) : (
-        list!.map((child, index) => {
-          const isChecked = selectedSessionIds?.has(child.id) ?? false
-          const prevChecked =
-            isEditMode && index > 0 && (selectedSessionIds?.has(list![index - 1].id) ?? false)
-          const nextChecked =
-            isEditMode &&
-            index < list!.length - 1 &&
-            (selectedSessionIds?.has(list![index + 1].id) ?? false)
-          const grandChildren = childrenByParent?.get(child.id)
-          return (
-            <div key={child.id}>
-              <SessionListItem
-                session={child}
-                isSelected={child.id === selectedSessionId}
-                onSelect={() => onSelect(child)}
-                onRename={newTitle => handleRename(child.id, newTitle)}
-                onDelete={() => setDeleteConfirm({ isOpen: true, sessionId: child.id })}
-                preferTouchUi={preferTouchUi}
-                density="minimal"
-                showDirectory={false}
-                isEditMode={isEditMode}
-                isChecked={isChecked}
-                checkedPrev={prevChecked}
-                checkedNext={nextChecked}
-                onToggleCheck={
-                  onToggleSessionSelection ? options => onToggleSessionSelection(child.id, options) : undefined
-                }
-              />
-              {grandChildren && grandChildren.length > 0 ? (
-                <SessionChildrenSlot
-                  parentSession={child}
-                  selectedSessionId={selectedSessionId}
-                  children={grandChildren}
-                  childrenByParent={childrenByParent}
-                  onSelect={onSelect}
-                  onDeleteSelected={onDeleteSelected}
-                  isEditMode={isEditMode}
-                  selectedSessionIds={selectedSessionIds}
-                  onToggleSessionSelection={onToggleSessionSelection}
-                />
-              ) : null}
-            </div>
-          )
-        })
-      )}
-      <ConfirmDialog
-        isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, sessionId: null })}
-        onConfirm={handleDeleteConfirmed}
-        title={t('sidebar.deleteChat')}
-        description={t('sidebar.deleteChatConfirm')}
-        confirmText={t('common:delete')}
-        variant="danger"
-      />
+    <div>
+      {rows.map((row, index) => {
+        const isChecked = selectedSessionIds?.has(row.session.id) ?? false
+        const previous = rows[index - 1]
+        const next = rows[index + 1]
+        const prevChecked = isEditMode && previous?.visualDepth === row.visualDepth &&
+          (selectedSessionIds?.has(previous.session.id) ?? false)
+        const nextChecked = isEditMode && next?.visualDepth === row.visualDepth &&
+          (selectedSessionIds?.has(next.session.id) ?? false)
+        const hierarchyTitle = row.truncated
+          ? `Fork depth ${row.depth}; deeper descendants hidden`
+          : row.depth > row.visualDepth
+            ? `Fork depth ${row.depth}`
+            : undefined
+
+        return (
+          <div
+            key={row.session.id}
+            data-fork-depth={row.depth}
+            title={hierarchyTitle}
+            style={{ marginInlineStart: `${row.visualDepth * 12}px` }}
+          >
+            <SessionListItem
+              session={row.session}
+              isSelected={row.session.id === selectedSessionId}
+              onSelect={() => onSelect(row.session)}
+              onRename={() => undefined}
+              onDelete={() => undefined}
+              preferTouchUi={preferTouchUi}
+              density="minimal"
+              showDirectory={false}
+              isEditMode={isEditMode}
+              isChecked={isChecked}
+              checkedPrev={prevChecked}
+              checkedNext={nextChecked}
+              onToggleCheck={
+                onToggleSessionSelection
+                  ? options => onToggleSessionSelection(row.session.id, options)
+                  : undefined
+              }
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }

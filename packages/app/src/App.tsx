@@ -40,6 +40,9 @@ import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
 import { ExtensionUiDialogHost } from './features/chat/ExtensionUiDialogHost'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
+import { openPiNativeSession } from './pi/nativeApi'
+import { trackPiSession } from './pi/piSessionIndex'
+import { useSessionContext } from './contexts/useSessionContext'
 
 const SettingsDialog = lazy(() =>
   import('./features/settings/SettingsDialog').then(module => ({ default: module.SettingsDialog })),
@@ -67,6 +70,7 @@ function App() {
     replaceSession,
   } = router
   const { currentDirectory, savedDirectories, sidebarExpanded, setSidebarExpanded } = useDirectory()
+  const { sessions } = useSessionContext()
   const { rightPanelOpen, rightPanelWidth, wakeLock } = useLayoutStore()
   const { surfaceRef, value: chatViewport } = useChatViewportController({
     sidebarExpanded,
@@ -75,6 +79,7 @@ function App() {
   })
   const splitPaneEnabled = canUseSplitPane(chatViewport)
   const paneLayout = usePaneLayout()
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const focusedController = usePaneController(paneLayout.focusedPaneId)
   const paneControllers = usePaneControllers()
   const syncingFromRouteRef = useRef(false)
@@ -173,10 +178,19 @@ function App() {
   const handleSelectSession = useCallback(
     (session: { id: string; directory?: string }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-      if (!paneId) return
-      navigatePaneToSession(paneId, session.id, session.directory)
+      const listed = sessions.find(item => item.id === session.id)
+      const directory = listed?.directory ?? session.directory
+      if (!paneId || !directory || openingSessionId) return
+      setOpeningSessionId(session.id)
+      void openPiNativeSession(directory, listed?.path)
+        .then(opened => {
+          trackPiSession(opened.sessionId, directory)
+          navigatePaneToSession(paneId, opened.sessionId, directory)
+        })
+        .catch(error => uiErrorHandler('open Pi session', error))
+        .finally(() => setOpeningSessionId(null))
     },
-    [paneLayout.focusedPaneId, navigatePaneToSession],
+    [paneLayout.focusedPaneId, navigatePaneToSession, openingSessionId, sessions],
   )
 
   const handleNewSession = useCallback(() => {
@@ -877,7 +891,7 @@ function App() {
                 >
                   <Sidebar
                     isOpen={sidebarExpanded}
-                    selectedSessionId={paneLayout.focusedSessionId}
+                    selectedSessionId={openingSessionId ?? paneLayout.focusedSessionId}
                     onSelectSession={handleSelectSession}
                     onNewSession={handleNewSession}
                     onOpen={handleOpenSidebar}
@@ -963,7 +977,7 @@ function App() {
             <>
               <Sidebar
                 isOpen={sidebarExpanded}
-                selectedSessionId={paneLayout.focusedSessionId}
+                selectedSessionId={openingSessionId ?? paneLayout.focusedSessionId}
                 onSelectSession={handleSelectSession}
                 onNewSession={handleNewSession}
                 onOpen={handleOpenSidebar}

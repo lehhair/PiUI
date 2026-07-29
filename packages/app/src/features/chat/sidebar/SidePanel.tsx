@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SessionList } from '../../sessions'
 import { FolderRecentList } from './FolderRecentList'
@@ -7,7 +7,6 @@ import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { ActiveSessionItem } from './ActiveSessionItem'
 import { NotificationItem } from './NotificationItem'
 import { SidebarFooter } from './SidebarFooter'
-import { buildActiveSessionTree } from './activeSessionTree'
 import { getParentPath } from './sidebarUtils'
 import {
   SidebarIcon,
@@ -30,17 +29,14 @@ import { useLayoutStore } from '../../../store'
 import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore'
 import { notificationStore, useNotifications, useUnreadNotificationCount } from '../../../store/notificationStore'
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
-import { serverStore } from '../../../store/serverStore'
 import type { NotificationEntry } from '../../../store/notificationStore'
 import {
   updateSession,
-  deleteSession as apiDeleteSession,
-  getSession,
   subscribeToConnectionState,
   type ConnectionInfo,
 } from '../../../api'
 import type { UiSession } from '../../../types/session'
-import { getDirectoryName, isSameDirectory, normalizeForComparison, normalizeToForwardSlash } from '../../../utils'
+import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
 import { usePiCapabilities } from '../../../pi/capabilities'
 
@@ -140,7 +136,7 @@ export function SidePanel({
   const { catalog: gitWorkspaceCatalog, isLoading: isGitWorkspaceCatalogLoading } =
     useGitWorkspaceCatalog(catalogDirectories)
   const { vcsInfo: currentDirectoryVcsInfo, isLoading: isCurrentDirectoryVcsLoading } = useVcsInfo(currentDirectory)
-  const { sidebarFolderRecents, sidebarShowChildSessions } = useLayoutStore()
+  const { sidebarFolderRecents } = useLayoutStore()
   const [globalFolderIndex, setGlobalFolderIndex] = useState<number>(() => {
     const saved = localStorage.getItem('opencode-sidebar-global-folder-index')
     const parsed = saved ? Number.parseInt(saved, 10) : 0
@@ -313,76 +309,16 @@ export function SidePanel({
     pinnedSessionsStore.getSnapshot,
     pinnedSessionsStore.getSnapshot,
   )
-  // 缓存通过 API 拉取的 session 数据（sessions 列表中不存在的）
-  const [fetchedSessions, setFetchedSessions] = useState<Record<string, UiSession>>({})
-  // 防止 busySessions 等数组引用抖动时 cancel+重拉，导致 /session 风暴
-  const inflightSessionIdsRef = useRef(new Set<string>())
-  const failedSessionIdsRef = useRef(new Set<string>())
-
-  // Build the lookup used by active sessions and notifications.
-  const sessionLookup = useMemo(() => {
-    const map = new Map<string, UiSession>()
-    for (const s of sessions) {
-      map.set(s.id, s)
-    }
-    // fetchedSessions 作为补充（其他项目的 session）
-    for (const [id, s] of Object.entries(fetchedSessions)) {
-      if (!map.has(id)) {
-        map.set(id, s)
-      }
-    }
-    return map
-  }, [sessions, fetchedSessions])
-
-  // ---- fork 父子嵌套数据（须在 orderedSessions 之前声明）----
-  const rootSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
-
-  const sessionIdByPath = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const session of sessions) {
-      if (session.path) map.set(normalizeForComparison(session.path), session.id)
-    }
-    return map
-  }, [sessions])
-
-  // 开关开时把 fork 子 session 从顶层摘到父下面（置顶的不动）
-  const forkChildIds = useMemo(() => {
-    if (search || !sidebarShowChildSessions) return undefined
-    const pinnedIds = new Set(pinnedEntries.map(entry => entry.sessionId))
-    const ids = new Set<string>()
-    for (const session of sessions) {
-      if (!session.parentSessionPath || pinnedIds.has(session.id)) continue
-      const pid = sessionIdByPath.get(normalizeForComparison(session.parentSessionPath))
-      if (pid && pid !== session.id && rootSessionIds.has(pid)) ids.add(session.id)
-    }
-    return ids
-  }, [search, sidebarShowChildSessions, pinnedEntries, sessions, sessionIdByPath, rootSessionIds])
-
-  const forkChildrenByParent = useMemo(() => {
-    if (!forkChildIds || forkChildIds.size === 0) return undefined
-    const map = new Map<string, UiSession[]>()
-    for (const session of sessions) {
-      if (!forkChildIds.has(session.id) || !session.parentSessionPath) continue
-      const pid = sessionIdByPath.get(normalizeForComparison(session.parentSessionPath))
-      if (!pid) continue
-      let arr = map.get(pid)
-      if (!arr) {
-        arr = []
-        map.set(pid, arr)
-      }
-      arr.push(session)
-    }
-    return map.size > 0 ? map : undefined
-  }, [forkChildIds, sessions, sessionIdByPath])
+  const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
   const orderedSessions = useMemo(() => {
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
     const pinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
       .filter((session): session is UiSession => Boolean(session))
-    const rest = sessions.filter(s => !pinnedSet.has(s.id) && !forkChildIds?.has(s.id))
+    const rest = sessions.filter(s => !pinnedSet.has(s.id))
     return [...pinned, ...rest]
-  }, [pinnedEntries, sessionLookup, sessions, forkChildIds])
+  }, [pinnedEntries, sessionLookup, sessions])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
       .map(entry => sessionLookup.get(entry.sessionId))
@@ -405,175 +341,8 @@ export function SidePanel({
     [pinnedEntries, sessionLookup],
   )
 
-  // 切服务器时清空跨目录 fetch 缓存，避免串服
-  useEffect(() => {
-    return serverStore.onServerChange(() => {
-      setFetchedSessions({})
-      inflightSessionIdsRef.current.clear()
-      failedSessionIdsRef.current.clear()
-    })
-  }, [])
-
-  // 需要补全的 session 集合：用内容 key 稳定，避免 busySessions 数组引用抖动触发重拉
-  const missingSessionsKey = useMemo(() => {
-    const byId = new Map<string, { sessionId: string; directory?: string; pinned?: boolean }>()
-    const add = (sessionId: string, directory?: string, pinned?: boolean) => {
-      if (sessionLookup.has(sessionId)) return
-      const existing = byId.get(sessionId)
-      if (existing) {
-        byId.set(sessionId, {
-          sessionId,
-          directory: existing.directory || directory,
-          pinned: existing.pinned || pinned,
-        })
-        return
-      }
-      byId.set(sessionId, { sessionId, directory, pinned })
-    }
-
-    for (const entry of busySessions) add(entry.sessionId, entry.directory)
-    for (const entry of notifications) add(entry.sessionId, entry.directory)
-    for (const entry of pinnedEntries) add(entry.sessionId, entry.directory, true)
-    if (selectedSessionId) add(selectedSessionId, currentDirectory || undefined)
-
-    return Array.from(byId.values())
-      .map(e => `${e.sessionId}\0${e.directory ?? ''}\0${e.pinned ? '1' : '0'}`)
-      .sort()
-      .join('|')
-  }, [busySessions, notifications, pinnedEntries, sessionLookup, selectedSessionId, currentDirectory])
-
-  // 异步拉取不在 lookup 中的 active/notification/pinned/selected session
-  useEffect(() => {
-    const neededIds = new Set<string>()
-    const missing: Array<{ sessionId: string; directory?: string; pinned?: boolean }> = []
-
-    if (missingSessionsKey) {
-      for (const token of missingSessionsKey.split('|')) {
-        const [sessionId, directory, pinned] = token.split('\0')
-        if (!sessionId) continue
-        neededIds.add(sessionId)
-        if (sessionLookup.has(sessionId)) continue
-        if (inflightSessionIdsRef.current.has(sessionId)) continue
-        if (failedSessionIdsRef.current.has(sessionId)) continue
-        missing.push({
-          sessionId,
-          directory: directory || undefined,
-          pinned: pinned === '1',
-        })
-      }
-    }
-
-    // 不再需要的失败记录清掉，session 再次出现时允许重试
-    for (const sessionId of [...failedSessionIdsRef.current]) {
-      if (!neededIds.has(sessionId)) failedSessionIdsRef.current.delete(sessionId)
-    }
-
-    if (missing.length === 0) return
-
-    for (const entry of missing) {
-      inflightSessionIdsRef.current.add(entry.sessionId)
-    }
-
-    void Promise.allSettled(
-      missing.map(async entry => {
-        try {
-          const session = await getSession(entry.sessionId, entry.directory)
-          inflightSessionIdsRef.current.delete(entry.sessionId)
-          setFetchedSessions(prev => (prev[session.id] ? prev : { ...prev, [session.id]: session }))
-          if (entry.pinned) {
-            pinnedSessionsStore.update(session.id, {
-              directory: session.directory || entry.directory,
-              title: session.title || session.id.slice(0, 12) + '...',
-            })
-          }
-        } catch {
-          inflightSessionIdsRef.current.delete(entry.sessionId)
-          // 失败只记一次，避免 SSE/busy 抖动时无限重试 /session
-          failedSessionIdsRef.current.add(entry.sessionId)
-        }
-      }),
-    )
-  }, [missingSessionsKey, sessionLookup])
-
-  // ---- 子 session 展示数据 ----
-  const findParentId = useCallback(
-    (id: string) => {
-      const parentPath = sessionLookup.get(id)?.parentSessionPath
-      if (!parentPath) return undefined
-      return sessionIdByPath.get(normalizeForComparison(parentPath))
-    },
-    [sessionLookup, sessionIdByPath],
-  )
-
-  // 开关开 → 拉 /children 全量：选中的 root 或选中子 session 时保持其父展开
-  const expandedChildSessionIds = useMemo(() => {
-    if (search || !sidebarShowChildSessions || !selectedSessionId) return undefined
-    if (rootSessionIds.has(selectedSessionId)) return new Set([selectedSessionId])
-    const pid = findParentId(selectedSessionId)
-    if (pid && rootSessionIds.has(pid)) return new Set([pid])
-    return undefined
-  }, [search, sidebarShowChildSessions, selectedSessionId, rootSessionIds, findParentId])
-
-  // 开关关 → 只挂活跃的 + 选中的子 session
-  const inlineChildSessions = useMemo(() => {
-    if (search) return undefined
-    const map = new Map<string, UiSession[]>()
-    const add = (parentId: string, session: UiSession) => {
-      if (expandedChildSessionIds?.has(parentId)) return
-      let arr = map.get(parentId)
-      if (!arr) {
-        arr = []
-        map.set(parentId, arr)
-      }
-      if (!arr.some(s => s.id === session.id)) arr.push(session)
-    }
-    for (const entry of busySessions) {
-      const pid = findParentId(entry.sessionId)
-      if (pid && rootSessionIds.has(pid)) {
-        const s = sessionLookup.get(entry.sessionId)
-        if (s) add(pid, s)
-      }
-    }
-    if (!sidebarShowChildSessions && selectedSessionId && !rootSessionIds.has(selectedSessionId)) {
-      const pid = findParentId(selectedSessionId)
-      if (pid && rootSessionIds.has(pid)) {
-        const s = sessionLookup.get(selectedSessionId)
-        if (s) add(pid, s)
-      }
-    }
-    if (forkChildrenByParent) {
-      for (const [pid, children] of forkChildrenByParent) {
-        // fork children 数据就在本地 sessions 里，不走 fetchAll 分支
-        for (const child of children) {
-          let arr = map.get(pid)
-          if (!arr) {
-            arr = []
-            map.set(pid, arr)
-          }
-          if (!arr.some(s => s.id === child.id)) arr.push(child)
-        }
-      }
-    }
-    return map.size > 0 ? map : undefined
-  }, [
-    search,
-    busySessions,
-    selectedSessionId,
-    sidebarShowChildSessions,
-    rootSessionIds,
-    expandedChildSessionIds,
-    sessionLookup,
-    findParentId,
-    forkChildrenByParent,
-  ])
-
-  const activeSessionTree = useMemo(
-    () => buildActiveSessionTree(busySessions, findParentId),
-    [busySessions, findParentId],
-  )
-
   const buildProjectGroups = useCallback(
-    (directories: typeof savedDirectories): ProjectItem[] => {
+    (directories: typeof savedDirectories, reorderablePaths?: Set<string>): ProjectItem[] => {
       const savedNameByPath = new Map(
         directories.map(directory => [normalizeToForwardSlash(directory.path), directory.name]),
       )
@@ -581,6 +350,7 @@ export function SidePanel({
 
       for (const directory of directories) {
         const normalizedDirectory = normalizeToForwardSlash(directory.path)
+        const canReorder = reorderablePaths?.has(normalizedDirectory) ?? true
         const meta = gitWorkspaceCatalog.get(normalizedDirectory)
         const { projectId, workspaceDirectories } = getProjectGroupIdentity(normalizedDirectory, meta)
         const existing = groups.get(projectId)
@@ -588,8 +358,11 @@ export function SidePanel({
         if (existing) {
           groups.set(projectId, {
             ...existing,
-            memberDirectories: [...(existing.memberDirectories ?? []), directory.path],
-            reorderPath: existing.reorderPath ?? directory.path,
+            canReorder: existing.canReorder || canReorder,
+            memberDirectories: canReorder
+              ? [...(existing.memberDirectories ?? []), directory.path]
+              : existing.memberDirectories,
+            reorderPath: existing.reorderPath ?? (canReorder ? directory.path : undefined),
           })
           continue
         }
@@ -598,9 +371,9 @@ export function SidePanel({
           id: projectId,
           worktree: projectId,
           name: savedNameByPath.get(projectId) ?? getDirectoryName(projectId),
-          canReorder: true,
-          memberDirectories: [directory.path],
-          reorderPath: directory.path,
+          canReorder,
+          memberDirectories: canReorder ? [directory.path] : [],
+          reorderPath: canReorder ? directory.path : undefined,
           workspaceDirectories,
         })
       }
@@ -626,8 +399,21 @@ export function SidePanel({
   )
 
   const folderProjectGroups = useMemo<ProjectItem[]>(() => {
-    return buildProjectGroups(savedDirectories)
-  }, [buildProjectGroups, savedDirectories])
+    const reorderablePaths = new Set(savedDirectories.map(directory => normalizeToForwardSlash(directory.path)))
+    const directories = [...savedDirectories]
+    const discovered = [...sessions]
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .map(session => session.directory)
+    for (const directory of discovered) {
+      if (directories.some(entry => isSameDirectory(entry.path, directory))) continue
+      directories.push({
+        path: directory,
+        name: getDirectoryName(directory),
+        addedAt: sessions.find(session => isSameDirectory(session.directory, directory))?.updatedAt ?? 0,
+      })
+    }
+    return buildProjectGroups(directories, reorderablePaths)
+  }, [buildProjectGroups, savedDirectories, sessions])
 
   const selectorProjectGroups = useMemo<ProjectItem[]>(() => {
     const sortedDirectories = [...savedDirectories].sort((a, b) => {
@@ -867,26 +653,6 @@ export function SidePanel({
     [addDirectory, onSelectSession, onCloseMobile],
   )
 
-  const renderActiveSessionNode = useCallback(
-    function renderActiveSessionNode(entry: (typeof busySessions)[number], level = 0): ReactNode {
-      const resolvedSession = sessionLookup.get(entry.sessionId)
-      const childEntries = activeSessionTree.childrenByParent.get(entry.sessionId) ?? []
-
-      return (
-        <div key={entry.sessionId} style={level > 0 ? { marginLeft: level * 12 } : undefined}>
-          <ActiveSessionItem
-            entry={entry}
-            resolvedSession={resolvedSession}
-            isSelected={entry.sessionId === selectedSessionId}
-            onSelect={handleSelectActive}
-          />
-          {childEntries.map(childEntry => renderActiveSessionNode(childEntry, level + 1))}
-        </div>
-      )
-    },
-    [activeSessionTree.childrenByParent, handleSelectActive, selectedSessionId, sessionLookup],
-  )
-
   const handleRename = useCallback(
     async (sessionId: string, newTitle: string) => {
       try {
@@ -928,18 +694,13 @@ export function SidePanel({
 
   const handleDeleteFolderSession = useCallback(
     async (session: UiSession) => {
-      await apiDeleteSession(session.id, session.directory)
-      pinnedSessionsStore.unpin(session.id)
-
-      if (!currentDirectory || isSameDirectory(currentDirectory, session.directory)) {
-        await refresh()
-      }
+      await deleteSession(session.id)
 
       if (selectedSessionId === session.id) {
         onNewSession()
       }
     },
-    [currentDirectory, onNewSession, refresh, selectedSessionId],
+    [deleteSession, onNewSession, selectedSessionId],
   )
 
   // ---- 批量删除 session ----
@@ -955,13 +716,7 @@ export function SidePanel({
     await Promise.allSettled(
       ids.map(async id => {
         try {
-          const s = sessionLookup.get(id)
-          if (s) {
-            await apiDeleteSession(id, s.directory)
-          } else {
-            await apiDeleteSession(id, currentDirectory)
-          }
-          pinnedSessionsStore.unpin(id)
+          await deleteSession(id)
         } catch (e) {
           uiErrorHandler('batch delete session', e)
         }
@@ -977,7 +732,7 @@ export function SidePanel({
     if (needSwitchSession) {
       onNewSession()
     }
-  }, [canDeleteSessions, selectedSessionIds, selectedSessionId, sessionLookup, currentDirectory, refresh, onNewSession])
+  }, [canDeleteSessions, selectedSessionIds, selectedSessionId, deleteSession, refresh, onNewSession])
 
   // ---- 批量移除项目 ----
   const handleBatchRemoveProjects = useCallback(() => {
@@ -999,9 +754,6 @@ export function SidePanel({
     onSelectSession: handleSelectActive,
     onRenameSession: handleRenameFolderSession,
     onDeleteSession: handleDeleteFolderSession,
-    expandedChildSessionIds,
-    inlineChildSessions,
-    onSelectChildSession: handleSelectActive,
     isEditMode,
     selectedSessionIds,
     selectedProjectIds,
@@ -1453,10 +1205,7 @@ export function SidePanel({
                   showHeader={false}
                   grouped={false}
                   density="compact"
-                  showDirectory={!currentDirectory}
-                  expandedChildSessionIds={expandedChildSessionIds}
-                  inlineChildSessions={inlineChildSessions}
-                  onSelectChildSession={handleSelectActive}
+                  showDirectory
                   pinnedDividerAfterIds={pinnedDividerAfterIds}
                   unavailablePinnedEntries={unavailablePinnedEntries}
                   availablePinnedCount={resolvedPinnedSessions.length}
@@ -1477,8 +1226,15 @@ export function SidePanel({
                 </div>
               ) : (
                 <div className="mt-1 space-y-0.5">
-                  {/* Busy sessions — 子 session 挂在父下面 */}
-                  {activeSessionTree.rootEntries.map(entry => renderActiveSessionNode(entry))}
+                  {busySessions.map(entry => (
+                    <ActiveSessionItem
+                      key={entry.sessionId}
+                      entry={entry}
+                      resolvedSession={sessionLookup.get(entry.sessionId)}
+                      isSelected={entry.sessionId === selectedSessionId}
+                      onSelect={handleSelectActive}
+                    />
+                  ))}
 
                   {/* Divider + actions between busy and notifications */}
                   {notifications.length > 0 && (
