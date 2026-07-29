@@ -44,16 +44,8 @@ export type CommandHandler = (ctx: CommandContext, params: JsonObject) => Promis
 
 const QUEUE_MODES = ["all", "one-at-a-time"] as const
 const REPLACEMENT_OPS = { fork: true, clone: true, newSession: true, switchSession: true, importSession: true }
-const SESSION_QUERY_COMMANDS = new Set([
-  "state.get",
-  "entries.get",
-  "branch.get",
-  "tree.get",
-  "registry.get",
-  "attachment.get",
-])
 
-export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
+const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   prompt: async (ctx, p) => {
     await ctx.requireRuntime().prompt(P.reqString(p, "text"), P.optImages(p), {
       expandPromptTemplates: P.optBoolean(p, "expandPromptTemplates"),
@@ -272,170 +264,166 @@ export function listCommandTypes(): string[] {
 }
 
 export function getCommandCapability(name: string): PiCapability | undefined {
-  return COMMAND_CAPABILITIES.find(capability => capability.name === name)
+  const found = COMMAND_REGISTRY.find(item => item.capability.name === name)
+  if (!found) return undefined
+  return { ...found.capability }
 }
 
 export function listCommandCapabilities(scope?: PiCapabilityScope): PiCapability[] {
-  return COMMAND_CAPABILITIES
-    .filter(capability => !scope || capability.scope === scope)
-    .map(capability => ({ ...capability }))
+  return COMMAND_REGISTRY
+    .filter(item => !scope || item.capability.scope === scope)
+    .map(item => ({ ...item.capability }))
 }
 
-function commandScope(name: string): PiCapabilityScope {
-  if (SESSION_QUERY_COMMANDS.has(name)) return "session"
-  if (name.startsWith("session.") || name.startsWith("models.") || name.startsWith("settings.") ||
-    name.startsWith("trust.") || name.startsWith("providers.") || name.startsWith("modelRuntime.") ||
-    name.startsWith("packages.")) {
-    return "global"
-  }
-  return "session"
+type RegisteredPiCapability = {
+  capability: PiCapability
+  handler: CommandHandler
 }
 
-function commandSource(name: string): PiCapability["source"] {
-  if (name === "invokeTool" || name === "invokeCommand") return "pi-extension"
-  return "pi-sdk"
+type CapabilityOptions = {
+  name: string
+  scope: PiCapabilityScope
+  description?: string
+  paramsSchema?: JsonObject
+  resultSchema?: JsonObject
+  source?: PiCapability["source"]
+  queue?: PiCapability["queue"]
+  replacement?: boolean
+  streaming?: boolean
+  cancellable?: boolean
+  idempotent?: boolean
+  requiresRuntime?: boolean
+  requiresTrust?: boolean
+  handler: CommandHandler
 }
 
-function commandDescription(name: string): string {
-  return DESCRIPTIONS[name] ?? name
-}
-
-const DESCRIPTIONS: Record<string, string> = {
-  prompt: "Send a user prompt to the current Pi session",
-  steer: "Queue steering text for the current Pi session",
-  followUp: "Queue a follow-up message for the current Pi session",
-  sendUserMessage: "Append and optionally deliver a user message",
-  abort: "Abort the current Pi turn",
-  newSession: "Create a new Pi session from the current runtime",
-  switchSession: "Switch the runtime to another Pi session file",
-  fork: "Fork the current Pi session at an entry",
-  clone: "Clone the current Pi session",
-  importSession: "Import a Pi session file",
-  setSessionName: "Set the current Pi session name",
-  setModel: "Set provider and model for the current Pi session",
-  cycleModel: "Cycle the selected model",
-  setScopedModels: "Set scoped model patterns",
-  setThinkingLevel: "Set the thinking level",
-  cycleThinkingLevel: "Cycle the thinking level",
-  setSteeringMode: "Set steering queue delivery mode",
-  setFollowUpMode: "Set follow-up queue delivery mode",
-  clearQueue: "Clear pending steering and follow-up queues",
-  compact: "Start Pi compaction",
-  abortCompaction: "Abort active compaction",
-  abortBranchSummary: "Abort active branch summary",
-  setAutoCompaction: "Toggle automatic compaction",
-  setAutoRetry: "Toggle automatic retry",
-  abortRetry: "Abort active retry",
-  bash: "Run a bash command through the Pi runtime",
-  abortBash: "Abort active bash execution",
-  setActiveTools: "Set active Pi tools",
-  invokeTool: "Invoke a registered Pi tool by name",
-  invokeCommand: "Invoke a registered Pi slash command by name",
-  navigateTree: "Navigate the Pi session tree",
-  setLabel: "Set an entry label",
-  sendCustomMessage: "Send a custom Pi message",
-  appendCustomEntry: "Append a custom Pi entry",
-  exportHtml: "Export the session as HTML",
-  exportJsonl: "Export the session as JSONL",
-  waitForIdle: "Wait until the Pi runtime is idle",
-  reload: "Reload Pi runtime resources",
-  respondExtensionUi: "Respond to a pending Pi extension UI request",
-  setExtensionEditorState: "Set Pi extension editor state",
-  "state.get": "Read current Pi session state",
-  "entries.get": "Read a page of Pi session entries",
-  "branch.get": "Read a page of the active Pi branch",
-  "tree.get": "Read the Pi session tree",
-  "registry.get": "Read runtime tools, commands, extensions, and handlers",
-  "attachment.get": "Read an attachment from a Pi entry",
-  "session.list": "List Pi sessions for a workspace",
-  "session.listAll": "List all Pi sessions",
-  "session.delete": "Delete a Pi session file",
-  "models.list": "List Pi models",
-  "settings.get": "Read Pi settings for a workspace",
-  "settings.patch": "Patch Pi settings for a workspace",
-  "trust.get": "Read Pi project trust state",
-  "trust.set": "Set Pi project trust state",
-  "providers.list": "List Pi providers",
-  "providers.startAuth": "Start provider authentication",
-  "providers.respondAuth": "Respond to provider authentication prompt",
-  "providers.cancelAuth": "Cancel provider authentication",
-  "providers.logout": "Log out from a provider",
-  "modelRuntime.inspect": "Inspect the Pi model runtime",
-  "modelRuntime.setApiKey": "Set a runtime provider API key",
-  "modelRuntime.removeApiKey": "Remove a runtime provider API key",
-  "modelRuntime.reload": "Reload model runtime config",
-  "modelRuntime.refresh": "Refresh model runtime state",
-  "packages.list": "List configured Pi packages",
-  "packages.manage": "Install, remove, or update Pi packages",
-  "packages.resolve": "Resolve Pi packages for a workspace",
-  "packages.resolveSources": "Resolve explicit Pi package sources",
-  "packages.changeSource": "Add or remove a Pi package source",
-  "packages.installedPath": "Read installed Pi package path",
-  "packages.checkUpdates": "Check Pi package updates",
-}
-
-function paramsSchema(name: string): JsonObject {
-  const required = REQUIRED_PARAMS[name] ?? []
+function registerPiCapability({ handler, ...capability }: CapabilityOptions): RegisteredPiCapability {
   return {
-    type: "object",
-    additionalProperties: true,
-    required,
-    properties: Object.fromEntries(required.map(key => [key, { type: "string" }])),
+    capability: {
+      source: "pi-sdk",
+      paramsSchema: EMPTY_PARAMS,
+      ...capability,
+    },
+    handler,
   }
 }
 
-const REQUIRED_PARAMS: Record<string, string[]> = {
-  prompt: ["text"],
-  steer: ["text"],
-  followUp: ["text"],
-  sendUserMessage: ["text"],
-  switchSession: ["sessionPath"],
-  fork: ["entryId"],
-  importSession: ["inputPath"],
-  setSessionName: ["name"],
-  setModel: ["provider", "modelId"],
-  setThinkingLevel: ["level"],
-  bash: ["command"],
-  invokeTool: ["name"],
-  invokeCommand: ["name"],
-  navigateTree: ["entryId"],
-  setLabel: ["entryId"],
-  sendCustomMessage: ["customType", "content", "display"],
-  exportHtml: ["outputPath"],
-  exportJsonl: ["outputPath"],
-  respondExtensionUi: ["requestId"],
-  setExtensionEditorState: ["text"],
-  "attachment.get": ["entryId", "blockIndex"],
-  "session.list": ["cwd"],
-  "session.delete": ["cwd", "sessionFile"],
-  "settings.get": ["cwd"],
-  "settings.patch": ["cwd"],
-  "trust.get": ["cwd"],
-  "trust.set": ["cwd"],
-  "providers.startAuth": ["providerId"],
-  "providers.respondAuth": ["flowId", "promptId", "value"],
-  "providers.cancelAuth": ["flowId"],
-  "providers.logout": ["providerId"],
-  "modelRuntime.setApiKey": ["providerId", "apiKey"],
-  "modelRuntime.removeApiKey": ["providerId"],
-  "packages.list": ["cwd"],
-  "packages.manage": ["cwd", "commandId"],
-  "packages.resolve": ["cwd"],
-  "packages.resolveSources": ["cwd"],
-  "packages.changeSource": ["cwd", "source"],
-  "packages.installedPath": ["cwd", "source"],
-  "packages.checkUpdates": ["cwd"],
+function command(name: string): CommandHandler {
+  const handler = COMMAND_IMPLEMENTATIONS[name]
+  if (!handler) throw new Error(`missing command implementation: ${name}`)
+  return handler
 }
 
-const COMMAND_CAPABILITIES: PiCapability[] = Object.keys(COMMAND_HANDLERS).map(name => {
-  const scope = commandScope(name)
-  return {
-    name,
-    scope,
-    source: commandSource(name),
-    description: commandDescription(name),
-    paramsSchema: paramsSchema(name),
-    queue: scope === "session" && !SESSION_QUERY_COMMANDS.has(name) ? "serialized" : "immediate",
-    replacement: isReplacementCommand(name) || undefined,
-  }
-})
+const STRING: JsonObject = { type: "string" }
+const BOOLEAN: JsonObject = { type: "boolean" }
+const NUMBER: JsonObject = { type: "number" }
+const NULL: JsonObject = { type: "null" }
+const ANY_JSON: JsonObject = {}
+const STRING_ARRAY: JsonObject = { type: "array", items: STRING }
+const IMAGE_INPUT: JsonObject = objectSchema({
+  type: { const: "image" },
+  data: STRING,
+  mimeType: STRING,
+}, ["type", "data", "mimeType"])
+const IMAGES: JsonObject = { type: "array", items: IMAGE_INPUT }
+const QUEUE_MODE: JsonObject = { enum: [...QUEUE_MODES] }
+const EMPTY_PARAMS = objectSchema({})
+
+function objectSchema(properties: Record<string, JsonObject>, required: string[] = [], additionalProperties = false): JsonObject {
+  return { type: "object", additionalProperties, required, properties }
+}
+
+function nullable(schema: JsonObject): JsonObject {
+  return { anyOf: [schema, NULL] }
+}
+
+function pageParams(): JsonObject {
+  return objectSchema({
+    cursor: nullable(STRING),
+    limit: { type: "integer", minimum: 1 },
+    maxBytes: { type: "integer", minimum: 1 },
+  })
+}
+
+const PROMPT_PARAMS = objectSchema({ text: STRING, images: IMAGES, expandPromptTemplates: BOOLEAN }, ["text"])
+const TEXT_IMAGES_PARAMS = objectSchema({ text: STRING, images: IMAGES }, ["text"])
+const OUTPUT_PATH_PARAMS = objectSchema({ outputPath: STRING }, ["outputPath"])
+const CWD_PARAMS = objectSchema({ cwd: STRING }, ["cwd"])
+
+const COMMAND_REGISTRY = [
+  registerPiCapability({ name: "prompt", scope: "session", description: "Send a user prompt to the current Pi session", paramsSchema: PROMPT_PARAMS, queue: "serialized", streaming: true, cancellable: true, handler: command("prompt") }),
+  registerPiCapability({ name: "steer", scope: "session", description: "Queue steering text for the current Pi session", paramsSchema: TEXT_IMAGES_PARAMS, queue: "immediate", handler: command("steer") }),
+  registerPiCapability({ name: "followUp", scope: "session", description: "Queue a follow-up message for the current Pi session", paramsSchema: TEXT_IMAGES_PARAMS, queue: "immediate", handler: command("followUp") }),
+  registerPiCapability({ name: "sendUserMessage", scope: "session", description: "Append and optionally deliver a user message", paramsSchema: objectSchema({ text: STRING, images: IMAGES, deliverAs: { enum: ["steer", "followUp"] } }, ["text"]), queue: "immediate", handler: command("sendUserMessage") }),
+  registerPiCapability({ name: "abort", scope: "session", description: "Abort the current Pi turn", queue: "immediate", handler: command("abort") }),
+  registerPiCapability({ name: "newSession", scope: "session", description: "Create a new Pi session from the current runtime", paramsSchema: objectSchema({ parentSession: STRING }), queue: "serialized", replacement: true, handler: command("newSession") }),
+  registerPiCapability({ name: "switchSession", scope: "session", description: "Switch the runtime to another Pi session file", paramsSchema: objectSchema({ sessionPath: STRING, cwdOverride: STRING }, ["sessionPath"]), queue: "serialized", replacement: true, handler: command("switchSession") }),
+  registerPiCapability({ name: "fork", scope: "session", description: "Fork the current Pi session at an entry", paramsSchema: objectSchema({ entryId: STRING, position: { enum: ["before", "at"] } }, ["entryId"]), queue: "serialized", replacement: true, handler: command("fork") }),
+  registerPiCapability({ name: "clone", scope: "session", description: "Clone the current Pi session", paramsSchema: objectSchema({ entryId: STRING }), queue: "serialized", replacement: true, handler: command("clone") }),
+  registerPiCapability({ name: "importSession", scope: "session", description: "Import a Pi session file", paramsSchema: objectSchema({ inputPath: STRING, cwdOverride: STRING }, ["inputPath"]), queue: "serialized", replacement: true, handler: command("importSession") }),
+  registerPiCapability({ name: "setSessionName", scope: "session", description: "Set the current Pi session name", paramsSchema: objectSchema({ name: STRING }, ["name"]), queue: "serialized", handler: command("setSessionName") }),
+  registerPiCapability({ name: "setModel", scope: "session", description: "Set provider and model for the current Pi session", paramsSchema: objectSchema({ provider: STRING, modelId: STRING }, ["provider", "modelId"]), queue: "serialized", handler: command("setModel") }),
+  registerPiCapability({ name: "cycleModel", scope: "session", description: "Cycle the selected model", paramsSchema: objectSchema({ direction: { enum: ["forward", "backward"] } }), queue: "serialized", handler: command("cycleModel") }),
+  registerPiCapability({ name: "setScopedModels", scope: "session", description: "Set scoped model patterns", paramsSchema: objectSchema({ patterns: STRING_ARRAY }), queue: "serialized", handler: command("setScopedModels") }),
+  registerPiCapability({ name: "setThinkingLevel", scope: "session", description: "Set the thinking level", paramsSchema: objectSchema({ level: STRING }, ["level"]), queue: "serialized", handler: command("setThinkingLevel") }),
+  registerPiCapability({ name: "cycleThinkingLevel", scope: "session", description: "Cycle the thinking level", queue: "serialized", handler: command("cycleThinkingLevel") }),
+  registerPiCapability({ name: "setSteeringMode", scope: "session", description: "Set steering queue delivery mode", paramsSchema: objectSchema({ mode: QUEUE_MODE }), queue: "immediate", handler: command("setSteeringMode") }),
+  registerPiCapability({ name: "setFollowUpMode", scope: "session", description: "Set follow-up queue delivery mode", paramsSchema: objectSchema({ mode: QUEUE_MODE }), queue: "immediate", handler: command("setFollowUpMode") }),
+  registerPiCapability({ name: "clearQueue", scope: "session", description: "Clear pending steering and follow-up queues", queue: "immediate", handler: command("clearQueue") }),
+  registerPiCapability({ name: "compact", scope: "session", description: "Start Pi compaction", paramsSchema: objectSchema({ customInstructions: STRING }), queue: "serialized", cancellable: true, handler: command("compact") }),
+  registerPiCapability({ name: "abortCompaction", scope: "session", description: "Abort active compaction", queue: "immediate", handler: command("abortCompaction") }),
+  registerPiCapability({ name: "abortBranchSummary", scope: "session", description: "Abort active branch summary", queue: "immediate", handler: command("abortBranchSummary") }),
+  registerPiCapability({ name: "setAutoCompaction", scope: "session", description: "Toggle automatic compaction", paramsSchema: objectSchema({ enabled: BOOLEAN }, ["enabled"]), queue: "serialized", handler: command("setAutoCompaction") }),
+  registerPiCapability({ name: "setAutoRetry", scope: "session", description: "Toggle automatic retry", paramsSchema: objectSchema({ enabled: BOOLEAN }, ["enabled"]), queue: "serialized", handler: command("setAutoRetry") }),
+  registerPiCapability({ name: "abortRetry", scope: "session", description: "Abort active retry", queue: "immediate", handler: command("abortRetry") }),
+  registerPiCapability({ name: "bash", scope: "session", description: "Run a bash command through the Pi runtime", paramsSchema: objectSchema({ command: STRING, excludeFromContext: BOOLEAN }, ["command"]), queue: "serialized", cancellable: true, handler: command("bash") }),
+  registerPiCapability({ name: "abortBash", scope: "session", description: "Abort active bash execution", queue: "immediate", handler: command("abortBash") }),
+  registerPiCapability({ name: "setActiveTools", scope: "session", description: "Set active Pi tools", paramsSchema: objectSchema({ toolNames: STRING_ARRAY }), queue: "serialized", handler: command("setActiveTools") }),
+  registerPiCapability({ name: "invokeTool", scope: "session", source: "pi-extension", description: "Invoke a registered Pi tool by name", paramsSchema: objectSchema({ name: STRING, arguments: objectSchema({}, [], true) }, ["name"]), queue: "serialized", handler: command("invokeTool") }),
+  registerPiCapability({ name: "invokeCommand", scope: "session", source: "pi-extension", description: "Invoke a registered Pi slash command by name", paramsSchema: objectSchema({ name: STRING, args: STRING }, ["name"]), queue: "serialized", handler: command("invokeCommand") }),
+  registerPiCapability({ name: "navigateTree", scope: "session", description: "Navigate the Pi session tree", paramsSchema: objectSchema({ entryId: STRING, summarize: BOOLEAN, customInstructions: STRING, replaceInstructions: BOOLEAN, label: STRING }, ["entryId"]), queue: "serialized", replacement: true, cancellable: true, handler: command("navigateTree") }),
+  registerPiCapability({ name: "setLabel", scope: "session", description: "Set an entry label", paramsSchema: objectSchema({ entryId: STRING, label: STRING }, ["entryId"]), queue: "serialized", handler: command("setLabel") }),
+  registerPiCapability({ name: "sendCustomMessage", scope: "session", description: "Send a custom Pi message", paramsSchema: objectSchema({ customType: STRING, content: { type: "array", items: { anyOf: [objectSchema({ type: { const: "text" }, text: STRING }, ["type", "text"]), IMAGE_INPUT] } }, display: BOOLEAN, details: ANY_JSON, triggerTurn: BOOLEAN, deliverAs: { enum: ["steer", "followUp", "nextTurn"] } }, ["customType", "content", "display"]), queue: "serialized", handler: command("sendCustomMessage") }),
+  registerPiCapability({ name: "appendCustomEntry", scope: "session", description: "Append a custom Pi entry", paramsSchema: objectSchema({ customType: STRING, data: ANY_JSON }, ["customType"]), queue: "serialized", handler: command("appendCustomEntry") }),
+  registerPiCapability({ name: "exportHtml", scope: "session", description: "Export the session as HTML", paramsSchema: OUTPUT_PATH_PARAMS, queue: "serialized", handler: command("exportHtml") }),
+  registerPiCapability({ name: "exportJsonl", scope: "session", description: "Export the session as JSONL", paramsSchema: OUTPUT_PATH_PARAMS, queue: "serialized", handler: command("exportJsonl") }),
+  registerPiCapability({ name: "waitForIdle", scope: "session", description: "Wait until the Pi runtime is idle", queue: "serialized", handler: command("waitForIdle") }),
+  registerPiCapability({ name: "reload", scope: "session", description: "Reload Pi runtime resources", queue: "serialized", handler: command("reload") }),
+  registerPiCapability({ name: "respondExtensionUi", scope: "session", description: "Respond to a pending Pi extension UI request", paramsSchema: objectSchema({ requestId: STRING, response: objectSchema({}, [], true) }, ["requestId"]), queue: "immediate", handler: command("respondExtensionUi") }),
+  registerPiCapability({ name: "setExtensionEditorState", scope: "session", description: "Set Pi extension editor state", paramsSchema: objectSchema({ text: STRING }, ["text"]), queue: "immediate", handler: command("setExtensionEditorState") }),
+  registerPiCapability({ name: "state.get", scope: "session", description: "Read current Pi session state", queue: "immediate", idempotent: true, handler: command("state.get") }),
+  registerPiCapability({ name: "entries.get", scope: "session", description: "Read a page of Pi session entries", paramsSchema: pageParams(), queue: "immediate", idempotent: true, handler: command("entries.get") }),
+  registerPiCapability({ name: "branch.get", scope: "session", description: "Read a page of the active Pi branch", paramsSchema: pageParams(), queue: "immediate", idempotent: true, handler: command("branch.get") }),
+  registerPiCapability({ name: "tree.get", scope: "session", description: "Read the Pi session tree", queue: "immediate", idempotent: true, handler: command("tree.get") }),
+  registerPiCapability({ name: "registry.get", scope: "session", description: "Read runtime tools, commands, extensions, and handlers", queue: "immediate", idempotent: true, handler: command("registry.get") }),
+  registerPiCapability({ name: "attachment.get", scope: "session", description: "Read an attachment from a Pi entry", paramsSchema: objectSchema({ entryId: STRING, blockIndex: { type: "integer", minimum: 0 } }, ["entryId", "blockIndex"]), queue: "immediate", idempotent: true, handler: command("attachment.get") }),
+  registerPiCapability({ name: "session.list", scope: "global", description: "List Pi sessions for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true, handler: command("session.list") }),
+  registerPiCapability({ name: "session.listAll", scope: "global", description: "List all Pi sessions", queue: "immediate", idempotent: true, handler: command("session.listAll") }),
+  registerPiCapability({ name: "session.delete", scope: "global", description: "Delete a Pi session file", paramsSchema: objectSchema({ cwd: STRING, sessionFile: STRING }, ["cwd", "sessionFile"]), queue: "serialized", handler: command("session.delete") }),
+  registerPiCapability({ name: "models.list", scope: "global", description: "List Pi models", queue: "immediate", idempotent: true, handler: command("models.list") }),
+  registerPiCapability({ name: "settings.get", scope: "global", description: "Read Pi settings for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true, handler: command("settings.get") }),
+  registerPiCapability({ name: "settings.patch", scope: "global", description: "Patch Pi settings for a workspace", paramsSchema: objectSchema({ cwd: STRING, patch: objectSchema({}, [], true) }, ["cwd"]), queue: "serialized", handler: command("settings.patch") }),
+  registerPiCapability({ name: "trust.get", scope: "global", description: "Read Pi project trust state", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true, handler: command("trust.get") }),
+  registerPiCapability({ name: "trust.set", scope: "global", description: "Set Pi project trust state", paramsSchema: objectSchema({ cwd: STRING, decision: nullable(BOOLEAN) }, ["cwd"]), queue: "serialized", handler: command("trust.set") }),
+  registerPiCapability({ name: "providers.list", scope: "global", description: "List Pi providers", queue: "immediate", idempotent: true, handler: command("providers.list") }),
+  registerPiCapability({ name: "providers.startAuth", scope: "global", description: "Start provider authentication", paramsSchema: objectSchema({ providerId: STRING, authType: { enum: ["api_key", "oauth"] } }, ["providerId"]), queue: "serialized", handler: command("providers.startAuth") }),
+  registerPiCapability({ name: "providers.respondAuth", scope: "global", description: "Respond to provider authentication prompt", paramsSchema: objectSchema({ flowId: STRING, promptId: STRING, value: STRING }, ["flowId", "promptId", "value"]), queue: "immediate", handler: command("providers.respondAuth") }),
+  registerPiCapability({ name: "providers.cancelAuth", scope: "global", description: "Cancel provider authentication", paramsSchema: objectSchema({ flowId: STRING }, ["flowId"]), queue: "immediate", handler: command("providers.cancelAuth") }),
+  registerPiCapability({ name: "providers.logout", scope: "global", description: "Log out from a provider", paramsSchema: objectSchema({ providerId: STRING }, ["providerId"]), queue: "serialized", handler: command("providers.logout") }),
+  registerPiCapability({ name: "modelRuntime.inspect", scope: "global", description: "Inspect the Pi model runtime", queue: "immediate", idempotent: true, handler: command("modelRuntime.inspect") }),
+  registerPiCapability({ name: "modelRuntime.setApiKey", scope: "global", description: "Set a runtime provider API key", paramsSchema: objectSchema({ providerId: STRING, apiKey: STRING }, ["providerId", "apiKey"]), queue: "serialized", handler: command("modelRuntime.setApiKey") }),
+  registerPiCapability({ name: "modelRuntime.removeApiKey", scope: "global", description: "Remove a runtime provider API key", paramsSchema: objectSchema({ providerId: STRING }, ["providerId"]), queue: "serialized", handler: command("modelRuntime.removeApiKey") }),
+  registerPiCapability({ name: "modelRuntime.reload", scope: "global", description: "Reload model runtime config", queue: "serialized", handler: command("modelRuntime.reload") }),
+  registerPiCapability({ name: "modelRuntime.refresh", scope: "global", description: "Refresh model runtime state", paramsSchema: objectSchema({ options: objectSchema({}, [], true) }), queue: "serialized", handler: command("modelRuntime.refresh") }),
+  registerPiCapability({ name: "packages.list", scope: "global", description: "List configured Pi packages", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true, handler: command("packages.list") }),
+  registerPiCapability({ name: "packages.manage", scope: "global", description: "Install, remove, or update Pi packages", paramsSchema: objectSchema({ cwd: STRING, commandId: STRING, action: { enum: ["install", "remove", "update"] }, source: STRING, local: BOOLEAN, persist: BOOLEAN }, ["cwd", "commandId"]), queue: "serialized", handler: command("packages.manage") }),
+  registerPiCapability({ name: "packages.resolve", scope: "global", description: "Resolve Pi packages for a workspace", paramsSchema: objectSchema({ cwd: STRING, missingAction: { enum: ["install", "skip", "error"] } }, ["cwd"]), queue: "serialized", handler: command("packages.resolve") }),
+  registerPiCapability({ name: "packages.resolveSources", scope: "global", description: "Resolve explicit Pi package sources", paramsSchema: objectSchema({ cwd: STRING, sources: STRING_ARRAY, local: BOOLEAN, temporary: BOOLEAN }, ["cwd"]), queue: "serialized", handler: command("packages.resolveSources") }),
+  registerPiCapability({ name: "packages.changeSource", scope: "global", description: "Add or remove a Pi package source", paramsSchema: objectSchema({ cwd: STRING, source: STRING, operation: { enum: ["add", "remove"] }, local: BOOLEAN }, ["cwd", "source"]), queue: "serialized", handler: command("packages.changeSource") }),
+  registerPiCapability({ name: "packages.installedPath", scope: "global", description: "Read installed Pi package path", paramsSchema: objectSchema({ cwd: STRING, source: STRING, scope: { enum: ["user", "project"] } }, ["cwd", "source"]), queue: "immediate", idempotent: true, handler: command("packages.installedPath") }),
+  registerPiCapability({ name: "packages.checkUpdates", scope: "global", description: "Check Pi package updates", paramsSchema: CWD_PARAMS, queue: "serialized", handler: command("packages.checkUpdates") }),
+]
+
+export const COMMAND_HANDLERS: Record<string, CommandHandler> = Object.fromEntries(
+  COMMAND_REGISTRY.map(item => [item.capability.name, item.handler]),
+)

@@ -5,7 +5,7 @@
 **Pi coding agent 的原生 server：数据零修改透传，能力自省生成 API，UI 直接消费 Pi 原生结构。**
 
 - 运行时：`@earendil-works/pi-coding-agent` SDK 内嵌于 worker 进程（官方对 Node 宿主的推荐方式）
-- 协议：命令/响应/事件三段式，对齐官方 RPC 语义；Pi 数据不定义中间类型，JsonValue 透传
+- 协议：registry/命令/响应/事件四段式，对齐官方 runtime registry 语义；Pi 数据不定义中间类型，JsonValue 透传
 - 扩展：tool/command 运行时枚举自动生成 API，装扩展零协议改动
 - 不调用真实模型做开发验收（mock driver + faux provider）
 
@@ -51,6 +51,7 @@ WS     /api/v1/events                            stream 订阅 + cursor/replay/r
 
 - `pi.event`:payload = `{event: <裸 Pi 事件>, meta: {epoch, sequence, liveMessage?}}`
 - `session.head`:entries/tree 变化后的 head(leafId/entryCount/revision)
+- `registry.updated`:runtime 能力变化，payload 含 `{revision, sessionId}`，客户端应重新拉 registry
 - `command.updated`:命令生命周期（accepted/running/completed/failed/cancelled)
 - `extension.ui` / `provider.auth` / `packages.progress` / `sessions.updated` / `resources.updated`
 - `workspace.files` / `workspace.git`:host 区文件与 Git 变化
@@ -59,6 +60,8 @@ WS     /api/v1/events                            stream 订阅 + cursor/replay/r
 
 - global：`registry.describe, session.open, session.attached, session.list, session.listAll, session.delete, models.list, settings.get, settings.patch, trust.get, trust.set, providers.*, modelRuntime.*, packages.*`
 - session：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState, state.get, entries.get, branch.get, tree.get, registry.get, attachment.get`
+
+每个 capability 由 `registerPiCapability` 显式注册，registry 是唯一真相。返回字段包括：`name/scope/source/description/paramsSchema/resultSchema/queue/replacement/streaming/cancellable/idempotent/requiresRuntime/requiresTrust`。`paramsSchema` 是 JSON Schema 风格结构，供客户端生成表单和本地校验；result 保持 Pi 原生 JSON 透传，不重建中间模型。
 
 扩展自省：
 - `POST /api/v1/pi/sessions/:id/commands/registry.get` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
@@ -107,6 +110,6 @@ curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
 
 ## 当前状态
 
-- 后端三包（protocol/pi-worker/server)：重构完成，97 测试全绿，含真实 SDK + faux provider 无网络集成测试
+- 后端三包（protocol/pi-worker/server)：重构完成，99 测试全绿，含真实 SDK + faux provider 无网络集成测试
 - app：未适配新协议，待后续处理
 - 待办：invokeTool 的 onUpdate 流式进度、PTY、app 适配、发布门禁（R12 conformance)

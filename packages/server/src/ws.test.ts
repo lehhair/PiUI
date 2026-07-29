@@ -121,6 +121,22 @@ describe("event websocket", () => {
     assert.equal(registry.status, 200)
     assert.ok(registry.json.data.tools.some((tool: any) => tool.name === "mock-tool"))
 
+    const reloaded = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/reload`)
+    assert.equal(reloaded.status, 202)
+    let sawRegistryUpdated = false
+    const registryDeadline = Date.now() + 5_000
+    while (Date.now() < registryDeadline && !sawRegistryUpdated) {
+      for (const envelope of envelopes.splice(0)) {
+        if (envelope.channel === "registry.updated") {
+          assert.equal((envelope.payload as { sessionId?: string }).sessionId, sessionId)
+          assert.equal(typeof (envelope.payload as { revision?: unknown }).revision, "number")
+          sawRegistryUpdated = true
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    assert.ok(sawRegistryUpdated, "did not see registry.updated")
+
     const list = await request(port, "POST", "/api/v1/pi/commands/session.listAll")
     assert.equal(list.status, 200)
     assert.ok(list.json.data.some((item: any) => item.id === sessionId), `sessions: ${JSON.stringify(list.json.data)} vs ${sessionId}`)

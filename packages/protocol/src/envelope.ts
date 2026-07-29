@@ -48,6 +48,7 @@ export type EventChannel =
   | "extension.ui"
   | "provider.auth"
   | "packages.progress"
+  | "registry.updated"
   | "workspace.files"
   | "workspace.git"
   | "sessions.updated"
