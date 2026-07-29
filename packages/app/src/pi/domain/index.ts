@@ -102,7 +102,7 @@ import type {
   ImageContent,
   ToolCall,
 } from '@earendil-works/pi-ai'
-import type { JsonObject } from '@piui/protocol'
+import type { JsonObject, EntriesPage, BranchCheckpoint, LiveMessage } from '@piui/protocol'
 
 /**
  * Pi Session row for sidebar display.
@@ -244,22 +244,14 @@ export type PiSessionRuntimeState = JsonObject
 
 /**
  * Pi branch page (from branch.get command).
- * Raw page from backend, kept as JsonObject for forward compatibility.
+ * Structure comes from protocol EntriesPage; items and liveMessage are
+ * narrowed to SDK types since the backend guarantees their shapes.
  */
-export type PiBranchPage = {
-  head: JsonObject
+export type PiLiveMessage = Omit<LiveMessage, 'message'> & { message: AgentMessage }
+export type PiBranchCheckpoint = Omit<BranchCheckpoint, 'liveMessage'> & { liveMessage?: PiLiveMessage }
+export type PiBranchPage = Omit<EntriesPage, 'items' | 'checkpoint'> & {
   items: SessionEntry[]
-  checkpoint?: {
-    position: { epoch: string; sequence: number }
-    liveMessage?: {
-      id: string
-      revision: number
-      phase: 'streaming' | 'persisting'
-      message: AgentMessage
-    }
-  }
-  beforeCursor?: string
-  hasMore: boolean
+  checkpoint?: PiBranchCheckpoint
 }
 
 /**

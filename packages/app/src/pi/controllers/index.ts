@@ -75,6 +75,9 @@ export async function loadPiSessionData(sessionId: string, signal?: AbortSignal)
 
 /**
  * Load more branch entries (pagination).
+ * Pages grow backwards: beforeCursor anchors the oldest entry of the current
+ * page, so older items must be PREPENDED. checkpoint only exists on the
+ * first (latest) page — preserve it when merging older pages.
  */
 export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortSignal): Promise<void> {
   const currentBranch = piBranchStore.getData()
@@ -87,16 +90,17 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
   }
 
   try {
-    const nextPage = await transport.getPiBranchPage(
+    const olderPage = await transport.getPiBranchPage(
       sessionId,
       { cursor: currentBranch.beforeCursor, limit: 200 },
       signal,
     )
 
-    // Merge with existing data
+    // Prepend older items; keep latest head/hasMore/cursor from the new page
     piBranchStore.setData({
-      ...nextPage,
-      items: [...currentBranch.items, ...nextPage.items],
+      ...olderPage,
+      checkpoint: currentBranch.checkpoint,
+      items: [...olderPage.items, ...currentBranch.items],
     })
   } catch (error) {
     console.error('Failed to load more branch entries:', error)

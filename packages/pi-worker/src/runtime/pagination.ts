@@ -1,35 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import type { EventCursor, JsonObject, JsonValue } from "@piui/protocol"
+import type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead } from "@piui/protocol"
 
-export type LiveMessage = {
-  id: string
-  revision: number
-  phase: "streaming" | "persisting"
-  message: JsonValue
-}
-
-export type SessionHead = {
-  sdkVersion: string
-  revision: number
-  sessionFormatVersion?: number
-  header: JsonObject | null
-  leafId: string | null
-  entryCount: number
-  epoch: string
-}
-
-export type BranchCheckpoint = {
-  position: EventCursor
-  liveMessage?: LiveMessage
-}
-
-export type EntriesPage = {
-  head: SessionHead
-  items: JsonObject[]
-  checkpoint?: BranchCheckpoint
-  beforeCursor?: string
-  hasMore: boolean
-}
+export type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead }
 
 type NativeCursor = { v: 1; epoch: string; beforeId: string }
 const cursorSecret = randomBytes(32)
