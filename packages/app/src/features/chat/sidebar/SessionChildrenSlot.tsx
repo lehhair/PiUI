@@ -18,6 +18,8 @@ interface SessionChildrenSlotProps {
   selectedSessionId: string | null
   fetchAll?: boolean
   children?: UiSession[]
+  /** 全量 children map，用于 fork 的 fork 这类多级嵌套递归渲染 */
+  childrenByParent?: Map<string, UiSession[]>
   onSelect: (session: UiSession) => void
   /** 删除子 session 后如果它正好被选中，通知外部切走 */
   onDeleteSelected?: () => void
@@ -32,6 +34,7 @@ export function SessionChildrenSlot({
   selectedSessionId,
   fetchAll,
   children: givenChildren,
+  childrenByParent,
   onSelect,
   onDeleteSelected,
   isEditMode = false,
@@ -103,25 +106,40 @@ export function SessionChildrenSlot({
             isEditMode &&
             index < list!.length - 1 &&
             (selectedSessionIds?.has(list![index + 1].id) ?? false)
+          const grandChildren = childrenByParent?.get(child.id)
           return (
-          <SessionListItem
-            key={child.id}
-            session={child}
-            isSelected={child.id === selectedSessionId}
-            onSelect={() => onSelect(child)}
-            onRename={newTitle => handleRename(child.id, newTitle)}
-            onDelete={() => setDeleteConfirm({ isOpen: true, sessionId: child.id })}
-            preferTouchUi={preferTouchUi}
-            density="minimal"
-            showDirectory={false}
-            isEditMode={isEditMode}
-            isChecked={isChecked}
-            checkedPrev={prevChecked}
-            checkedNext={nextChecked}
-            onToggleCheck={
-              onToggleSessionSelection ? options => onToggleSessionSelection(child.id, options) : undefined
-            }
-          />
+            <div key={child.id}>
+              <SessionListItem
+                session={child}
+                isSelected={child.id === selectedSessionId}
+                onSelect={() => onSelect(child)}
+                onRename={newTitle => handleRename(child.id, newTitle)}
+                onDelete={() => setDeleteConfirm({ isOpen: true, sessionId: child.id })}
+                preferTouchUi={preferTouchUi}
+                density="minimal"
+                showDirectory={false}
+                isEditMode={isEditMode}
+                isChecked={isChecked}
+                checkedPrev={prevChecked}
+                checkedNext={nextChecked}
+                onToggleCheck={
+                  onToggleSessionSelection ? options => onToggleSessionSelection(child.id, options) : undefined
+                }
+              />
+              {grandChildren && grandChildren.length > 0 ? (
+                <SessionChildrenSlot
+                  parentSession={child}
+                  selectedSessionId={selectedSessionId}
+                  children={grandChildren}
+                  childrenByParent={childrenByParent}
+                  onSelect={onSelect}
+                  onDeleteSelected={onDeleteSelected}
+                  isEditMode={isEditMode}
+                  selectedSessionIds={selectedSessionIds}
+                  onToggleSessionSelection={onToggleSessionSelection}
+                />
+              ) : null}
+            </div>
           )
         })
       )}
