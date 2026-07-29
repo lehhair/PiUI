@@ -238,7 +238,7 @@ describe('SessionTreePanel', () => {
         cancelled: false,
       },
     })
-    render(<SessionTreePanel sessionId="session-1" />)
+    render(<SessionTreePanel sessionId="session-1" mode="controls" />)
 
     fireEvent.click(screen.getByText('Import JSONL'))
     fireEvent.change(screen.getByPlaceholderText('Path to a Pi JSONL file'), {
@@ -258,7 +258,7 @@ describe('SessionTreePanel', () => {
     )
   })
 
-  it('controls native queue, retry, compaction, tools, and branch summaries', async () => {
+  it('controls native queue, retry, compaction, and tools', async () => {
     const runtimeSnapshot: SessionSnapshotV1 = {
       ...snapshot(),
       sequence: 2,
@@ -302,9 +302,10 @@ describe('SessionTreePanel', () => {
     mocks.compact.mockResolvedValue({ accepted: true, snapshot: runtimeSnapshot })
     mocks.navigate.mockResolvedValue({ snapshot: runtimeSnapshot, cancelled: false })
 
-    render(<SessionTreePanel sessionId="session-1" />)
+    render(<SessionTreePanel sessionId="session-1" mode="controls" />)
 
-    fireEvent.click(screen.getByText('Session Controls'))
+    expect(screen.getByText('Session Controls')).toBeInTheDocument()
+    expect(mocks.fetchNativeTree).not.toHaveBeenCalled()
     expect(screen.getByText('Correct the parser')).toBeInTheDocument()
     expect(screen.getByText('Run the tests')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('Clear queued messages'))
@@ -323,10 +324,12 @@ describe('SessionTreePanel', () => {
     fireEvent.click(screen.getByTitle('Compact context'))
     await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith('session-1', 'Keep API decisions'))
 
-    fireEvent.click(await screen.findByText('user-entry'))
-    fireEvent.click(screen.getByText('Navigation Options'))
-    fireEvent.click(screen.getByLabelText('Summarize the abandoned branch when navigating'))
-    fireEvent.click(screen.getByText('Return here'))
-    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry', true))
+  })
+
+  it('keeps runtime controls out of the tree mode', async () => {
+    render(<SessionTreePanel sessionId="session-1" />)
+
+    expect(screen.getByLabelText('Session Tree')).toBeInTheDocument()
+    expect(screen.queryByText('Session Controls')).not.toBeInTheDocument()
   })
 })

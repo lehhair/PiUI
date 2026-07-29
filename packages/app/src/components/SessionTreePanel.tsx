@@ -45,12 +45,14 @@ import {
 
 interface SessionTreePanelProps {
   sessionId: string
+  mode?: 'tree' | 'controls'
   onNavigateSession?: (session: { id: string; directory?: string }) => void
 }
 
 
 export const SessionTreePanel = memo(function SessionTreePanel({
   sessionId,
+  mode = 'tree',
   onNavigateSession,
 }: SessionTreePanelProps) {
   const { t } = useTranslation('components')
@@ -93,7 +95,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     defaultPrimaryHeightRatio: 0.55,
   })
   const loadNativeTree = useCallback(async () => {
-    if (!sessionId) return
+    if (!sessionId || mode !== 'tree') return
     const request = ++nativeRequestRef.current
     setNativeLoading(true)
     setNativeLoadError(null)
@@ -107,9 +109,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     } finally {
       if (request === nativeRequestRef.current) setNativeLoading(false)
     }
-  }, [sessionId])
+  }, [mode, sessionId])
 
   useEffect(() => {
+    if (mode !== 'tree') return
     nativeRequestRef.current += 1
     nativeRevisionRef.current = snapshot ? `${snapshot.native.epoch}:${snapshot.native.revision}` : undefined
     setNativeTree([])
@@ -117,14 +120,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     resetSplitHeight()
     const timer = window.setTimeout(() => { void loadNativeTree() }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadNativeTree])
+  }, [loadNativeTree, mode])
 
   useEffect(() => {
+    if (mode !== 'tree') return
     const revision = snapshot ? `${snapshot.native.epoch}:${snapshot.native.revision}` : undefined
     if (revision === undefined || revision === nativeRevisionRef.current) return
     nativeRevisionRef.current = revision
     void loadNativeTree()
-  }, [loadNativeTree, snapshot?.native.epoch, snapshot?.native.revision])
+  }, [loadNativeTree, mode, snapshot?.native.epoch, snapshot?.native.revision])
   const treeGraph = useMemo(
     () => buildSessionTreeGraph(nativeTree, snapshot?.native.leafId ?? null, type => t(`sessionTree.entryTypes.${type}`)),
     [nativeTree, snapshot?.native.leafId, t],
@@ -334,14 +338,16 @@ export const SessionTreePanel = memo(function SessionTreePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg-100">
-      <details className="shrink-0 border-b border-border-200/40 bg-bg-100">
-        <summary className="cursor-pointer px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-300 hover:bg-bg-200/40 hover:text-text-100">
-          {t('sessionTree.sessionControls')}
-        </summary>
-        <div className="max-h-[45vh] overflow-y-auto border-t border-border-200/40">
+      {mode === 'controls' ? (
+        <section className="flex h-full min-h-0 flex-col bg-bg-100" aria-label={t('sessionTree.sessionControls')}>
+          <h2 className="shrink-0 border-b border-border-200/40 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-300">
+            {t('sessionTree.sessionControls')}
+          </h2>
+          <div className="min-h-0 flex-1 overflow-y-auto">
       {snapshot && (capabilities.compactionManage || capabilities.retryManage) ? (
         <div className="shrink-0 border-b border-border-200/40 px-3 py-2">
-          <h3 className="mb-2 text-[length:var(--fs-xs)] font-medium text-text-300">{t('sessionTree.runtimeControls')}</h3>
+          <h3 className="text-[length:var(--fs-xs)] font-medium text-text-300">{t('sessionTree.runtimeControls')}</h3>
+          <p className="mt-1 text-[length:var(--fs-xs)] leading-relaxed text-text-500">{t('sessionTree.runtimeControlsHint')}</p>
           {capabilities.compactionManage ? (
             <form
               className="flex items-center gap-1"
@@ -485,7 +491,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
       {snapshot && capabilities.queueManage ? (
         <div className="shrink-0 border-b border-border-200/40 px-3 py-2 text-[length:var(--fs-xs)]">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-text-200">{t('sessionTree.queue')}</span>
+            <div>
+              <span className="font-medium text-text-200">{t('sessionTree.queue')}</span>
+              <p className="mt-0.5 text-text-500">{t('sessionTree.queueHint')}</p>
+            </div>
             <IconButton
               size="sm"
               aria-label={t('sessionTree.clearQueue')}
@@ -539,6 +548,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           <summary className="cursor-pointer text-[length:var(--fs-sm)] font-medium text-text-200">
             {t('sessionTree.activeTools', { active: snapshot.runtime.activeTools.length, total: snapshot.runtime.tools.length })}
           </summary>
+          <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('sessionTree.toolsHint')}</p>
           <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
             {snapshot.runtime.tools.map(tool => (
               <label key={tool.name} className="flex min-w-0 items-start gap-1.5 text-[length:var(--fs-xs)] text-text-300">
@@ -557,6 +567,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
 
       {capabilities.sessionImport ? (
         <div className="shrink-0 border-b border-border-200/40 px-2 py-2">
+          <p className="mb-2 px-1 text-[length:var(--fs-xs)] text-text-500">{t('sessionTree.importHint')}</p>
           {importOpen ? (
             <form
               className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1"
@@ -605,8 +616,9 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           )}
         </div>
       ) : null}
-        </div>
-      </details>
+          </div>
+        </section>
+      ) : null}
 
       {error ? (
         <div role="alert" className="shrink-0 border-b border-danger-100/30 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
@@ -614,7 +626,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         </div>
       ) : null}
 
-      <div ref={containerRef} className="min-h-0 flex-1 flex flex-col">
+      <div ref={containerRef} className={mode === 'tree' ? 'min-h-0 flex-1 flex flex-col' : 'hidden'}>
         <div
           ref={canvasRef}
           className="shrink-0 overflow-hidden"
