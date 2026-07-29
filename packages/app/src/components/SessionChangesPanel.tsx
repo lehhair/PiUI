@@ -145,7 +145,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const changeOptions = useMemo<ChangeMode[]>(() => {
     const options: ChangeMode[] = []
     if (project?.vcs) options.push('git')
-    if (project?.vcs && vcsInfo?.branch) {
+    if (project?.vcs && vcsInfo?.branch && !vcsInfo?.unborn) {
       options.push('branch')
     }
     if (project?.vcs) options.push('staged', 'unstaged')

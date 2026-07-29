@@ -29,6 +29,7 @@ export async function getVcsInfo(directory?: string, signal?: AbortSignal): Prom
     upstream: info.upstream,
     ahead: info.ahead,
     behind: info.behind,
+    unborn: info.unborn,
   }
 }
 
