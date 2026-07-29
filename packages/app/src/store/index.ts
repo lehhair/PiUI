@@ -18,9 +18,6 @@ export {
   useUndoRedoState,
 } from './messageStoreHooks'
 
-export { childSessionStore, useChildSessions, useSessionFamily } from './childSessionStore'
-export type { ChildSessionInfo } from './childSessionStore'
-
 export { layoutStore, useLayoutStore, exportLayoutBackup, importLayoutBackup } from './layoutStore'
 export type { LayoutBackup } from './layoutStore'
 

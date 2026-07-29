@@ -71,11 +71,6 @@
     "networkActive": "Fetching page",
     "networkFailed_one": "{{count}} fetch failed",
     "networkFailed_other": "{{count}} fetches failed",
-    "taskDone_one": "Ran {{count}} subtask",
-    "taskDone_other": "Ran {{count}} subtasks",
-    "taskActive": "Running subtask",
-    "taskFailed_one": "{{count}} subtask failed",
-    "taskFailed_other": "{{count}} subtasks failed",
     "todoDone": "Updated tasks",
     "todoActive": "Updating tasks",
     "todoFailed": "Task update failed",
@@ -125,14 +120,6 @@
     "autoPrefix": "auto-",
     "filesChanged": "{{count}} file changed",
     "filesChanged_other": "{{count}} files changed"
-  },
-  "subtask": {
-    "running": "Running",
-    "done": "Done",
-    "error": "Error",
-    "enter": "Enter",
-    "task": "Task",
-    "viewFullSession": "View full session"
   },
   "stepFinish": {
     "inputTokens": "Input: {{input}}",

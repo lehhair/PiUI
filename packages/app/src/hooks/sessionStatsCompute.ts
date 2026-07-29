@@ -12,7 +12,6 @@ function charsFromUserPart(part: Part): number {
   if (part.type === 'file') return part.source?.text.value.length ?? 0
   if (part.type === 'agent') return part.source?.value.length ?? 0
   if (part.type === 'compaction') return 'What did we do so far?'.length
-  if (part.type === 'subtask') return 'The following tool was executed by the user'.length
   return 0
 }
 

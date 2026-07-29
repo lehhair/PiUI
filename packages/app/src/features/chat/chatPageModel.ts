@@ -104,9 +104,6 @@ export function estimateMessageRenderWeight(message: Message): number {
       case 'file':
         weight += 2
         break
-      case 'subtask':
-        weight += 3
-        break
       case 'step-finish':
       case 'retry':
         weight += 2

@@ -57,9 +57,6 @@
     "networkDone": "获取了 {{count}} 个网页",
     "networkActive": "正在获取网页",
     "networkFailed": "{{count}} 个网页获取失败",
-    "taskDone": "完成了 {{count}} 个子任务",
-    "taskActive": "正在运行子任务",
-    "taskFailed": "{{count}} 个子任务失败",
     "todoDone": "更新了任务清单",
     "todoActive": "正在更新任务清单",
     "todoFailed": "任务清单更新失败",
@@ -99,14 +96,6 @@
     "autoPrefix": "自动",
     "filesChanged": "{{count}} 个文件变更",
     "filesChanged_other": "{{count}} 个文件变更"
-  },
-  "subtask": {
-    "running": "运行中",
-    "done": "Done",
-    "error": "Error",
-    "enter": "Enter",
-    "task": "Task",
-    "viewFullSession": "查看完整会话"
   },
   "stepFinish": {
     "inputTokens": "Input: {{input}}",

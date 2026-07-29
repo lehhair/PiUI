@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { PermissionListIcon, UsersIcon, ReturnIcon, ChevronDownIcon } from '../../components/Icons'
 import { DiffView } from '../../components/DiffView'
 import { ContentBlock } from '../../components'
-import { childSessionStore, autoApproveStore } from '../../store'
+import { autoApproveStore } from '../../store'
 import { usePresence } from '../../hooks'
 import { useChatViewport } from './chatViewport'
 
@@ -55,7 +55,6 @@ export function PermissionDialog({
 
   // 判断是否来自子 session
   const isFromChildSession = currentSessionId && request.sessionID !== currentSessionId
-  const childSessionInfo = isFromChildSession ? childSessionStore.getSessionInfo(request.sessionID) : null
 
   // 弹出/收起动画
   const { shouldRender, ref: animRef } = usePresence<HTMLDivElement>(!collapsed, {
@@ -108,7 +107,7 @@ export function PermissionDialog({
                 <UsersIcon className="w-3.5 h-3.5 text-info-100" />
                 <span className="text-[length:var(--fs-sm)] text-info-100">
                   {t('permissionDialog.fromSubtask', {
-                    title: childSessionInfo?.title || t('permissionDialog.subtaskFallback'),
+                    title: t('permissionDialog.subtaskFallback'),
                   })}
                 </span>
               </div>

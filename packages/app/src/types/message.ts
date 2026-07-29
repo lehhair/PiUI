@@ -255,15 +255,6 @@ export interface StepFinishPart extends PartBase {
   snapshot?: string
 }
 
-export interface SubtaskPart extends PartBase {
-  type: 'subtask'
-  prompt: string
-  description: string
-  agent: string
-  model?: ModelRef
-  command?: string
-}
-
 export interface SnapshotPart extends PartBase {
   type: 'snapshot'
   snapshot: string
@@ -295,7 +286,6 @@ export type Part =
   | AgentPart
   | StepStartPart
   | StepFinishPart
-  | SubtaskPart
   | SnapshotPart
   | PatchPart
   | RetryPart
@@ -352,7 +342,6 @@ export function isRenderablePart(part: Part): boolean {
     case 'file':
     case 'agent':
     case 'step-finish':
-    case 'subtask':
     case 'retry':
     case 'compaction':
       return true

@@ -37,7 +37,7 @@ export interface ToolCall {
 // 消息内部的流程块，按时间顺序排列
 // ============================================
 
-export type AgentBlockType = 'thinking' | 'tool_calls' | 'text' | 'step_info' | 'subtask'
+export type AgentBlockType = 'thinking' | 'tool_calls' | 'text' | 'step_info'
 
 export interface ThinkingBlock {
   type: 'thinking'
@@ -72,16 +72,7 @@ export interface StepInfoBlock {
   }
 }
 
-export interface SubtaskBlock {
-  type: 'subtask'
-  id: string
-  description: string
-  agent: string
-  prompt: string
-  status: 'pending' | 'running' | 'completed'
-}
-
-export type AgentBlock = ThinkingBlock | ToolCallsBlock | TextBlock | StepInfoBlock | SubtaskBlock
+export type AgentBlock = ThinkingBlock | ToolCallsBlock | TextBlock | StepInfoBlock
 
 import type { Attachment } from '../features/attachment'
 

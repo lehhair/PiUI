@@ -18,7 +18,6 @@ export type {
   ToolCallsBlock,
   TextBlock,
   StepInfoBlock,
-  SubtaskBlock,
   AgentBlock,
   PermissionDecision,
   PermissionMode,

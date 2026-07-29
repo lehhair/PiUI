@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
 import { useDisclosureScrollLock, useResponsiveMaxHeight } from '../../../../hooks'
-import { useSessionState, messageStore, childSessionStore } from '../../../../store'
+import { useSessionState, messageStore } from '../../../../store'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
 import { abortSession } from '../../../../api'
 import { sessionErrorHandler } from '../../../../utils'
@@ -29,7 +29,7 @@ const EMPTY_MESSAGES: Message[] = []
 
 export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
-  const { currentSessionId, currentDirectory } = useSessionNavigation()
+  const { currentDirectory } = useSessionNavigation()
   const { state } = part
   const [expanded, setExpanded] = useUiDisclosureState(
     `message:${part.messageID}:tool:${part.id}:task-body`,
@@ -47,8 +47,6 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
   const agentType = (input?.subagent_type as string) || 'general'
 
   // 获取子 session ID —— 只信任 metadata.sessionId，它是后端为这个 tool call 精确设置的
-  // 不再用 useChildSessions fallback 取"最新子 session"，因为同一父 session 下多个 task
-  // 同时运行时，fallback 会导致所有 task 都渲染最新的那个子 session
   const metadata = state.metadata as Record<string, unknown> | undefined
   const targetSessionId = metadata?.sessionId as string | undefined
 
@@ -69,13 +67,9 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
     (e: React.MouseEvent) => {
       e.stopPropagation()
       if (!targetSessionId) return
-      const childInfo = childSessionStore.getSessionInfo(targetSessionId)
-      const parentSessionId = childInfo?.parentID || currentSessionId || null
-      const parentState = parentSessionId ? messageStore.getSessionState(parentSessionId) : null
-      const directory = parentState?.directory || currentDirectory || ''
-      abortSession(targetSessionId, directory)
+      abortSession(targetSessionId, currentDirectory || '')
     },
-    [targetSessionId, currentSessionId, currentDirectory],
+    [targetSessionId, currentDirectory],
   )
 
   // 运行时自动展开
@@ -184,20 +178,14 @@ export const TaskHeader = memo(function TaskHeader({
   onStop,
 }: TaskHeaderProps) {
   const { t } = useTranslation('message')
-  const { navigateToSession, currentSessionId, currentDirectory } = useSessionNavigation()
+  const { navigateToSession, currentDirectory } = useSessionNavigation()
   const handleOpenSession = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
       if (!sessionId) return
-
-      const childInfo = childSessionStore.getSessionInfo(sessionId)
-      const parentSessionId = childInfo?.parentID || currentSessionId || null
-      const parentState = parentSessionId ? messageStore.getSessionState(parentSessionId) : null
-      const directory = parentState?.directory || currentDirectory || ''
-
-      navigateToSession(sessionId, directory || undefined)
+      navigateToSession(sessionId, currentDirectory || undefined)
     },
-    [sessionId, navigateToSession, currentSessionId, currentDirectory],
+    [sessionId, navigateToSession, currentDirectory],
   )
 
   const isRunning = status === 'running' || status === 'pending'

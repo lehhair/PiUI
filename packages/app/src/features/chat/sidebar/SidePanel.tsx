@@ -26,7 +26,7 @@ import {
 } from '../../../components/Icons'
 import { useDirectory, useKeybindingLabel, useGitWorkspaceCatalog, useVcsInfo } from '../../../hooks'
 import { useSessionContext } from '../../../contexts/useSessionContext'
-import { useLayoutStore, childSessionStore } from '../../../store'
+import { useLayoutStore } from '../../../store'
 import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore'
 import { notificationStore, useNotifications, useUnreadNotificationCount } from '../../../store/notificationStore'
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
@@ -296,11 +296,6 @@ export function SidePanel({
   // Active sessions
   const busySessions = useBusySessions()
   const busyCount = useBusyCount()
-  useSyncExternalStore(
-    childSessionStore.subscribe.bind(childSessionStore),
-    childSessionStore.getVersion,
-    childSessionStore.getVersion,
-  )
   // Notification history
   const notifications = useNotifications()
   const unreadNotificationCount = useUnreadNotificationCount()
@@ -504,11 +499,8 @@ export function SidePanel({
   const findParentId = useCallback(
     (id: string) => {
       const parentPath = sessionLookup.get(id)?.parentSessionPath
-      if (parentPath) {
-        const parentId = sessionIdByPath.get(normalizeForComparison(parentPath))
-        if (parentId) return parentId
-      }
-      return childSessionStore.getSessionInfo(id)?.parentID
+      if (!parentPath) return undefined
+      return sessionIdByPath.get(normalizeForComparison(parentPath))
     },
     [sessionLookup, sessionIdByPath],
   )

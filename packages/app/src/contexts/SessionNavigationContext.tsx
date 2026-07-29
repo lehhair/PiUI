@@ -6,7 +6,7 @@
 // 默认实现走 hash 路由（单 session 模式），
 // 各消费者（如分屏 pane）可通过 Provider 覆盖为自己的导航逻辑。
 //
-// 这样 SubtaskPartView、TaskRenderer 等深层组件不再硬编码
+// 这样 TaskRenderer 等深层组件不再硬编码
 // window.location.hash，而是通过 context 获取导航方法。
 
 import { createContext, useContext } from 'react'
