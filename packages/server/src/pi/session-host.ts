@@ -1,8 +1,8 @@
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import type { WorkerEvent } from "@piui/pi-worker"
-import type { EventHub } from "./event-hub.ts"
-import type { RuntimeSupervisor } from "./runtime-supervisor.ts"
+import type { EventHub } from "../event-hub.ts"
+import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionExecutor, type SubmittedCommand } from "./session-executor.ts"
 import type { WorkerSession } from "./worker-client.ts"
 

@@ -35,20 +35,27 @@ packages/pi-worker  唯一懂 Pi 的进程:命令表 → AgentSession
 ### HTTP 面
 
 ```text
-GET    /api/v1/health
-GET    /api/v1/models                        models.list(catalog)
-GET    /api/v1/providers                     providers.list(catalog)
-POST   /api/v1/catalog/commands              catalog 统一命令口(settings/trust/packages/...)
-GET    /api/v1/sessions?cwd=                 列表(Pi 原生条目)+ attached
-POST   /api/v1/sessions                      {cwd, sessionFile?} → attach
-GET    /api/v1/sessions/:id                  state
-DELETE /api/v1/sessions/:id                  detach
-GET    /api/v1/sessions/:id/{state,entries,branch,tree,registry}
-GET    /api/v1/sessions/:id/entries/:entryId/attachments/:index
-POST   /api/v1/sessions/:id/commands         {id?, type, params?} → 202(幂等,串行)
-GET    /api/v1/commands/:id                  命令生命周期查询
-GET    /api/v1/workspaces ...                host 区:workspaces/files/git(自有能力)
-WS     /api/v1/events                        stream 订阅 + cursor/replay/resync
+GET    /api/v1/pi/models                         models.list(catalog)
+GET    /api/v1/pi/providers                      providers.list(catalog)
+GET    /api/v1/pi/settings?cwd=                  settings.get(catalog)
+PATCH  /api/v1/pi/settings?cwd=                  settings.patch(catalog)
+GET    /api/v1/pi/trust?cwd=                     trust.get(catalog)
+PUT    /api/v1/pi/trust?cwd=                     trust.set(catalog)
+POST   /api/v1/pi/commands                       catalog 统一命令口(settings/trust/packages/...)
+GET    /api/v1/pi/sessions?cwd=                  列表(Pi 原生条目)+ attached
+POST   /api/v1/pi/sessions                       {cwd, sessionFile?} → attach
+GET    /api/v1/pi/sessions/:id                   state
+DELETE /api/v1/pi/sessions/:id                   detach
+GET    /api/v1/pi/sessions/:id/{entries,branch,tree,registry}
+GET    /api/v1/pi/sessions/:id/entries/:entryId/attachments/:index
+POST   /api/v1/pi/sessions/:id/commands          {id?, type, params?} → 202(幂等,串行)
+
+GET    /api/v1/host/health                       server 健康检查
+GET    /api/v1/host/capabilities                 server 自省(driver/事件流/版本)
+GET    /api/v1/host/commands/:id                 命令生命周期查询
+GET    /api/v1/host/workspaces ...               host 区:workspaces/files/git(自有能力)
+
+WS     /api/v1/events                            stream 订阅 + cursor/replay/resync
 ```
 
 ### 事件通道（WS envelope.channel)
@@ -59,7 +66,7 @@ WS     /api/v1/events                        stream 订阅 + cursor/replay/resyn
 - `extension.ui` / `provider.auth` / `packages.progress` / `sessions.updated` / `resources.updated`
 - `workspace.files` / `workspace.git`:host 区文件与 Git 变化
 
-### 关键命令（POST sessions/:id/commands 的 type)
+### 关键命令（POST /api/v1/pi/sessions/:id/commands 的 type)
 
 核心 40+：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState`
 
@@ -73,8 +80,11 @@ WS     /api/v1/events                        stream 订阅 + cursor/replay/resyn
 | 包 | 职责 |
 |---|---|
 | `packages/protocol` | 信封/命令名/宿主类型。**只有 type 没有 interface**(JsonValue 兼容需要）；不声明 Pi 数据结构 |
-| `packages/pi-worker` | sdk-host(动态加载+版本握手）、命令表、real/mock runtime、catalog、IPC |
-| `packages/server` | 分发：worker 池/lease/命令幂等串行/事件路由/HTTP/WS/host 区 |
+| `packages/pi-worker/src/runtime/` | real/mock runtime、catalog、pagination、extension UI、provider auth；唯一直接碰 Pi SDK runtime 的实现区 |
+| `packages/pi-worker/src/` | worker 框架：sdk-host、IPC、命令表、参数校验、scheduler、entry |
+| `packages/server/src/pi/` | Pi 面分发：worker-client、supervisor、session-host、executor、lease |
+| `packages/server/src/host/` | host 面能力：workspace 注册/监听、files、file-search、git、auth/security/path-safety |
+| `packages/server/src/` | HTTP/WS/event-hub/shutdown/index 组装层 |
 | `packages/app` | OCUI 视觉壳（GPL)。**待适配新协议**，暂不参与根 build/typecheck |
 
 ## 本地跑
@@ -89,12 +99,12 @@ npm run dev:server:pi    # 真 Pi(读 ~/.pi/agent 凭据,发消息消耗 token)
 ### 冒烟
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/v1/health
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/v1/host/health
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
-  -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/sessions
+  -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/pi/sessions
 curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
   -d '{"id":"c1","type":"prompt","params":{"text":"hi"}}' \
-  http://127.0.0.1:8787/api/v1/sessions/$SID/commands
+  http://127.0.0.1:8787/api/v1/pi/sessions/$SID/commands
 ```
 
 ### 环境变量

@@ -10,8 +10,8 @@ import {
   type EventStreamRef,
 } from "@piui/protocol"
 import type { EventHub } from "./event-hub.ts"
-import { requestHasAllowedOrigin, requestHasValidToken, timingSafeTokenEquals } from "./security.ts"
-import { resolveAuthToken } from "./auth-token.ts"
+import { requestHasAllowedOrigin, requestHasValidToken, timingSafeTokenEquals } from "./host/security.ts"
+import { resolveAuthToken } from "./host/auth-token.ts"
 
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024
 

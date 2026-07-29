@@ -9,7 +9,7 @@ import type {
 } from "@earendil-works/pi-coding-agent"
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, requireJsonValue } from "@piui/protocol"
-import { getLoadedSdk } from "./sdk-host.js"
+import { getLoadedSdk } from "../sdk-host.js"
 import { configuredSessionDir, resolveUserPath } from "./catalog.js"
 import { ExtensionUiBridge } from "./extension-ui-bridge.js"
 import {
@@ -21,7 +21,7 @@ import {
   type LiveMessage,
   type SessionHead,
 } from "./pagination.js"
-import type { PiEventMeta, SessionRuntime, Unsubscribe } from "./runtime.js"
+import type { PiEventMeta, SessionRuntime, Unsubscribe } from "../runtime.js"
 
 export interface ExtensionHostActions {
   reserveReplacement(request: {

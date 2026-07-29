@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import { requireJsonValue } from "@piui/protocol"
-import { getLoadedSdk } from "./sdk-host.js"
+import { getLoadedSdk } from "../sdk-host.js"
 
 export type ProviderAuthEvent =
   | { type: "prompt"; flowId: string; promptId: string; providerId: string; prompt: JsonObject }
