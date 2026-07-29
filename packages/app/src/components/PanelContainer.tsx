@@ -17,6 +17,7 @@ import {
   TeachIcon,
   GitWorktreeIcon,
   GitBranchIcon,
+  SettingsIcon,
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
 import { updatePtySession } from '../api/pty'
@@ -46,6 +47,7 @@ const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
   files: <FolderIcon size={12} />,
   changes: <GitCommitIcon size={12} />,
   'session-tree': <GitBranchIcon size={12} />,
+  'session-controls': <SettingsIcon size={12} />,
   mcp: <PlugIcon size={12} />,
   skill: <TeachIcon size={12} />,
   worktree: <GitWorktreeIcon size={12} />,
@@ -71,6 +73,8 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
     }
     case 'session-tree':
       return t('panelContainer.sessionTree')
+    case 'session-controls':
+      return t('panelContainer.sessionControls')
     case 'mcp':
       return t('panelContainer.mcp')
     case 'skill':
@@ -106,6 +110,7 @@ export const PanelContainer = memo(function PanelContainer({
     if (tab.type === 'mcp') return capabilities.mcp
     if (tab.type === 'worktree') return capabilities.worktree
     if (tab.type === 'session-tree') return capabilities.sessionTree
+    if (tab.type === 'session-controls') return capabilities.sessionTree
     return true
   })
   const activeTabId = layout.activeTabId[position]
@@ -415,7 +420,7 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.renameTerminal')}
               </button>
             )}
-            {contextTab?.type !== 'session-tree' && (
+            {contextTab?.type !== 'session-tree' && contextTab?.type !== 'session-controls' && (
               <button
                 onClick={handleMoveToOtherPanel}
                 className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
@@ -489,6 +494,20 @@ export const PanelContainer = memo(function PanelContainer({
                   <GitBranchIcon size={12} />
                 </span>
                 {t('panelContainer.sessionTree')}
+              </button>
+            )}
+            {position === 'right' && capabilities.sessionTree && (
+              <button
+                onClick={() => {
+                  layoutStore.addSessionControlsTab()
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <SettingsIcon size={12} />
+                </span>
+                {t('panelContainer.sessionControls')}
               </button>
             )}
             {capabilities.mcp && (

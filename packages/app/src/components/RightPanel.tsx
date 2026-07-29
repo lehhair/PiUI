@@ -176,6 +176,22 @@ export const RightPanel = memo(function RightPanel({
               </div>
             )
           ) : null}
+
+          {activeTab.type === 'session-controls' ? (
+            sessionId ? (
+              <Suspense fallback={<PanelFallback />}>
+                <SessionTreePanel
+                  sessionId={sessionId}
+                  mode="controls"
+                  onNavigateSession={onNavigateSession}
+                />
+              </Suspense>
+            ) : (
+              <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+                {t('rightPanel.noActiveSession')}
+              </div>
+            )
+          ) : null}
         </>
       )
     },

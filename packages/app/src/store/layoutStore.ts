@@ -6,7 +6,7 @@
 export type PanelPosition = 'bottom' | 'right'
 
 // 面板内容类型
-export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'mcp' | 'skill' | 'worktree'
+export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'mcp' | 'skill' | 'worktree'
 type PersistedPanelTabType = Exclude<PanelTabType, 'terminal'>
 
 // 统一的面板标签
@@ -164,7 +164,7 @@ export interface PersistedTerminalLayoutMap {
 }
 
 const PANEL_POSITIONS: PanelPosition[] = ['bottom', 'right']
-const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'mcp', 'skill', 'worktree']
+const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'session-controls', 'mcp', 'skill', 'worktree']
 
 function isPanelPosition(value: unknown): value is PanelPosition {
   return typeof value === 'string' && PANEL_POSITIONS.includes(value as PanelPosition)
@@ -626,6 +626,10 @@ export class LayoutStore {
     return this.addSingletonTab('session-tree', 'right', 'session-tree')
   }
 
+  addSessionControlsTab() {
+    return this.addSingletonTab('session-controls', 'right', 'session-controls')
+  }
+
   // 添加 MCP 标签
   addMcpTab(position: PanelPosition) {
     return this.addSingletonTab('mcp', position, 'mcp')
@@ -678,6 +682,7 @@ export class LayoutStore {
   moveTab(tabId: string, toPosition: PanelPosition) {
     const tab = this.state.panelTabs.find(t => t.id === tabId)
     if (!tab || tab.position === toPosition) return
+    if (tab.type === 'session-tree' || tab.type === 'session-controls') return
 
     const fromPosition = tab.position
 

@@ -55,6 +55,27 @@ describe('LayoutStore panel and terminal layout', () => {
     expect(store.getTerminalTabs('right')).toEqual([])
   })
 
+  it('keeps session controls as a persisted right-panel singleton', () => {
+    const store = new LayoutStore()
+
+    const firstId = store.addSessionControlsTab()
+    const secondId = store.addSessionControlsTab()
+    store.moveTab(firstId, 'bottom')
+
+    const state = store.getState()
+    expect(firstId).toBe('session-controls')
+    expect(secondId).toBe(firstId)
+    expect(state.panelTabs.filter(tab => tab.type === 'session-controls')).toHaveLength(1)
+    expect(state.panelTabs.find(tab => tab.id === firstId)?.position).toBe('right')
+    expect(state.activeTabId.right).toBe(firstId)
+
+    const restored = new LayoutStore().getState()
+    expect(restored.panelTabs.find(tab => tab.id === firstId)).toMatchObject({
+      type: 'session-controls',
+      position: 'right',
+    })
+  })
+
   it('restores terminal positions for each directory when switching between projects', () => {
     const store = new LayoutStore()
 
