@@ -11,6 +11,7 @@
   "scripts": {
     "postinstall": "patch-package",
     "clean": "node scripts/clean.mjs",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev -w @piui/server",
     "dev:server:pi": "node scripts/dev-server-pi.mjs",
     "dev:host": "npm run dev -w @piui/server",
