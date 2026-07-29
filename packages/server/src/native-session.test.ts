@@ -188,6 +188,67 @@ describe("native Pi session discovery", () => {
     assert.equal(result.source.nativeHead?.entryCount, 1)
   })
 
+  it("derives the fork target title from the source without a suffix", async () => {
+    let sessionId = "pi-fork-source"
+    let sessionFile = path.join(root, "fork-source.jsonl")
+    const runtime = {
+      getWorkerGeneration: () => "fork-generation",
+      onState: () => () => {},
+      onCrash: () => () => {},
+      getSessionId: () => sessionId,
+      getSessionFile: () => sessionFile,
+      getSessionName: () => undefined,
+      getRuntimeUiState: () => ({
+        thinkingLevel: "off",
+        availableThinkingLevels: ["off"],
+        isStreaming: false,
+        isCompacting: false,
+        retryAttempt: 0,
+        queue: { steering: [], followUp: [] },
+        activeTools: [],
+      }),
+      getModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getAvailableThinkingLevels: () => ["off"],
+      isStreaming: () => false,
+      getLeafId: () => sessionId === "pi-fork-source" ? "source-entry" : "target-entry",
+      ...nativeRuntime(sessionId === "pi-fork-source"
+        ? nativeEnvelope("source-entry", "source")
+        : nativeEnvelope("target-entry", "target")),
+      fork: async () => {
+        const sourceSessionId = sessionId
+        sessionId = "pi-fork-target"
+        sessionFile = path.join(root, "fork-target.jsonl")
+        return {
+          sourceSessionId,
+          targetSessionId: sessionId,
+          targetSessionFile: sessionFile,
+          targetCwd: root,
+          cancelled: false,
+        }
+      },
+      dispose: async () => {},
+    } as unknown as PiSessionRuntime
+    const backend: PiSessionBackend = {
+      listAll: async () => [{
+        id: "pi-fork-source",
+        path: path.join(root, "fork-source.jsonl"),
+        cwd: root,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        messageCount: 1,
+        firstMessage: "你好",
+      }],
+      open: async () => runtime,
+    }
+    const registry = new SessionRegistry(new WorkspaceStore(), "pi", backend)
+    await registry.list()
+
+    const result = await registry.forkSession("pi-fork-source", "source-entry", "at")
+    assert.equal(result.target.title, "你好")
+    assert.equal(result.source.title, "你好")
+  })
+
   it("detaches a source runtime after replacement lease commit failure", async () => {
     let disposals = 0
     const runtime = {

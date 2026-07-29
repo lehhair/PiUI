@@ -1443,7 +1443,7 @@ export class SessionRegistry {
         id: targetId,
         cwd: targetCwd,
         driverSessionId: targetId,
-        title: runtime.getSessionName() ?? `${source.title} fork`,
+        title: runtime.getSessionName() ?? source.title,
         createdAt: now,
         updatedAt: now,
         epoch: randomUUID(),
