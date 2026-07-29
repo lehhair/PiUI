@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto"
-import { ModelRuntime } from "@earendil-works/pi-coding-agent"
-import type { PiModelRuntimeSnapshotV1, ProviderAuthEventV1, ProviderAuthInfoV1 } from "@piui/protocol"
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
+import type { JsonObject, JsonValue } from "@piui/protocol"
+import { requireJsonValue } from "@piui/protocol"
+import { getLoadedSdk } from "./sdk-host.js"
+
+export type ProviderAuthEvent =
+  | { type: "prompt"; flowId: string; promptId: string; providerId: string; prompt: JsonObject }
+  | { type: "notification"; flowId: string; providerId: string; event: JsonValue }
+  | { type: "completed"; flowId: string; providerId: string }
+  | { type: "failed"; flowId: string; providerId: string; message: string }
+  | { type: "cancelled"; flowId: string; providerId: string }
 
 interface PendingPrompt {
   flowId: string
@@ -16,21 +25,21 @@ interface AuthFlow {
 }
 
 export class ProviderAuthHost {
-  private readonly listeners = new Set<(event: ProviderAuthEventV1) => void>()
+  private readonly listeners = new Set<(event: ProviderAuthEvent) => void>()
   private readonly flows = new Map<string, AuthFlow>()
   private readonly prompts = new Map<string, PendingPrompt>()
   private runtimePromise?: Promise<ModelRuntime>
 
-  constructor(private readonly createRuntime: () => Promise<ModelRuntime> = () => ModelRuntime.create()) {}
+  constructor(private readonly createRuntime?: () => Promise<ModelRuntime>) {}
 
-  onEvent(listener: (event: ProviderAuthEventV1) => void): () => void {
+  onEvent(listener: (event: ProviderAuthEvent) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  async listProviders(): Promise<ProviderAuthInfoV1[]> {
+  async listProviders(): Promise<JsonValue> {
     const runtime = await this.runtime()
-    return runtime.getProviders().map(provider => ({
+    return requireJsonValue(runtime.getProviders().map(provider => ({
       id: provider.id,
       name: provider.name,
       methods: [
@@ -47,10 +56,10 @@ export class ProviderAuthHost {
       ],
       configured: runtime.hasConfiguredAuth(provider.id),
       status: runtime.getProviderAuthStatus(provider.id),
-    }))
+    })))
   }
 
-  async start(providerId: string, authType: "api_key" | "oauth"): Promise<string> {
+  async start(providerId: string, authType: "api_key" | "oauth"): Promise<JsonValue> {
     const runtime = await this.runtime()
     const provider = runtime.getProvider(providerId)
     const method = authType === "api_key" ? provider?.auth.apiKey : provider?.auth.oauth
@@ -65,14 +74,14 @@ export class ProviderAuthHost {
     void runtime.login(providerId, authType, {
       signal: flow.controller.signal,
       prompt: prompt => this.prompt(flowId, providerId, prompt),
-      notify: event => this.emit({ type: "notification", flowId, providerId, event }),
+      notify: event => this.emit({ type: "notification", flowId, providerId, event: safeJson(event) as JsonValue }),
     }).then(
       () => this.finish(flowId, { type: "completed", flowId, providerId }),
       error => this.finish(flowId, flow.controller.signal.aborted
         ? { type: "cancelled", flowId, providerId }
         : { type: "failed", flowId, providerId, message: error instanceof Error ? error.message : String(error) }),
     )
-    return flowId
+    return { flowId }
   }
 
   respond(flowId: string, promptId: string, value: string): void {
@@ -103,28 +112,29 @@ export class ProviderAuthHost {
     await (await this.runtime()).logout(providerId)
   }
 
-  async inspect(): Promise<PiModelRuntimeSnapshotV1> {
+  async inspect(): Promise<JsonValue> {
     const runtime = await this.runtime()
     const providers = await this.listProviders()
-    const authChecks = Object.fromEntries(await Promise.all(providers.map(async provider => [
+    const providerList = Array.isArray(providers) ? providers as Array<{ id: string }> : []
+    const authChecks = Object.fromEntries(await Promise.all(providerList.map(async provider => [
       provider.id,
       safeJson(await runtime.checkAuth(provider.id)),
     ])))
     const registeredProviderIds = [...runtime.getRegisteredProviderIds()]
-    return {
+    return safeJson({
       providers,
-      models: [...jsonClone(runtime.getModels())],
-      availableModels: [...jsonClone(await runtime.getAvailable())],
-      availableSnapshot: [...jsonClone(runtime.getAvailableSnapshot())],
-      credentials: [...jsonClone(await runtime.listCredentials())],
+      models: runtime.getModels(),
+      availableModels: await runtime.getAvailable(),
+      availableSnapshot: runtime.getAvailableSnapshot(),
+      credentials: await runtime.listCredentials(),
       registeredProviderIds,
       registeredProviderConfigs: Object.fromEntries(registeredProviderIds.map(providerId => [
         providerId,
-        safeJson(runtime.getRegisteredProviderConfig(providerId)),
+        runtime.getRegisteredProviderConfig(providerId),
       ])),
       authChecks,
       error: runtime.getError(),
-    }
+    }) as JsonValue
   }
 
   async setRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
@@ -139,8 +149,8 @@ export class ProviderAuthHost {
     await (await this.runtime()).reloadConfig()
   }
 
-  async refresh(options?: Record<string, unknown>): Promise<unknown> {
-    return safeJson(await (await this.runtime()).refresh(options as never))
+  async refresh(options?: JsonObject): Promise<JsonValue> {
+    return safeJson(await (await this.runtime()).refresh(options as never)) as JsonValue
   }
 
   resetRuntime(): void {
@@ -154,12 +164,14 @@ export class ProviderAuthHost {
   }
 
   private async runtime(): Promise<ModelRuntime> {
-    // A failed creation must not be cached, otherwise one transient error
-    // would break every later auth operation until a session replacement.
-    return this.runtimePromise ??= this.createRuntime().catch(error => {
-      this.runtimePromise = undefined
-      throw error
-    })
+    if (!this.runtimePromise) {
+      const factory = this.createRuntime ?? (() => getLoadedSdk().sdk.ModelRuntime.create())
+      this.runtimePromise = factory().catch(error => {
+        this.runtimePromise = undefined
+        throw error
+      })
+    }
+    return this.runtimePromise
   }
 
   private prompt(flowId: string, providerId: string, prompt: {
@@ -192,14 +204,14 @@ export class ProviderAuthHost {
         prompt: {
           type: prompt.type,
           message: prompt.message,
-          placeholder: prompt.placeholder,
-          options: prompt.options?.map(option => ({ ...option })),
+          placeholder: prompt.placeholder ?? null,
+          options: prompt.options?.map(option => ({ ...option })) ?? null,
         },
       })
     })
   }
 
-  private finish(flowId: string, event: ProviderAuthEventV1): void {
+  private finish(flowId: string, event: ProviderAuthEvent): void {
     const flow = this.flows.get(flowId)
     if (!flow) return
     for (const promptId of flow.promptIds) {
@@ -211,7 +223,7 @@ export class ProviderAuthHost {
     this.emit(event)
   }
 
-  private emit(event: ProviderAuthEventV1): void {
+  private emit(event: ProviderAuthEvent): void {
     for (const listener of this.listeners) listener(event)
   }
 }
@@ -228,15 +240,4 @@ function safeJson(value: unknown): unknown {
     if (typeof item === "bigint") return item.toString()
     return item
   }))
-}
-
-function jsonClone<T>(value: T): T {
-  if (value === undefined) return value
-  return JSON.parse(JSON.stringify(value, (_key, item) => {
-    if (item instanceof Map) return Object.fromEntries(item)
-    if (item instanceof Error) return { name: item.name, message: item.message }
-    if (typeof item === "function" || typeof item === "symbol") return undefined
-    if (typeof item === "bigint") return item.toString()
-    return item
-  })) as T
 }

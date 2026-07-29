@@ -1,23 +1,23 @@
-export * from "./native-pagination.js"
-export * from "./runtime-contract.js"
-export * from "./worker-protocol.js"
-export type { PiExtensionUiEvent } from "./extension-ui-bridge.js"
-export type {
-  PiCommandInfo,
-  PiRuntimeUiState,
-  PiSessionInfo,
-  PiSkillInfo,
-  RealPiSession,
-} from "./real-session.js"
+export * from "./ipc.js"
+export * from "./runtime.js"
+export * from "./sdk-host.js"
+export * from "./pagination.js"
+export * from "./command-table.js"
+export * from "./params.js"
+export { RealPiSession, type ExtensionHostActions, type RealPiSessionOpenOptions } from "./real-session.js"
+export { MockPiSession, MockCatalog, MockStore } from "./mock-session.js"
+export { PiCatalog } from "./catalog.js"
+export { ProviderAuthHost, type ProviderAuthEvent } from "./provider-auth-host.js"
+export { ExtensionUiBridge, type PiExtensionUiEvent } from "./extension-ui-bridge.js"
+export { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
 
 export type DriverMode = "mock" | "pi"
 
 export function getDriverMode(env: NodeJS.ProcessEnv = process.env): DriverMode {
-  const v = (env.PIUI_DRIVER ?? env.PIUI_USE_REAL_PI ?? "mock").toLowerCase()
-  if (v === "pi" || v === "1" || v === "true" || v === "real") return "pi"
-  return "mock"
+  const v = (env.PIUI_DRIVER ?? "mock").toLowerCase()
+  return v === "pi" || v === "1" || v === "true" || v === "real" ? "pi" : "mock"
 }
 
 export function getPiWorkerEntryUrl(): URL {
-  return new URL("./worker-entry.js", import.meta.url)
+  return new URL("./entry.js", import.meta.url)
 }

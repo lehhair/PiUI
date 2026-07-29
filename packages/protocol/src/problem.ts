@@ -4,6 +4,7 @@ export type ErrorCode =
   | "PI_SDK_VERSION_MISMATCH"
   | "CAPABILITY_DISABLED"
   | "INVALID_REQUEST"
+  | "UNKNOWN_COMMAND"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "WORKSPACE_NOT_FOUND"
@@ -22,6 +23,7 @@ export type ErrorCode =
   | "SESSION_CONFLICT"
   | "SESSION_RUNTIME_CRASHED"
   | "SESSION_IDENTITY_MISMATCH"
+  | "RUNTIME_NOT_OPEN"
   | "RUNTIME_REPLACED"
   | "WORKER_RESULT_UNKNOWN"
   | "DRIVER_UNAVAILABLE"
@@ -38,24 +40,34 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "INTERNAL"
 
-export interface ProblemV1 {
-  protocolVersion: 1
+export type Problem = {
   code: ErrorCode
   message: string
   requestId?: string
+  retryable?: boolean
   details?: unknown
 }
 
 export function problem(
   code: ErrorCode,
   message: string,
-  extra?: { requestId?: string; details?: unknown },
-): ProblemV1 {
+  extra?: { requestId?: string; retryable?: boolean; details?: unknown },
+): Problem {
   return {
-    protocolVersion: 1,
     code,
     message,
     requestId: extra?.requestId,
+    retryable: extra?.retryable,
     details: extra?.details,
+  }
+}
+
+export function problemFromError(error: unknown, fallbackCode: ErrorCode = "INTERNAL"): Problem {
+  const code = error && typeof error === "object" && "code" in error
+    ? String(error.code) as ErrorCode
+    : fallbackCode
+  return {
+    code,
+    message: error instanceof Error ? error.message : String(error),
   }
 }

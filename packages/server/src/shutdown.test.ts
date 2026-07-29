@@ -6,12 +6,12 @@ import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
 
 it("ends a stalled HTTP request at the shutdown deadline without forcing exit", async () => {
-  const server = createAppServer({ authToken: null })
-  const eventServer = attachEventWebSocket(server, { authToken: null })
+  const app = createAppServer({ authToken: null })
+  const eventServer = attachEventWebSocket(app.server, { eventHub: app.eventHub, authToken: null })
   await new Promise<void>((resolve, reject) => {
-    server.listen(0, "127.0.0.1", (error?: Error) => (error ? reject(error) : resolve()))
+    app.server.listen(0, "127.0.0.1", (error?: Error) => (error ? reject(error) : resolve()))
   })
-  const address = server.address()
+  const address = app.server.address()
   if (!address || typeof address === "string") throw new Error("Server did not bind a TCP port")
   const socket = createConnection({ host: "127.0.0.1", port: address.port })
   await new Promise<void>((resolve, reject) => {
@@ -22,12 +22,13 @@ it("ends a stalled HTTP request at the shutdown deadline without forcing exit", 
 
   let timedOut = false
   let forcedExit = false
-  await shutdownAppServer(server, eventServer, {
+  await shutdownAppServer(app.server, eventServer, {
     timeoutMs: 20,
     hardStopGraceMs: 20,
     onTimeout: () => { timedOut = true },
     forceExit: () => { forcedExit = true },
   })
+  await app.supervisor.dispose()
   await new Promise(resolve => setTimeout(resolve, 30))
 
   assert.equal(timedOut, true)

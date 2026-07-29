@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
-import type { ProviderAuthEventV1 } from "@piui/protocol"
+import type { ProviderAuthEvent } from "./provider-auth-host.js"
 import { ProviderAuthHost } from "./provider-auth-host.ts"
 
 describe("ProviderAuthHost", () => {
@@ -84,7 +84,7 @@ describe("ProviderAuthHost", () => {
       logout: async (providerId: string) => { loggedOut = providerId },
     } as unknown as ModelRuntime
     const host = new ProviderAuthHost(async () => runtime)
-    const events: ProviderAuthEventV1[] = []
+    const events: ProviderAuthEvent[] = []
     let completed!: () => void
     const completion = new Promise<void>(resolve => { completed = resolve })
     host.onEvent(event => {
@@ -92,9 +92,9 @@ describe("ProviderAuthHost", () => {
       if (event.type === "completed") completed()
     })
 
-    const flowId = await host.start("fixture", "api_key")
+    const { flowId } = await host.start("fixture", "api_key") as { flowId: string }
     await new Promise(resolve => setImmediate(resolve))
-    const prompt = events.find((event): event is Extract<ProviderAuthEventV1, { type: "prompt" }> =>
+    const prompt = events.find((event): event is Extract<ProviderAuthEvent, { type: "prompt" }> =>
       event.type === "prompt")
     assert.ok(prompt)
     assert.equal(prompt.prompt.type, "secret")

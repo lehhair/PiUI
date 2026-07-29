@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
-import type { AnyEventEnvelopeV2 } from "@piui/protocol"
+import type { EventEnvelope } from "@piui/protocol"
 import { EventHub } from "./event-hub.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { WorkspaceWatcher } from "./workspace-watcher.ts"
@@ -22,38 +22,36 @@ describe("WorkspaceWatcher", () => {
     mkdirSync(path.join(root, ".git", "refs", "heads"), { recursive: true })
     const store = new WorkspaceStore()
     const hub = new EventHub()
-    const events: AnyEventEnvelopeV2[] = []
-    const unsubscribe = hub.subscribeV2(event => events.push(event))
+    const events: EventEnvelope[] = []
+    const unsubscribe = hub.subscribe(event => events.push(event))
     const watcher = new WorkspaceWatcher(hub)
     const workspace = store.resolve(root)
     watcher.watch(workspace)
     try {
       await new Promise(resolve => setTimeout(resolve, 250))
-      assert.ok(events.some(event => event.type === "workspace.files.changed" && event.payload.rescan))
+      assert.ok(events.some(event => event.channel === "workspace.files" && (event.payload as { rescan?: boolean }).rescan))
       events.length = 0
       writeFileSync(path.join(root, "created.txt"), "hello")
-      await waitFor(() => events.some(event => event.type === "workspace.files.changed"))
-      const fileEvent = events.find(event => event.type === "workspace.files.changed")
+      await waitFor(() => events.some(event => event.channel === "workspace.files"))
+      const fileEvent = events.find(event => event.channel === "workspace.files")
       assert.equal(fileEvent?.stream.id, workspace.canonicalRoot)
-      if (fileEvent?.type === "workspace.files.changed") {
-        assert.deepEqual(fileEvent.payload.changes, [{ path: "created.txt", kind: "created", type: "file" }])
-      }
-      assert.ok(events.some(event => event.type === "workspace.git.updated"))
+      assert.deepEqual((fileEvent?.payload as { changes?: unknown[] }).changes, [{ path: "created.txt", kind: "created", type: "file" }])
+      assert.ok(events.some(event => event.channel === "workspace.git"))
 
       events.length = 0
       writeFileSync(path.join(root, ".git", "HEAD"), "ref: refs/heads/main\n")
-      await waitFor(() => events.some(event => event.type === "workspace.git.updated"))
-      assert.ok(!events.some(event => event.type === "workspace.files.changed"))
+      await waitFor(() => events.some(event => event.channel === "workspace.git"))
+      assert.ok(!events.some(event => event.channel === "workspace.files"))
 
       events.length = 0
       const states = (watcher as unknown as { watched: Map<string, { watcher: { emit: (event: string, error: Error) => void } }> }).watched
       states.values().next().value?.watcher.emit("error", new Error("simulated watcher error"))
-      await waitFor(() => events.some(event => event.type === "workspace.files.changed" && event.payload.rescan))
+      await waitFor(() => events.some(event => event.channel === "workspace.files" && (event.payload as { rescan?: boolean }).rescan))
 
       events.length = 0
       writeFileSync(path.join(root, ".git", "refs", "heads", "main"), "0123456789\n")
-      await waitFor(() => events.some(event => event.type === "workspace.git.updated"))
-      assert.ok(!events.some(event => event.type === "workspace.files.changed"))
+      await waitFor(() => events.some(event => event.channel === "workspace.git"))
+      assert.ok(!events.some(event => event.channel === "workspace.files"))
     } finally {
       unsubscribe()
       await watcher.dispose()
@@ -73,8 +71,8 @@ describe("WorkspaceWatcher", () => {
     git(main, "worktree", "add", "-b", "feature", worktree)
     const store = new WorkspaceStore()
     const hub = new EventHub()
-    const events: AnyEventEnvelopeV2[] = []
-    const unsubscribe = hub.subscribeV2(event => events.push(event))
+    const events: EventEnvelope[] = []
+    const unsubscribe = hub.subscribe(event => events.push(event))
     const watcher = new WorkspaceWatcher(hub)
     watcher.watch(store.resolve(worktree))
     try {
@@ -85,7 +83,7 @@ describe("WorkspaceWatcher", () => {
       await new Promise(resolve => setTimeout(resolve, 200))
       events.length = 0
       git(worktree, "commit", "-m", "linked")
-      await waitFor(() => events.some(event => event.type === "workspace.git.updated"))
+      await waitFor(() => events.some(event => event.channel === "workspace.git"))
     } finally {
       unsubscribe()
       await watcher.dispose()

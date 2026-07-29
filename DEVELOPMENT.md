@@ -2,116 +2,111 @@
 
 ## 目标
 
-**保留 OpenCodeUI 成熟视觉结构，实现 Pi 0.81.1 原生全功能客户端。**
+**Pi coding agent 的原生 server：数据零修改透传，能力自省生成 API，UI 直接消费 Pi 原生结构。**
 
-- 视觉壳：fork `_archive/opencodeui-baseline`（GPL-3.0）
-- 运行时：自有 protocol + server + pi-worker，**不**接 OpenCode SDK / 兼容层
-- 不调用真实模型做开发验收（用 mock / 无网络 unit 测试）
+- 运行时：`@earendil-works/pi-coding-agent` SDK 内嵌于 worker 进程（官方对 Node 宿主的推荐方式）
+- 协议：命令/响应/事件三段式，对齐官方 RPC 语义；Pi 数据不定义中间类型，JsonValue 透传
+- 扩展：tool/command 运行时枚举自动生成 API，装扩展零协议改动
+- 不调用真实模型做开发验收（mock driver + faux provider）
 
-主计划：`docs/PIUI_MASTER_PLAN.md`
-
-能力矩阵：`docs/PI_UI_INTEGRATION.md`
-
-基线设计：`docs/universal-agent-pi-technical-design.md`
-
-产品边界：`docs/ADR-0002-pi-native-client.md`
-
-## 原则
-
-1. 壳（布局、主题、ChatArea、侧栏、文件、终端）尽量原样
-2. 血（api / types / store / hooks / events）整段替换
-3. 禁止假 OpenCode SSE / 空 Proxy 当架构
-4. 每个 Phase 自测通过后再 commit
-5. **禁止**在开发流程里调用 Pi 付费模型对话
-6. Pi JSONL 和 `SessionManager` 是会话历史唯一来源，PiUI 不复制保存消息
-
-## 仓库
+## 架构
 
 ```text
-docs/                         设计文档
-packages/app/                 OCUI 视觉壳（GPL）
-packages/protocol/            版本化协议
-packages/server/              Orchestrator（127.0.0.1）
-packages/pi-worker/           Pi SDK worker + 投影 + mock runtime
-_archive/opencodeui-baseline  只读参考
-_archive/wip-phase0-*         清理前半成品
+浏览器/客户端
+  │  HTTP(命令口 + 只读查询) / WS(事件订阅)
+  ▼
+packages/server     分发层:不感知 Pi 语义,只转发
+  │  IPC(统一命令消息 + 事件 + hostCall)
+  ▼
+packages/pi-worker  唯一懂 Pi 的进程:命令表 → AgentSession
+  │
+  ▼
+@earendil-works/pi-coding-agent   SDK 内嵌,配置/凭据/扩展/会话全走 ~/.pi/agent 原生路径
 ```
 
-## 历史启动阶段
+### 核心原则
 
-| Phase | 内容 | 验收 |
-|------|------|------|
-| 0 | 清理、文档、baseline 恢复、骨架 | `npm run test:phase0` |
-| 1 | protocol + server workspace/文件安全路径 | server 单测 |
-| 2 | pi-worker 生命周期（无真实 prompt） | worker 单测 |
-| 3 | app 去 SDK 依赖，壳可 dev | 无 `@opencode-ai/sdk` 生产 import |
-| 4 | Chat 接 mock/host timeline | 投影/reducer 测试 |
-| 5+ | 文件/Git/PTY/桌面 | 已由 R0-R12 parity 路线取代 |
+1. **零数据转换**:worker→server→客户端的会话数据只做 JSON 结构化复制，不可序列化直接报错
+2. **零协议发明**:命令对齐 SDK 方法语义（prompt/steer/followUp/compact/fork/…)，事件就是 Pi 原生事件
+3. **零能力白名单**:API 面 = 运行时枚举的注册表（getAllTools/getCommands/extensions),capabilities 动态生成
+4. **SDK 可替换**:worker 经 sdk-host 动态加载 SDK，默认 bundle 验证版（0.81.1),`PIUI_SDK_PATH` 可指外部版本
+5. **mock 在 worker 内**:server 不感知 driver;mock 会话写独立 JSONL 目录（PIUI_MOCK_DIR)，格式与 Pi 相同
 
-当前实施使用主计划中的 R0-R12；上表只记录仓库从 OpenCodeUI 迁出的启动历史
+### HTTP 面
+
+```text
+GET    /api/v1/health
+GET    /api/v1/models                        models.list(catalog)
+GET    /api/v1/providers                     providers.list(catalog)
+POST   /api/v1/catalog/commands              catalog 统一命令口(settings/trust/packages/...)
+GET    /api/v1/sessions?cwd=                 列表(Pi 原生条目)+ attached
+POST   /api/v1/sessions                      {cwd, sessionFile?} → attach
+GET    /api/v1/sessions/:id                  state
+DELETE /api/v1/sessions/:id                  detach
+GET    /api/v1/sessions/:id/{state,entries,branch,tree,registry}
+GET    /api/v1/sessions/:id/entries/:entryId/attachments/:index
+POST   /api/v1/sessions/:id/commands         {id?, type, params?} → 202(幂等,串行)
+GET    /api/v1/commands/:id                  命令生命周期查询
+GET    /api/v1/workspaces ...                host 区:workspaces/files/git(自有能力)
+WS     /api/v1/events                        stream 订阅 + cursor/replay/resync
+```
+
+### 事件通道（WS envelope.channel)
+
+- `pi.event`:payload = `{event: <裸 Pi 事件>, meta: {epoch, sequence, liveMessage?}}`
+- `session.head`:entries/tree 变化后的 head(leafId/entryCount/revision)
+- `command.updated`:命令生命周期（accepted/running/completed/failed/cancelled)
+- `extension.ui` / `provider.auth` / `packages.progress` / `sessions.updated` / `resources.updated`
+- `workspace.files` / `workspace.git`:host 区文件与 Git 变化
+
+### 关键命令（POST sessions/:id/commands 的 type)
+
+核心 40+：`prompt, steer, followUp, sendUserMessage, abort, newSession, switchSession, fork, clone, importSession, setSessionName, setModel, cycleModel, setScopedModels, setThinkingLevel, cycleThinkingLevel, setSteeringMode, setFollowUpMode, clearQueue, compact, abortCompaction, abortBranchSummary, setAutoCompaction, setAutoRetry, abortRetry, bash, abortBash, setActiveTools, invokeTool, invokeCommand, navigateTree, setLabel, sendCustomMessage, appendCustomEntry, exportHtml, exportJsonl, waitForIdle, reload, respondExtensionUi, setExtensionEditorState`
+
+扩展自省：
+- `GET .../registry` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
+- `invokeTool {name, arguments}` → 直接执行扩展 tool(ctx.ui 交互走 extension.ui 桥)
+- `invokeCommand {name, args}` → 执行扩展 slash command
+
+## 包职责
+
+| 包 | 职责 |
+|---|---|
+| `packages/protocol` | 信封/命令名/宿主类型。**只有 type 没有 interface**(JsonValue 兼容需要）；不声明 Pi 数据结构 |
+| `packages/pi-worker` | sdk-host(动态加载+版本握手）、命令表、real/mock runtime、catalog、IPC |
+| `packages/server` | 分发：worker 池/lease/命令幂等串行/事件路由/HTTP/WS/host 区 |
+| `packages/app` | OCUI 视觉壳（GPL)。**待适配新协议**，暂不参与根 build/typecheck |
 
 ## 本地跑
 
 ```bash
 npm install
-npm run test:phase0
-npm run dev:server   # 127.0.0.1:8787
-npm run dev:app      # vite
+npm test                 # 三包 build + 全部测试(mock,不调模型)
+npm run dev:server       # 127.0.0.1:8787,mock driver
+npm run dev:server:pi    # 真 Pi(读 ~/.pi/agent 凭据,发消息消耗 token)
 ```
 
-## 当前
-
-当前 Pi 原生会话、聊天、文件和 Git 主流程可用，尚未达到稳定产品标准。前端过渡 facade、UI 元数据持久化、fork/undo 和 PTY 后端仍需按主计划处理。下列勾选表示对应能力已有基础实现，不代表已经满足主计划中的完整完成标准。
-
-- [x] Phase 0 结构
-- [x] Phase 1 health + workspace + 安全文件 list/read
-- [x] Phase 2 pi-worker 投影 + mock turn（无真实模型）
-- [x] Phase 3 去掉 npm `@opencode-ai/sdk` 和网络 shim，过渡 facade 不发网络请求，`vite build` 通过
-- [x] Phase 4 mock session snapshot API + `sessionProjectionStore`（无真实 prompt）
-- [x] Phase 5 timeline→Message 桥接 + mock-chat 灌进 ChatArea（无真实 prompt）
-- [x] **最小完成体**：seed 会话 → 输入发送 → mock 回复进 ChatArea（`npm run test:mvp`）
-- [x] 侧栏会话列表 / 新建 / 删除 / 切换（Pi server）
-- [x] **最小可用**：文件树 list/read 接 server + 会话绑 workspace + abort 占位
-- [x] mock 流式：WS `/api/v1/events` + prompt stream 增量 snapshot
-- [x] workspace git status / info / diff（文件树改动标记）
-- [x] 文件名/正文搜索 + 写文件(ETag) + 侧栏连接态接 Pi WS
-- [x] 真 Pi driver：`PIUI_DRIVER=pi` 启用（默认 `mock` 不调模型）
-- [x] 真实 Pi runtime 与模型枚举运行在独立 worker 子进程，server 仅通过私有 IPC 调用
-- [x] 前端 snapshot 按 Pi session ID 隔离，WS 支持 epoch/sequence 去重、有限重放和 resync
-- [x] 会话加载、发送、abort、slash command 和侧栏 CRUD 只使用 Pi API，不再 fallback 到旧 SDK
-- [x] Pi 基础能力：模型/thinking level/compact/skills·commands/runtime 状态
-- [x] R0：Pi 0.81.1 精确版本、完整 parity matrix、真实 session 性能基线
-- [x] R1：Protocol v2 command/capability、分作用域事件 replay、worker handshake 与 generation
-- [x] R2：worker supervisor、IPC v4 心跳、跨进程单写 lease、generation 隔离与崩溃恢复
-- [x] R3：原生 session tree、navigate、label、fork、clone、import 与持久删除
-- [x] R4：steer/follow-up、queue、retry、compact、branch summary、工具控制与 bounded delta
-- [x] 阶段 0/1：完整 mock 根测试、全 workspace typecheck/build、render 前 Pi health、旧 SSE 删除、真实 Pi 不再启动即建会话
-- [~] 阶段 6：OpenCode SDK 包、shim、alias、类型 import 和网络 client 已删除；旧 facade 函数继续迁往 Pi API
-- [ ] undo/redo 快捷操作映射 Pi tree；终端 PTY
-- 矩阵：`docs/PI_UI_INTEGRATION.md`
-
-### 真 Pi 怎么开
+### 冒烟
 
 ```bash
-# 需本机已配置 ~/.pi/agent 凭据（auth.json）
-npm run dev:server:pi   # Windows / bash 通用
-npm run dev:app
-# 控制台应有 driver=pi；模型选择器从 /api/v1/drivers/pi/models 拉列表
-# 发消息会走真实模型，消耗 token
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/v1/health
+curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"cwd":"/path/to/project"}' http://127.0.0.1:8787/api/v1/sessions
+curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"id":"c1","type":"prompt","params":{"text":"hi"}}' \
+  http://127.0.0.1:8787/api/v1/sessions/$SID/commands
 ```
 
-### 发不了消息时先查
+### 环境变量
 
-1. server 是否在跑，health 是否 200  
-2. 模型选择器是否有项（mock 至少有 Mock；pi 看凭据）  
-3. 浏览器控制台是否有 promptSession failed  
-4. 是否开了会话 hash `#/session/...`  
+- `PIUI_DRIVER`: `mock`(默认,不调模型)| `pi`
+- `PIUI_MOCK_DIR`: mock 会话目录（默认 `<tmpdir>/piui-mock`)
+- `PIUI_SDK_PATH`: 外部 SDK 路径（目录或入口文件；版本与验证版不同时警告放行）
+- `PIUI_SDK_STRICT=1`: 外部 SDK 版本不匹配时拒绝启动
+- `PIUI_AUTH_TOKEN`: 覆盖本地 token（默认生成并持久化在数据目录）
 
-### 最小可用怎么跑
+## 当前状态
 
-```bash
-npm run dev:server   # 127.0.0.1:8787
-npm run dev:app      # 5173，/api 代理到 server
-# 打开浏览器 → mock 会话 → 侧栏列表 → 发消息 mock 回复 → 右侧文件树可浏览
-# VITE_PIUI_MOCK=0 关闭自动 seed
-```
+- 后端三包（protocol/pi-worker/server)：重构完成，97 测试全绿，含真实 SDK + faux provider 无网络集成测试
+- app：未适配新协议，待后续处理
+- 待办：invokeTool 的 onUpdate 流式进度、PTY、app 适配、发布门禁（R12 conformance)

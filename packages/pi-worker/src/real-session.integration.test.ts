@@ -14,6 +14,24 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent"
 import { RealPiSession } from "./real-session.ts"
+import { PiCatalog } from "./catalog.ts"
+import { loadPiSdk } from "./sdk-host.ts"
+
+await loadPiSdk()
+
+type AnyRecord = Record<string, any>
+
+function allEntries(session: RealPiSession): AnyRecord[] {
+  return session.getEntriesPage(undefined, 100_000, 256 * 1024 * 1024).items as AnyRecord[]
+}
+
+function activeBranchEntries(session: RealPiSession): AnyRecord[] {
+  return session.getBranchPage(undefined, 100_000, 256 * 1024 * 1024).items as AnyRecord[]
+}
+
+function sessionTree(session: RealPiSession): AnyRecord[] {
+  return session.getTree() as AnyRecord[]
+}
 
 describe("RealPiSession with the Pi SDK", () => {
   it("uses the configured sessionDir for creation and discovery", async () => {
@@ -36,9 +54,10 @@ describe("RealPiSession with the Pi SDK", () => {
       discoverable.appendMessage(fauxAssistantMessage("persisted"))
       assert.equal(existsSync(discoverable.getSessionFile()!), true)
       assert.equal((await SessionManager.list(cwd, sessionDir)).some(item => item.id === discoverable.getSessionId()), true)
-      assert.equal((await RealPiSession.list(cwd, agentDir)).some(item => item.id === discoverable.getSessionId()), true)
+      const catalog = new PiCatalog(agentDir)
+      assert.equal(((await catalog.listSessions(cwd)) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()), true)
       assert.equal(SettingsManager.create(process.cwd(), agentDir).getSessionDir(), sessionDir)
-      assert.equal((await RealPiSession.listAll(agentDir)).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal(((await catalog.listAllSessions()) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()), true)
       await session.dispose()
       session = await RealPiSession.open(cwd, discoverable.getSessionFile(), { agentDir })
       const replacement = await session.newSession()
@@ -82,7 +101,8 @@ describe("RealPiSession with the Pi SDK", () => {
     const previousHttpProxy = process.env.HTTP_PROXY
     const previousHttpsProxy = process.env.HTTPS_PROXY
     try {
-      const result = await RealPiSession.patchSettings(cwd, {
+      const catalog = new PiCatalog(agentDir)
+      const result = await catalog.patchSettings(cwd, {
         defaultThinkingLevel: "max",
         transport: "websocket-cached",
         httpIdleTimeoutMs: 1234,
@@ -93,7 +113,7 @@ describe("RealPiSession with the Pi SDK", () => {
           { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
         ],
         warnings: { anthropicExtraUsage: false },
-      }, agentDir)
+      }) as AnyRecord
       assert.equal(result.effective.defaultThinkingLevel, "max")
       assert.equal(result.effective.transport, "websocket-cached")
       assert.equal(result.effective.httpIdleTimeoutMs, 1234)
@@ -104,22 +124,22 @@ describe("RealPiSession with the Pi SDK", () => {
       ])
 
       await assert.rejects(
-        RealPiSession.patchSettings(cwd, { packages: [{ source: "x", unknown: true }] } as never, agentDir),
+        catalog.patchSettings(cwd, { packages: [{ source: "x", unknown: true }] }),
         /invalid Pi setting: packages/,
       )
       await assert.rejects(
-        RealPiSession.patchSettings(cwd, { warnings: { anthropicExtraUsage: "yes" } } as never, agentDir),
+        catalog.patchSettings(cwd, { warnings: { anthropicExtraUsage: "yes" as never } }),
         /invalid Pi setting: warnings/,
       )
       await assert.rejects(
-        RealPiSession.patchSettings(cwd, { httpIdleTimeoutMs: -1 }, agentDir),
+        catalog.patchSettings(cwd, { httpIdleTimeoutMs: -1 }),
         /invalid Pi setting: httpIdleTimeoutMs/,
       )
       await assert.rejects(
-        RealPiSession.patchSettings(cwd, { httpProxy: 42 } as never, agentDir),
+        catalog.patchSettings(cwd, { httpProxy: 42 as never }),
         /invalid Pi setting: httpProxy/,
       )
-      const cleared = await RealPiSession.patchSettings(cwd, { httpProxy: null }, agentDir)
+      const cleared = await catalog.patchSettings(cwd, { httpProxy: null }) as AnyRecord
       assert.equal(cleared.effective.httpProxy, undefined)
     } finally {
       if (previousHttpProxy === undefined) delete process.env.HTTP_PROXY
@@ -153,7 +173,7 @@ export default function (pi) {
     try {
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       await session.initializeExtensions()
-      assert.equal((await session.listCommands()).some(command => command.name === "trusted-project-command"), true)
+      assert.equal(session.getRegistry().commands.some(command => command.name === "trusted-project-command"), true)
       assert.equal(new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).get(cwd), true)
     } finally {
       await session?.dispose()
@@ -217,7 +237,7 @@ export default function (pi) {
       const skippedCompaction = await session.compact()
       assert.equal(skippedCompaction.status, "skipped")
       const nativeEvents: Array<Record<string, unknown>> = []
-      const unsubscribeNative = session.onNativeEvent(
+      const unsubscribeNative = session.onPiEvent(
         event => nativeEvents.push(event as Record<string, unknown>),
       )
       await session.prompt("ping", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
@@ -236,15 +256,15 @@ export default function (pi) {
 
       assert.equal(faux.state.callCount, 1)
       assert.equal(session.getSessionFile(), undefined)
-      assert.equal(session.getModel()?.provider, "piui-faux")
-      const nativeEntries = session.getNativeEnvelope().entries
+      assert.equal((session.getState().model as AnyRecord)?.provider, "piui-faux")
+      const nativeEntries = allEntries(session)
       const userEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "user")
       const assistantEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "assistant")
       assert.ok(userEntry)
       assert.ok(assistantEntry)
       assert.deepEqual(
-        session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024).items,
-        nativeActiveBranch(session.getNativeEnvelope()),
+        session.getBranchPage(undefined, 100, 32 * 1024 * 1024).items,
+        activeBranchEntries(session),
       )
       const userMessage = userEntry.message
       assert.ok(userMessage && typeof userMessage === "object" && !Array.isArray(userMessage))
@@ -252,13 +272,13 @@ export default function (pi) {
         { type: "text", text: "ping" },
         { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
       ])
-      session.setLabel(String(assistantEntry.id), "offline checkpoint")
-      session.setSessionName("Offline R3")
-      assert.equal(session.getSessionName(), "Offline R3")
-      assert.equal(findTreeLabel(session.getNativeEnvelope().tree, String(assistantEntry.id)), "offline checkpoint")
-      assert.deepEqual(findTreeNode(session.getNativeEnvelope().tree, String(assistantEntry.id))?.entry, assistantEntry)
-      assert.throws(
-        () => session!.setActiveTools(["piui-tool-that-does-not-exist"]),
+      await session.setLabel(String(assistantEntry.id), "offline checkpoint")
+      await session.setSessionName("Offline R3")
+      assert.equal(session.getState().sessionName, "Offline R3")
+      assert.equal(findTreeLabel(sessionTree(session), String(assistantEntry.id)), "offline checkpoint")
+      assert.deepEqual(findTreeNode(sessionTree(session), String(assistantEntry.id))?.entry, assistantEntry)
+      await assert.rejects(
+        session.setActiveTools(["piui-tool-that-does-not-exist"]),
         error => (error as { code?: string }).code === "INVALID_REQUEST",
       )
 
@@ -270,25 +290,25 @@ export default function (pi) {
       assert.notEqual(replacement.targetSessionId, sourceSessionId)
       assert.equal(replacement.cancelled, false)
 
-      const uiState = session.getRuntimeUiState()
+      const uiState = session.getState()
       assert.equal(uiState.isBashRunning, false)
       assert.equal(uiState.hasPendingBashMessages, false)
       assert.equal(uiState.isRetrying, false)
       assert.equal(uiState.retryAttempt, 0)
       assert.equal(uiState.pendingMessageCount, 0)
-      assert.throws(
-        () => session!.cycleThinkingLevel(),
+      await assert.rejects(
+        session.cycleThinkingLevel(),
         error => (error as { code?: string }).code === "CAPABILITY_DISABLED",
       )
 
       await session.sendUserMessage("sent while idle")
       assert.equal(faux.state.callCount, 2)
-      assert.ok(session.getNativeEnvelope().entries.some(entry =>
+      assert.ok(allEntries(session).some(entry =>
         entry.type === "message" && nativeRole(entry) === "user" && nativeMessageText(entry) === "sent while idle"
       ))
 
       await session.prompt("fail offline")
-      const failed = session.getNativeEnvelope().entries.filter(entry =>
+      const failed = allEntries(session).filter(entry =>
         entry.type === "message" && nativeRole(entry) === "assistant"
       ).at(-1)
       assert.equal(faux.state.callCount, 3)
@@ -353,7 +373,7 @@ export default function (pi) {
       const sourceSessionId = session.getSessionId()
       await assert.rejects(
         session.importSession(path.join(inputDir, "missing.jsonl"), cwd),
-        { name: "SessionImportFileNotFoundError" },
+        { code: "NOT_FOUND" },
       )
       assert.equal(session.getSessionId(), sourceSessionId)
       assert.equal(readFileSync(sourceFile, "utf8"), sourceBefore)
@@ -406,7 +426,7 @@ export default function (pi) {
 
       const prompt = session.prompt("hold user settlement")
       await blocked
-      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
       assert.equal(during.items.some(entry => nativeRole(entry) === "user"), false)
       assert.equal(during.checkpoint?.liveMessage?.phase, "streaming")
       const live = during.checkpoint?.liveMessage?.message
@@ -415,17 +435,17 @@ export default function (pi) {
 
       release()
       await prompt
-      const settled = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const settled = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
       assert.equal(settled.checkpoint?.liveMessage, undefined)
       assert.ok(settled.items.some(entry => nativeRole(entry) === "user"))
       assert.ok(settled.items.some(entry => nativeRole(entry) === "assistant"))
-      const latest = session.getNativeBranchPage(undefined, 1, 32 * 1024 * 1024)
+      const latest = session.getBranchPage(undefined, 1, 32 * 1024 * 1024)
       assert.ok(latest.beforeCursor)
       assert.ok(latest.checkpoint)
-      const older = session.getNativeBranchPage(latest.beforeCursor, 1, 32 * 1024 * 1024)
+      const older = session.getBranchPage(latest.beforeCursor, 1, 32 * 1024 * 1024)
       assert.equal(older.checkpoint, undefined)
       await session.sendCustomMessage("fixture.custom", [{ type: "text", text: "custom" }], { display: true })
-      assert.equal(session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024).checkpoint?.liveMessage, undefined)
+      assert.equal(session.getBranchPage(undefined, 100, 32 * 1024 * 1024).checkpoint?.liveMessage, undefined)
     } finally {
       release?.()
       await session?.dispose()
@@ -466,7 +486,7 @@ export default function (pi) {
         return originalEmit(event)
       }
       const eventLiveIds: string[] = []
-      const off = session.onNativeEvent((event, meta) => {
+      const off = session.onPiEvent((event, meta) => {
         if (event && typeof event === "object" && !Array.isArray(event) && event.type === "message_start" && meta.liveMessage) {
           eventLiveIds.push(meta.liveMessage.id)
         }
@@ -474,7 +494,7 @@ export default function (pi) {
 
       const prompt = session.prompt("blocked start")
       await blocked
-      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
       const provisionalId = during.checkpoint?.liveMessage?.id
       assert.ok(provisionalId)
       const provisional = during.checkpoint?.liveMessage?.message
@@ -529,7 +549,7 @@ export default function (pi) {
       }
       let assistantStartId: string | undefined
       let assistantUpdateId: string | undefined
-      const off = session.onNativeEvent((event, meta) => {
+      const off = session.onPiEvent((event, meta) => {
         if (!event || typeof event !== "object" || Array.isArray(event)) return
         const message = event.message
         if (!message || typeof message !== "object" || Array.isArray(message) || message.role !== "assistant") return
@@ -539,7 +559,7 @@ export default function (pi) {
 
       const prompt = session.prompt("blocked update")
       await blocked
-      const during = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
       const provisionalId = during.checkpoint?.liveMessage?.id
       assert.ok(assistantStartId)
       assert.equal(provisionalId, assistantStartId)
@@ -581,7 +601,7 @@ export default function (pi) {
       const nativeEvents: Array<Record<string, unknown>> = []
       let resolvePartial!: () => void
       const partialStarted = new Promise<void>(resolve => { resolvePartial = resolve })
-      const offNative = session.onNativeEvent(event => {
+      const offNative = session.onPiEvent(event => {
         if (!event || typeof event !== "object" || Array.isArray(event)) return
         nativeEvents.push(event)
         if (event.type !== "message_update") return
@@ -595,7 +615,7 @@ export default function (pi) {
 
       const prompt = session.prompt("initial")
       await partialStarted
-      const livePage = session.getNativeBranchPage(undefined, 100, 32 * 1024 * 1024)
+      const livePage = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
       const liveMessage = livePage.checkpoint?.liveMessage?.message
       assert.ok(liveMessage && typeof liveMessage === "object" && !Array.isArray(liveMessage))
       assert.equal(liveMessage.role, "assistant")
@@ -603,16 +623,16 @@ export default function (pi) {
       assert.ok(nativeContentText(liveMessage.content).length < slowText.length)
       await session.steer("steer now")
       await session.followUp("follow up later")
-      assert.deepEqual(session.getRuntimeUiState().queue.steering, ["steer now"])
-      assert.deepEqual(session.getRuntimeUiState().queue.followUp, ["follow up later"])
+      assert.deepEqual((session.getState().queue as AnyRecord).steering, ["steer now"])
+      assert.deepEqual((session.getState().queue as AnyRecord).followUp, ["follow up later"])
 
       await prompt
       offNative()
       assert.equal(opened.faux.state.callCount, 3)
       assert.equal(opened.faux.getPendingResponseCount(), 0)
-      assert.deepEqual(session.getRuntimeUiState().queue.steering, [])
-      assert.deepEqual(session.getRuntimeUiState().queue.followUp, [])
-      const answers = session.getNativeEnvelope().entries
+      assert.deepEqual((session.getState().queue as AnyRecord).steering, [])
+      assert.deepEqual((session.getState().queue as AnyRecord).followUp, [])
+      const answers = allEntries(session)
         .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
         .map(nativeMessageText)
       assert.deepEqual(answers, [slowText, "steering handled", "follow-up handled"])
@@ -640,7 +660,10 @@ export default function (pi) {
       ])
       session = opened.session
       const phases: string[] = []
-      const off = session.onState(state => phases.push(state.retry.phase))
+      const off = session.onPiEvent(() => {
+        const phase = String((session.getState().retry as AnyRecord).phase)
+        if (phases.at(-1) !== phase) phases.push(phase)
+      })
       await session.prompt("retry this")
       off()
 
@@ -650,7 +673,7 @@ export default function (pi) {
       assert.ok(waiting >= 0)
       assert.ok(running > waiting)
       assert.ok(finished > running)
-      const retry = session.getRuntimeUiState().retry
+      const retry = session.getState().retry as AnyRecord
       assert.equal(retry.phase, "finished")
       if (retry.phase !== "finished") assert.fail("retry did not finish")
       assert.equal(retry.success, true)
@@ -683,14 +706,15 @@ export default function (pi) {
       ])
       session = opened.session
       const operationPhases: string[] = []
-      const off = session.onState(state => {
-        if (state.compaction.operation.type === "branchSummary") {
-          operationPhases.push(state.compaction.operation.phase)
+      const off = session.onPiEvent(() => {
+        const operation = (session.getState().compaction as AnyRecord).operation as AnyRecord
+        if (operation.type === "branchSummary" && operationPhases.at(-1) !== operation.phase) {
+          operationPhases.push(operation.phase)
         }
       })
       await session.prompt("one")
       await session.prompt("two")
-      const target = session.getNativeEnvelope().entries
+      const target = allEntries(session)
         .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
         .at(0)
       assert.ok(target)
@@ -701,11 +725,12 @@ export default function (pi) {
       })
       off()
       assert.equal(navigation.cancelled, false)
-      assert.equal(navigation.aborted, undefined)
-      assert.equal(navigation.summaryEntry?.type, "branch_summary")
-      if (navigation.summaryEntry?.type !== "branch_summary") assert.fail("branch summary was not persisted")
-      assert.match(String(navigation.summaryEntry.summary), /abandoned branch summary/)
-      assert.ok(session.getNativeEnvelope().entries.some(entry => entry.type === "branch_summary"))
+      assert.ok(!navigation.aborted)
+      const summaryEntry = navigation.summaryEntry as AnyRecord | null
+      assert.equal(summaryEntry?.type, "branch_summary")
+      if (summaryEntry?.type !== "branch_summary") assert.fail("branch summary was not persisted")
+      assert.match(String(summaryEntry.summary), /abandoned branch summary/)
+      assert.ok(allEntries(session).some(entry => entry.type === "branch_summary"))
       assert.ok(operationPhases.includes("retrying"))
       assert.equal(opened.faux.state.callCount, 4)
     } finally {
@@ -734,12 +759,12 @@ export default function (pi) {
       session = opened.session
       await session.prompt("one")
       await session.prompt("two")
-      const lastAssistant = session.getNativeEnvelope().entries
+      const lastAssistant = allEntries(session)
         .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
         .at(-1)
       assert.ok(lastAssistant)
 
-      const compacted = await session.compact("preserve test checkpoints")
+      const compacted = await session.compact("preserve test checkpoints") as AnyRecord
       assert.equal(compacted.status, "completed")
       if (compacted.status !== "completed") assert.fail("manual compaction was skipped")
       assert.match(compacted.result.summary, /history summary/)
@@ -749,7 +774,7 @@ export default function (pi) {
       assert.ok((compacted.result.estimatedTokensAfter ?? 0) > 0)
       assert.equal(opened.faux.state.callCount, 4)
       assert.equal(opened.faux.getPendingResponseCount(), 0)
-      assert.ok(session.getNativeEnvelope().entries.some(entry => entry.type === "compaction"))
+      assert.ok(allEntries(session).some(entry => entry.type === "compaction"))
     } finally {
       await session?.dispose()
       rmSync(cwd, { recursive: true, force: true })
@@ -758,7 +783,7 @@ export default function (pi) {
 })
 
 function findTreeLabel(
-  roots: ReturnType<RealPiSession["getNativeEnvelope"]>["tree"],
+  roots: AnyRecord[],
   entryId: string,
 ): string | undefined {
   const node = findTreeNode(roots, entryId)
@@ -766,9 +791,9 @@ function findTreeLabel(
 }
 
 function findTreeNode(
-  roots: ReturnType<RealPiSession["getNativeEnvelope"]>["tree"],
+  roots: AnyRecord[],
   entryId: string,
-): ReturnType<RealPiSession["getNativeEnvelope"]>["tree"][number] | undefined {
+): AnyRecord | undefined {
   const stack = [...roots]
   while (stack.length > 0) {
     const node = stack.pop()!
@@ -785,36 +810,17 @@ function findTreeNode(
   return undefined
 }
 
-function nativeRole(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number]): unknown {
+function nativeRole(entry: AnyRecord): unknown {
   const message = entry.message
   return message && typeof message === "object" && !Array.isArray(message) ? message.role : undefined
 }
 
-function nativeActiveBranch(envelope: ReturnType<RealPiSession["getNativeEnvelope"]>) {
-  const byId = new Map(envelope.entries.flatMap(entry =>
-    typeof entry.id === "string" ? [[entry.id, entry] as const] : []
-  ))
-  const branch: typeof envelope.entries = []
-  const visited = new Set<string>()
-  let id = envelope.leafId
-  while (id && !visited.has(id)) {
-    visited.add(id)
-    const entry = byId.get(id)
-    if (!entry) break
-    branch.push(entry)
-    id = typeof entry.parentId === "string" ? entry.parentId : null
-  }
-  return branch.reverse()
-}
-
-function nativeMessage(
-  entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number] | undefined,
-): Record<string, unknown> {
+function nativeMessage(entry: AnyRecord | undefined): Record<string, unknown> {
   const message = entry?.message
   return message && typeof message === "object" && !Array.isArray(message) ? message : {}
 }
 
-function nativeMessageText(entry: ReturnType<RealPiSession["getNativeEnvelope"]>["entries"][number]): string {
+function nativeMessageText(entry: AnyRecord): string {
   return nativeContentText(nativeMessage(entry).content)
 }
 
