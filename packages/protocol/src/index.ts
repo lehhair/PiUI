@@ -7,6 +7,7 @@ export * from "./registry.js"
 export * from "./workspace.js"
 export * from "./git.js"
 export * from "./extension-ui.js"
+export * from "./session-page.js"
 
 export type HealthResponse = {
   ok: true
