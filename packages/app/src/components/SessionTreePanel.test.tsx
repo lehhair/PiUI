@@ -29,6 +29,26 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))
+vi.mock('./SessionTreeCanvas', () => ({
+  SessionTreeCanvas: ({ tree, selectedEntryId, onSelectEntry }: {
+    tree: Array<{ entry: { id?: unknown }; children: unknown[]; label?: string }>
+    selectedEntryId: string | null
+    onSelectEntry: (entryId: string) => void
+  }) => (
+    <div aria-label="Session Tree">
+      {tree.flatMap(root => [root, ...(root.children as typeof tree)]).map(node => (
+        <button
+          type="button"
+          key={String(node.entry.id)}
+          aria-pressed={selectedEntryId === node.entry.id}
+          onClick={() => onSelectEntry(String(node.entry.id))}
+        >
+          {node.label ?? String(node.entry.id)}
+        </button>
+      ))}
+    </div>
+  ),
+}))
 vi.mock('../pi/sessionApi', () => ({
   navigatePiSessionTree: mocks.navigate,
   setPiSessionLabel: mocks.setLabel,
@@ -118,7 +138,8 @@ describe('SessionTreePanel', () => {
     mocks.navigate.mockResolvedValue({ snapshot: updated, editorText: 'Change the parser' })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click(await screen.findByTitle('Return here'))
+    fireEvent.click(await screen.findByText('user-entry'))
+    fireEvent.click(screen.getByText('Return here'))
 
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry'))
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(updated)
@@ -141,12 +162,13 @@ describe('SessionTreePanel', () => {
     })
     render(<SessionTreePanel sessionId="session-1" onNavigateSession={onNavigateSession} />)
 
-    fireEvent.click((await screen.findAllByTitle('Edit label'))[0])
+    fireEvent.click(await screen.findByText('user-entry'))
+    fireEvent.click(screen.getByTitle('Edit label'))
     fireEvent.change(screen.getByPlaceholderText('Branch label'), { target: { value: 'checkpoint' } })
     fireEvent.keyDown(screen.getByPlaceholderText('Branch label'), { key: 'Enter' })
     await waitFor(() => expect(mocks.setLabel).toHaveBeenCalledWith('session-1', 'user-entry', 'checkpoint'))
 
-    fireEvent.click((await screen.findAllByTitle('Fork here'))[0])
+    fireEvent.click(screen.getByTitle('Fork here'))
     await waitFor(() => expect(mocks.fork).toHaveBeenCalledWith('session-1', 'user-entry', 'at'))
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(sourceSnapshot, { activate: false })
     expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(targetSnapshot)
@@ -165,14 +187,15 @@ describe('SessionTreePanel', () => {
       </>,
     )
 
-    fireEvent.click(await screen.findByTitle('Return here'))
+    fireEvent.click(await screen.findByText('user-entry'))
+    fireEvent.click(screen.getByText('Return here'))
     await waitFor(() => expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt'))
 
-    fireEvent.click(await screen.findByTitle('Return here'))
+    fireEvent.click(screen.getByText('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt')
 
-    fireEvent.click(await screen.findByTitle('Return here'))
+    fireEvent.click(screen.getByText('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(3))
     expect(screen.getByTestId('draft')).toHaveTextContent('editable prompt')
   })
@@ -181,17 +204,17 @@ describe('SessionTreePanel', () => {
     mocks.setLabel.mockResolvedValue({ snapshot: { ...snapshot(), sequence: 2 } })
     render(<SessionTreePanel sessionId="session-1" />)
 
-    fireEvent.click((await screen.findAllByTitle('Edit label'))[1])
+    fireEvent.click(await screen.findByText('working branch'))
+    fireEvent.click(screen.getByTitle('Edit label'))
     const input = screen.getByPlaceholderText('Branch label')
     expect(input).toHaveValue('working branch')
-    expect(input.closest('button')).toBeNull()
     fireEvent.change(input, { target: { value: 'current checkpoint' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() =>
       expect(mocks.setLabel).toHaveBeenCalledWith('session-1', 'assistant-entry', 'current checkpoint'),
     )
-    expect(screen.getByRole('tree')).toHaveAttribute('aria-label', 'Session Tree')
+    expect(screen.getByLabelText('Session Tree')).toBeInTheDocument()
   })
 
   it('passes an optional cwd override when importing JSONL', async () => {
@@ -272,6 +295,7 @@ describe('SessionTreePanel', () => {
 
     render(<SessionTreePanel sessionId="session-1" />)
 
+    fireEvent.click(screen.getByText('Session Controls'))
     expect(screen.getByText('Correct the parser')).toBeInTheDocument()
     expect(screen.getByText('Run the tests')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('Clear queued messages'))
@@ -290,8 +314,10 @@ describe('SessionTreePanel', () => {
     fireEvent.click(screen.getByTitle('Compact context'))
     await waitFor(() => expect(mocks.compact).toHaveBeenCalledWith('session-1', 'Keep API decisions'))
 
+    fireEvent.click(await screen.findByText('user-entry'))
+    fireEvent.click(screen.getByText('Navigation Options'))
     fireEvent.click(screen.getByLabelText('Summarize the abandoned branch when navigating'))
-    fireEvent.click(await screen.findByTitle('Return here'))
+    fireEvent.click(screen.getByText('Return here'))
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('session-1', 'user-entry', true))
   })
 })

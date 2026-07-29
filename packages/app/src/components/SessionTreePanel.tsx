@@ -1,6 +1,5 @@
-import { memo, startTransition, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { PiNativeJsonValueV1 } from '@piui/protocol'
 import {
   CheckIcon,
   CloseIcon,
@@ -35,219 +34,20 @@ import {
 } from '../pi/sessionApi'
 import { clearSessionEditorDraft, setSessionEditorDraft } from '../pi/sessionEditorDraftStore'
 import { nativeSessionStore } from '../pi/nativeSessionStore'
+import { SessionTreeCanvas } from './SessionTreeCanvas'
+import { SessionTreeDetail } from './SessionTreeDetail'
+import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
+import {
+  findSessionTreeNode,
+  type NativeEntry,
+  type NativeTreeNode,
+} from './sessionTreeGraph'
 
 interface SessionTreePanelProps {
   sessionId: string
   onNavigateSession?: (session: { id: string; directory?: string }) => void
 }
 
-interface TreeNodeProps {
-  node: NativeTreeNode
-  depth: number
-  leafId: string | null
-  pendingEntryId: string | null
-  editingEntryId: string | null
-  editingLabel: string
-  canNavigate: boolean
-  canFork: boolean
-  canClone: boolean
-  onNavigate: (entryId: string) => void
-  onFork: (entryId: string) => void
-  onClone: (entryId: string) => void
-  onStartLabel: (entryId: string, label?: string) => void
-  onEditingLabelChange: (label: string) => void
-  onSubmitLabel: (entryId: string) => void
-  onCancelLabel: () => void
-}
-
-type NativeEntry = { [key: string]: PiNativeJsonValueV1 }
-type NativeTreeNode = NativeEntry & { entry: NativeEntry; children: NativeTreeNode[]; label?: string }
-
-function entryText(entry: NativeEntry, typeLabel: (type: string) => string): string {
-  const type = typeof entry.type === 'string' ? entry.type : 'unknown'
-  if (type === 'message') {
-    const message = asNativeRecord(entry.message)
-    return textFromNative(message.content) || String(message.role ?? typeLabel(type))
-  }
-  if (type === 'model_change') return `${String(entry.provider ?? '')}/${String(entry.modelId ?? '')}`
-  if (type === 'thinking_level_change') return String(entry.thinkingLevel ?? typeLabel(type))
-  if (type === 'compaction' || type === 'branch_summary') return String(entry.summary ?? typeLabel(type))
-  if (type === 'custom_message') return textFromNative(entry.content) || String(entry.customType ?? typeLabel(type))
-  if (type === 'custom') return String(entry.customType ?? typeLabel(type))
-  if (type === 'label') return String(entry.label ?? typeLabel(type))
-  if (type === 'session_info') return String(entry.name ?? typeLabel(type))
-  return typeLabel(type)
-}
-
-function asNativeRecord(value: PiNativeJsonValueV1 | undefined): NativeEntry {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
-function textFromNative(value: PiNativeJsonValueV1 | undefined): string {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.map(item => textFromNative(item)).join('')
-  const record = asNativeRecord(value)
-  if (typeof record.text === 'string') return record.text
-  if (typeof record.summary === 'string') return record.summary
-  return ''
-}
-
-const SessionTreeNode = memo(function SessionTreeNode({
-  node,
-  depth,
-  leafId,
-  pendingEntryId,
-  editingEntryId,
-  editingLabel,
-  canNavigate,
-  canFork,
-  canClone,
-  onNavigate,
-  onFork,
-  onClone,
-  onStartLabel,
-  onEditingLabelChange,
-  onSubmitLabel,
-  onCancelLabel,
-}: TreeNodeProps) {
-  const { t } = useTranslation('components')
-  const entry = node.entry
-  const entryId = typeof entry.id === 'string' ? entry.id : ''
-  const isLeaf = entryId === leafId
-  const isPending = entryId === pendingEntryId
-  const isEditing = entryId === editingEntryId
-  const text = entryText(entry, type => t(`sessionTree.entryTypes.${type}`))
-
-  return (
-    <div
-      role="treeitem"
-      aria-level={depth + 1}
-      aria-current={isLeaf ? 'true' : undefined}
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '36px' }}
-    >
-      <div
-        className={`group relative flex min-h-9 items-center border-b border-border-200/20 pr-2 ${
-          isLeaf ? 'bg-accent-main-100/8' : 'hover:bg-bg-200/35'
-        }`}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}
-      >
-        {depth > 0 ? (
-          <span className="absolute bottom-0 top-0 w-px bg-border-200/35" style={{ left: `${depth * 16}px` }} />
-        ) : null}
-        <span
-          className={`mr-2 h-2 w-2 shrink-0 rounded-full border ${
-            isLeaf ? 'border-accent-main-100 bg-accent-main-100' : 'border-text-500 bg-bg-100'
-          }`}
-        />
-        {isEditing ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1 py-1">
-            <input
-              autoFocus
-              value={editingLabel}
-              onChange={event => onEditingLabelChange(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') onSubmitLabel(entryId)
-                if (event.key === 'Escape') onCancelLabel()
-              }}
-              placeholder={t('sessionTree.labelPlaceholder')}
-              className="h-7 min-w-0 flex-1 rounded border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100"
-            />
-            <IconButton
-              aria-label={t('common:save')}
-              title={t('common:save')}
-              size="sm"
-              onClick={() => onSubmitLabel(entryId)}
-            >
-              <CheckIcon size={13} />
-            </IconButton>
-            <IconButton
-              aria-label={t('sessionTree.cancel')}
-              title={t('sessionTree.cancel')}
-              size="sm"
-              onClick={onCancelLabel}
-            >
-              <CloseIcon size={13} />
-            </IconButton>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="min-w-0 flex-1 py-2 text-left disabled:cursor-default"
-            onClick={() => onNavigate(entryId)}
-            disabled={!canNavigate || isLeaf || isPending}
-            title={isLeaf ? t('sessionTree.current') : t('sessionTree.navigate')}
-          >
-            <span className="block truncate text-[length:var(--fs-sm)] text-text-200">{node.label || text}</span>
-            {node.label ? (
-              <span className="block truncate text-[length:var(--fs-xs)] text-text-500">{text}</span>
-            ) : null}
-          </button>
-        )}
-
-        {!isEditing ? (
-          <div className="flex shrink-0 items-center opacity-60 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-            <IconButton
-              aria-label={t('sessionTree.label')}
-              title={t('sessionTree.label')}
-              size="sm"
-              disabled={isPending}
-              onClick={() => onStartLabel(entryId, node.label)}
-            >
-              <PencilIcon size={13} />
-            </IconButton>
-            {canFork ? (
-              <IconButton
-                aria-label={t('sessionTree.fork')}
-                title={t('sessionTree.fork')}
-                size="sm"
-                disabled={isPending}
-                onClick={() => onFork(entryId)}
-              >
-                <GitBranchIcon size={13} />
-              </IconButton>
-            ) : null}
-            {canClone ? (
-              <IconButton
-                aria-label={t('sessionTree.clone')}
-                title={t('sessionTree.clone')}
-                size="sm"
-                disabled={isPending}
-                onClick={() => onClone(entryId)}
-              >
-                <CopyIcon size={13} />
-              </IconButton>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      {node.children.length > 0 ? (
-        <div role="group">
-          {node.children.map(child => (
-            <SessionTreeNode
-              key={String(child.entry.id)}
-              node={child}
-              depth={depth + 1}
-              leafId={leafId}
-              pendingEntryId={pendingEntryId}
-              editingEntryId={editingEntryId}
-              editingLabel={editingLabel}
-              canNavigate={canNavigate}
-              canFork={canFork}
-              canClone={canClone}
-              onNavigate={onNavigate}
-              onFork={onFork}
-              onClone={onClone}
-              onStartLabel={onStartLabel}
-              onEditingLabelChange={onEditingLabelChange}
-              onSubmitLabel={onSubmitLabel}
-              onCancelLabel={onCancelLabel}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-})
 
 export const SessionTreePanel = memo(function SessionTreePanel({
   sessionId,
@@ -255,12 +55,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
 }: SessionTreePanelProps) {
   const { t } = useTranslation('components')
   const capabilities = usePiCapabilities()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const snapshot = useSyncExternalStore(
     nativeSessionStore.subscribe.bind(nativeSessionStore),
     () => nativeSessionStore.getSnapshot(sessionId),
     () => null,
   )
   const [pendingEntryId, setPendingEntryId] = useState<string | null>(null)
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -271,8 +74,23 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const [nativeTree, setNativeTree] = useState<NativeTreeNode[]>([])
   const [nativeLoading, setNativeLoading] = useState(false)
   const [nativeLoadError, setNativeLoadError] = useState<string | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
   const nativeRevisionRef = useRef<string | undefined>(undefined)
   const nativeRequestRef = useRef(0)
+  const {
+    splitHeight: canvasHeight,
+    isResizing,
+    handleResizeStart,
+    handleTouchResizeStart,
+    resetSplitHeight,
+  } = useVerticalSplitResize({
+    containerRef,
+    primaryRef: canvasRef,
+    cssVariableName: '--session-tree-canvas-height',
+    minPrimaryHeight: 180,
+    minSecondaryHeight: 160,
+    defaultPrimaryHeightRatio: 0.55,
+  })
   const loadNativeTree = useCallback(async () => {
     if (!sessionId) return
     const request = ++nativeRequestRef.current
@@ -294,6 +112,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     nativeRequestRef.current += 1
     nativeRevisionRef.current = snapshot ? `${snapshot.native.epoch}:${snapshot.native.revision}` : undefined
     setNativeTree([])
+    setDetailOpen(false)
+    resetSplitHeight()
     const timer = window.setTimeout(() => { void loadNativeTree() }, 0)
     return () => window.clearTimeout(timer)
   }, [loadNativeTree])
@@ -304,11 +124,36 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     nativeRevisionRef.current = revision
     void loadNativeTree()
   }, [loadNativeTree, snapshot?.native.epoch, snapshot?.native.revision])
+  useEffect(() => {
+    if (nativeTree.length === 0) {
+      setSelectedEntryId(null)
+      setDetailOpen(false)
+      return
+    }
+    setSelectedEntryId(current => {
+      if (findSessionTreeNode(nativeTree, current)) return current
+      const leafId = snapshot?.native.leafId ?? null
+      if (findSessionTreeNode(nativeTree, leafId)) return leafId
+      return typeof nativeTree[0]?.entry.id === 'string' ? nativeTree[0].entry.id : null
+    })
+  }, [nativeTree, snapshot?.native.leafId])
   const [summarizeNavigation, setSummarizeNavigation] = useState(false)
   const [navigationInstructions, setNavigationInstructions] = useState('')
   const [replaceNavigationInstructions, setReplaceNavigationInstructions] = useState(false)
   const [navigationLabel, setNavigationLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const selectedNode = useMemo(
+    () => findSessionTreeNode(nativeTree, selectedEntryId),
+    [nativeTree, selectedEntryId],
+  )
+  const selectedEntry = selectedNode?.entry
+  const selectedEntryType = typeof selectedEntry?.type === 'string' ? selectedEntry.type : 'unknown'
+  const selectedMessage = selectedEntryType === 'message' && selectedEntry?.message &&
+    typeof selectedEntry.message === 'object' && !Array.isArray(selectedEntry.message)
+    ? selectedEntry.message as NativeEntry
+    : undefined
+  const selectedRole = typeof selectedMessage?.role === 'string' ? selectedMessage.role : undefined
+  const selectedIsLeaf = selectedEntryId !== null && selectedEntryId === snapshot?.native.leafId
 
   useEffect(() => {
     const handleCommandUpdate = (rawEvent: Event) => {
@@ -466,7 +311,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   }, [applyReplacement, capabilities.sessionImport, importCwd, importPath, runEntryCommand, sessionId])
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg-100">
+    <div ref={containerRef} className="flex h-full min-h-0 flex-col bg-bg-100">
+      <details className="shrink-0 border-b border-border-200/40 bg-bg-100">
+        <summary className="cursor-pointer px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-300 hover:bg-bg-200/40 hover:text-text-100">
+          {t('sessionTree.sessionControls')}
+        </summary>
+        <div className="max-h-[45vh] overflow-y-auto border-t border-border-200/40">
       {snapshot && (capabilities.compactionManage || capabilities.retryManage) ? (
         <div className="shrink-0 border-b border-border-200/40 px-3 py-2">
           {capabilities.compactionManage ? (
@@ -680,13 +530,6 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         </details>
       ) : null}
 
-      {snapshot && capabilities.sessionNavigate && capabilities.compactionManage ? (
-        <div className="shrink-0 space-y-2 border-b border-border-200/40 px-3 py-2 text-[length:var(--fs-xs)] text-text-300">
-          <label className="flex items-center gap-2"><input type="checkbox" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />{t('sessionTree.summarizeNavigation')}</label>
-          {summarizeNavigation ? <div className="space-y-1"><input className="h-7 w-full rounded border border-border-200 bg-bg-100 px-2 text-text-100" value={navigationInstructions} placeholder="Branch summary instructions" onChange={event => setNavigationInstructions(event.target.value)} /><input className="h-7 w-full rounded border border-border-200 bg-bg-100 px-2 text-text-100" value={navigationLabel} placeholder="Optional branch label" onChange={event => setNavigationLabel(event.target.value)} /><label className="flex items-center gap-2"><input type="checkbox" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />Replace default instructions</label></div> : null}
-        </div>
-      ) : null}
-
       {capabilities.sessionImport ? (
         <div className="shrink-0 border-b border-border-200/40 px-2 py-2">
           {importOpen ? (
@@ -733,6 +576,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           )}
         </div>
       ) : null}
+        </div>
+      </details>
 
       {error ? (
         <div role="alert" className="shrink-0 border-b border-danger-100/30 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
@@ -740,35 +585,165 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         </div>
       ) : null}
 
-      <div role="tree" aria-label={t('panelContainer.sessionTree')} className="min-h-0 flex-1 overflow-auto">
-        {nativeLoadError ? <p className="mb-2 text-[length:var(--fs-xs)] text-danger-100">{nativeLoadError}</p> : null}
-        {nativeTree.length ? (
-          nativeTree.map(node => (
-            <SessionTreeNode
-              key={String(node.entry.id)}
-              node={node}
-              depth={0}
-              leafId={snapshot?.native.leafId ?? null}
-              pendingEntryId={pendingEntryId}
-              editingEntryId={editingEntryId}
-              editingLabel={editingLabel}
-              canNavigate={capabilities.sessionNavigate}
-              canFork={capabilities.fork}
-              canClone={capabilities.sessionClone}
-              onNavigate={handleNavigate}
-              onFork={handleFork}
-              onClone={handleClone}
-              onStartLabel={handleStartLabel}
-              onEditingLabelChange={setEditingLabel}
-              onSubmitLabel={handleSubmitLabel}
-              onCancelLabel={() => setEditingEntryId(null)}
+      <div className="min-h-0 flex-1 flex flex-col">
+        <div
+          ref={canvasRef}
+          className="shrink-0 overflow-hidden"
+          style={{
+            '--session-tree-canvas-height': canvasHeight !== null ? `${canvasHeight}px` : '55%',
+            height: detailOpen && selectedNode ? 'var(--session-tree-canvas-height)' : '100%',
+            minHeight: detailOpen && selectedNode ? 180 : undefined,
+          } as React.CSSProperties}
+        >
+          <SessionTreeCanvas
+            sessionId={sessionId}
+            tree={nativeTree}
+            leafId={snapshot?.native.leafId ?? null}
+            selectedEntryId={selectedEntryId}
+            pendingEntryId={pendingEntryId}
+            loading={nativeLoading}
+            error={nativeLoadError}
+            onSelectEntry={id => { setSelectedEntryId(id); setDetailOpen(true) }}
+          />
+        </div>
+
+        {detailOpen && selectedNode && selectedEntryId ? (
+          <>
+            <div
+              className={`h-1.5 cursor-row-resize shrink-0 relative transition-colors ${
+                isResizing ? 'bg-accent-main-100' : 'bg-bg-200/60 hover:bg-accent-main-100/50'
+              }`}
+              onMouseDown={handleResizeStart}
+              onTouchStart={handleTouchResizeStart}
             />
-          ))
-        ) : (
-          <div className="flex h-full items-center justify-center px-4 text-center text-[length:var(--fs-sm)] text-text-400">
-            {nativeLoading ? 'Loading…' : t('sessionTree.empty')}
-          </div>
-        )}
+            <section className="flex min-h-0 flex-1 flex-col bg-bg-100" style={{ minHeight: 160 }} aria-label={t('sessionTree.selectedEntry')}>
+              <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-200/40 px-3">
+                <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">
+                  {selectedNode.label || t(selectedRole ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}` : `sessionTree.entryTypes.${selectedEntryType}`)}
+                </span>
+                {selectedIsLeaf ? (
+                  <span className="shrink-0 rounded bg-accent-main-100/12 px-1.5 py-0.5 text-[length:var(--fs-xs)] font-medium text-accent-main-100">
+                    {t('sessionTree.current')}
+                  </span>
+                ) : null}
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <IconButton aria-label={t('sessionTree.closeDetail')} title={t('sessionTree.closeDetail')} size="sm" onClick={() => { setDetailOpen(false); resetSplitHeight() }}>
+                    <CloseIcon size={12} />
+                  </IconButton>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+                <SessionTreeDetail
+                  sessionId={sessionId}
+                  directory={snapshot?.session.directory ?? '/'}
+                  node={selectedNode}
+                  selectedEntryId={selectedEntryId}
+                />
+                {selectedNode.label ? (
+                  <p className="mt-1.5 text-[length:var(--fs-xs)] text-text-500">
+                    {t('sessionTree.labelLine', { label: selectedNode.label, time: selectedNode.labelTimestamp ?? '' })}
+                  </p>
+                ) : null}
+
+                {capabilities.sessionNavigate && !selectedIsLeaf ? (
+                  <p className="mt-2 rounded border border-border-200/40 bg-bg-200/30 px-2.5 py-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+                    {selectedRole === 'user' || selectedEntryType === 'custom_message'
+                      ? t('sessionTree.navigateUserHint')
+                      : t('sessionTree.navigateEntryHint')}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 border-t border-border-200/40 px-3 py-2">
+                {editingEntryId === selectedEntryId ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={editingLabel}
+                      onChange={event => setEditingLabel(event.target.value)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') handleSubmitLabel(selectedEntryId)
+                        if (event.key === 'Escape') setEditingEntryId(null)
+                      }}
+                      aria-label={t('sessionTree.labelPlaceholder')}
+                      placeholder={t('sessionTree.labelPlaceholder')}
+                      autoComplete="off"
+                      className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                    />
+                    <IconButton aria-label={t('common:save')} title={t('common:save')} size="sm" onClick={() => handleSubmitLabel(selectedEntryId)}>
+                      <CheckIcon size={13} />
+                    </IconButton>
+                    <IconButton aria-label={t('sessionTree.cancel')} title={t('sessionTree.cancel')} size="sm" onClick={() => setEditingEntryId(null)}>
+                      <CloseIcon size={13} />
+                    </IconButton>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {capabilities.sessionNavigate && !selectedIsLeaf ? (
+                      <button
+                        type="button"
+                        disabled={pendingEntryId !== null}
+                        onClick={() => handleNavigate(selectedEntryId)}
+                        className="h-7 rounded-md bg-accent-main-100 px-2.5 text-[length:var(--fs-xs)] font-medium text-bg-100 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main-100/60 disabled:opacity-50"
+                      >
+                        {t('sessionTree.navigate')}
+                      </button>
+                    ) : null}
+                    <IconButton aria-label={t('sessionTree.label')} title={t('sessionTree.label')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}>
+                      <PencilIcon size={13} />
+                    </IconButton>
+                    {capabilities.fork ? (
+                      <IconButton aria-label={t('sessionTree.fork')} title={t('sessionTree.fork')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleFork(selectedEntryId)}>
+                        <GitBranchIcon size={13} />
+                      </IconButton>
+                    ) : null}
+                    {capabilities.sessionClone ? (
+                      <IconButton aria-label={t('sessionTree.clone')} title={t('sessionTree.clone')} size="sm" disabled={pendingEntryId !== null} onClick={() => handleClone(selectedEntryId)}>
+                        <CopyIcon size={13} />
+                      </IconButton>
+                    ) : null}
+                    {capabilities.sessionNavigate && capabilities.compactionManage && !selectedIsLeaf ? (
+                      <details className="text-[length:var(--fs-xs)] text-text-300">
+                        <summary className="cursor-pointer select-none hover:text-text-100">{t('sessionTree.navigationOptions')}</summary>
+                        <div className="mt-2 space-y-2 border-l border-border-200 pl-2">
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
+                            {t('sessionTree.summarizeNavigation')}
+                          </label>
+                          {summarizeNavigation ? (
+                            <>
+                              <input
+                                className="h-7 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                                value={navigationInstructions}
+                                aria-label={t('sessionTree.branchSummaryInstructions')}
+                                placeholder={t('sessionTree.branchSummaryInstructions')}
+                                autoComplete="off"
+                                onChange={event => setNavigationInstructions(event.target.value)}
+                              />
+                              <input
+                                className="h-7 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
+                                value={navigationLabel}
+                                aria-label={t('sessionTree.optionalBranchLabel')}
+                                placeholder={t('sessionTree.optionalBranchLabel')}
+                                autoComplete="off"
+                                onChange={event => setNavigationLabel(event.target.value)}
+                              />
+                              <label className="flex items-center gap-2">
+                                <input type="checkbox" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />
+                                {t('sessionTree.replaceDefaultInstructions')}
+                              </label>
+                            </>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
     </div>
   )
