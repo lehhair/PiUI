@@ -1,6 +1,6 @@
 import { DEFAULT_HTTP_BASE } from "@piui/protocol"
 import { getDriverMode } from "@piui/pi-worker"
-import { authTokenPath, resolveAuthToken } from "./auth-token.ts"
+import { authTokenPath, resolveAuthToken } from "./host/auth-token.ts"
 import { createAppServer } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"

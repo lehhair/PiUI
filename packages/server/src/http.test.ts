@@ -41,10 +41,10 @@ describe("http api", () => {
     const port = await listen(app)
     cleanups.push(() => app.dispose())
 
-    const rejected = await request(port, "GET", "/api/v1/health")
+    const rejected = await request(port, "GET", "/api/v1/host/health")
     assert.equal(rejected.status, 401)
 
-    const accepted = await request(port, "GET", "/api/v1/health", { token: "test-token" })
+    const accepted = await request(port, "GET", "/api/v1/host/health", { token: "test-token" })
     assert.equal(accepted.status, 200)
     assert.equal(accepted.json.ok, true)
     assert.equal(accepted.json.service, "piui-server")
@@ -62,44 +62,44 @@ describe("http api", () => {
       rmSync(root, { recursive: true, force: true })
     })
 
-    const created = await request(port, "POST", "/api/v1/workspaces", { body: { rootPath: root } })
+    const created = await request(port, "POST", "/api/v1/host/workspaces", { body: { rootPath: root } })
     assert.equal(created.status, 201)
     const workspacePath = created.json.workspace.path as string
 
-    const list = await request(port, "GET", "/api/v1/workspaces")
+    const list = await request(port, "GET", "/api/v1/host/workspaces")
     assert.equal(list.status, 200)
     assert.ok(list.json.workspaces.some((ws: any) => ws.path === workspacePath))
 
     const encoded = encodeURIComponent(workspacePath)
-    const dir = await request(port, "GET", `/api/v1/workspaces/${encoded}/files/list?path=`)
+    const dir = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/list?path=`)
     assert.equal(dir.status, 200)
     assert.ok(dir.json.entries.some((entry: any) => entry.name === "hello.txt"))
 
-    const read = await request(port, "GET", `/api/v1/workspaces/${encoded}/files/read?path=hello.txt`)
+    const read = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/read?path=hello.txt`)
     assert.equal(read.status, 200)
     assert.equal(read.json.content, "hello piui")
     const etag = read.json.etag as string
     assert.ok(etag)
 
-    const written = await request(port, "PUT", `/api/v1/workspaces/${encoded}/files/write?path=hello.txt`, {
+    const written = await request(port, "PUT", `/api/v1/host/workspaces/${encoded}/files/write?path=hello.txt`, {
       body: { content: "updated", ifMatch: etag },
     })
     assert.equal(written.status, 200)
     assert.equal(written.json.content, "updated")
 
-    const stale = await request(port, "PUT", `/api/v1/workspaces/${encoded}/files/write?path=hello.txt`, {
+    const stale = await request(port, "PUT", `/api/v1/host/workspaces/${encoded}/files/write?path=hello.txt`, {
       body: { content: "stale write", ifMatch: etag },
     })
     assert.equal(stale.status, 409)
 
-    const search = await request(port, "GET", `/api/v1/workspaces/${encoded}/files/search-name?q=index`)
+    const search = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/search-name?q=index`)
     assert.equal(search.status, 200)
     assert.ok(search.json.paths.some((p: string) => p.endsWith("index.ts")))
 
-    const gitStatus = await request(port, "GET", `/api/v1/workspaces/${encoded}/git/status`)
+    const gitStatus = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/git/status`)
     assert.equal(gitStatus.status, 200)
 
-    const outside = await request(port, "GET", `/api/v1/workspaces/${encoded}/files/read?path=../outside.txt`)
+    const outside = await request(port, "GET", `/api/v1/host/workspaces/${encoded}/files/read?path=../outside.txt`)
     assert.ok([400, 403, 404].includes(outside.status))
   })
 
@@ -114,31 +114,31 @@ describe("http api", () => {
       rmSync(mockHome, { recursive: true, force: true })
     })
 
-    const models = await request(port, "GET", "/api/v1/models")
+    const models = await request(port, "GET", "/api/v1/pi/models")
     assert.equal(models.status, 200)
     assert.ok(models.json.data.some((model: any) => model.provider === "mock"))
 
-    const settings = await request(port, "GET", `/api/v1/workspaces/${encodeURIComponent(mockHome)}/pi-settings`)
-    assert.equal(settings.status, 404)
+    const settings = await request(port, "GET", `/api/v1/pi/settings?cwd=${encodeURIComponent(mockHome)}`)
+    assert.equal(settings.status, 200)
 
-    const created = await request(port, "POST", "/api/v1/workspaces", { body: { rootPath: mockHome } })
+    const created = await request(port, "POST", "/api/v1/host/workspaces", { body: { rootPath: mockHome } })
     assert.equal(created.status, 201)
     const encoded = encodeURIComponent(mockHome)
-    const settingsNow = await request(port, "GET", `/api/v1/workspaces/${encoded}/pi-settings`)
+    const settingsNow = await request(port, "GET", `/api/v1/pi/settings?cwd=${encoded}`)
     assert.equal(settingsNow.status, 200)
     assert.equal(settingsNow.json.data.workspacePath, mockHome)
 
-    const trust = await request(port, "GET", `/api/v1/workspaces/${encoded}/trust`)
+    const trust = await request(port, "GET", `/api/v1/pi/trust?cwd=${encoded}`)
     assert.equal(trust.status, 200)
     assert.equal(trust.json.data.trusted, true)
 
-    const unknown = await request(port, "POST", "/api/v1/catalog/commands", {
+    const unknown = await request(port, "POST", "/api/v1/pi/commands", {
       body: { type: "does.not.exist", params: {} },
     })
     assert.equal(unknown.status, 500)
     assert.equal(unknown.json.code, "UNKNOWN_COMMAND")
 
-    const badCommand = await request(port, "POST", "/api/v1/catalog/commands", { body: { params: {} } })
+    const badCommand = await request(port, "POST", "/api/v1/pi/commands", { body: { params: {} } })
     assert.equal(badCommand.status, 400)
   })
 })

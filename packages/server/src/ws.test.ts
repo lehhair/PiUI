@@ -46,7 +46,7 @@ describe("event websocket", () => {
       rmSync(mockHome, { recursive: true, force: true })
     })
 
-    const health = await request(port, "GET", "/api/v1/health")
+    const health = await request(port, "GET", "/api/v1/host/health")
     assert.equal(health.status, 200)
     assert.equal(health.json.service, "piui-server")
 
@@ -62,7 +62,7 @@ describe("event websocket", () => {
     })
     await hello
 
-    const created = await request(port, "POST", "/api/v1/sessions", { cwd: mockHome })
+    const created = await request(port, "POST", "/api/v1/pi/sessions", { cwd: mockHome })
     assert.equal(created.status, 201)
     const sessionId = created.json.sessionId as string
     assert.ok(sessionId)
@@ -75,7 +75,7 @@ describe("event websocket", () => {
     }))
     await new Promise(resolve => setTimeout(resolve, 100))
 
-    const prompted = await request(port, "POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/commands`, {
+    const prompted = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands`, {
       id: "cmd-1",
       type: "prompt",
       params: { text: "hello mock" },
@@ -108,21 +108,21 @@ describe("event websocket", () => {
     assert.ok(sawAgentEnd, "did not see agent_end")
     assert.ok(sawCommandCompleted, "did not see command completion")
 
-    const state = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/state`)
+    const state = await request(port, "GET", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}`)
     assert.equal(state.status, 200)
     assert.equal(state.json.data.sessionId, sessionId)
 
-    const branch = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/branch`)
+    const branch = await request(port, "GET", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/branch`)
     assert.equal(branch.status, 200)
     assert.ok(branch.json.data.items.length >= 2)
     const roles = branch.json.data.items.map((entry: any) => entry.message?.role)
     assert.deepEqual(roles, ["user", "assistant"])
 
-    const registry = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/registry`)
+    const registry = await request(port, "GET", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/registry`)
     assert.equal(registry.status, 200)
     assert.ok(registry.json.data.tools.some((tool: any) => tool.name === "mock-tool"))
 
-    const list = await request(port, "GET", "/api/v1/sessions")
+    const list = await request(port, "GET", "/api/v1/pi/sessions")
     assert.equal(list.status, 200)
     assert.ok(list.json.sessions.some((item: any) => item.id === sessionId), `sessions: ${JSON.stringify(list.json.sessions)} vs ${sessionId}`)
     assert.ok(list.json.attached.includes(sessionId))

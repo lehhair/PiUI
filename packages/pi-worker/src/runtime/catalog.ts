@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import { requireJsonValue } from "@piui/protocol"
 import type { SettingsManager } from "@earendil-works/pi-coding-agent"
-import { getLoadedSdk } from "./sdk-host.js"
-import type { CatalogProvider } from "./runtime.js"
-import type { PackagesGateway } from "./command-table.js"
+import { getLoadedSdk } from "../sdk-host.js"
+import type { CatalogProvider } from "../runtime.js"
+import type { PackagesGateway } from "../command-table.js"
 
 export function settingsForWorkspace(cwd: string, agentDir?: string) {
   const { SettingsManager, ProjectTrustStore, getAgentDir, hasTrustRequiringProjectResources } = getLoadedSdk().sdk

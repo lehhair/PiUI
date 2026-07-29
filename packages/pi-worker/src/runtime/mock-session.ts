@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
-import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from "./runtime.js"
-import type { PackagesGateway } from "./command-table.js"
+import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from "../runtime.js"
+import type { PackagesGateway } from "../command-table.js"
 import {
   entriesPageFromEntries,
   sessionHeadFromParts,

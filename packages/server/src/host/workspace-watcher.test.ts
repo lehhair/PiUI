@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
 import type { EventEnvelope } from "@piui/protocol"
-import { EventHub } from "./event-hub.ts"
+import { EventHub } from "../event-hub.ts"
 import { WorkspaceStore } from "./workspace-store.ts"
 import { WorkspaceWatcher } from "./workspace-watcher.ts"
 

@@ -17,17 +17,17 @@ import {
   moveWorkspaceEntry,
   readFileContent,
   writeFileContent,
-} from "./files.ts"
-import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
-import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./git.ts"
+} from "./host/files.ts"
+import { searchFilesByName, searchWorkspaceText } from "./host/file-search.ts"
+import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./host/git.ts"
 import { EventHub } from "./event-hub.ts"
-import { RuntimeSupervisor } from "./runtime-supervisor.ts"
-import { SessionHost } from "./session-host.ts"
-import { WorkspaceStore } from "./workspace-store.ts"
-import { WorkspaceWatcher } from "./workspace-watcher.ts"
-import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./security.ts"
-import { resolveAuthToken } from "./auth-token.ts"
-import { PathSafetyError } from "./path-safety.ts"
+import { RuntimeSupervisor } from "./pi/supervisor.ts"
+import { SessionHost } from "./pi/session-host.ts"
+import { WorkspaceStore } from "./host/workspace-store.ts"
+import { WorkspaceWatcher } from "./host/workspace-watcher.ts"
+import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./host/security.ts"
+import { resolveAuthToken } from "./host/auth-token.ts"
+import { PathSafetyError } from "./host/path-safety.ts"
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
@@ -136,7 +136,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendProblem(res, 401, Object.assign(new Error("missing or invalid authorization token"), { code: "UNAUTHORIZED" }))
       }
 
-      if (method === "GET" && (p === "/api/v1/health" || p === "/health")) {
+      if (method === "GET" && (p === "/api/v1/host/health" || p === "/health")) {
         const body: HealthResponse = {
           ok: true,
           protocolVersion: PROTOCOL_VERSION,
@@ -146,15 +146,77 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendJson(res, 200, body)
       }
 
-      if (method === "GET" && p === "/api/v1/models") {
+      if (method === "GET" && p === "/api/v1/host/capabilities") {
+        return sendJson(res, 200, {
+          protocolVersion: PROTOCOL_VERSION,
+          service: "piui-server",
+          piSdkVersion: PI_PARITY_SDK_VERSION,
+          driver: process.env.PIUI_DRIVER ?? "mock",
+          eventStreams: ["server", "workspace", "session", "provider", "resources"],
+          eventChannels: [
+            "pi.event",
+            "session.head",
+            "command.updated",
+            "extension.ui",
+            "provider.auth",
+            "packages.progress",
+            "sessions.updated",
+            "resources.updated",
+            "workspace.files",
+            "workspace.git",
+          ],
+        })
+      }
+
+      if (method === "GET" && p === "/api/v1/pi/models") {
         return sendJson(res, 200, { data: await sessions.catalogCommand("models.list", undefined, { retry: true }) })
       }
 
-      if (method === "GET" && p === "/api/v1/providers") {
+      if (method === "GET" && p === "/api/v1/pi/providers") {
         return sendJson(res, 200, { data: await sessions.catalogCommand("providers.list", undefined, { retry: true }) })
       }
 
-      if (method === "POST" && p === "/api/v1/catalog/commands") {
+      if (method === "GET" && p === "/api/v1/pi/settings") {
+        const cwd = url.searchParams.get("cwd")
+        if (!cwd) throw invalidRequest("cwd query is required")
+        const data = await sessions.catalogCommand("settings.get", { cwd }, { retry: true })
+        return sendJson(res, 200, { data: data ?? null })
+      }
+
+      if ((method === "PATCH" || method === "POST") && p === "/api/v1/pi/settings") {
+        const body = await readBody(req)
+        const cwd = url.searchParams.get("cwd") ?? (typeof body.cwd === "string" ? body.cwd : undefined)
+        if (!cwd) throw invalidRequest("cwd query is required")
+        const data = await sessions.catalogCommand("settings.patch", {
+          cwd,
+          patch: body.patch && typeof body.patch === "object" ? body.patch : body,
+        })
+        return sendJson(res, 200, { data: data ?? null })
+      }
+
+      if (p === "/api/v1/pi/trust") {
+        const cwd = url.searchParams.get("cwd") ?? undefined
+        if (method === "GET") {
+          if (!cwd) throw invalidRequest("cwd query is required")
+          const data = await sessions.catalogCommand("trust.get", { cwd }, { retry: true })
+          return sendJson(res, 200, { data: data ?? null })
+        }
+        if (method === "PUT" || method === "POST") {
+          const body = await readBody(req)
+          const trustCwd = cwd ?? (typeof body.cwd === "string" ? body.cwd : undefined)
+          if (!trustCwd) throw invalidRequest("cwd query is required")
+          const decision = body.decision
+          if (decision !== null && typeof decision !== "boolean") {
+            throw invalidRequest("body.decision must be a boolean or null")
+          }
+          const data = await sessions.catalogCommand("trust.set", { cwd: trustCwd, decision })
+          return sendJson(res, 200, { data: data ?? null })
+        }
+        res.setHeader("allow", "GET,PUT,POST")
+        return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
+      }
+
+      if (method === "POST" && p === "/api/v1/pi/commands") {
         const body = await readBody(req)
         const type = typeof body.type === "string" ? body.type : undefined
         if (!type) throw invalidRequest("body.type must be a command type string")
@@ -165,7 +227,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendJson(res, 200, { data: data ?? null })
       }
 
-      if (p === "/api/v1/sessions") {
+      if (p === "/api/v1/pi/sessions") {
         if (method === "GET") {
           const cwd = url.searchParams.get("cwd")
           const listed = cwd
@@ -184,7 +246,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
       }
 
-      const sessionMatch = p.match(/^\/api\/v1\/sessions\/([^/]+)(\/(.*))?$/)
+      const sessionMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)(\/(.*))?$/)
       if (sessionMatch) {
         const sessionId = decodeURIComponent(sessionMatch[1]!)
         const sub = sessionMatch[3] ?? ""
@@ -195,9 +257,6 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         if (!sub && method === "DELETE") {
           await sessions.closeSession(sessionId)
           return sendJson(res, 200, { ok: true })
-        }
-        if (sub === "state" && method === "GET") {
-          return sendJson(res, 200, { data: await sessions.sessionQuery(sessionId, "state.get") ?? null })
         }
         if ((sub === "entries" || sub === "branch") && method === "GET") {
           const data = await sessions.sessionQuery(sessionId, `${sub}.get`, {
@@ -250,14 +309,14 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
       }
 
-      const commandMatch = p.match(/^\/api\/v1\/commands\/([^/]+)$/)
+      const commandMatch = p.match(/^\/api\/v1\/host\/commands\/([^/]+)$/)
       if (commandMatch && method === "GET") {
         const record = sessions.getCommand(decodeURIComponent(commandMatch[1]!))
         if (!record) return sendProblem(res, 404, Object.assign(new Error("command not found"), { code: "NOT_FOUND" }))
         return sendJson(res, 200, { command: record })
       }
 
-      if (p === "/api/v1/workspaces") {
+      if (p === "/api/v1/host/workspaces") {
         if (method === "GET") return sendJson(res, 200, { workspaces: store.list() })
         if (method === "POST") {
           const body = await readBody(req)
@@ -279,7 +338,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
       }
 
-      const workspaceMatch = p.match(/^\/api\/v1\/workspaces\/([^/]+)(\/(.*))?$/)
+      const workspaceMatch = p.match(/^\/api\/v1\/host\/workspaces\/([^/]+)(\/(.*))?$/)
       if (workspaceMatch) {
         const workspacePath = decodeURIComponent(workspaceMatch[1]!)
         const sub = workspaceMatch[3] ?? ""
@@ -296,35 +355,6 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         if (sub === "watch" && method === "POST") {
           watcher.watch(workspace)
           return sendJson(res, 200, { ok: true })
-        }
-        if (sub === "pi-settings") {
-          if (method === "GET") {
-            const data = await sessions.catalogCommand("settings.get", { cwd: workspace.canonicalRoot }, { retry: true })
-            return sendJson(res, 200, { data: data ?? null })
-          }
-          if (method === "PATCH" || method === "POST") {
-            const body = await readBody(req)
-            const data = await sessions.catalogCommand("settings.patch", {
-              cwd: workspace.canonicalRoot,
-              patch: body.patch && typeof body.patch === "object" ? body.patch : body,
-            })
-            return sendJson(res, 200, { data: data ?? null })
-          }
-        }
-        if (sub === "trust") {
-          if (method === "GET") {
-            const data = await sessions.catalogCommand("trust.get", { cwd: workspace.canonicalRoot }, { retry: true })
-            return sendJson(res, 200, { data: data ?? null })
-          }
-          if (method === "PUT" || method === "POST") {
-            const body = await readBody(req)
-            const decision = body.decision
-            if (decision !== null && typeof decision !== "boolean") {
-              throw invalidRequest("body.decision must be a boolean or null")
-            }
-            const data = await sessions.catalogCommand("trust.set", { cwd: workspace.canonicalRoot, decision })
-            return sendJson(res, 200, { data: data ?? null })
-          }
         }
         if (sub === "files/list" && method === "GET") {
           const data = await listFiles(workspace, url.searchParams.get("path") ?? "", {

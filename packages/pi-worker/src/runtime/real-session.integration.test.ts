@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { RealPiSession } from "./real-session.ts"
 import { PiCatalog } from "./catalog.ts"
-import { loadPiSdk } from "./sdk-host.ts"
+import { loadPiSdk } from "../sdk-host.ts"
 
 await loadPiSdk()
 

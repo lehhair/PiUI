@@ -4,7 +4,7 @@ import { lstat, readFile } from "node:fs/promises"
 import type { JsonObject } from "@piui/protocol"
 
 type WorkspaceFileChange = { path: string; kind: "created" | "changed" | "deleted"; type: "file" | "directory" }
-import type { EventHub } from "./event-hub.ts"
+import type { EventHub } from "../event-hub.ts"
 import { invalidateGitCache } from "./git.ts"
 import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
 
