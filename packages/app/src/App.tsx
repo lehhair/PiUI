@@ -181,13 +181,22 @@ function App() {
       const listed = sessions.find(item => item.id === session.id)
       const directory = listed?.directory ?? session.directory
       if (!paneId || !directory || openingSessionId) return
+      const enterSession = (sessionId: string) => {
+        trackPiSession(sessionId, directory)
+        navigatePaneToSession(paneId, sessionId, directory)
+      }
       setOpeningSessionId(session.id)
       void openPiNativeSession(directory, listed?.path)
         .then(opened => {
-          trackPiSession(opened.sessionId, directory)
-          navigatePaneToSession(paneId, opened.sessionId, directory)
+          enterSession(opened.sessionId)
         })
-        .catch(error => uiErrorHandler('open Pi session', error))
+        .catch(error => {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') {
+            enterSession(session.id)
+            return
+          }
+          uiErrorHandler('open Pi session', error)
+        })
         .finally(() => setOpeningSessionId(null))
     },
     [paneLayout.focusedPaneId, navigatePaneToSession, openingSessionId, sessions],

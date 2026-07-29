@@ -1,22 +1,17 @@
 import type { HealthResponse, HostRegistrySnapshot, JsonObject, JsonValue, PiRegistrySnapshot } from '@piui/protocol'
 import { getApiBase, piFetch } from './sessionApi'
 
-export type PiSessionListItem = {
-  id?: string
-  sessionId?: string
-  path?: string
-  sessionFile?: string
+export type PiNativeSessionInfo = {
+  id: string
+  path: string
+  cwd: string
   name?: string
-  title?: string
-  cwd?: string
-  workspacePath?: string
-  created?: string
-  modified?: string
-  updatedAt?: string
-  createdAt?: string
-  firstMessage?: string
-  allMessagesText?: string
-  messageCount?: number
+  created: string
+  modified: string
+  firstMessage: string
+  allMessagesText: string
+  messageCount: number
+  parentSessionPath?: string
   [key: string]: JsonValue | undefined
 }
 
@@ -59,12 +54,12 @@ export async function postPiGlobalCommand<T = JsonValue | undefined>(
   return response.data
 }
 
-export function listPiNativeSessions(signal?: AbortSignal): Promise<PiSessionListItem[]> {
-  return postPiGlobalCommand<PiSessionListItem[]>('session.listAll', undefined, signal)
+export function listPiNativeSessions(signal?: AbortSignal): Promise<PiNativeSessionInfo[]> {
+  return postPiGlobalCommand<PiNativeSessionInfo[]>('session.listAll', undefined, signal)
 }
 
-export function listPiNativeSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<PiSessionListItem[]> {
-  return postPiGlobalCommand<PiSessionListItem[]>('session.list', { cwd }, signal)
+export function listPiNativeSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<PiNativeSessionInfo[]> {
+  return postPiGlobalCommand<PiNativeSessionInfo[]>('session.list', { cwd }, signal)
 }
 
 export function openPiNativeSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<PiSessionOpenResult> {
@@ -79,7 +74,17 @@ async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await piFetch(url, init)
   if (!response.ok) {
     const message = await response.text().catch(() => '')
-    throw new Error(`${url} ${response.status}${message ? ` ${message}` : ''}`)
+    let code: string | undefined
+    try {
+      const body = JSON.parse(message) as { code?: unknown }
+      if (typeof body.code === 'string') code = body.code
+    } catch {
+      // Keep non-JSON error detail in the message.
+    }
+    throw Object.assign(new Error(`${url} ${response.status}${message ? ` ${message}` : ''}`), {
+      status: response.status,
+      code,
+    })
   }
   return await response.json() as T
 }
