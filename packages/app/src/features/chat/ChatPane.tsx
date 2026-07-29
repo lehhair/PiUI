@@ -811,6 +811,7 @@ export const ChatPane = memo(function ChatPane({
                 key={chatAreaMountKey}
                 ref={chatAreaRef}
                 messages={renderedMessages}
+                queuedSteering={piRuntime?.queue.steering}
                 queuedFollowUps={piRuntime?.queue.followUp}
                 pageRecords={chatPageViewModel.pageRecords}
                 visibleMessages={chatPageViewModel.visibleMessages}
