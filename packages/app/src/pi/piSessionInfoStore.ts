@@ -1,24 +1,24 @@
-import type { PiNativeSessionInfo } from './nativeApi'
+import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 
 class PiSessionInfoStore {
-  private all: PiNativeSessionInfo[] = []
-  private byCwd = new Map<string, PiNativeSessionInfo[]>()
+  private all: SessionInfo[] = []
+  private byCwd = new Map<string, SessionInfo[]>()
 
-  replaceAll(sessions: PiNativeSessionInfo[]): PiNativeSessionInfo[] {
+  replaceAll(sessions: SessionInfo[]): SessionInfo[] {
     this.all = sessions
     return this.all
   }
 
-  replaceForCwd(cwd: string, sessions: PiNativeSessionInfo[]): PiNativeSessionInfo[] {
+  replaceForCwd(cwd: string, sessions: SessionInfo[]): SessionInfo[] {
     this.byCwd.set(pathKey(cwd), sessions)
     return sessions
   }
 
-  getAll(): readonly PiNativeSessionInfo[] {
+  getAll(): readonly SessionInfo[] {
     return this.all
   }
 
-  getForCwd(cwd: string): readonly PiNativeSessionInfo[] {
+  getForCwd(cwd: string): readonly SessionInfo[] {
     return this.byCwd.get(pathKey(cwd)) ?? []
   }
 
