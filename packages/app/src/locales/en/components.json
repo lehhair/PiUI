@@ -111,6 +111,7 @@
     "allAtOnce": "All",
     "queueEmpty": "Empty",
     "activeTools": "Tools ({{active}}/{{total}} active)",
+    "runtimeStatus": "Runtime Status",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "toolError": "Error",

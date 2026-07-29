@@ -20,6 +20,7 @@ export interface SessionTreeNodeData extends Record<string, unknown> {
   currentLeaf: boolean
   branchCount: number
   compact: boolean
+  toolCalls?: Array<{ id: string; name: string; args: Record<string, unknown> }>
 }
 
 export type SessionGraphNode = Node<SessionTreeNodeData, 'sessionEntry'>
@@ -30,9 +31,9 @@ export interface SessionTreeGraph {
   nodeById: Map<string, NativeTreeNode>
 }
 
-const NODE_WIDTH = 240
-const MESSAGE_HEIGHT = 72
-const EVENT_HEIGHT = 54
+const NODE_WIDTH = 200
+const MESSAGE_HEIGHT = 48
+const EVENT_HEIGHT = 40
 
 function asRecord(value: PiNativeJsonValueV1 | undefined): NativeEntry {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -52,6 +53,74 @@ function textFromNative(value: PiNativeJsonValueV1 | undefined): string {
 function normalizePreview(value: string): string {
   const normalized = value.replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized
+}
+
+function shortenPath(path: string): string {
+  return path
+}
+
+function formatToolCall(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case 'read': {
+      const path = shortenPath(String(args.path || args.file_path || ''))
+      const offset = args.offset as number | undefined
+      const limit = args.limit as number | undefined
+      let display = path
+      if (offset !== undefined || limit !== undefined) {
+        const start = offset ?? 1
+        const end = limit !== undefined ? start + limit - 1 : ''
+        display += `:${start}${end ? `-${end}` : ''}`
+      }
+      return `[read: ${display}]`
+    }
+    case 'write': {
+      const path = shortenPath(String(args.path || args.file_path || ''))
+      return `[write: ${path}]`
+    }
+    case 'edit': {
+      const path = shortenPath(String(args.path || args.file_path || ''))
+      return `[edit: ${path}]`
+    }
+    case 'bash': {
+      const rawCmd = String(args.command || '')
+      const cmd = rawCmd.replace(/[\n\t]/g, ' ').trim().slice(0, 50)
+      return `[bash: ${cmd}${rawCmd.length > 50 ? '...' : ''}]`
+    }
+    case 'grep': {
+      const pattern = String(args.pattern || '')
+      const path = shortenPath(String(args.path || '.'))
+      return `[grep: /${pattern}/ in ${path}]`
+    }
+    case 'find': {
+      const pattern = String(args.pattern || '')
+      const path = shortenPath(String(args.path || '.'))
+      return `[find: ${pattern} in ${path}]`
+    }
+    case 'ls': {
+      const path = shortenPath(String(args.path || '.'))
+      return `[ls: ${path}]`
+    }
+    default: {
+      const argsStr = JSON.stringify(args).slice(0, 40)
+      return `[${name}: ${argsStr}${JSON.stringify(args).length > 40 ? '...' : ''}]`
+    }
+  }
+}
+
+function extractToolCalls(entry: NativeEntry): Array<{ id: string; name: string; args: Record<string, unknown> }> {
+  if (entry.type !== 'message') return []
+  const message = asRecord(entry.message)
+  if (message.role !== 'assistant') return []
+  const content = message.content
+  if (!Array.isArray(content)) return []
+  const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = []
+  for (const block of content) {
+    const record = asRecord(block)
+    if (record.type === 'toolCall' && typeof record.id === 'string' && typeof record.name === 'string') {
+      toolCalls.push({ id: record.id, name: record.name, args: asRecord(record.arguments) })
+    }
+  }
+  return toolCalls
 }
 
 export function sessionTreeEntryPreview(entry: NativeEntry, typeLabel: (type: string) => string): string {
@@ -126,7 +195,7 @@ export function buildSessionTreeGraph(
   typeLabel: (type: string) => string,
 ): SessionTreeGraph {
   const graph = new dagre.graphlib.Graph()
-    .setGraph({ rankdir: 'TB', ranksep: 68, nodesep: 36, marginx: 40, marginy: 40 })
+    .setGraph({ rankdir: 'TB', ranksep: 48, nodesep: 24, marginx: 24, marginy: 24 })
     .setDefaultEdgeLabel(() => ({}))
   const nodeById = new Map<string, NativeTreeNode>()
   const rawParentById = new Map<string, string | null>()
@@ -184,6 +253,11 @@ export function buildSessionTreeGraph(
     const message = asRecord(source.entry.message)
     const role = type === 'message' && typeof message.role === 'string' ? message.role : undefined
     const compact = type !== 'message' && type !== 'custom_message' && type !== 'branch_summary'
+    const toolCalls = extractToolCalls(source.entry)
+    const preview = sessionTreeEntryPreview(source.entry, typeLabel)
+    const displayPreview = toolCalls.length > 0 && !preview.includes('[')
+      ? `${toolCalls.map(tc => formatToolCall(tc.name, tc.args)).join(' ')} ${preview}`.trim()
+      : preview
     return {
       id: entryId,
       type: 'sessionEntry',
@@ -193,11 +267,12 @@ export function buildSessionTreeGraph(
         type,
         role,
         label: source.label,
-        preview: sessionTreeEntryPreview(source.entry, typeLabel),
+        preview: displayPreview,
         activePath: activePath.has(entryId),
         currentLeaf: entryId === visualLeafId,
         branchCount: childCountById.get(entryId) ?? 0,
         compact,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       },
       width: NODE_WIDTH,
       height: compact ? EVENT_HEIGHT : MESSAGE_HEIGHT,
@@ -209,14 +284,14 @@ export function buildSessionTreeGraph(
 
   const edges: Edge[] = graph.edges().map(({ v, w }) => {
     const onActivePath = activePath.has(v) && activePath.has(w)
-    const color = onActivePath ? 'hsl(var(--accent-main-100))' : 'hsl(var(--border-200) / 0.9)'
+    const color = onActivePath ? 'hsl(var(--accent-main-100))' : 'hsl(var(--border-200) / 0.6)'
     return {
       id: `${v}->${w}`,
       source: v,
       target: w,
       type: 'smoothstep',
-      style: { stroke: color, strokeWidth: onActivePath ? 2.5 : 1.5, opacity: 0.95 },
-      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
+      style: { stroke: color, strokeWidth: onActivePath ? 2 : 1, opacity: 0.8 },
+      markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color },
       zIndex: onActivePath ? 2 : 1,
     }
   })

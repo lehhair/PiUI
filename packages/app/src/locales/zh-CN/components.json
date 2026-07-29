@@ -111,6 +111,7 @@
     "allAtOnce": "全部",
     "queueEmpty": "空",
     "activeTools": "工具（{{active}}/{{total}} 已启用）",
+    "runtimeStatus": "运行状态",
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "toolError": "错误",
