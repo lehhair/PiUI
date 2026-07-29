@@ -24,6 +24,8 @@ const workerGeneration = randomUUID()
 let runtime: SessionRuntime | undefined
 let loadedSdkInfo: { version: string; verified: boolean } | undefined
 let registryRevision = 1
+let runtimeRegistryDigest: string | undefined
+let registryCheck: Promise<void> = Promise.resolve()
 const runtimeUnsubs: Array<() => void> = []
 
 const driver = (process.env.PIUI_DRIVER ?? "mock").toLowerCase() === "pi" ? "pi" : "mock"
@@ -112,16 +114,49 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
       workspacePath: current.getCwd(),
     })))
     runtimeUnsubs.push(current.onResourcesChanged(() => {
-      registryRevision += 1
-      send({
-        kind: "event",
-        generation: workerGeneration,
-        sessionId: current.getSessionId(),
-        channel: "registry.updated",
-        event: { revision: registryRevision, sessionId: current.getSessionId() },
-      })
+      void queueRegistryChangeCheck(current, "resources.updated")
     }))
   }
+}
+
+async function setRuntimeRegistryBaseline(current: SessionRuntime): Promise<void> {
+  runtimeRegistryDigest = stableStringify(await current.getRegistry())
+}
+
+function queueRegistryChangeCheck(current: SessionRuntime, reason: string): Promise<void> {
+  registryCheck = registryCheck.then(() => detectRegistryChange(current, reason), () => detectRegistryChange(current, reason))
+  return registryCheck
+}
+
+async function detectRegistryChange(current: SessionRuntime, reason: string): Promise<void> {
+  if (runtime !== current) return
+  const next = stableStringify(await current.getRegistry())
+  if (runtimeRegistryDigest === undefined) {
+    runtimeRegistryDigest = next
+    return
+  }
+  if (next === runtimeRegistryDigest) return
+  runtimeRegistryDigest = next
+  registryRevision += 1
+  send({
+    kind: "event",
+    generation: workerGeneration,
+    sessionId: current.getSessionId(),
+    channel: "registry.updated",
+    event: { revision: registryRevision, sessionId: current.getSessionId(), reason },
+  })
+}
+
+function stableStringify(value: JsonValue): string {
+  return JSON.stringify(sortJson(value))
+}
+
+function sortJson(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(sortJson)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.keys(value).sort().map(key => [key, sortJson(value[key] ?? null)]),
+  )
 }
 
 async function openRuntime(params: JsonObject): Promise<JsonValue> {
@@ -134,6 +169,7 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
   runtime = opened
   subscribeRuntimeEvents(opened)
   if (opened instanceof RealPiSession) await opened.initializeExtensions()
+  await setRuntimeRegistryBaseline(opened)
   return {
     sessionId: opened.getSessionId(),
     sessionFile: opened.getSessionFile() ?? null,
@@ -146,6 +182,7 @@ async function closeRuntime(): Promise<void> {
   runtimeUnsubs.splice(0).forEach(unsub => unsub())
   const current = runtime
   runtime = undefined
+  runtimeRegistryDigest = undefined
   await current?.dispose()
 }
 
@@ -174,7 +211,21 @@ async function execute(command: { type: string; params?: JsonObject }): Promise<
   if (!handler) {
     throw Object.assign(new Error(`unknown command: ${command.type}`), { code: "UNKNOWN_COMMAND" })
   }
-  return handler(ctx, params)
+  const result = await handler(ctx, params)
+  if (runtime && shouldCheckRegistryAfter(command.type)) {
+    await queueRegistryChangeCheck(runtime, `command:${command.type}`)
+  }
+  return result
+}
+
+const REGISTRY_READ_COMMANDS = new Set(["state.get", "entries.get", "branch.get", "tree.get", "registry.get", "attachment.get", "waitForIdle"])
+
+function shouldCheckRegistryAfter(type: string): boolean {
+  if (!runtime) return false
+  if (type.startsWith("session.") || type.startsWith("models.") || type.startsWith("settings.") ||
+    type.startsWith("trust.") || type.startsWith("providers.") || type.startsWith("modelRuntime.") ||
+    type.startsWith("packages.")) return false
+  return !REGISTRY_READ_COMMANDS.has(type)
 }
 
 function describeRegistry(): PiRegistrySnapshot {

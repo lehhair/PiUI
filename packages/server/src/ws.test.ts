@@ -120,9 +120,13 @@ describe("event websocket", () => {
     const registry = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/registry.get`)
     assert.equal(registry.status, 200)
     assert.ok(registry.json.data.tools.some((tool: any) => tool.name === "mock-tool"))
+    assert.equal(registry.json.data.tools.some((tool: any) => tool.name === "mock-dynamic-tool"), false)
 
-    const reloaded = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/reload`)
-    assert.equal(reloaded.status, 202)
+    const dynamicCommand = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/invokeCommand`, {
+      id: "cmd-dynamic-registry",
+      params: { name: "mock-command" },
+    })
+    assert.equal(dynamicCommand.status, 202)
     let sawRegistryUpdated = false
     const registryDeadline = Date.now() + 5_000
     while (Date.now() < registryDeadline && !sawRegistryUpdated) {
@@ -130,12 +134,23 @@ describe("event websocket", () => {
         if (envelope.channel === "registry.updated") {
           assert.equal((envelope.payload as { sessionId?: string }).sessionId, sessionId)
           assert.equal(typeof (envelope.payload as { revision?: unknown }).revision, "number")
+          assert.equal((envelope.payload as { reason?: string }).reason, "command:invokeCommand")
           sawRegistryUpdated = true
         }
       }
       await new Promise(resolve => setTimeout(resolve, 25))
     }
     assert.ok(sawRegistryUpdated, "did not see registry.updated")
+
+    const changedRegistry = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/registry.get`)
+    assert.equal(changedRegistry.status, 200)
+    assert.ok(changedRegistry.json.data.tools.some((tool: any) => tool.name === "mock-dynamic-tool"))
+
+    const dynamicTool = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/invokeTool`, {
+      id: "cmd-dynamic-tool",
+      params: { name: "mock-dynamic-tool", arguments: { value: "ok" } },
+    })
+    assert.equal(dynamicTool.status, 202)
 
     const list = await request(port, "POST", "/api/v1/pi/commands/session.listAll")
     assert.equal(list.status, 200)

@@ -217,6 +217,7 @@ export class MockPiSession implements SessionRuntime {
   private followUpMode: "all" | "one-at-a-time" = "one-at-a-time"
   private thinkingLevel = "off"
   private activeTools = ["mock-tool"]
+  private dynamicToolRegistered = false
   private autoCompaction = true
   private autoRetry = true
   private eventEpoch = randomUUID()
@@ -388,16 +389,25 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getRegistry(): RegistrySnapshot {
+    const tools: RegistrySnapshot["tools"] = [
+      {
+        name: "mock-tool",
+        description: "Mock tool for tests",
+        parameters: { type: "object", properties: { echo: { type: "string" } } },
+        sourceInfo: { source: "builtin" },
+      },
+    ]
+    if (this.dynamicToolRegistered) {
+      tools.push({
+        name: "mock-dynamic-tool",
+        description: "Mock dynamically registered tool",
+        parameters: { type: "object", properties: { value: { type: "string" } } },
+        sourceInfo: { source: "dynamic" },
+      })
+    }
     return {
       sdkVersion: MOCK_SDK_VERSION,
-      tools: [
-        {
-          name: "mock-tool",
-          description: "Mock tool for tests",
-          parameters: { type: "object", properties: { echo: { type: "string" } } },
-          sourceInfo: { source: "builtin" },
-        },
-      ],
+      tools,
       activeTools: [...this.activeTools],
       commands: [
         { name: "mock-command", description: "Mock extension command", sourceInfo: { source: "builtin" } },
@@ -720,12 +730,16 @@ export class MockPiSession implements SessionRuntime {
   }
 
   async invokeTool(name: string, args?: JsonObject): Promise<JsonValue | undefined> {
+    if (name === "mock-dynamic-tool" && this.dynamicToolRegistered) {
+      return { content: [{ type: "text", text: `mock-dynamic-tool value: ${String(args?.value ?? "")}` }], details: {} }
+    }
     if (name !== "mock-tool") throw Object.assign(new Error(`tool not found: ${name}`), { code: "NOT_FOUND" })
     return { content: [{ type: "text", text: `mock-tool echo: ${String(args?.echo ?? "")}` }], details: {} }
   }
 
   async invokeCommand(name: string): Promise<JsonValue | undefined> {
     if (name !== "mock-command") throw Object.assign(new Error(`command not found: ${name}`), { code: "NOT_FOUND" })
+    this.dynamicToolRegistered = true
     return undefined
   }
 

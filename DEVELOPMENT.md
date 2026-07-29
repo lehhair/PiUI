@@ -51,7 +51,7 @@ WS     /api/v1/events                            stream 订阅 + cursor/replay/r
 
 - `pi.event`:payload = `{event: <裸 Pi 事件>, meta: {epoch, sequence, liveMessage?}}`
 - `session.head`:entries/tree 变化后的 head(leafId/entryCount/revision)
-- `registry.updated`:runtime 能力变化，payload 含 `{revision, sessionId}`，客户端应重新拉 registry
+- `registry.updated`:runtime 能力变化，payload 含 `{revision, sessionId, reason}`，客户端应重新拉 registry；worker 会对 session registry 做 digest 对比，兜底发现动态 extension tool/command 变化
 - `command.updated`:命令生命周期（accepted/running/completed/failed/cancelled)
 - `extension.ui` / `provider.auth` / `packages.progress` / `sessions.updated` / `resources.updated`
 - `workspace.files` / `workspace.git`:host 区文件与 Git 变化
