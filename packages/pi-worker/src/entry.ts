@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
-import type { JsonObject, JsonValue } from "@piui/protocol"
+import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError } from "@piui/protocol"
 import { loadPiSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
 import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
-import { COMMAND_HANDLERS, type CommandContext } from "./command-table.js"
+import { COMMAND_HANDLERS, listCommandCapabilities, type CommandContext } from "./command-table.js"
 import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
 import {
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
@@ -22,6 +22,7 @@ import * as P from "./params.js"
 
 const workerGeneration = randomUUID()
 let runtime: SessionRuntime | undefined
+let loadedSdkInfo: { version: string; verified: boolean } | undefined
 const runtimeUnsubs: Array<() => void> = []
 
 const driver = (process.env.PIUI_DRIVER ?? "mock").toLowerCase() === "pi" ? "pi" : "mock"
@@ -152,6 +153,7 @@ const ctx: CommandContext = {
 
 async function execute(command: { type: string; params?: JsonObject }): Promise<JsonValue | undefined | void> {
   const params = command.params ?? {}
+  if (command.type === "registry.describe") return describeRegistry()
   if (command.type === "session.open") return openRuntime(params)
   if (command.type === "session.close") {
     await closeRuntime()
@@ -162,6 +164,24 @@ async function execute(command: { type: string; params?: JsonObject }): Promise<
     throw Object.assign(new Error(`unknown command: ${command.type}`), { code: "UNKNOWN_COMMAND" })
   }
   return handler(ctx, params)
+}
+
+function describeRegistry(): PiRegistrySnapshot {
+  const registryDescribe: PiCapability = {
+    name: "registry.describe",
+    scope: "global",
+    source: "piui-adapter",
+    description: "Describe registered Pi capabilities exposed by this worker",
+    paramsSchema: { type: "object", additionalProperties: false, properties: {} },
+    queue: "immediate",
+  }
+  return {
+    protocolVersion: 1,
+    sdkVersion: loadedSdkInfo?.version ?? "unknown",
+    driver,
+    globalCommands: [registryDescribe, ...listCommandCapabilities("global")],
+    sessionCommands: listCommandCapabilities("session"),
+  }
 }
 
 const schedule = createWorkerCommandScheduler(execute)
@@ -267,6 +287,7 @@ const loaded = await loadPiSdk({
   sdkPath: process.env.PIUI_SDK_PATH,
   strict: process.env.PIUI_SDK_STRICT === "1",
 })
+loadedSdkInfo = loaded
 
 send({
   kind: "hello",

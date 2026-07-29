@@ -1,6 +1,7 @@
-import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue } from "@piui/protocol"
+import { randomUUID } from "node:crypto"
+import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
-import type { WorkerEvent } from "@piui/pi-worker"
+import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionExecutor, type SubmittedCommand } from "./session-executor.ts"
@@ -13,14 +14,38 @@ export interface AttachedSession {
   worker: WorkerSession
 }
 
-const SESSION_QUERY_COMMANDS = new Set([
-  "state.get",
-  "entries.get",
-  "branch.get",
-  "tree.get",
-  "registry.get",
-  "attachment.get",
-])
+const SERVER_GLOBAL_CAPABILITIES: PiCapability[] = [
+  {
+    name: "session.open",
+    scope: "global",
+    source: "piui-adapter",
+    description: "Attach or create a Pi session runtime",
+    paramsSchema: {
+      type: "object",
+      additionalProperties: true,
+      required: ["cwd"],
+      properties: { cwd: { type: "string" }, sessionFile: { type: "string" } },
+    },
+    queue: "immediate",
+  },
+  {
+    name: "session.attached",
+    scope: "global",
+    source: "piui-adapter",
+    description: "List Pi session ids currently attached to this PiUI server",
+    paramsSchema: { type: "object", additionalProperties: false, properties: {} },
+    queue: "immediate",
+  },
+]
+
+const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
+  name: "session.close",
+  scope: "session",
+  source: "piui-adapter",
+  description: "Detach a Pi session runtime from PiUI",
+  paramsSchema: { type: "object", additionalProperties: false, properties: {} },
+  queue: "immediate",
+}]
 
 export class SessionHost {
   private readonly attached = new Map<string, AttachedSession>()
@@ -106,10 +131,44 @@ export class SessionHost {
 
   async sessionQuery(sessionId: string, type: string, params?: JsonObject): Promise<JsonValue | undefined> {
     const session = this.requireAttached(sessionId)
-    if (!SESSION_QUERY_COMMANDS.has(type)) {
+    const capability = this.getSessionCapability(type)
+    if (capability?.queue !== "immediate") {
       throw Object.assign(new Error(`${type} is not a query command`), { code: "INVALID_REQUEST" })
     }
     return session.worker.command(type, params)
+  }
+
+  async piRegistry(): Promise<PiRegistrySnapshot> {
+    const data = await this.catalogCommand("registry.describe", undefined, { retry: true }) as PiRegistrySnapshot | undefined
+    if (!data || typeof data !== "object") {
+      throw Object.assign(new Error("Pi registry is unavailable"), { code: "REGISTRY_UNAVAILABLE" })
+    }
+    return {
+      ...data,
+      globalCommands: mergeCapabilities(SERVER_GLOBAL_CAPABILITIES, data.globalCommands),
+      sessionCommands: mergeCapabilities(SERVER_SESSION_CAPABILITIES, data.sessionCommands),
+    }
+  }
+
+  async executeGlobalCommand(type: string, params?: JsonObject): Promise<JsonValue | undefined> {
+    if (type === "session.open") {
+      const cwd = typeof params?.cwd === "string" ? params.cwd : undefined
+      if (!cwd) throw Object.assign(new Error("params.cwd must be a non-empty string"), { code: "INVALID_REQUEST" })
+      const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
+      return this.openSession(cwd, sessionFile)
+    }
+    if (type === "session.attached") return this.listAttachedIds()
+    return this.catalogCommand(type, params, { retry: true })
+  }
+
+  executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string): JsonValue | SubmittedCommand | Promise<JsonValue | undefined> {
+    if (type === "session.close") {
+      return this.closeSession(sessionId).then(() => ({ ok: true }))
+    }
+    const capability = this.getSessionCapability(type)
+    if (!capability) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    if (capability.queue === "immediate") return this.sessionQuery(sessionId, type, params)
+    return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
 
   submitSessionCommand(sessionId: string, envelope: Omit<CommandEnvelope, "sessionId">): SubmittedCommand {
@@ -128,6 +187,10 @@ export class SessionHost {
 
   async catalogCommand(type: string, params?: JsonObject, options?: { retry?: boolean }): Promise<JsonValue | undefined> {
     return this.supervisor.catalogCommand(type, params, options)
+  }
+
+  private getSessionCapability(type: string): PiCapability | undefined {
+    return SERVER_SESSION_CAPABILITIES.find(capability => capability.name === type) ?? getCommandCapability(type)
   }
 
   private trackReplacement(session: AttachedSession, data: JsonValue | undefined): void {
@@ -191,4 +254,11 @@ export class SessionHost {
       : { kind: "server" as const, id: "server" }
     this.hub.publish(stream, "command.updated", record as unknown as JsonValue)
   }
+}
+
+function mergeCapabilities(local: PiCapability[], remote: PiCapability[]): PiCapability[] {
+  const merged = new Map<string, PiCapability>()
+  for (const capability of remote) merged.set(capability.name, capability)
+  for (const capability of local) merged.set(capability.name, capability)
+  return [...merged.values()]
 }

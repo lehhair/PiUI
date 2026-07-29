@@ -1,11 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import { randomUUID } from "node:crypto"
 import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_VERSION,
   problem,
   problemFromError,
-  type CommandEnvelope,
   type HealthResponse,
   type JsonObject,
   type WorkspaceCreateRequest,
@@ -91,6 +89,18 @@ function pageLimit(url: URL, key: string, fallback: number, maximum: number): nu
   return parsed
 }
 
+function commandParams(body: JsonObject): JsonObject | undefined {
+  if (body.params && typeof body.params === "object" && !Array.isArray(body.params)) {
+    return body.params as JsonObject
+  }
+  const { id: _id, ...params } = body
+  return Object.keys(params).length > 0 ? params : undefined
+}
+
+function isSubmittedCommand(value: unknown): value is { record: unknown; promise: Promise<unknown> } {
+  return !!value && typeof value === "object" && "record" in value && "promise" in value
+}
+
 export interface CreateAppServerOptions {
   supervisor?: RuntimeSupervisor
   sessionHost?: SessionHost
@@ -168,145 +178,30 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         })
       }
 
-      if (method === "GET" && p === "/api/v1/pi/models") {
-        return sendJson(res, 200, { data: await sessions.catalogCommand("models.list", undefined, { retry: true }) })
+      if (method === "GET" && p === "/api/v1/pi/registry") {
+        return sendJson(res, 200, await sessions.piRegistry())
       }
 
-      if (method === "GET" && p === "/api/v1/pi/providers") {
-        return sendJson(res, 200, { data: await sessions.catalogCommand("providers.list", undefined, { retry: true }) })
-      }
-
-      if (method === "GET" && p === "/api/v1/pi/settings") {
-        const cwd = url.searchParams.get("cwd")
-        if (!cwd) throw invalidRequest("cwd query is required")
-        const data = await sessions.catalogCommand("settings.get", { cwd }, { retry: true })
+      const piCommandMatch = p.match(/^\/api\/v1\/pi\/commands\/([^/]+)$/)
+      if (piCommandMatch && method === "POST") {
+        const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
+        const name = decodeURIComponent(piCommandMatch[1]!)
+        const data = await sessions.executeGlobalCommand(name, commandParams(body))
         return sendJson(res, 200, { data: data ?? null })
       }
 
-      if ((method === "PATCH" || method === "POST") && p === "/api/v1/pi/settings") {
-        const body = await readBody(req)
-        const cwd = url.searchParams.get("cwd") ?? (typeof body.cwd === "string" ? body.cwd : undefined)
-        if (!cwd) throw invalidRequest("cwd query is required")
-        const data = await sessions.catalogCommand("settings.patch", {
-          cwd,
-          patch: body.patch && typeof body.patch === "object" ? body.patch : body,
-        })
-        return sendJson(res, 200, { data: data ?? null })
-      }
-
-      if (p === "/api/v1/pi/trust") {
-        const cwd = url.searchParams.get("cwd") ?? undefined
-        if (method === "GET") {
-          if (!cwd) throw invalidRequest("cwd query is required")
-          const data = await sessions.catalogCommand("trust.get", { cwd }, { retry: true })
-          return sendJson(res, 200, { data: data ?? null })
+      const piSessionCommandMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)\/commands\/([^/]+)$/)
+      if (piSessionCommandMatch && method === "POST") {
+        const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
+        const sessionId = decodeURIComponent(piSessionCommandMatch[1]!)
+        const name = decodeURIComponent(piSessionCommandMatch[2]!)
+        const id = typeof body.id === "string" && body.id ? body.id : undefined
+        const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id)
+        if (isSubmittedCommand(result)) {
+          void result.promise.catch(() => undefined)
+          return sendJson(res, 202, { command: result.record })
         }
-        if (method === "PUT" || method === "POST") {
-          const body = await readBody(req)
-          const trustCwd = cwd ?? (typeof body.cwd === "string" ? body.cwd : undefined)
-          if (!trustCwd) throw invalidRequest("cwd query is required")
-          const decision = body.decision
-          if (decision !== null && typeof decision !== "boolean") {
-            throw invalidRequest("body.decision must be a boolean or null")
-          }
-          const data = await sessions.catalogCommand("trust.set", { cwd: trustCwd, decision })
-          return sendJson(res, 200, { data: data ?? null })
-        }
-        res.setHeader("allow", "GET,PUT,POST")
-        return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
-      }
-
-      if (method === "POST" && p === "/api/v1/pi/commands") {
-        const body = await readBody(req)
-        const type = typeof body.type === "string" ? body.type : undefined
-        if (!type) throw invalidRequest("body.type must be a command type string")
-        const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
-          ? body.params as JsonObject
-          : undefined
-        const data = await sessions.catalogCommand(type, params)
-        return sendJson(res, 200, { data: data ?? null })
-      }
-
-      if (p === "/api/v1/pi/sessions") {
-        if (method === "GET") {
-          const cwd = url.searchParams.get("cwd")
-          const listed = cwd
-            ? await sessions.catalogCommand("session.list", { cwd }, { retry: true })
-            : await sessions.catalogCommand("session.listAll", undefined, { retry: true })
-          return sendJson(res, 200, { sessions: listed ?? [], attached: sessions.listAttachedIds() })
-        }
-        if (method === "POST") {
-          const body = await readBody(req)
-          const cwd = body.cwd
-          if (typeof cwd !== "string" || !cwd) throw invalidRequest("body.cwd must be a non-empty string")
-          const sessionFile = typeof body.sessionFile === "string" ? body.sessionFile : undefined
-          return sendJson(res, 201, await sessions.openSession(cwd, sessionFile))
-        }
-        res.setHeader("allow", "GET,POST")
-        return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
-      }
-
-      const sessionMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)(\/(.*))?$/)
-      if (sessionMatch) {
-        const sessionId = decodeURIComponent(sessionMatch[1]!)
-        const sub = sessionMatch[3] ?? ""
-
-        if (!sub && method === "GET") {
-          return sendJson(res, 200, { data: await sessions.sessionQuery(sessionId, "state.get") ?? null })
-        }
-        if (!sub && method === "DELETE") {
-          await sessions.closeSession(sessionId)
-          return sendJson(res, 200, { ok: true })
-        }
-        if ((sub === "entries" || sub === "branch") && method === "GET") {
-          const data = await sessions.sessionQuery(sessionId, `${sub}.get`, {
-            cursor: url.searchParams.get("cursor") ?? null,
-            limit: pageLimit(url, "limit", 200, 1000),
-            maxBytes: pageLimit(url, "maxBytes", 4 * 1024 * 1024, 32 * 1024 * 1024),
-          })
-          return sendJson(res, 200, { data: data ?? null })
-        }
-        if (sub === "tree" && method === "GET") {
-          return sendJson(res, 200, { data: await sessions.sessionQuery(sessionId, "tree.get") ?? null })
-        }
-        if (sub === "registry" && method === "GET") {
-          return sendJson(res, 200, { data: await sessions.sessionQuery(sessionId, "registry.get") ?? null })
-        }
-        const attachmentMatch = sub.match(/^entries\/([^/]+)\/attachments\/(\d+)$/)
-        if (attachmentMatch && method === "GET") {
-          const data = await sessions.sessionQuery(sessionId, "attachment.get", {
-            entryId: decodeURIComponent(attachmentMatch[1]!),
-            blockIndex: Number(attachmentMatch[2]),
-          }) as { mimeType: string; data: string; etag: string } | undefined
-          if (!data) return sendProblem(res, 404, Object.assign(new Error("attachment not found"), { code: "NOT_FOUND" }))
-          const etag = req.headers["if-none-match"]
-          if (typeof etag === "string" && etag === data.etag) {
-            res.writeHead(304)
-            res.end()
-            return
-          }
-          const bytes = Buffer.from(data.data, "base64")
-          res.writeHead(200, {
-            "content-type": data.mimeType,
-            "content-length": bytes.length,
-            etag: data.etag,
-          })
-          res.end(bytes)
-          return
-        }
-        if (sub === "commands" && method === "POST") {
-          const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
-          const type = typeof body.type === "string" ? body.type : undefined
-          if (!type) throw invalidRequest("body.type must be a command type string")
-          const id = typeof body.id === "string" && body.id ? body.id : randomUUID()
-          const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
-            ? body.params as JsonObject
-            : undefined
-          const submitted = sessions.submitSessionCommand(sessionId, { id, type, params })
-          void submitted.promise.catch(() => undefined)
-          return sendJson(res, 202, { command: submitted.record })
-        }
-        return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
+        return sendJson(res, 200, { data: result ?? null })
       }
 
       const commandMatch = p.match(/^\/api\/v1\/host\/commands\/([^/]+)$/)
