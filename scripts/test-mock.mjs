@@ -10,14 +10,10 @@ if (!npmCli) {
 const commands = [
   ["run", "build", "-w", "@piui/protocol"],
   ["run", "build", "-w", "@piui/pi-worker"],
-  ["run", "test:phase0"],
-  ["run", "test:phase3"],
-  ["run", "test:mvp"],
-  ["run", "test:usable"],
+  ["run", "build", "-w", "@piui/server"],
   ["run", "test", "-w", "@piui/protocol"],
-  ["run", "test", "-w", "@piui/server"],
   ["run", "test", "-w", "@piui/pi-worker"],
-  ["run", "test:run", "-w", "@piui/app"],
+  ["run", "test", "-w", "@piui/server"],
 ]
 
 for (const args of commands) {

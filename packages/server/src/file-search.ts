@@ -1,10 +1,10 @@
 import { readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import type {
-  FileNameSearchResponseV1,
-  FileSearchStatsV1,
-  FileTextSearchResponseV1,
-  WorkspaceTextSearchMatchV1,
+  FileNameSearchResponse,
+  FileSearchStats,
+  FileTextSearchResponse,
+  WorkspaceTextSearchMatch,
 } from "@piui/protocol"
 import type { WorkspaceRecord } from "./workspace-store.ts"
 import { resolveWorkspacePath } from "./path-safety.ts"
@@ -21,14 +21,14 @@ export async function searchFilesByName(
   ws: WorkspaceRecord,
   query: string,
   opts: { type?: "file" | "directory"; limit?: number; signal?: AbortSignal } = {},
-): Promise<FileNameSearchResponseV1> {
+): Promise<FileNameSearchResponse> {
   const started = performance.now()
   const needle = query.trim().toLocaleLowerCase()
   const limit = boundedLimit(opts.limit)
   const paths: string[] = []
   let visited = 0
   let scannedFiles = 0
-  let limitReason: FileSearchStatsV1["limitReason"]
+  let limitReason: FileSearchStats["limitReason"]
   if (needle) {
     await walkWorkspace(ws, opts.signal, async entry => {
       visited++
@@ -59,15 +59,15 @@ export async function searchWorkspaceText(
   ws: WorkspaceRecord,
   pattern: string,
   opts: { limit?: number; signal?: AbortSignal } = {},
-): Promise<FileTextSearchResponseV1> {
+): Promise<FileTextSearchResponse> {
   const started = performance.now()
   const needle = pattern.trim()
   const limit = boundedLimit(opts.limit)
-  const matches: WorkspaceTextSearchMatchV1[] = []
+  const matches: WorkspaceTextSearchMatch[] = []
   let visited = 0
   let scannedFiles = 0
   let scannedBytes = 0
-  let limitReason: FileSearchStatsV1["limitReason"]
+  let limitReason: FileSearchStats["limitReason"]
   if (needle) {
     await walkWorkspace(ws, opts.signal, async entry => {
       visited++
@@ -185,7 +185,7 @@ function collectTextMatches(
   content: string,
   relativePath: string,
   needle: string,
-  results: WorkspaceTextSearchMatchV1[],
+  results: WorkspaceTextSearchMatch[],
   limit: number,
 ): void {
   const matcher = new RegExp(escapeRegExp(needle), "giu")
@@ -197,7 +197,7 @@ function collectTextMatches(
     const end = newline < 0 ? content.length : newline
     const rawLine = content.slice(charOffset, end)
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine
-    const submatches: WorkspaceTextSearchMatchV1["submatches"] = []
+    const submatches: WorkspaceTextSearchMatch["submatches"] = []
     matcher.lastIndex = 0
     for (const match of line.matchAll(matcher)) {
       const start = match.index
@@ -247,8 +247,8 @@ function stats(
   visited: number,
   scannedFiles: number,
   scannedBytes: number,
-  limitReason: FileSearchStatsV1["limitReason"],
-): FileSearchStatsV1 {
+  limitReason: FileSearchStats["limitReason"],
+): FileSearchStats {
   return {
     visited,
     scannedFiles,

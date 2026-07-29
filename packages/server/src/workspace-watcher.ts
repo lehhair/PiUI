@@ -1,10 +1,12 @@
 import path from "node:path"
 import chokidar, { type FSWatcher } from "chokidar"
 import { lstat, readFile } from "node:fs/promises"
-import type { EventPayloadsV2 } from "@piui/protocol"
+import type { JsonObject } from "@piui/protocol"
+
+type WorkspaceFileChange = { path: string; kind: "created" | "changed" | "deleted"; type: "file" | "directory" }
 import type { EventHub } from "./event-hub.ts"
 import { invalidateGitCache } from "./git.ts"
-import type { WorkspaceRecord } from "./workspace-store.ts"
+import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
 
 const FLUSH_DELAY_MS = 80
 const MAX_CHANGES_PER_EVENT = 512
@@ -15,7 +17,7 @@ interface WatchedWorkspace {
   watcher: FSWatcher
   gitWatcher?: FSWatcher
   revision: number
-  pending: Map<string, EventPayloadsV2["workspace.files.changed"]["changes"][number]>
+  pending: Map<string, WorkspaceFileChange>
   gitDirty: boolean
   rescan: boolean
   timer?: NodeJS.Timeout
@@ -133,6 +135,15 @@ export class WorkspaceWatcher {
     }
   }
 
+  unwatch(workspace: WorkspaceRecord): void {
+    const key = workspacePathKey(workspace.canonicalRoot)
+    const state = this.watched.get(key)
+    if (!state) return
+    if (state.timer) clearTimeout(state.timer)
+    this.watched.delete(key)
+    void Promise.all([state.watcher.close(), state.gitWatcher?.close()]).catch(() => undefined)
+  }
+
   private evictOldest(): void {
     const oldest = [...this.watched.entries()].sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt)[0]
     if (!oldest) return
@@ -148,9 +159,9 @@ export class WorkspaceWatcher {
       state.timer = undefined
       state.revision++
       if (state.pending.size > 0 || state.rescan) {
-        this.eventHub.publishV2(
+        this.eventHub.publish(
           { kind: "workspace", id: workspace.canonicalRoot },
-          "workspace.files.changed",
+          "workspace.files",
           {
             workspacePath: workspace.canonicalRoot,
             revision: state.revision,
@@ -161,9 +172,9 @@ export class WorkspaceWatcher {
       }
       if (state.gitDirty) {
         invalidateGitCache(workspace.canonicalRoot)
-        this.eventHub.publishV2(
+        this.eventHub.publish(
           { kind: "workspace", id: workspace.canonicalRoot },
-          "workspace.git.updated",
+          "workspace.git",
           { workspacePath: workspace.canonicalRoot, revision: state.revision },
         )
       }
@@ -196,7 +207,7 @@ function isGitMetadata(relative: string): boolean {
 function toChange(
   event: string,
   relative: string,
-): EventPayloadsV2["workspace.files.changed"]["changes"][number] | null {
+): WorkspaceFileChange | null {
   if (event === "add") return { path: relative, kind: "created", type: "file" }
   if (event === "addDir") return { path: relative, kind: "created", type: "directory" }
   if (event === "change") return { path: relative, kind: "changed", type: "file" }

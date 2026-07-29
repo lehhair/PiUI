@@ -1,4 +1,4 @@
-export type GitFileStatusV1 =
+export type GitFileStatus =
   | "added"
   | "modified"
   | "deleted"
@@ -8,24 +8,24 @@ export type GitFileStatusV1 =
   | "untracked"
   | "unknown"
 
-export interface GitStatusItemV1 {
+export type GitStatusItem = {
   path: string
   oldPath?: string
-  status: GitFileStatusV1
+  status: GitFileStatus
   indexStatus: string
   worktreeStatus: string
   staged: boolean
   unstaged: boolean
 }
 
-export interface GitStatusResponseV1 {
+export type GitStatusResponse = {
   branch: string | null
   ahead: number
   behind: number
-  items: GitStatusItemV1[]
+  items: GitStatusItem[]
 }
 
-export interface GitInfoResponseV1 {
+export type GitInfoResponse = {
   branch: string | null
   root: boolean
   rootPath?: string
@@ -38,26 +38,26 @@ export interface GitInfoResponseV1 {
   behind: number
 }
 
-export type GitDiffModeV1 = "git" | "branch" | "staged" | "unstaged"
+export type GitDiffMode = "git" | "branch" | "staged" | "unstaged"
 
-export interface GitDiffItemV1 {
+export type GitDiffItem = {
   file: string
   oldPath?: string
-  status: Exclude<GitFileStatusV1, "conflicted" | "unknown">
+  status: Exclude<GitFileStatus, "conflicted" | "unknown">
   additions: number
   deletions: number
   binary: boolean
 }
 
-export interface GitDiffResponseV1 {
-  mode: GitDiffModeV1
+export type GitDiffResponse = {
+  mode: GitDiffMode
   baseRef?: string
   baseCommit?: string
-  files: GitDiffItemV1[]
+  files: GitDiffItem[]
 }
 
-export interface GitFileDiffResponseV1 extends GitDiffItemV1 {
-  mode: GitDiffModeV1
+export type GitFileDiffResponse = GitDiffItem & {
+  mode: GitDiffMode
   patch: string
   truncated: boolean
 }

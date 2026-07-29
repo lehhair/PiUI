@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
 import type {
-  ExtensionUiDialogRequestV1,
-  ExtensionUiDialogResponseV1,
-  ExtensionUiEditorCommandV1,
-  ExtensionUiStatePatchV1,
-  ExtensionUiSettlementReasonV1,
+  ExtensionUiDialogRequest,
+  ExtensionUiDialogResponse,
+  ExtensionUiEditorCommand,
+  ExtensionUiStatePatch,
+  ExtensionUiSettlementReason,
 } from "@piui/protocol"
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent"
 
@@ -14,15 +14,15 @@ const MAX_OPTIONS = 200
 const MAX_WIDGET_LINES = 500
 
 export type PiExtensionUiEvent =
-  | { type: "requested"; request: ExtensionUiDialogRequestV1 }
-  | { type: "settled"; requestId: string; sessionId: string; reason: ExtensionUiSettlementReasonV1 }
-  | { type: "state"; sessionId: string; patch: ExtensionUiStatePatchV1 }
+  | { type: "requested"; request: ExtensionUiDialogRequest }
+  | { type: "settled"; requestId: string; sessionId: string; reason: ExtensionUiSettlementReason }
+  | { type: "state"; sessionId: string; patch: ExtensionUiStatePatch }
   | { type: "notify"; sessionId: string; message: string; notifyType?: "info" | "warning" | "error" }
-  | { type: "editor"; sessionId: string; command: ExtensionUiEditorCommandV1 }
+  | { type: "editor"; sessionId: string; command: ExtensionUiEditorCommand }
 
 interface PendingDialog {
-  request: ExtensionUiDialogRequestV1
-  resolve: (response: ExtensionUiDialogResponseV1) => void
+  request: ExtensionUiDialogRequest
+  resolve: (response: ExtensionUiDialogResponse) => void
   timer?: NodeJS.Timeout
   removeAbort?: () => void
 }
@@ -46,7 +46,7 @@ export class ExtensionUiBridge {
     return () => this.listeners.delete(listener)
   }
 
-  respond(requestId: string, response: ExtensionUiDialogResponseV1): boolean {
+  respond(requestId: string, response: ExtensionUiDialogResponse): boolean {
     const pending = this.pending.get(requestId)
     if (!pending) return false
     if (!("cancelled" in response)) {
@@ -72,7 +72,7 @@ export class ExtensionUiBridge {
     this.editorText = text
   }
 
-  cancelAll(reason: ExtensionUiSettlementReasonV1): void {
+  cancelAll(reason: ExtensionUiSettlementReason): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer)
       pending.removeAbort?.()
@@ -206,7 +206,7 @@ export class ExtensionUiBridge {
   }
 
   private dialog(
-    kind: ExtensionUiDialogRequestV1["kind"],
+    kind: ExtensionUiDialogRequest["kind"],
     fields: {
       title: string
       options?: string[]
@@ -215,7 +215,7 @@ export class ExtensionUiBridge {
       prefill?: string
     },
     opts?: { timeout?: number; signal?: AbortSignal },
-  ): Promise<ExtensionUiDialogResponseV1> {
+  ): Promise<ExtensionUiDialogResponse> {
     if (opts?.signal?.aborted) return Promise.resolve({ cancelled: true })
     assertText("dialog title", fields.title, MAX_TITLE_LENGTH)
     if (fields.message !== undefined) assertText("dialog message", fields.message)
@@ -237,7 +237,7 @@ export class ExtensionUiBridge {
       createdAt: createdAt.toISOString(),
       expiresAt: opts?.timeout ? new Date(createdAt.getTime() + opts.timeout).toISOString() : undefined,
     }
-    const request: ExtensionUiDialogRequestV1 = kind === "select"
+    const request: ExtensionUiDialogRequest = kind === "select"
       ? { ...base, kind, options: fields.options ?? [] }
       : kind === "confirm"
         ? { ...base, kind, message: fields.message ?? "" }
@@ -255,7 +255,7 @@ export class ExtensionUiBridge {
           type: "settled",
           requestId,
           sessionId: request.sessionId,
-          reason: reason as ExtensionUiSettlementReasonV1,
+          reason: reason as ExtensionUiSettlementReason,
         })
       }
       if (opts?.timeout) pending.timer = setTimeout(() => cancel("timeout"), opts.timeout)
@@ -269,7 +269,7 @@ export class ExtensionUiBridge {
     })
   }
 
-  private state(patch: ExtensionUiStatePatchV1): void {
+  private state(patch: ExtensionUiStatePatch): void {
     this.emit({ type: "state", sessionId: this.getSessionId(), patch })
   }
 

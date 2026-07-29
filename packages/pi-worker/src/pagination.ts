@@ -1,68 +1,71 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
-import type {
-  PiNativeEntriesPageV1,
-  PiNativeBranchCheckpointV1,
-  PiNativeJsonValueV1,
-  PiNativeSessionEnvelopeV1,
-  PiNativeSessionHeadV1,
-} from "@piui/protocol"
+import type { EventCursor, JsonObject, JsonValue } from "@piui/protocol"
+
+export type LiveMessage = {
+  id: string
+  revision: number
+  phase: "streaming" | "persisting"
+  message: JsonValue
+}
+
+export type SessionHead = {
+  sdkVersion: string
+  revision: number
+  sessionFormatVersion?: number
+  header: JsonObject | null
+  leafId: string | null
+  entryCount: number
+  epoch: string
+}
+
+export type BranchCheckpoint = {
+  position: EventCursor
+  liveMessage?: LiveMessage
+}
+
+export type EntriesPage = {
+  head: SessionHead
+  items: JsonObject[]
+  checkpoint?: BranchCheckpoint
+  beforeCursor?: string
+  hasMore: boolean
+}
 
 type NativeCursor = { v: 1; epoch: string; beforeId: string }
 const cursorSecret = randomBytes(32)
 
-export function nativeSessionHead(native: PiNativeSessionEnvelopeV1): PiNativeSessionHeadV1 {
-  return nativeSessionHeadFromParts({
-    sdkVersion: native.sdkVersion,
-    revision: native.revision,
-    sessionFormatVersion: native.sessionFormatVersion,
-    header: native.header,
-    leafId: native.leafId,
-    entryCount: native.entries.length,
-  })
-}
-
-export function nativeSessionHeadFromParts(
-  parts: Omit<PiNativeSessionHeadV1, "namespace" | "schemaVersion" | "epoch">,
+export function sessionHeadFromParts(
+  parts: Omit<SessionHead, "epoch">,
   epochSeed: unknown = parts.header,
-): PiNativeSessionHeadV1 {
+): SessionHead {
   return {
-    namespace: "pi",
-    schemaVersion: 1,
     ...parts,
     epoch: createHash("sha256").update(JSON.stringify(epochSeed)).digest("base64url").slice(0, 22),
   }
 }
 
-export function nativeEntriesPage(
-  native: PiNativeSessionEnvelopeV1,
-  options: { cursor?: string; limit: number; maxBytes: number },
-): PiNativeEntriesPageV1 {
-  const head = nativeSessionHead(native)
-  return nativeEntriesPageFromEntries(head, native.entries, options, item => item)
-}
-
-export function nativeEntriesPageFromEntries<T>(
-  head: PiNativeSessionHeadV1,
+export function entriesPageFromEntries<T>(
+  head: SessionHead,
   entries: readonly T[],
-  options: { cursor?: string; limit: number; maxBytes: number; checkpoint?: PiNativeBranchCheckpointV1 },
-  serialize: (entry: T) => { [key: string]: PiNativeJsonValueV1 },
-): PiNativeEntriesPageV1 {
+  options: { cursor?: string; limit: number; maxBytes: number; checkpoint?: BranchCheckpoint },
+  serialize: (entry: T) => JsonObject,
+): EntriesPage {
   const decoded = options.cursor ? decodeCursor(options.cursor) : undefined
-  if (decoded && decoded.epoch !== head.epoch) throw staleCursor("native cursor belongs to another session epoch")
+  if (decoded && decoded.epoch !== head.epoch) throw staleCursor("cursor belongs to another session epoch")
   const before = decoded
-    ? entries.findIndex(entry => entryId(entry) === decoded.beforeId)
+    ? entries.findIndex(entry => entryIdOf(entry) === decoded.beforeId)
     : entries.length
-  if (before < 0) throw staleCursor("native cursor anchor is no longer in the session")
+  if (before < 0) throw staleCursor("cursor anchor is no longer in the session")
   const emptyPage = { head, items: [], checkpoint: options.checkpoint, hasMore: before > 0 }
   if (Buffer.byteLength(JSON.stringify(emptyPage), "utf8") > options.maxBytes) {
-    throw Object.assign(new Error("native page metadata exceeds the byte limit"), { code: "FILE_TOO_LARGE" })
+    throw Object.assign(new Error("page metadata exceeds the byte limit"), { code: "FILE_TOO_LARGE" })
   }
-  const selected: Array<{ [key: string]: PiNativeJsonValueV1 }> = []
+  const selected: JsonObject[] = []
   let index = before - 1
   while (index >= 0 && selected.length < options.limit) {
     const item = serialize(entries[index]!)
     if (typeof item.id !== "string") {
-      throw Object.assign(new Error("Pi session entry id is not a string"), { code: "NATIVE_SESSION_NOT_JSON" })
+      throw Object.assign(new Error("Pi session entry id is not a string"), { code: "NATIVE_DATA_NOT_JSON" })
     }
     const candidate = [item, ...selected]
     const candidateStart = index
@@ -78,7 +81,7 @@ export function nativeEntriesPageFromEntries<T>(
     }
     const candidateBytes = Buffer.byteLength(JSON.stringify(candidatePage), "utf8")
     if (candidateBytes > options.maxBytes) {
-      if (!selected.length) throw Object.assign(new Error("native entry exceeds the page byte limit"), { code: "FILE_TOO_LARGE" })
+      if (!selected.length) throw Object.assign(new Error("entry exceeds the page byte limit"), { code: "FILE_TOO_LARGE" })
       break
     }
     selected.unshift(item)
@@ -96,26 +99,16 @@ export function nativeEntriesPageFromEntries<T>(
   }
 }
 
-export function nativeImageAttachment(
-  native: PiNativeSessionEnvelopeV1,
-  entryId: string,
-  blockIndex: number,
-): { mimeType: string; data: string; etag: string } {
-  const entry = native.entries.find(item => item.id === entryId)
-  if (!entry) throw notFound("native entry not found")
-  return nativeImageAttachmentFromEntry(entry, blockIndex)
-}
-
-export function nativeImageAttachmentFromEntry(
-  entry: { [key: string]: PiNativeJsonValueV1 },
+export function imageAttachmentFromEntry(
+  entry: JsonObject,
   blockIndex: number,
 ): { mimeType: string; data: string; etag: string } {
   const message = asRecord(entry.message)
   const content = message.content
-  if (!Array.isArray(content)) throw notFound("native entry has no message content")
-  const block = asRecord(content[blockIndex])
+  if (!Array.isArray(content)) throw notFound("entry has no message content")
+  const block = asRecord(content[blockIndex] as JsonValue)
   if (block.type !== "image" || typeof block.mimeType !== "string" || typeof block.data !== "string") {
-    throw notFound("native image block not found")
+    throw notFound("image block not found")
   }
   return {
     mimeType: block.mimeType,
@@ -145,11 +138,11 @@ function decodeCursor(cursor: string): NativeCursor {
   }
 }
 
-function asRecord(value: PiNativeJsonValueV1 | undefined): { [key: string]: PiNativeJsonValueV1 } {
+function asRecord(value: JsonValue | undefined): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {}
 }
 
-function entryId(value: unknown): string | undefined {
+function entryIdOf(value: unknown): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const id = (value as { id?: unknown }).id
   return typeof id === "string" ? id : undefined

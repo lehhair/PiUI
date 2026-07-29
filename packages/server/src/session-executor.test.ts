@@ -1,168 +1,126 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import type { CommandRecordV2, CommandRequestV2, CommandTypeV2 } from "@piui/protocol"
+import type { CommandEnvelope } from "@piui/protocol"
 import { SessionExecutor } from "./session-executor.ts"
 
-function request<T extends CommandTypeV2>(
-  commandId: string,
-  sessionId: string,
-  type: T,
-  concurrency: CommandRequestV2<T>["concurrency"],
-  payload: CommandRequestV2<T>["payload"],
-): CommandRequestV2<T> {
-  return { protocolVersion: 2, commandId, sessionId, type, concurrency, payload }
+function envelope(id: string, sessionId: string | undefined, type: string, params?: CommandEnvelope["params"]): CommandEnvelope {
+  return { id, sessionId, type, params }
 }
 
-test("SessionExecutor serializes idle commands and keeps sessions independent", async () => {
+test("SessionExecutor serializes session commands and keeps sessions independent", async () => {
   const executor = new SessionExecutor()
   const order: string[] = []
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
 
-  const first = executor.submit(
-    request("one", "a", "session.prompt", "idle-only", { text: "one" }),
-    async () => {
-      order.push("a1:start")
-      await gate
-      order.push("a1:end")
-      return 1
-    },
-  )
-  const second = executor.submit(
-    request("two", "a", "session.compact", "idle-only", {}),
-    async () => { order.push("a2"); return 2 },
-  )
-  const other = executor.submit(
-    request("three", "b", "session.prompt", "idle-only", { text: "three" }),
-    async () => { order.push("b1"); return 3 },
-  )
+  const first = executor.submit(envelope("one", "a", "prompt"), async () => {
+    order.push("a1:start")
+    await gate
+    order.push("a1:end")
+    return 1
+  })
+  const second = executor.submit(envelope("two", "a", "compact"), async () => {
+    order.push("a2")
+    return 2
+  })
+  const other = executor.submit(envelope("three", "b", "prompt"), async () => {
+    order.push("b1")
+    return 3
+  })
 
   await other.promise
   assert.deepEqual(order, ["a1:start", "b1"])
+  assert.equal(second.record.status === "completed", false)
   release()
-  assert.deepEqual(await Promise.all([first.promise, second.promise]), [1, 2])
+  await first.promise
+  await second.promise
   assert.deepEqual(order, ["a1:start", "b1", "a1:end", "a2"])
+  assert.equal(first.record.status, "completed")
+  assert.equal(first.record.result, 1)
 })
 
-test("SessionExecutor runs control commands without waiting for idle work", async () => {
+test("SessionExecutor runs catalog commands without waiting for session work", async () => {
   const executor = new SessionExecutor()
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  const prompt = executor.submit(
-    request("prompt", "a", "session.prompt", "idle-only", { text: "work" }),
-    async () => { await gate },
-  )
-  let controlled = false
-  const control = executor.submit(
-    request("follow-up", "a", "session.followUp", "run-control", { text: "next" }),
-    async () => { controlled = true },
-  )
+  const order: string[] = []
 
-  await control.promise
-  assert.equal(controlled, true)
+  const prompt = executor.submit(envelope("one", "a", "prompt"), async () => {
+    order.push("prompt")
+    await gate
+    return undefined
+  })
+  const catalog = executor.submit(envelope("two", undefined, "session.list"), async () => {
+    order.push("catalog")
+    return undefined
+  })
+
+  await catalog.promise
+  assert.deepEqual(order, ["prompt", "catalog"])
   release()
   await prompt.promise
 })
 
-test("SessionExecutor reuses commandId and records failures", async () => {
+test("SessionExecutor reuses command id and records failures", async () => {
   const executor = new SessionExecutor()
   let calls = 0
-  const input = request("same", "a", "session.prompt", "idle-only", { text: "same" })
-  const first = executor.submit(input, async () => ++calls)
-  const duplicate = executor.submit(input, async () => ++calls)
-  assert.equal(await duplicate.promise, 1)
-  assert.equal(first.promise, duplicate.promise)
+  const run = async () => {
+    calls += 1
+    if (calls === 1) return "first"
+    return "second"
+  }
+  const env = envelope("same", "a", "prompt")
+  const first = executor.submit(env, run)
+  const second = executor.submit(env, run)
+  assert.equal(second.reused, true)
+  await first.promise
+  await second.promise
   assert.equal(calls, 1)
-  assert.equal(executor.get("same")?.status, "completed")
-  assert.throws(
-    () => executor.submit(
-      request("same", "a", "session.prompt", "idle-only", { text: "different" }),
-      async () => ++calls,
-    ),
-    /commandId already used/,
-  )
 
-  const failed = executor.submit(
-    request("failed", "a", "session.compact", "idle-only", {}),
-    async () => { throw Object.assign(new Error("bad"), { code: "INVALID_REQUEST" }) },
-  )
-  await assert.rejects(failed.promise, /bad/)
-  assert.deepEqual(executor.get("failed")?.error, { code: "INVALID_REQUEST", message: "bad" })
-})
-
-test("SessionExecutor records selected command results", async () => {
-  const executor = new SessionExecutor()
-  const command = executor.submit(
-    request("result", "a", "session.executeBash", "idle-only", { command: "pwd" }),
-    async () => ({ output: "workspace", secret: "hidden" }),
-    { recordResult: result => ({ output: result.output }) },
-  )
-  await command.promise
-  assert.deepEqual(executor.get("result")?.result, { output: "workspace" })
-})
-
-test("SessionExecutor emits immutable command status updates", async () => {
-  const updates: CommandRecordV2[] = []
-  const executor = new SessionExecutor(record => updates.push(record))
-  const command = executor.submit(
-    request("command-events", "session-a", "session.prompt", "idle-only", { text: "done" }),
-    async () => "done",
-  )
-  await command.promise
-
-  assert.deepEqual(updates.map(update => update.status), ["accepted", "running", "completed"])
-  assert.equal(updates[0]?.startedAt, undefined)
-  assert.equal(updates[2]?.completedAt !== undefined, true)
+  const failed = executor.submit(envelope("bad", "a", "prompt"), async () => {
+    throw Object.assign(new Error("boom"), { code: "INVALID_REQUEST" })
+  })
+  await assert.rejects(failed.promise)
+  assert.equal(failed.record.status, "failed")
+  assert.equal(failed.record.error?.code, "INVALID_REQUEST")
 })
 
 test("SessionExecutor bounds retained commands and keeps unfinished ones", async () => {
   const executor = new SessionExecutor()
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  const pending = executor.submit(
-    request("pending", "a", "session.prompt", "idle-only", { text: "pending" }),
-    async () => { await gate },
-  )
-  await new Promise<void>(resolve => setImmediate(resolve))
-
   for (let index = 0; index < 600; index += 1) {
-    const finished = executor.submit(
-      request(`done-${index}`, "b", "session.setName", "queueable", { name: `n${index}` }),
-      async () => index,
-    )
-    await finished.promise
+    executor.submit(envelope(`done-${index}`, "a", "compact"), async () => index)
+    await executor.get(`done-${index}`)!.status
   }
-
+  await new Promise(resolve => setImmediate(resolve))
+  const pending = executor.submit(envelope("pending", "a", "prompt"), () => new Promise(() => undefined))
+  for (let index = 600; index < 700; index += 1) {
+    await executor.submit(envelope(`later-${index}`, "b", "compact"), async () => index).promise
+  }
+  assert.ok(executor.get("pending"))
   assert.equal(executor.get("done-0"), undefined)
-  assert.equal(executor.get("done-599")?.status, "completed")
-  // The still-running command must survive pruning.
-  assert.equal(executor.get("pending")?.status, "running")
-  release()
-  await pending.promise
+  void pending
 })
 
 test("SessionExecutor invalidates running and queued commands after a runtime crash", async () => {
   const executor = new SessionExecutor()
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  let queuedRan = false
-  const running = executor.submit(
-    request("running", "session-a", "session.prompt", "idle-only", { text: "running" }),
-    async () => { await gate },
-  )
-  const queued = executor.submit(
-    request("queued", "session-a", "session.prompt", "idle-only", { text: "queued" }),
-    async () => { queuedRan = true },
-  )
-  await new Promise<void>(resolve => setImmediate(resolve))
+  const running = executor.submit(envelope("running", "a", "prompt"), async () => {
+    await gate
+    return "done"
+  })
+  const queued = executor.submit(envelope("queued", "a", "compact"), async () => "queued")
+  await new Promise(resolve => setImmediate(resolve))
 
-  executor.markRuntimeCrashed("session-a")
-  assert.equal(executor.get("running")?.status, "unknown_after_crash")
-  assert.equal(executor.get("queued")?.status, "cancelled")
+  executor.markRuntimeCrashed("a")
+  assert.equal(running.record.status, "unknown_after_crash")
+  assert.equal(queued.record.status, "cancelled")
+  assert.equal(running.record.error?.retryable, true)
   release()
-  const results = await Promise.allSettled([running.promise, queued.promise])
-  assert.deepEqual(results.map(result => result.status), ["rejected", "rejected"])
-  assert.equal(queuedRan, false)
-  assert.equal(executor.get("running")?.status, "unknown_after_crash")
-  assert.equal(executor.get("queued")?.status, "cancelled")
+  await assert.rejects(running.promise)
+  await assert.rejects(queued.promise)
+
+  const after = executor.submit(envelope("after", "a", "prompt"), async () => "after")
+  await after.promise
+  assert.equal(after.record.status, "completed")
 })

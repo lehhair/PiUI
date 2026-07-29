@@ -2,14 +2,14 @@ import { spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
 import type {
-  GitDiffItemV1,
-  GitDiffModeV1,
-  GitDiffResponseV1,
-  GitFileDiffResponseV1,
-  GitFileStatusV1,
-  GitInfoResponseV1,
-  GitStatusItemV1,
-  GitStatusResponseV1,
+  GitDiffItem,
+  GitDiffMode,
+  GitDiffResponse,
+  GitFileDiffResponse,
+  GitFileStatus,
+  GitInfoResponse,
+  GitStatusItem,
+  GitStatusResponse,
 } from "@piui/protocol"
 import { normalizeRelativePath } from "./path-safety.ts"
 
@@ -96,11 +96,11 @@ export async function isGitRepo(cwd: string, signal?: AbortSignal): Promise<bool
   return result.code === 0 && text(result.stdout).trim() === "true"
 }
 
-export function getGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
+export function getGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponse> {
   return cachedResult(cwd, "info", signal, () => loadGitInfo(cwd, signal))
 }
 
-async function loadGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
+async function loadGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoResponse> {
   if (!(await isGitRepo(cwd, signal))) return emptyInfo()
   const [rootResult, branchResult, oidResult, upstreamResult, originHeadResult] = await Promise.all([
     runGit(cwd, ["rev-parse", "--show-toplevel"], { signal }),
@@ -142,13 +142,13 @@ async function loadGitInfo(cwd: string, signal?: AbortSignal): Promise<GitInfoRe
   }
 }
 
-export function parsePorcelainStatus(stdout: string): GitStatusItemV1[] {
+export function parsePorcelainStatus(stdout: string): GitStatusItem[] {
   return stdout.includes("\0") ? parsePorcelainStatusZ(stdout) : parsePorcelainLines(stdout)
 }
 
-export function parsePorcelainStatusZ(stdout: string): GitStatusItemV1[] {
+export function parsePorcelainStatusZ(stdout: string): GitStatusItem[] {
   const records = stdout.split("\0")
-  const items: GitStatusItemV1[] = []
+  const items: GitStatusItem[] = []
   for (let index = 0; index < records.length;) {
     const record = records[index++]
     if (!record || record.length < 3) continue
@@ -161,7 +161,7 @@ export function parsePorcelainStatusZ(stdout: string): GitStatusItemV1[] {
   return items
 }
 
-function parsePorcelainLines(stdout: string): GitStatusItemV1[] {
+function parsePorcelainLines(stdout: string): GitStatusItem[] {
   return stdout.split(/\r?\n/).flatMap(line => {
     if (line.length < 4) return []
     const xy = line.slice(0, 2)
@@ -173,7 +173,7 @@ function parsePorcelainLines(stdout: string): GitStatusItemV1[] {
   })
 }
 
-export function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStatusResponseV1> {
+export function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStatusResponse> {
   const load = async () => {
     const info = await getGitInfo(cwd, signal)
     if (!info.root) return { branch: null, ahead: 0, behind: 0, items: [] }
@@ -189,7 +189,7 @@ export function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStat
   return cachedResult(cwd, "status", signal, load)
 }
 
-export function getGitDiff(cwd: string, mode: GitDiffModeV1, signal?: AbortSignal): Promise<GitDiffResponseV1> {
+export function getGitDiff(cwd: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitDiffResponse> {
   const load = async () => {
     const info = await getGitInfo(cwd, signal)
     if (!info.root) return { mode, files: [] }
@@ -258,10 +258,10 @@ async function countUntrackedStats(
 
 export async function getGitFileDiff(
   cwd: string,
-  mode: GitDiffModeV1,
+  mode: GitDiffMode,
   filePath: string,
   signal?: AbortSignal,
-): Promise<GitFileDiffResponseV1> {
+): Promise<GitFileDiffResponse> {
   const relative = normalizeRelativePath(filePath)
   if (!relative) throw Object.assign(new Error("file path required"), { code: "INVALID_REQUEST" })
   const diff = await getGitDiff(cwd, mode, signal)
@@ -298,7 +298,7 @@ export function invalidateGitCache(cwd?: string): void {
   for (const key of completedCache.keys()) if (key.startsWith(prefix)) completedCache.delete(key)
 }
 
-function combineDiff(nameStatus: string, numstat: string): GitDiffItemV1[] {
+function combineDiff(nameStatus: string, numstat: string): GitDiffItem[] {
   const numbers = parseNumstatZ(numstat)
   return parseNameStatusZ(nameStatus).map(item => {
     const number = numbers.get(item.file)
@@ -311,9 +311,9 @@ function combineDiff(nameStatus: string, numstat: string): GitDiffItemV1[] {
   })
 }
 
-function parseNameStatusZ(stdout: string): Array<Pick<GitDiffItemV1, "file" | "oldPath" | "status">> {
+function parseNameStatusZ(stdout: string): Array<Pick<GitDiffItem, "file" | "oldPath" | "status">> {
   const tokens = stdout.split("\0")
-  const items: Array<Pick<GitDiffItemV1, "file" | "oldPath" | "status">> = []
+  const items: Array<Pick<GitDiffItem, "file" | "oldPath" | "status">> = []
   for (let index = 0; index < tokens.length;) {
     const code = tokens[index++]
     if (!code) continue
@@ -360,8 +360,8 @@ export function parseNumstatZ(stdout: string): Map<string, { additions: number; 
 
 async function comparisonForMode(
   cwd: string,
-  mode: GitDiffModeV1,
-  info: GitInfoResponseV1,
+  mode: GitDiffMode,
+  info: GitInfoResponse,
   signal?: AbortSignal,
 ): Promise<{ args: string[]; baseRef?: string; baseCommit?: string }> {
   if (mode === "staged") return { args: ["--cached"] }
@@ -385,7 +385,7 @@ async function comparisonForMode(
   return { args: [`${baseRef}...HEAD`], baseRef, baseCommit: baseCommit || undefined }
 }
 
-function statusItem(filePath: string, xy: string, oldPath?: string): GitStatusItemV1 {
+function statusItem(filePath: string, xy: string, oldPath?: string): GitStatusItem {
   const indexStatus = xy[0] ?? " "
   const worktreeStatus = xy[1] ?? " "
   return {
@@ -399,7 +399,7 @@ function statusItem(filePath: string, xy: string, oldPath?: string): GitStatusIt
   }
 }
 
-function statusFromXy(xy: string): GitFileStatusV1 {
+function statusFromXy(xy: string): GitFileStatus {
   if (xy === "??") return "untracked"
   if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(xy)) return "conflicted"
   if (xy.includes("R")) return "renamed"
@@ -410,7 +410,7 @@ function statusFromXy(xy: string): GitFileStatusV1 {
   return "unknown"
 }
 
-function diffStatus(code: string): GitDiffItemV1["status"] {
+function diffStatus(code: string): GitDiffItem["status"] {
   if (code === "A") return "added"
   if (code === "D") return "deleted"
   return "modified"
@@ -462,7 +462,7 @@ async function localDefaultBranch(cwd: string, signal?: AbortSignal): Promise<st
   return undefined
 }
 
-function emptyInfo(): GitInfoResponseV1 {
+function emptyInfo(): GitInfoResponse {
   return { branch: null, root: false, detached: false, unborn: false, ahead: 0, behind: 0 }
 }
 

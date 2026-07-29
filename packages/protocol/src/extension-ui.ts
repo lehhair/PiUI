@@ -1,6 +1,6 @@
-export type ExtensionUiDialogKindV1 = "select" | "confirm" | "input" | "editor"
+export type ExtensionUiDialogKind = "select" | "confirm" | "input" | "editor"
 
-interface ExtensionUiDialogRequestBaseV1 {
+type ExtensionUiDialogRequestBase = {
   requestId: string
   sessionId: string
   workerGeneration?: string
@@ -9,18 +9,18 @@ interface ExtensionUiDialogRequestBaseV1 {
   expiresAt?: string
 }
 
-export type ExtensionUiDialogRequestV1 =
-  | (ExtensionUiDialogRequestBaseV1 & { kind: "select"; options: string[] })
-  | (ExtensionUiDialogRequestBaseV1 & { kind: "confirm"; message: string })
-  | (ExtensionUiDialogRequestBaseV1 & { kind: "input"; placeholder?: string })
-  | (ExtensionUiDialogRequestBaseV1 & { kind: "editor"; prefill?: string })
+export type ExtensionUiDialogRequest =
+  | (ExtensionUiDialogRequestBase & { kind: "select"; options: string[] })
+  | (ExtensionUiDialogRequestBase & { kind: "confirm"; message: string })
+  | (ExtensionUiDialogRequestBase & { kind: "input"; placeholder?: string })
+  | (ExtensionUiDialogRequestBase & { kind: "editor"; prefill?: string })
 
-export type ExtensionUiDialogResponseV1 =
+export type ExtensionUiDialogResponse =
   | { responseId?: string; value: string }
   | { responseId?: string; confirmed: boolean }
   | { responseId?: string; cancelled: true }
 
-export type ExtensionUiSettlementReasonV1 =
+export type ExtensionUiSettlementReason =
   | "submitted"
   | "user_cancelled"
   | "timeout"
@@ -31,7 +31,7 @@ export type ExtensionUiSettlementReasonV1 =
   | "runtime_crashed"
   | "host_unavailable"
 
-export type ExtensionUiStatePatchV1 =
+export type ExtensionUiStatePatch =
   | { kind: "status"; key: string; text?: string }
   | { kind: "workingMessage"; message?: string }
   | { kind: "workingVisible"; visible: boolean }
@@ -42,11 +42,11 @@ export type ExtensionUiStatePatchV1 =
   | { kind: "theme"; name?: string }
   | { kind: "toolsExpanded"; expanded: boolean }
 
-export type ExtensionUiEditorCommandV1 =
+export type ExtensionUiEditorCommand =
   | { kind: "set"; text: string }
   | { kind: "paste"; text: string }
 
-export interface ExtensionUiStateV1 {
+export type ExtensionUiState = {
   revision: number
   statuses: Record<string, string>
   workingMessage?: string
@@ -60,16 +60,16 @@ export interface ExtensionUiStateV1 {
   toolsExpanded: boolean
 }
 
-export interface ExtensionUiSnapshotV1 {
+export type ExtensionUiSnapshot = {
   sessionId: string
   workerGeneration?: string
-  state: ExtensionUiStateV1
-  pending: ExtensionUiDialogRequestV1[]
+  state: ExtensionUiState
+  pending: ExtensionUiDialogRequest[]
 }
 
-export type ExtensionUiMethodSupportV1 = "rpc" | "web-equivalent" | "tui-only"
+export type ExtensionUiMethodSupport = "rpc" | "web-equivalent" | "tui-only"
 
-export interface ExtensionUiMethodCapabilityV1 {
-  support: ExtensionUiMethodSupportV1
+export type ExtensionUiMethodCapability = {
+  support: ExtensionUiMethodSupport
   reason?: string
 }

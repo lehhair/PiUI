@@ -1,53 +1,62 @@
-import type { WorkerCommand, WorkerRequest, WorkerResult } from "./worker-protocol.js"
+import type { JsonObject } from "@piui/protocol"
 
-function canRunConcurrently(command: WorkerCommand, active: WorkerCommand | undefined): boolean {
+export interface SchedulerCommand {
+  type: string
+  params?: JsonObject
+}
+
+const QUERY_COMMANDS = new Set([
+  "state.get",
+  "entries.get",
+  "branch.get",
+  "tree.get",
+  "registry.get",
+])
+
+function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand | undefined): boolean {
+  const text = command.params?.text
   switch (command.type) {
     case "prompt":
-      // Pi resolves extension slash commands before checking the streaming
-      // guard, so these must reach AgentSession immediately during a turn.
-      return active?.type === "prompt" && /^\/[^\s/]+(?:\s|$)/.test(command.text)
+      return active?.type === "prompt" && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
     case "steer":
     case "followUp":
     case "abort":
     case "abortRetry":
-    case "setQueueModes":
+    case "setSteeringMode":
+    case "setFollowUpMode":
     case "clearQueue":
-      return active?.type === "prompt"
-    case "getNativeBranchPage":
       return active?.type === "prompt"
     case "abortCompaction":
       return active?.type === "compact"
     case "abortBranchSummary":
       return active?.type === "navigateTree"
     case "abortBash":
-      return active?.type === "executeBash"
+      return active?.type === "bash"
     case "respondExtensionUi":
     case "setExtensionEditorState":
-    case "respondProviderAuth":
-    case "cancelProviderAuth":
+    case "providers.respondAuth":
+    case "providers.cancelAuth":
       return true
     case "sendCustomMessage":
-      return active?.type === "prompt" && command.deliverAs !== undefined
-    // Only queued delivery is safe alongside a turn; without deliverAs the SDK
-    // starts a new turn, which must not interleave with the active command.
     case "sendUserMessage":
-      return active?.type === "prompt" && command.deliverAs !== undefined
+      return active?.type === "prompt" && command.params?.deliverAs !== undefined
     default:
+      if (QUERY_COMMANDS.has(command.type)) return active?.type === "prompt"
       return false
   }
 }
 
-export function createWorkerCommandScheduler(
-  execute: (request: WorkerRequest) => Promise<WorkerResult>,
-): (request: WorkerRequest) => Promise<WorkerResult> {
+export function createWorkerCommandScheduler<T>(
+  execute: (command: SchedulerCommand) => Promise<T>,
+): (command: SchedulerCommand) => Promise<T> {
   let queue: Promise<void> = Promise.resolve()
-  let active: WorkerCommand | undefined
-  return request => {
-    if (canRunConcurrently(request.command, active)) return execute(request)
+  let active: SchedulerCommand | undefined
+  return command => {
+    if (canRunConcurrently(command, active)) return execute(command)
     const result = queue.then(async () => {
-      active = request.command
+      active = command
       try {
-        return await execute(request)
+        return await execute(command)
       } finally {
         active = undefined
       }

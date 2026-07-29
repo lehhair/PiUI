@@ -13,10 +13,10 @@ import {
 } from "node:fs/promises"
 import path from "node:path"
 import type {
-  FileListResponseV1,
-  FileNodeDtoV1,
-  FileOperationResponseV1,
-  FileReadResponseV1,
+  FileListResponse,
+  FileNodeDto,
+  FileOperationResponse,
+  FileReadResponse,
 } from "@piui/protocol"
 import { PathSafetyError, resolveWorkspacePath } from "./path-safety.ts"
 import type { WorkspaceRecord } from "./workspace-store.ts"
@@ -31,7 +31,7 @@ export async function listFiles(
   ws: WorkspaceRecord,
   relativePath: string,
   opts: { cursor?: string; limit?: number } = {},
-): Promise<FileListResponseV1> {
+): Promise<FileListResponse> {
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (!resolved.exists) throw new PathSafetyError("INVALID_REQUEST", "path does not exist")
   const directory = await lstat(resolved.absolute)
@@ -45,7 +45,7 @@ export async function listFiles(
   const offset = cursor.offset
   const page = names.slice(offset, offset + limit)
   const entries = (await Promise.all(page.map(name => describeEntry(ws, resolved.relative, name))))
-    .filter((entry): entry is FileNodeDtoV1 => entry !== null)
+    .filter((entry): entry is FileNodeDto => entry !== null)
     .sort((a, b) => {
       if (a.type === "directory" && b.type !== "directory") return -1
       if (a.type !== "directory" && b.type === "directory") return 1
@@ -61,7 +61,7 @@ export async function listFiles(
   }
 }
 
-export async function readFileContent(ws: WorkspaceRecord, relativePath: string): Promise<FileReadResponseV1> {
+export async function readFileContent(ws: WorkspaceRecord, relativePath: string): Promise<FileReadResponse> {
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (!resolved.exists) throw new PathSafetyError("INVALID_REQUEST", "path does not exist")
   if (resolved.restricted) throw new PathSafetyError("SYMLINK_ESCAPE", "restricted path")
@@ -96,7 +96,7 @@ export async function writeFileContent(
   relativePath: string,
   content: string,
   opts: { ifMatch?: string; encoding?: "utf-8" | "base64"; createOnly?: boolean } = {},
-): Promise<FileReadResponseV1> {
+): Promise<FileReadResponse> {
   const key = path.join(ws.canonicalRoot, ...relativePath.replace(/\\/g, "/").split("/"))
   return withWorkspaceMutation(ws, () => withFileLock(key, () => writeFileContentLocked(ws, relativePath, content, opts)))
 }
@@ -106,7 +106,7 @@ async function writeFileContentLocked(
   relativePath: string,
   content: string,
   opts: { ifMatch?: string; encoding?: "utf-8" | "base64"; createOnly?: boolean },
-): Promise<FileReadResponseV1> {
+): Promise<FileReadResponse> {
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (resolved.restricted) throw new PathSafetyError("SYMLINK_ESCAPE", "restricted path")
   let existingMode: number | undefined
@@ -156,7 +156,7 @@ export async function createWorkspaceEntry(
   relativePath: string,
   type: "file" | "directory",
   opts: { content?: string; encoding?: "utf-8" | "base64"; overwrite?: boolean } = {},
-): Promise<FileOperationResponseV1 | FileReadResponseV1> {
+): Promise<FileOperationResponse | FileReadResponse> {
   const key = path.join(ws.canonicalRoot, ...relativePath.replace(/\\/g, "/").split("/"))
   return withWorkspaceMutation(ws, () => withFileLock(key, () => createWorkspaceEntryLocked(ws, relativePath, type, opts)))
 }
@@ -166,7 +166,7 @@ async function createWorkspaceEntryLocked(
   relativePath: string,
   type: "file" | "directory",
   opts: { content?: string; encoding?: "utf-8" | "base64"; overwrite?: boolean },
-): Promise<FileOperationResponseV1 | FileReadResponseV1> {
+): Promise<FileOperationResponse | FileReadResponse> {
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (resolved.relative === "") throw new PathSafetyError("INVALID_REQUEST", "workspace root already exists")
   if (type === "directory") {
@@ -187,7 +187,7 @@ export async function moveWorkspaceEntry(
   from: string,
   to: string,
   overwrite = false,
-): Promise<FileOperationResponseV1> {
+): Promise<FileOperationResponse> {
   const keys = [from, to].map(relative => path.join(ws.canonicalRoot, ...relative.replace(/\\/g, "/").split("/"))).sort()
   return withWorkspaceMutation(ws, () => withFileLocks(keys, () => moveWorkspaceEntryLocked(ws, from, to, overwrite)))
 }
@@ -197,7 +197,7 @@ async function moveWorkspaceEntryLocked(
   from: string,
   to: string,
   overwrite: boolean,
-): Promise<FileOperationResponseV1> {
+): Promise<FileOperationResponse> {
   const source = resolveWorkspacePath(ws.canonicalRoot, from)
   const target = resolveWorkspacePath(ws.canonicalRoot, to)
   if (!source.exists || source.relative === "") throw new PathSafetyError("INVALID_REQUEST", "source does not exist")
@@ -265,7 +265,7 @@ async function deleteWorkspaceEntryLocked(
   await rm(target, { recursive: recursive && stat.isDirectory(), force: false })
 }
 
-async function describeEntry(ws: WorkspaceRecord, parent: string, name: string): Promise<FileNodeDtoV1 | null> {
+async function describeEntry(ws: WorkspaceRecord, parent: string, name: string): Promise<FileNodeDto | null> {
   const relative = parent ? `${parent}/${name}` : name
   const lexical = lexicalPath(ws, relative)
   try {

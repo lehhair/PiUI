@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs"
 import path from "node:path"
-import type { WorkspaceDtoV1 } from "@piui/protocol"
+import type { WorkspaceDto } from "@piui/protocol"
 
 export interface WorkspaceRecord {
   displayName: string
@@ -17,7 +17,7 @@ export interface WorkspaceRecord {
 export class WorkspaceStore {
   private readonly byPath = new Map<string, WorkspaceRecord>()
 
-  list(): WorkspaceDtoV1[] {
+  list(): WorkspaceDto[] {
     return [...this.byPath.values()].map(toDto)
   }
 
@@ -62,6 +62,10 @@ export class WorkspaceStore {
     this.byPath.set(key, rec)
     return rec
   }
+
+  remove(rootPath: string): boolean {
+    return this.byPath.delete(workspacePathKey(rootPath))
+  }
 }
 
 /** Two paths name one workspace when their keys match. */
@@ -69,7 +73,7 @@ export function workspacePathKey(rootPath: string, platform = process.platform):
   return platform === "win32" ? rootPath.toLowerCase() : rootPath
 }
 
-function toDto(r: WorkspaceRecord): WorkspaceDtoV1 {
+function toDto(r: WorkspaceRecord): WorkspaceDto {
   return {
     path: r.canonicalRoot,
     displayName: r.displayName,

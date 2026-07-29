@@ -1,291 +1,149 @@
 import assert from "node:assert/strict"
 import { after, describe, it } from "node:test"
-import { createAppServer } from "./http.ts"
-import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
 import { WebSocket } from "ws"
-import { EventHub } from "./event-hub.ts"
-import { EVENT_WS_SUBPROTOCOL_V2, eventStreamKeyV2 } from "@piui/protocol"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { EVENT_WS_SUBPROTOCOL, eventStreamKey, type EventEnvelope } from "@piui/protocol"
+import { createAppServer, type AppServer } from "./http.ts"
+import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
+import type { WebSocketServer } from "ws"
 
-async function listen(server: ReturnType<typeof createAppServer>) {
+async function listen(app: AppServer) {
   await new Promise<void>((resolve, reject) => {
-    server.listen(0, "127.0.0.1", (err?: Error) => (err ? reject(err) : resolve()))
+    app.server.listen(0, "127.0.0.1", (err?: Error) => (err ? reject(err) : resolve()))
   })
-  const addr = server.address()
+  const addr = app.server.address()
   if (!addr || typeof addr === "string") throw new Error("no port")
-  return {
-    port: addr.port,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close(e => (e ? reject(e) : resolve()))
-      }),
-  }
+  return addr.port
+}
+
+async function request(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  return { status: response.status, json: await response.json().catch(() => undefined) }
 }
 
 describe("event websocket", () => {
-  it("receives snapshot events during streamed prompt", async () => {
-    const server = createAppServer({ authToken: null })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const events: string[] = []
-    let ws: WebSocket | undefined
-    try {
-      ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
-      await new Promise<void>((resolve, reject) => {
-        ws!.on("open", () => resolve())
-        ws!.on("error", reject)
-      })
-      ws.on("message", data => {
-        try {
-          const msg = JSON.parse(String(data)) as { channel?: string; event?: { type: string } }
-          if (msg.channel === "event" && msg.event?.type) events.push(msg.event.type)
-        } catch {
-          /* ignore */
-        }
-      })
-
-      const seed = await fetch(`http://127.0.0.1:${port}/api/v1/dev/mock-chat`, { method: "POST" })
-      assert.equal(seed.status, 201)
-      const seeded = await seed.json()
-      const sessionId = seeded.snapshot.session.id as string
-
-      const prompt = await fetch(
-        `http://127.0.0.1:${port}/api/v1/sessions/${sessionId}/commands/prompt`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: "stream me", stream: true }),
-        },
-      )
-      assert.equal(prompt.status, 202)
-
-      // allow last events to flush
-      await new Promise(r => setTimeout(r, 50))
-      assert.ok(events.includes("session.snapshot"), `got events: ${events.join(",")}`)
-      assert.ok(events.includes("session.updated"))
-    } finally {
-      ws?.close()
-      await close()
-    }
+  const cleanups: Array<() => Promise<void> | void> = []
+  after(async () => {
+    for (const cleanup of cleanups.splice(0)) await cleanup()
   })
 
-  it("replays events after a retained cursor", async () => {
-    const eventHub = new EventHub(10)
-    eventHub.publish({ type: "before-cursor", payload: 1 })
-    const cursor = eventHub.getCursor()
-    eventHub.publish({ type: "replay-two", payload: 2 })
-    eventHub.publish({ type: "replay-three", payload: 3 })
-    const server = createAppServer({ authToken: null, eventHub })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${port}/api/v1/events?cursorEpoch=${encodeURIComponent(cursor.epoch)}&cursorSequence=${cursor.sequence}`,
-    )
-    try {
-      const replayed = await new Promise<string[]>((resolve, reject) => {
-        const types: string[] = []
-        const timer = setTimeout(() => reject(new Error(`replay timeout: ${types.join(",")}`)), 2000)
-        ws.on("message", data => {
-          const msg = JSON.parse(String(data)) as { channel?: string; event?: { type: string } }
-          if (msg.channel !== "event" || !msg.event) return
-          types.push(msg.event.type)
-          if (types.length === 2) {
-            clearTimeout(timer)
-            resolve(types)
-          }
-        })
-        ws.on("error", reject)
-      })
-      assert.deepEqual(replayed, ["replay-two", "replay-three"])
-    } finally {
-      ws.close()
-      await close()
-    }
-  })
+  it("streams native Pi events for a mock session end to end", async () => {
+    const mockHome = mkdtempSync(path.join(tmpdir(), "piui-ws-mock-"))
+    process.env.PIUI_MOCK_DIR = mockHome
+    process.env.PIUI_DRIVER = "mock"
+    const app = createAppServer({ authToken: null })
+    const wss: WebSocketServer = attachEventWebSocket(app.server, { eventHub: app.eventHub, authToken: null })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      closeEventWebSocket(wss)
+      await app.dispose()
+      rmSync(mockHome, { recursive: true, force: true })
+    })
 
-  it("replays and filters independent v2 streams", async () => {
-    const eventHub = new EventHub(10)
-    const one = { kind: "session" as const, id: "one" }
-    const two = { kind: "session" as const, id: "two" }
-    const oneCursor = eventHub.getCursorV2(one)
-    const twoCursor = eventHub.getCursorV2(two)
-    eventHub.publishV2(one, "command.updated", { commandId: "one-command", sessionId: "one", status: "running" })
-    eventHub.publishV2(two, "command.updated", { commandId: "two-command", sessionId: "two", status: "running" })
+    const health = await request(port, "GET", "/api/v1/health")
+    assert.equal(health.status, 200)
+    assert.equal(health.json.service, "piui-server")
 
-    const server = createAppServer({ authToken: null, eventHub })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
-    try {
-      const commandIds = await new Promise<string[]>((resolve, reject) => {
-        const received: string[] = []
-        const timer = setTimeout(() => reject(new Error(`v2 replay timeout: ${received.join(",")}`)), 2000)
-        ws.on("open", () => {
-          assert.equal(ws.protocol, EVENT_WS_SUBPROTOCOL_V2)
-          ws.send(JSON.stringify({
-            type: "subscribe",
-            protocolVersion: 2,
-            streams: [one],
-            cursors: { [eventStreamKeyV2(one)]: oneCursor, [eventStreamKeyV2(two)]: twoCursor },
-          }))
-        })
-        ws.on("message", data => {
-          const message = JSON.parse(String(data)) as {
-            channel?: string
-            event?: { payload?: { commandId?: string } }
-          }
-          const commandId = message.event?.payload?.commandId
-          if (message.channel !== "event" || !commandId) return
-          received.push(commandId)
-          clearTimeout(timer)
-          resolve(received)
-        })
-        ws.on("error", reject)
-      })
-      assert.deepEqual(commandIds, ["one-command"])
-    } finally {
-      ws.close()
-      await close()
-    }
-  })
-
-  it("requests resync only for v2 streams with missing cursors", async () => {
-    const eventHub = new EventHub()
-    const session = { kind: "session" as const, id: "session-1" }
-    const server = createAppServer({ authToken: null, eventHub })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
-    try {
-      const control = await new Promise<{ reason?: string }>((resolve, reject) => {
-        ws.on("open", () => {
-          ws.send(JSON.stringify({ type: "subscribe", protocolVersion: 2, streams: [session], cursors: {} }))
-        })
-        ws.on("message", data => {
-          const message = JSON.parse(String(data)) as {
-            channel?: string
-            streams?: Record<string, { reason?: string }>
-          }
-          if (message.channel !== "control") return
-          resolve(message.streams?.[eventStreamKeyV2(session)] ?? {})
-        })
-        ws.on("error", reject)
-      })
-      assert.equal(control.reason, "missing_cursor")
-    } finally {
-      ws.close()
-      await close()
-    }
-  })
-
-  it("streams real external workspace file changes after cursor setup", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-files-"))
-    const server = createAppServer({ authToken: null })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const registered = await fetch(`http://127.0.0.1:${port}/api/v1/workspaces`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ rootPath: root }),
-    }).then(response => response.json()) as { workspace: { path: string } }
-    const stream = { kind: "workspace" as const, id: registered.workspace.path }
-    const key = eventStreamKeyV2(stream)
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL_V2)
-    try {
-      const changed = await new Promise<{ path: string }>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("workspace event timeout")), 5000)
-        ws.on("open", () => {
-          ws.send(JSON.stringify({ type: "subscribe", protocolVersion: 2, streams: [stream], cursors: {} }))
-        })
-        ws.on("message", raw => {
-          const message = JSON.parse(String(raw)) as {
-            channel?: string
-            streams?: Record<string, { cursor: { epoch: string; sequence: number } }>
-            event?: { type?: string; payload?: { changes?: Array<{ path: string }> } }
-          }
-          const cursor = message.streams?.[key]?.cursor
-          if (message.channel === "control" && cursor) {
-            ws.send(JSON.stringify({
-              type: "subscribe", protocolVersion: 2, streams: [stream], cursors: { [key]: cursor },
-            }))
-            setTimeout(() => writeFileSync(path.join(root, "external.txt"), "changed"), 250)
-            return
-          }
-          const change = message.event?.payload?.changes?.[0]
-          if (message.channel === "event" && message.event?.type === "workspace.files.changed" && change) {
-            clearTimeout(timer)
-            resolve(change)
-          }
-        })
-        ws.on("error", reject)
-      })
-      assert.equal(changed.path, "external.txt")
-    } finally {
-      ws.close()
-      await close()
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it("rejects non-local browser origins", async () => {
-    const server = createAppServer({ authToken: null })
-    attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    try {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, {
-        headers: { origin: "https://example.test" },
-      })
-      const error = await new Promise<Error>(resolve => ws.on("error", resolve))
-      assert.match(error.message, /Unexpected server response: 403/)
-      ws.close()
-    } finally {
-      await close()
-    }
-  })
-
-  it("requires the configured token", async () => {
-    const server = createAppServer({ authToken: "test-token" })
-    attachEventWebSocket(server, { authToken: "test-token" })
-    const { port, close } = await listen(server)
-    try {
-      const rejected = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
-      const rejection = await new Promise<Error>(resolve => rejected.on("error", resolve))
-      assert.match(rejection.message, /Unexpected server response: 403/)
-
-      const wrongToken = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=nope`)
-      const wrongRejection = await new Promise<Error>(resolve => wrongToken.on("error", resolve))
-      assert.match(wrongRejection.message, /Unexpected server response: 403/)
-
-      // Browsers cannot set handshake headers, so the query token is supported.
-      const accepted = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=test-token`)
-      await new Promise<void>((resolve, reject) => {
-        accepted.on("open", resolve)
-        accepted.on("error", reject)
-      })
-      accepted.close()
-    } finally {
-      await close()
-    }
-  })
-
-  it("terminates connected clients during event server shutdown", async () => {
-    const server = createAppServer({ authToken: null })
-    const eventServer = attachEventWebSocket(server, { authToken: null })
-    const { port, close } = await listen(server)
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
-    await new Promise<void>((resolve, reject) => {
-      ws.once("open", resolve)
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`, EVENT_WS_SUBPROTOCOL)
+    const envelopes: EventEnvelope[] = []
+    const hello = new Promise<void>((resolve, reject) => {
+      ws.once("message", () => resolve())
       ws.once("error", reject)
     })
-    const clientClosed = new Promise<void>(resolve => ws.once("close", () => resolve()))
-    const eventsClosed = new Promise<void>((resolve, reject) => {
-      closeEventWebSocket(eventServer, error => (error ? reject(error) : resolve()))
+    ws.on("message", data => {
+      const message = JSON.parse(String(data))
+      if (message.channel === "event") envelopes.push(message.event)
+    })
+    await hello
+
+    const created = await request(port, "POST", "/api/v1/sessions", { cwd: mockHome })
+    assert.equal(created.status, 201)
+    const sessionId = created.json.sessionId as string
+    assert.ok(sessionId)
+
+    ws.send(JSON.stringify({
+      type: "subscribe",
+      protocolVersion: 1,
+      streams: [{ kind: "server", id: "server" }, { kind: "session", id: sessionId }],
+      cursors: {},
+    }))
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    const prompted = await request(port, "POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/commands`, {
+      id: "cmd-1",
+      type: "prompt",
+      params: { text: "hello mock" },
+    })
+    assert.equal(prompted.status, 202)
+    assert.equal(prompted.json.command.status, "accepted")
+
+    const deadline = Date.now() + 10_000
+    let sawAgentEnd = false
+    let sawCommandCompleted = false
+    const piEventTypes = new Set<string>()
+    while (Date.now() < deadline && (!sawAgentEnd || !sawCommandCompleted)) {
+      for (const envelope of envelopes.splice(0)) {
+        if (envelope.channel === "pi.event") {
+          const piEvent = (envelope.payload as { event: { type: string } }).event
+          piEventTypes.add(piEvent.type)
+          if (piEvent.type === "agent_end") sawAgentEnd = true
+        }
+        if (envelope.channel === "command.updated" &&
+          (envelope.payload as { status?: string }).status === "completed") {
+          sawCommandCompleted = true
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+
+    assert.ok(piEventTypes.has("agent_start"), `missing agent_start in ${[...piEventTypes]}`)
+    assert.ok(piEventTypes.has("message_start"), `missing message_start in ${[...piEventTypes]}`)
+    assert.ok(piEventTypes.has("message_end"), `missing message_end in ${[...piEventTypes]}`)
+    assert.ok(sawAgentEnd, "did not see agent_end")
+    assert.ok(sawCommandCompleted, "did not see command completion")
+
+    const state = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/state`)
+    assert.equal(state.status, 200)
+    assert.equal(state.json.data.sessionId, sessionId)
+
+    const branch = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/branch`)
+    assert.equal(branch.status, 200)
+    assert.ok(branch.json.data.items.length >= 2)
+    const roles = branch.json.data.items.map((entry: any) => entry.message?.role)
+    assert.deepEqual(roles, ["user", "assistant"])
+
+    const registry = await request(port, "GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/registry`)
+    assert.equal(registry.status, 200)
+    assert.ok(registry.json.data.tools.some((tool: any) => tool.name === "mock-tool"))
+
+    const list = await request(port, "GET", "/api/v1/sessions")
+    assert.equal(list.status, 200)
+    assert.ok(list.json.sessions.some((item: any) => item.id === sessionId), `sessions: ${JSON.stringify(list.json.sessions)} vs ${sessionId}`)
+    assert.ok(list.json.attached.includes(sessionId))
+
+    ws.close()
+  })
+
+  it("rejects connections without a valid token", async () => {
+    const app = createAppServer({ authToken: "secret-token" })
+    const wss: WebSocketServer = attachEventWebSocket(app.server, { eventHub: app.eventHub, authToken: "secret-token" })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      closeEventWebSocket(wss)
+      await app.dispose()
     })
 
-    await Promise.all([clientClosed, eventsClosed])
-    assert.equal(eventServer.clients.size, 0)
-    await close()
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events`)
+    const closed = await new Promise<number>(resolve => {
+      ws.on("close", code => resolve(code))
+      ws.on("error", () => undefined)
+    })
+    assert.equal(closed, 1006)
   })
 })

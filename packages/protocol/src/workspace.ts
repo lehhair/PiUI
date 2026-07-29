@@ -1,4 +1,4 @@
-export interface WorkspaceDtoV1 {
+export type WorkspaceDto = {
   /**
    * Canonical absolute path, which is also the identity: a workspace is a
    * directory, so there is nothing else to identify it by. Clients send this
@@ -10,17 +10,17 @@ export interface WorkspaceDtoV1 {
   lastOpenedAt: string
 }
 
-export interface WorkspaceCreateRequestV1 {
+export type WorkspaceCreateRequest = {
   /** Absolute path on host; server validates existence. */
   rootPath: string
   displayName?: string
 }
 
-export interface WorkspaceCreateResponseV1 {
-  workspace: WorkspaceDtoV1
+export type WorkspaceCreateResponse = {
+  workspace: WorkspaceDto
 }
 
-export interface FileNodeDtoV1 {
+export type FileNodeDto = {
   name: string
   path: string
   type: "file" | "directory" | "symlink" | "other"
@@ -29,15 +29,15 @@ export interface FileNodeDtoV1 {
   restricted?: boolean
 }
 
-export interface FileListResponseV1 {
+export type FileListResponse = {
   path: string
-  entries: FileNodeDtoV1[]
+  entries: FileNodeDto[]
   total: number
   truncated: boolean
   nextCursor?: string
 }
 
-export interface FileReadResponseV1 {
+export type FileReadResponse = {
   path: string
   content: string
   encoding: "utf-8" | "base64"
@@ -47,13 +47,13 @@ export interface FileReadResponseV1 {
   etag: string
 }
 
-export interface FileWriteRequestV1 {
+export type FileWriteRequest = {
   content: string
   encoding?: "utf-8" | "base64"
   ifMatch?: string
 }
 
-export interface FileCreateRequestV1 {
+export type FileCreateRequest = {
   path: string
   type: "file" | "directory"
   content?: string
@@ -61,18 +61,18 @@ export interface FileCreateRequestV1 {
   overwrite?: boolean
 }
 
-export interface FileMoveRequestV1 {
+export type FileMoveRequest = {
   from: string
   to: string
   overwrite?: boolean
 }
 
-export interface FileOperationResponseV1 {
+export type FileOperationResponse = {
   path: string
   type: "file" | "directory"
 }
 
-export interface FileSearchStatsV1 {
+export type FileSearchStats = {
   visited: number
   scannedFiles: number
   scannedBytes: number
@@ -81,13 +81,13 @@ export interface FileSearchStatsV1 {
   limitReason?: "results" | "entries" | "bytes" | "cancelled"
 }
 
-export interface FileNameSearchResponseV1 {
+export type FileNameSearchResponse = {
   query: string
   paths: string[]
-  stats: FileSearchStatsV1
+  stats: FileSearchStats
 }
 
-export interface WorkspaceTextSearchMatchV1 {
+export type WorkspaceTextSearchMatch = {
   path: { text: string }
   lines: { text: string }
   line_number: number
@@ -95,8 +95,8 @@ export interface WorkspaceTextSearchMatchV1 {
   submatches: Array<{ start: number; end: number; match: { text: string } }>
 }
 
-export interface FileTextSearchResponseV1 {
+export type FileTextSearchResponse = {
   query: string
-  matches: WorkspaceTextSearchMatchV1[]
-  stats: FileSearchStatsV1
+  matches: WorkspaceTextSearchMatch[]
+  stats: FileSearchStats
 }
