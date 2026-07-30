@@ -508,6 +508,7 @@ function App() {
         paneId={paneId}
         sessionId={paneSessionId}
         onEnterSession={(sessionId, directory) => navigatePaneToSession(paneId, sessionId, directory)}
+        onNewChat={handleNewSession}
         onOpenSidebar={handleOpenSidebar}
         onToggleRightPanel={handleToggleRightPanel}
         onSplitPane={splitPaneEnabled ? handleSplitPane : undefined}
@@ -517,6 +518,7 @@ function App() {
     ),
     [
       navigatePaneToSession,
+      handleNewSession,
       handleOpenSidebar,
       handleToggleRightPanel,
       splitPaneEnabled,

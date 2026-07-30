@@ -42,6 +42,7 @@ interface PiChatPaneProps {
   sessionId: string | null
   /** Home flow: called after the first send creates a session */
   onEnterSession?: (sessionId: string, directory: string) => void
+  onNewChat?: () => void
   onOpenSidebar?: () => void
   onToggleRightPanel?: () => void
   onSplitPane?: () => void
@@ -67,6 +68,7 @@ export function PiChatPane({
   paneId,
   sessionId,
   onEnterSession,
+  onNewChat,
   onOpenSidebar,
   onToggleRightPanel,
   onSplitPane,
@@ -82,9 +84,15 @@ export function PiChatPane({
   // sure session data belongs to THIS session — the branch store is a
   // singleton, so stale data from the previous session must be dropped
   // before the ChatArea mounts (its cold-start bottom estimate runs once
-  // at mount).
+  // at mount). Home (null) releases the session entirely so the header
+  // and stores don't keep showing the previous session.
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      piEventStream.disconnect()
+      piBranchStore.clear()
+      piSessionStateStore.clear()
+      return
+    }
     piEventStream.connect(sessionId)
     const current = piBranchStore.getData()
     if (!current || branchSessionIdOf(current) !== sessionId) {
@@ -293,11 +301,12 @@ export function PiChatPane({
             sessionId={sessionId}
             onSend={handleSend}
             onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
-            fileCapabilities={{ image: imageCapable, pdf: false, audio: false, video: false }}
+            onNewChat={onNewChat}
             isStreaming={isStreaming}
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}
             onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
+            fileCapabilities={{ image: imageCapable, pdf: false, audio: false, video: false }}
             variants={thinkingLevels}
             selectedVariant={thinkingLevel}
             onVariantChange={handleVariantChange}
