@@ -80,4 +80,41 @@ describe("createWorkerCommandScheduler", () => {
     await second
     assert.deepEqual(started, ["prompt", "prompt"])
   })
+
+  it("lets queries and abort run alongside an active sendUserMessage turn", async () => {
+    const gate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
+      started.push(command.type)
+      if (command.type === "sendUserMessage" && command.params?.deliverAs === undefined) await gate.promise
+      return undefined
+    })
+
+    const turn = schedule({ type: "sendUserMessage", params: { text: "hello" } })
+    await Promise.resolve()
+    // While the sendUserMessage turn is active, queries and abort must not block
+    await schedule({ type: "state.get", params: {} })
+    await schedule({ type: "branch.get", params: {} })
+    await schedule({ type: "abort" })
+    assert.deepEqual(started, ["sendUserMessage", "state.get", "branch.get", "abort"])
+    gate.resolve()
+    await turn
+  })
+
+  it("lets a queued sendUserMessage (deliverAs) run alongside an active turn", async () => {
+    const gate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
+      started.push(command.type)
+      if (command.type === "sendUserMessage" && command.params?.deliverAs === undefined) await gate.promise
+      return undefined
+    })
+
+    const turn = schedule({ type: "sendUserMessage", params: { text: "hello" } })
+    await Promise.resolve()
+    await schedule({ type: "sendUserMessage", params: { text: "more", deliverAs: "followUp" } })
+    assert.deepEqual(started, ["sendUserMessage", "sendUserMessage"])
+    gate.resolve()
+    await turn
+  })
 })
