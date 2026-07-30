@@ -13,7 +13,7 @@ const { listDirectory, getFileContent, getFileStatus, getVcsDiff, invalidateWork
   resolveWorkspacePath: vi.fn(async (directory?: string) => directory ?? null),
 }))
 
-vi.mock('../pi/sessionApi', () => ({ resolveWorkspacePath }))
+vi.mock('../pi/workspaces', () => ({ resolveWorkspacePath }))
 
 vi.mock('../api', () => ({
   listDirectory,
