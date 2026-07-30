@@ -7,7 +7,6 @@ import type {
   PiAssistantMessageItem,
   PiCompactionItem,
   PiBranchSummaryItem,
-  PiModelChangeItem,
   PiCustomMessageItem,
   PiUnknownItem,
 } from '../domain/index.js'
@@ -126,15 +125,6 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         fromId: entry.fromId,
         details: entry.details,
       } as PiBranchSummaryItem)
-    } else if (entry.type === 'model_change') {
-      items.push({
-        kind: 'model_change',
-        entryId: entry.id,
-        timestamp,
-        rawEntry: entry,
-        provider: entry.provider,
-        modelId: entry.modelId,
-      } as PiModelChangeItem)
     } else if (entry.type === 'custom_message') {
       items.push({
         kind: 'custom_message',
@@ -146,11 +136,17 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         display: entry.display,
         details: entry.details,
       } as PiCustomMessageItem)
-    } else if (entry.type === 'thinking_level_change' || entry.type === 'label' || entry.type === 'custom') {
-      // Not consumed in the conversation flow (matches pi's official
-      // renderers): thinking level lives in the composer level selector,
-      // labels are markers on their target entries, plain custom entries
-      // are extension state for reload reconstruction.
+    } else if (
+      entry.type === 'thinking_level_change' ||
+      entry.type === 'model_change' ||
+      entry.type === 'label' ||
+      entry.type === 'custom'
+    ) {
+      // Not consumed in the conversation flow: model and thinking level
+      // live in the header model selector / composer level selector
+      // (repeated model_change entries are just noise here), labels are
+      // markers on their target entries, plain custom entries are
+      // extension state for reload reconstruction.
       continue
     } else {
       // Unknown entry type, keep as unknown item

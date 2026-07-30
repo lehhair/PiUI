@@ -137,7 +137,6 @@ export type PiTimelineItem =
   | PiCompactionItem
   | PiBranchSummaryItem
   | PiSummaryMessageItem
-  | PiModelChangeItem
   | PiCustomMessageItem
   | PiUnknownItem
 
@@ -207,15 +206,6 @@ export type PiSummaryMessageItem = {
   timestamp: number
   rawEntry: SessionEntry
   message: BranchSummaryMessage | CompactionSummaryMessage
-}
-
-export type PiModelChangeItem = {
-  kind: 'model_change'
-  entryId: string
-  timestamp: number
-  rawEntry: SessionEntry
-  provider: string
-  modelId: string
 }
 
 export type PiCustomMessageItem = {
