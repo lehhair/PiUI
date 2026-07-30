@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { UiSession } from '../types/session'
-import {
-  listPiNativeSessions,
-  openPiNativeSession,
-  postPiGlobalCommand,
-} from '../pi/nativeApi'
+import { loadPiSessions, openPiSession, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
-import { piSessionInfoStore } from '../pi/piSessionInfoStore'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
@@ -31,7 +26,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      const nativeSessions = piSessionInfoStore.replaceAll(await listPiNativeSessions())
+      const nativeSessions = await loadPiSessions()
       const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
       const next = linkPiSessionForks(mapped)
       if (requestId !== requestIdRef.current) return
@@ -88,7 +83,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const createSession = useCallback(async (title?: string) => {
     const directory = currentDirectory?.trim()
     if (!directory) throw new Error('Choose a project directory before creating a session')
-    const opened = await openPiNativeSession(directory)
+    const opened = await openPiSession(directory)
     const now = Date.now()
     const session: UiSession = {
       id: opened.sessionId,
@@ -106,7 +101,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const deleteSession = useCallback(async (id: string) => {
     const session = allSessionsRef.current.find(item => item.id === id)
     if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-    await postPiGlobalCommand('session.delete', { cwd: session.directory, sessionFile: session.path })
+    await deletePiSession(session.directory, session.path)
     pinnedSessionsStore.unpin(id)
     clearSessionRuntimeState(id)
     paneLayoutStore.clearSession(id)

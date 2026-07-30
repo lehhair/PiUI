@@ -1,6 +1,7 @@
 import type {
   JsonObject,
   JsonValue,
+  HealthResponse,
   PiRegistrySnapshot,
   HostRegistrySnapshot,
   CommandRecord,
@@ -79,6 +80,10 @@ export type PiEntriesPage = {
 export type PiSessionListResult = SessionInfo[]
 
 // Transport layer - raw API calls
+export async function fetchHostHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  return readJson<HealthResponse>(`${getApiBase()}/api/v1/host/health`, { signal })
+}
+
 export async function fetchPiRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {
   return readJson<PiRegistrySnapshot>(`${getApiBase()}/api/v1/pi/registry`, { signal })
 }
@@ -132,6 +137,10 @@ export function listAllPiSessions(signal?: AbortSignal): Promise<PiSessionListRe
 
 export function openPiSession(params: PiSessionOpenParams, signal?: AbortSignal): Promise<PiSessionOpenResult> {
   return postPiGlobalCommand<PiSessionOpenResult>('session.open', params, signal)
+}
+
+export function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal): Promise<null> {
+  return postPiGlobalCommand('session.delete', { cwd, sessionFile }, signal)
 }
 
 // State commands

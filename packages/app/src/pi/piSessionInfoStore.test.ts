@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { PiNativeSessionInfo } from './nativeApi'
+import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import { piSessionInfoStore } from './piSessionInfoStore'
 
-const session = (id: string, cwd: string): PiNativeSessionInfo => ({
+const session = (id: string, cwd: string): SessionInfo => ({
   id,
   path: `${cwd}/${id}.jsonl`,
   cwd,
-  created: '2026-07-28T10:00:00.000Z',
-  modified: '2026-07-29T10:00:00.000Z',
+  created: new Date('2026-07-28T10:00:00.000Z'),
+  modified: new Date('2026-07-29T10:00:00.000Z'),
   firstMessage: id,
   allMessagesText: id,
   messageCount: 1,
