@@ -1,37 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type {
-  ConfiguredPackageV1,
-  PackageResolveMissingActionV1,
-  PackageUpdateV1,
-  ResolvedPackageResourcesV1,
-} from '@piui/protocol'
+import { useCallback, useEffect, useState } from 'react'
 import { Button } from '../../../components/ui/Button'
-import { useManagementEvents } from '../../../pi/managementEventStore'
+import type { PiConfiguredPackage, PiPackageUpdate, ResolvedPaths } from '../../../pi/domain'
 import {
   changePiPackageSource,
   checkPiPackageUpdates,
   getPiPackageInstalledPath,
   listPiPackages,
-  managePiPackageDetailed,
+  managePiPackage,
   resolvePiExtensionSources,
   resolvePiPackages,
-} from '../../../pi/sessionApi'
+} from '../../../pi/transport/index.js'
 
 const inputClass = 'h-8 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100'
 
 export function PiPackageManagement({ workspacePath }: { workspacePath: string }) {
-  const [packages, setPackages] = useState<ConfiguredPackageV1[]>([])
-  const [updates, setUpdates] = useState<PackageUpdateV1[]>([])
-  const [resolved, setResolved] = useState<ResolvedPackageResourcesV1 | null>(null)
+  const [packages, setPackages] = useState<PiConfiguredPackage[]>([])
+  const [updates, setUpdates] = useState<PiPackageUpdate[]>([])
+  const [resolved, setResolved] = useState<ResolvedPaths | null>(null)
   const [source, setSource] = useState('')
   const [projectLocal, setProjectLocal] = useState(true)
   const [temporary, setTemporary] = useState(false)
-  const [missingAction, setMissingAction] = useState<PackageResolveMissingActionV1>('skip')
+  const [missingAction, setMissingAction] = useState<'install' | 'skip' | 'error'>('skip')
   const [installedPaths, setInstalledPaths] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { packageProgress } = useManagementEvents()
-  const progress = useMemo(() => Object.values(packageProgress).filter(item => !item.workspacePath || item.workspacePath === workspacePath).slice(-8), [packageProgress, workspacePath])
 
   const load = useCallback(async () => {
     try {
@@ -60,8 +52,13 @@ export function PiPackageManagement({ workspacePath }: { workspacePath: string }
   }
 
   const manage = async (action: 'install' | 'remove' | 'update', packageSource?: string, local = projectLocal) => {
-    const result = await managePiPackageDetailed(workspacePath, action, packageSource, local)
-    setPackages(result.packages)
+    const next = await managePiPackage(workspacePath, {
+      commandId: crypto.randomUUID(),
+      action,
+      source: packageSource,
+      local,
+    })
+    setPackages(next)
     if (action === 'install') setSource('')
     setUpdates(await checkPiPackageUpdates(workspacePath))
   }
@@ -83,7 +80,7 @@ export function PiPackageManagement({ workspacePath }: { workspacePath: string }
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-y border-border-100 py-2">
-        <select className="h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-xs)] text-text-200" value={missingAction} onChange={event => setMissingAction(event.target.value as PackageResolveMissingActionV1)}>
+        <select className="h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-xs)] text-text-200" value={missingAction} onChange={event => setMissingAction(event.target.value as 'install' | 'skip' | 'error')}>
           <option value="skip">Skip missing</option><option value="install">Install missing</option><option value="error">Error on missing</option>
         </select>
         <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('resolve', async () => setResolved(await resolvePiPackages(workspacePath, missingAction)))}>Resolve configured</Button>
@@ -96,12 +93,11 @@ export function PiPackageManagement({ workspacePath }: { workspacePath: string }
       <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
         {packages.map(item => {
           const key = `${item.scope}:${item.source}`
-          return <div key={key} className="space-y-1 border-t border-border-100 pt-2"><div className="flex flex-wrap items-center gap-2"><div className="min-w-44 flex-1"><p className="truncate text-[length:var(--fs-sm)] text-text-200">{item.source}</p><p className="text-[length:var(--fs-xs)] text-text-400">{item.scope}{item.filtered ? ' · filtered' : ''}{item.installedPath ? ` · ${item.installedPath}` : ''}</p></div><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run(`path:${key}`, async () => { const path = await getPiPackageInstalledPath(workspacePath, item.source, item.scope); setInstalledPaths(paths => ({ ...paths, [key]: path })) })}>Path</Button><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run(`source:${key}`, async () => { const result = await changePiPackageSource(workspacePath, item.source, 'remove', item.scope === 'project'); setPackages(result.packages) })}>Remove source</Button><Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run(`remove:${key}`, () => manage('remove', item.source, item.scope === 'project'))}>Uninstall</Button></div>{installedPaths[key] ? <p className="break-all text-[length:var(--fs-xs)] text-text-400">{installedPaths[key]}</p> : null}</div>
+          return <div key={key} className="space-y-1 border-t border-border-100 pt-2"><div className="flex flex-wrap items-center gap-2"><div className="min-w-44 flex-1"><p className="truncate text-[length:var(--fs-sm)] text-text-200">{item.source}</p><p className="text-[length:var(--fs-xs)] text-text-400">{item.scope}{item.filtered ? ' · filtered' : ''}{item.installedPath ? ` · ${item.installedPath}` : ''}</p></div><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run(`path:${key}`, async () => { const path = await getPiPackageInstalledPath(workspacePath, item.source, item.scope); setInstalledPaths(paths => ({ ...paths, [key]: path ?? 'not installed' })) })}>Path</Button><Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run(`source:${key}`, async () => { const result = await changePiPackageSource(workspacePath, item.source, 'remove', item.scope === 'project'); setPackages(result.packages) })}>Remove source</Button><Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run(`remove:${key}`, () => manage('remove', item.source, item.scope === 'project'))}>Uninstall</Button></div>{installedPaths[key] ? <p className="break-all text-[length:var(--fs-xs)] text-text-400">{installedPaths[key]}</p> : null}</div>
         })}
       </div>
 
       {resolved ? <details open className="text-[length:var(--fs-xs)]"><summary className="cursor-pointer text-text-300">Resolved resources</summary><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">{(['extensions', 'skills', 'prompts', 'themes'] as const).map(kind => <div key={kind}><p className="font-medium text-text-300">{kind} ({resolved[kind].length})</p>{resolved[kind].map(item => <p key={item.path} className="truncate text-text-500" title={item.path}>{item.enabled ? 'on' : 'off'}: {item.path}</p>)}</div>)}</div></details> : null}
-      {progress.length ? <details className="text-[length:var(--fs-xs)]"><summary className="cursor-pointer text-text-300">Recent package progress</summary><div className="mt-1 space-y-1">{progress.map(item => <p key={item.commandId} className={item.type === 'error' ? 'text-danger-100' : 'text-text-400'}>{item.action} {item.source}: {item.message ?? item.type}</p>)}</div></details> : null}
     </section>
   )
 }

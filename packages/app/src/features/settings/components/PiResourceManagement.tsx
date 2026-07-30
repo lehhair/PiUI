@@ -1,29 +1,19 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { PiResourceSnapshotV1, PiRuntimeInspectionV1 } from '@piui/protocol'
+import type { RegistrySnapshot } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
 import { useManagementEvents } from '../../../pi/managementEventStore'
-import {
-  extendPiResources,
-  hasPiExtensionHandlers,
-  inspectPiResources,
-  inspectPiRuntime,
-  inspectPiSystemPrompt,
-  inspectPiToolDefinition,
-  reloadPiResources,
-  waitForPiCommand,
-} from '../../../pi/sessionApi'
+import { loadPiSessionRegistry, reloadPiSessionResources } from '../../../pi/controllers/index.js'
 
 const inputClass = 'h-8 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100'
 
+/**
+ * Session resource inspector over the native runtime registry (registry.get).
+ * Extensions, tools, commands and event handlers come straight from the
+ * session's extension runner; reload goes through the native reload command.
+ */
 export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: string | null; workspacePath: string }) {
-  const [resources, setResources] = useState<PiResourceSnapshotV1 | null>(null)
-  const [runtime, setRuntime] = useState<PiRuntimeInspectionV1 | null>(null)
-  const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
-  const [resourceKind, setResourceKind] = useState<'skillPaths' | 'promptPaths' | 'themePaths'>('skillPaths')
-  const [resourcePath, setResourcePath] = useState('')
-  const [toolName, setToolName] = useState('')
-  const [toolDefinition, setToolDefinition] = useState<unknown>()
+  const [registry, setRegistry] = useState<RegistrySnapshot | null>(null)
   const [eventType, setEventType] = useState('')
   const [handlerResult, setHandlerResult] = useState<boolean | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -35,7 +25,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
   const load = useCallback(async () => {
     if (!sessionId) return
     try {
-      setResources(await inspectPiResources(sessionId))
+      setRegistry((await loadPiSessionRegistry(sessionId)) ?? null)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -61,50 +51,23 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
 
   if (!sessionId) return <section><h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">Session resources and inspection</h3><p className="mt-1 text-[length:var(--fs-xs)] text-text-400">Open a session to inspect its active runtime.</p></section>
 
-  const addResourcePath = async () => {
-    const path = resourcePath.trim()
-    if (!path) return
-    const metadata = { source: path, scope: 'temporary' as const, origin: 'top-level' as const }
-    const next = await extendPiResources(sessionId, { [resourceKind]: [{ path, metadata }] })
-    setResources(next)
-    setResourcePath('')
-  }
-
   return (
     <section className="space-y-3">
-      <div className="flex items-end justify-between gap-3"><div><h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">Session resources and inspection</h3><p className="text-[length:var(--fs-xs)] text-text-400">Inspect loaded resources, extend temporary paths and query native Pi runtime details.</p></div><Button size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === 'reload'} onClick={() => void run('reload', async () => { const commandId = await reloadPiResources(sessionId); await waitForPiCommand(commandId); await load() })}>Reload</Button></div>
+      <div className="flex items-end justify-between gap-3"><div><h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">Session resources and inspection</h3><p className="text-[length:var(--fs-xs)] text-text-400">Inspect the session's native runtime registry and reload resources.</p></div><Button size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === 'reload'} onClick={() => void run('reload', async () => { await reloadPiSessionResources(sessionId); await load() })}>Reload</Button></div>
       {error ? <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">{error}</p> : null}
-      <p className="text-[length:var(--fs-xs)] text-text-400">{resources ? `${resources.extensions.length} extensions · ${resources.skills.length} skills · ${resources.prompts.length} prompts · ${resources.themes.length} themes · ${resources.agentsFiles.length} AGENTS files` : 'Loading resources…'}</p>
+      <p className="text-[length:var(--fs-xs)] text-text-400">{registry ? `${registry.extensions.length} extensions · ${registry.tools.length} tools (${registry.activeTools.length} active) · ${registry.commands.length} commands · ${registry.eventHandlers.length} event handlers` : 'Loading registry…'}</p>
 
-      <div className="flex flex-wrap gap-2">
-        <select className="h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-xs)] text-text-200" value={resourceKind} onChange={event => setResourceKind(event.target.value as typeof resourceKind)}><option value="skillPaths">Skill path</option><option value="promptPaths">Prompt path</option><option value="themePaths">Theme path</option></select>
-        <input className={`${inputClass} min-w-44 flex-1`} value={resourcePath} placeholder="Absolute or workspace resource path" onChange={event => setResourcePath(event.target.value)} />
-        <Button size="sm" disabled={busy !== null || !resourcePath.trim()} onClick={() => void run('extend', addResourcePath)}>Add temporarily</Button>
-      </div>
-
-      {resources ? <div className="space-y-2">
-        <ResourceList title="Extensions" items={resources.extensions.map(item => ({ name: item.path, detail: item.resolvedPath }))} />
-        <ResourceList title="Skills" items={resources.skills.map(item => ({ name: item.name, detail: `${item.description} · ${item.filePath}` }))} />
-        <ResourceList title="Prompts" items={resources.prompts.map(item => ({ name: item.name, detail: `${item.description} · ${item.filePath}` }))} />
-        <ResourceList title="Themes" items={resources.themes.map(item => ({ name: item.name ?? '(unnamed)', detail: item.sourcePath ?? '' }))} />
-        <ResourceList title="AGENTS files" items={resources.agentsFiles.map(item => ({ name: item.path, detail: item.content }))} />
-        {[...resources.diagnostics, ...resources.runtimeDiagnostics].map((item, index) => <p key={`${item.type}:${index}`} className={`text-[length:var(--fs-xs)] ${item.type === 'error' ? 'text-danger-100' : 'text-warning-100'}`}>{item.message}</p>)}
-        {resources.modelFallbackMessage ? <p className="text-[length:var(--fs-xs)] text-warning-100">{resources.modelFallbackMessage}</p> : null}
+      {registry ? <div className="space-y-2">
+        <ResourceList title="Extensions" items={registry.extensions.map(item => ({ name: item.path, detail: `${item.tools.length} tools · ${item.commands.length} commands · ${item.handlers.length} handlers${item.hidden ? ' · hidden' : ''}` }))} />
+        <ResourceList title="Tools" items={registry.tools.map(item => ({ name: `${item.name}${registry.activeTools.includes(item.name) ? '' : ' (inactive)'}`, detail: item.description ?? '' }))} />
+        <ResourceList title="Commands" items={registry.commands.map(item => ({ name: item.name, detail: item.description ?? '' }))} />
+        <ResourceList title="Event handlers" items={registry.eventHandlers.map(name => ({ name, detail: '' }))} />
       </div> : null}
 
-      <div className="flex flex-wrap gap-2 border-t border-border-100 pt-3">
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('runtime', async () => setRuntime(await inspectPiRuntime(sessionId)))}>Runtime inspection</Button>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('prompt', async () => setSystemPrompt(await inspectPiSystemPrompt(sessionId)))}>System prompt</Button>
-      </div>
-      {runtime ? <JsonDetails title="Runtime data" value={runtime} /> : null}
-      {systemPrompt !== null ? <details open><summary className="cursor-pointer text-[length:var(--fs-xs)] text-text-300">System prompt</summary><pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-bg-200/40 p-2 text-[length:var(--fs-xs)] text-text-400">{systemPrompt}</pre></details> : null}
-
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t border-border-100 pt-3"><input className={inputClass} placeholder="Tool name" value={toolName} onChange={event => setToolName(event.target.value)} /><Button size="sm" variant="secondary" disabled={busy !== null || !toolName.trim()} onClick={() => void run('tool', async () => setToolDefinition(await inspectPiToolDefinition(sessionId, toolName.trim())))}>Inspect tool</Button></div>
-      {toolDefinition !== undefined ? <JsonDetails title={`Tool: ${toolName}`} value={toolDefinition} /> : null}
-
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2"><input className={inputClass} placeholder="Extension event type" value={eventType} onChange={event => setEventType(event.target.value)} /><Button size="sm" variant="secondary" disabled={busy !== null || !eventType.trim()} onClick={() => void run('handler', async () => setHandlerResult(await hasPiExtensionHandlers(sessionId, eventType.trim())))}>Check handler</Button></div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t border-border-100 pt-3"><input className={inputClass} placeholder="Extension event type" value={eventType} onChange={event => setEventType(event.target.value)} /><Button size="sm" variant="secondary" disabled={busy !== null || !eventType.trim()} onClick={() => setHandlerResult(registry?.eventHandlers.includes(eventType.trim()) ?? null)}>Check handler</Button></div>
       {handlerResult !== null ? <p className="text-[length:var(--fs-xs)] text-text-300">Handler {handlerResult ? 'registered' : 'not registered'} for {eventType}</p> : null}
 
+      {registry ? <JsonDetails title="Registry data" value={registry} /> : null}
       {extensionUi.sessions[sessionId] ? <JsonDetails title="Extension UI state" value={extensionUi.sessions[sessionId]} /> : null}
     </section>
   )
