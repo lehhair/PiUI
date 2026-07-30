@@ -152,15 +152,30 @@ export class SessionHost {
    * restart, or a client deep-linking to a session id), locate it on disk
    * via the global session list and attach it before failing.
    */
+  private attachFlights = new Map<string, Promise<AttachedSession>>()
+
   private async ensureAttached(sessionId: string): Promise<AttachedSession> {
     const existing = this.attached.get(sessionId)
     if (existing) return existing
-    const found = await this.findSessionOnDisk(sessionId)
-    if (!found) {
-      throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
+    // Single-flight: concurrent queries (state.get + branch.get fire together)
+    // must share one attach, or the second worker loses the session lease
+    // with SESSION_BUSY.
+    const inFlight = this.attachFlights.get(sessionId)
+    if (inFlight) return inFlight
+    const flight = (async (): Promise<AttachedSession> => {
+      const found = await this.findSessionOnDisk(sessionId)
+      if (!found) {
+        throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
+      }
+      await this.openSession(found.cwd, found.sessionFile)
+      return this.requireAttached(sessionId)
+    })()
+    this.attachFlights.set(sessionId, flight)
+    try {
+      return await flight
+    } finally {
+      this.attachFlights.delete(sessionId)
     }
-    await this.openSession(found.cwd, found.sessionFile)
-    return this.requireAttached(sessionId)
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
@@ -251,6 +266,7 @@ export class SessionHost {
     session.sessionId = data.targetSessionId
     session.sessionFile = typeof data.targetSessionFile === "string" ? data.targetSessionFile : session.sessionFile
     session.cwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
+    session.worker.updateSessionIdentity(session.sessionId, session.sessionFile, session.cwd)
     this.attached.set(session.sessionId, session)
     this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
       replaced: true,

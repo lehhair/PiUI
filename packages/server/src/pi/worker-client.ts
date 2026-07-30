@@ -254,6 +254,15 @@ export class WorkerSession {
     return this.sessionId ?? ""
   }
 
+  /** After a runtime replacement (fork/clone/new/import), the worker owns a
+   * different session — requests must carry the new id or the worker
+   * rejects them as RUNTIME_REPLACED. */
+  updateSessionIdentity(sessionId: string, sessionFile?: string, cwd?: string): void {
+    this.sessionId = sessionId
+    if (sessionFile !== undefined) this.sessionFile = sessionFile
+    if (cwd !== undefined) this.cwd = cwd
+  }
+
   getSessionFile(): string | undefined {
     return this.sessionFile
   }

@@ -130,6 +130,20 @@ function App() {
   // 全局唯一 SSE 连接。所有 pane 通过 consumer 机制接收自己的 session 事件。
   useGlobalEvents(activeDirectories)
 
+  // Runtime replacement (fork/clone/new/import): panes follow the new session id
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>).detail
+      if (!detail?.sourceSessionId || !detail.targetSessionId) return
+      paneLayoutStore.remapSession(detail.sourceSessionId, detail.targetSessionId)
+      if (routeSessionId === detail.sourceSessionId) {
+        navigateRouteToSession(detail.targetSessionId, detail.targetCwd ?? routeDirectory)
+      }
+    }
+    window.addEventListener('piui:session-replaced', handler)
+    return () => window.removeEventListener('piui:session-replaced', handler)
+  }, [routeSessionId, routeDirectory, navigateRouteToSession])
+
   // URL -> focused pane session
   useEffect(() => {
     if (lastRouteSessionIdRef.current === routeSessionId) return
