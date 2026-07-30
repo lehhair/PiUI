@@ -1,2 +1,2 @@
 // Slash Command feature exports
-export { SlashCommandMenu, type SlashCommandMenuHandle } from './SlashCommandMenu'
+export { SlashCommandMenu, type Command, type SlashCommandMenuHandle } from './SlashCommandMenu'

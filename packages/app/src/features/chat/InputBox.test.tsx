@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, type ForwardedRef } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBox } from './InputBox'
-import type { Command } from '../../api/command'
+import type { Command } from '../slash-command'
 import type { Message } from '../../types/message'
 
 let slashCommands: Command[] = []

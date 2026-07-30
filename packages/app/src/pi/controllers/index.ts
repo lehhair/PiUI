@@ -1,9 +1,18 @@
-import type { JsonObject } from '@piui/protocol'
+import type { JsonObject, RegistrySnapshot, CommandDescriptor } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
+
+/**
+ * Load a session's native slash commands (extension commands, prompt
+ * templates, skills) from the runtime registry.
+ */
+export async function loadPiSlashCommands(sessionId: string, signal?: AbortSignal): Promise<CommandDescriptor[]> {
+  const registry = (await transport.getPiSessionRegistry(sessionId, signal)) as RegistrySnapshot | undefined
+  return registry?.commands ?? []
+}
 
 /**
  * Load all Pi sessions globally.
