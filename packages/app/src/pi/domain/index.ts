@@ -161,6 +161,8 @@ export type PiAssistantMessageItem = {
   blocks: (TextContent | ThinkingContent | ToolCall)[]
   /** Tool results paired by toolCallId; empty while a call has no result yet */
   toolResults: Record<string, ToolResultMessage>
+  /** True for the live streaming message (not yet persisted as an entry) */
+  isStreaming?: boolean
 }
 
 export type PiBashExecutionItem = {

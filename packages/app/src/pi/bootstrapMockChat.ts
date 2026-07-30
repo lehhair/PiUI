@@ -10,6 +10,7 @@ import { messageStore } from "../store/messageStore"
 import { resetWorkspaceResolutionCache } from "./sessionApi"
 import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
+import { piEventStream } from "./eventStream"
 
 export interface PiBackendBootstrapResult {
   available: boolean
@@ -82,7 +83,7 @@ export function installPiBackendServerSwitch(): void {
     resetManagementEvents()
     setPiCapabilities(undefined)
     setPiBackendState({ status: "booting" })
-    void import("./eventSocket").then(({ resetPiEventSocket }) => resetPiEventSocket())
+    piEventStream.disconnect()
     void initializePiBackend().then(() => {
       // A switch can arrive while an older bootstrap promise is still active.
       // Re-run against the newly selected server once that promise is released.

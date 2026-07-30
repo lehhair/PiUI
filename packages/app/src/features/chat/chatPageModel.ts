@@ -1,4 +1,5 @@
 import type { Message } from '../../types/message'
+import type { PiAssistantMessageItem, PiTimelineItem } from '../../pi/domain/index.js'
 
 export const PAGE_MESSAGE_COUNT = 20
 export const PAGE_EXTREME_RENDER_WEIGHT = 700
@@ -659,10 +660,10 @@ export function buildPageRenderSegments(options: {
   return segments
 }
 
-export function buildTurnDurationMap(messages: Message[], visibleMessages: Message[]): Map<string, number> {
+export function buildTurnDurationMap(items: PiTimelineItem[], visibleItems: PiTimelineItem[]): Map<string, number> {
   const map = new Map<string, number>()
   const visibleAssistantIds = new Set(
-    visibleMessages.filter(message => message.info.role === 'assistant').map(message => message.info.id),
+    visibleItems.filter(item => item.kind === 'assistant_message').map(item => item.entryId),
   )
 
   let currentUserCreated: number | null = null
@@ -674,22 +675,23 @@ export function buildTurnDurationMap(messages: Message[], visibleMessages: Messa
     map.set(currentVisibleAssistantId, currentLastCompleted - currentUserCreated)
   }
 
-  for (const message of messages) {
-    if (message.info.role === 'user') {
+  for (const item of items) {
+    if (item.kind === 'user_message') {
       commitTurn()
-      currentUserCreated = message.info.time.created
+      currentUserCreated = item.timestamp
       currentVisibleAssistantId = null
       currentLastCompleted = null
       continue
     }
 
-    if (currentUserCreated == null || message.info.role !== 'assistant') continue
+    if (currentUserCreated == null || item.kind !== 'assistant_message') continue
 
-    if (visibleAssistantIds.has(message.info.id)) {
-      currentVisibleAssistantId = message.info.id
+    if (visibleAssistantIds.has(item.entryId)) {
+      currentVisibleAssistantId = item.entryId
     }
-    if (message.info.time.completed != null) {
-      currentLastCompleted = message.info.time.completed
+    // Persisted assistant messages carry their completion timestamp
+    if (!item.isStreaming && item.message.timestamp) {
+      currentLastCompleted = item.message.timestamp
     }
   }
 
@@ -702,7 +704,7 @@ export function buildTurnDurationMap(messages: Message[], visibleMessages: Messa
  * 每个用户回合里，最后一条可见 assistant 消息的 id 集合。
  * 用于「仅最新 Step」：中间 assistant 消息不显示 step 完成信息。
  */
-export function buildTurnLatestAssistantIdSet(visibleMessages: Message[]): Set<string> {
+export function buildTurnLatestAssistantIdSet(visibleItems: PiTimelineItem[]): Set<string> {
   const latestIds = new Set<string>()
   let currentLatestAssistantId: string | null = null
 
@@ -710,14 +712,14 @@ export function buildTurnLatestAssistantIdSet(visibleMessages: Message[]): Set<s
     if (currentLatestAssistantId) latestIds.add(currentLatestAssistantId)
   }
 
-  for (const message of visibleMessages) {
-    if (message.info.role === 'user') {
+  for (const item of visibleItems) {
+    if (item.kind === 'user_message') {
       commitTurn()
       currentLatestAssistantId = null
       continue
     }
-    if (message.info.role === 'assistant') {
-      currentLatestAssistantId = message.info.id
+    if (item.kind === 'assistant_message') {
+      currentLatestAssistantId = item.entryId
     }
   }
 
@@ -730,7 +732,7 @@ export type ProcessTimelineItem =
   | {
       kind: 'message'
       key: string
-      message: Message
+      item: PiTimelineItem
       /** 过程壳内消息的内容范围 */
       processContentScope?: 'process' | 'final' | 'inline'
     }
@@ -743,11 +745,11 @@ export type ProcessTimelineItem =
       isActive: boolean
       /** 壳内消息（不含壳外 final） */
       children: Array<{
-        message: Message
+        item: PiTimelineItem
         processContentScope: 'process' | 'inline'
       }>
       /** 壳外最终回答（结束后才有） */
-      finalMessage?: Message
+      finalItem?: PiTimelineItem
     }
 
 /** 两行是否可共享同一对象（VirtualRow 靠 item 引用短路） */
@@ -756,7 +758,7 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
   if (a.kind !== b.kind || a.key !== b.key) return false
 
   if (a.kind === 'message' && b.kind === 'message') {
-    return a.message === b.message && a.processContentScope === b.processContentScope
+    return a.item === b.item && a.processContentScope === b.processContentScope
   }
 
   if (a.kind === 'process-shell' && b.kind === 'process-shell') {
@@ -765,7 +767,7 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       a.startedAt !== b.startedAt ||
       a.durationMs !== b.durationMs ||
       a.isActive !== b.isActive ||
-      a.finalMessage !== b.finalMessage ||
+      a.finalItem !== b.finalItem ||
       a.children.length !== b.children.length
     ) {
       return false
@@ -773,7 +775,7 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
     for (let i = 0; i < a.children.length; i++) {
       const left = a.children[i]
       const right = b.children[i]
-      if (left.message !== right.message || left.processContentScope !== right.processContentScope) {
+      if (left.item !== right.item || left.processContentScope !== right.processContentScope) {
         return false
       }
     }
@@ -813,31 +815,31 @@ export function reuseProcessTimelineItems(
   return allSame ? previous : result
 }
 
-function assistantHasLiveWork(message: Message): boolean {
-  if (message.info.role !== 'assistant') return false
-  if (message.info.time.completed == null || message.isStreaming) return true
-  return message.parts.some(
-    p => p.type === 'tool' && (p.state.status === 'running' || p.state.status === 'pending'),
+function assistantHasLiveWork(item: PiTimelineItem): boolean {
+  if (item.kind !== 'assistant_message') return false
+  if (item.isStreaming) return true
+  return item.blocks.some(
+    (block: PiAssistantMessageItem['blocks'][number]) => block.type === 'toolCall' && !item.toolResults[block.id],
   )
 }
 
 function resolveTurnDurationMs(
-  assistants: Message[],
+  assistants: PiAssistantMessageItem[],
   userStart: number | undefined,
   turnDurationMap: Map<string, number>,
 ): number | undefined {
   if (userStart == null) return undefined
   for (const m of [...assistants].reverse()) {
-    const mapped = turnDurationMap.get(m.info.id)
+    const mapped = turnDurationMap.get(m.entryId)
     if (mapped != null && mapped > 0) return mapped
   }
   let latestEnd: number | undefined
   for (const m of assistants) {
-    const completed = m.info.time.completed
+    const completed = m.isStreaming ? null : m.message.timestamp || null
     if (completed != null && (latestEnd == null || completed > latestEnd)) latestEnd = completed
-    for (const p of m.parts) {
-      if (p.type !== 'tool') continue
-      const toolEnd = p.state.time?.end
+    for (const p of m.blocks) {
+      if (p.type !== 'toolCall') continue
+      const toolEnd = m.toolResults[p.id]?.timestamp
       if (toolEnd != null && (latestEnd == null || toolEnd > latestEnd)) latestEnd = toolEnd
     }
   }
@@ -858,12 +860,12 @@ function resolveTurnDurationMs(
  * isUserEntryReady：空壳等用户入场生长完成后再挂。
  */
 export function buildProcessTimeline(
-  visibleMessages: Message[],
+  visibleItems: PiTimelineItem[],
   options: {
     turnDurationMap: Map<string, number>
     sessionIsStreaming: boolean
-    messageHasProcess: (message: Message) => boolean
-    messageHasFinal: (message: Message) => boolean
+    messageHasProcess: (item: PiAssistantMessageItem) => boolean
+    messageHasFinal: (item: PiAssistantMessageItem) => boolean
     /** 用户消息入场生长是否完成；缺省视为已完成（历史消息 / 测试） */
     isUserEntryReady?: (userMessageId: string) => boolean
   },
@@ -878,31 +880,39 @@ export function buildProcessTimeline(
   const items: ProcessTimelineItem[] = []
 
   type TurnBag = {
-    user: Message | null
-    assistants: Message[]
+    user: PiTimelineItem | null
+    assistants: PiAssistantMessageItem[]
   }
 
   const turns: TurnBag[] = []
   let current: TurnBag | null = null
 
-  for (const message of visibleMessages) {
-    if (message.info.role === 'user') {
+  for (const item of visibleItems) {
+    if (item.kind === 'user_message') {
       if (current) turns.push(current)
-      current = { user: message, assistants: [] }
+      current = { user: item, assistants: [] }
       continue
     }
-    if (message.info.role !== 'assistant') continue
+    // 系统条目（bash/compaction/summary/custom/label/unknown）独立平铺，不进壳
+    if (item.kind !== 'assistant_message') {
+      if (current) {
+        turns.push(current)
+        current = null
+      }
+      items.push({ kind: 'message', key: item.entryId, item })
+      continue
+    }
     if (!current) {
       // 历史续段 / 页首无 user：直接平铺，不挂壳
-      items.push({ kind: 'message', key: message.info.id, message })
+      items.push({ kind: 'message', key: item.entryId, item })
       continue
     }
-    current.assistants.push(message)
+    current.assistants.push(item)
   }
   if (current) turns.push(current)
 
   // 只关心带 user 的回合（过程壳的锚点）
-  const userTurns = turns.filter((t): t is TurnBag & { user: Message } => t.user != null)
+  const userTurns = turns.filter((t): t is TurnBag & { user: PiTimelineItem } => t.user != null)
 
   const laterHasAssistant = (fromIndex: number) => {
     for (let j = fromIndex + 1; j < userTurns.length; j++) {
@@ -919,7 +929,7 @@ export function buildProcessTimeline(
     return false
   }
 
-  const isTurnSettled = (turn: TurnBag & { user: Message }, index: number): boolean => {
+  const isTurnSettled = (turn: TurnBag & { user: PiTimelineItem }, index: number): boolean => {
     const assistants = turn.assistants
     // 后面 SSE live → 前面 Worked（须最先判断；前轮 completed 常晚到）
     if (laterHasLive(index)) return true
@@ -931,27 +941,27 @@ export function buildProcessTimeline(
     // 全 completed 且无 live → 锁定 Worked。
     // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。
     // 工具循环间隙若下一助手还没到，会短暂 Worked；下一助手 live 后自然回到 Working。
-    return assistants.every(m => m.info.time.completed != null && !m.isStreaming)
+    return assistants.every(m => !m.isStreaming)
   }
 
-  const isTurnPending = (turn: TurnBag & { user: Message }, index: number): boolean => {
+  const isTurnPending = (turn: TurnBag & { user: PiTimelineItem }, index: number): boolean => {
     if (isTurnSettled(turn, index)) return false
     if (turn.assistants.length > 0) return true
-    return sessionIsStreaming && isUserEntryReady(turn.user.info.id)
+    return sessionIsStreaming && isUserEntryReady(turn.user.entryId)
   }
 
   // 唯一 Working：最早 pending 的用户回合
   let activeUserId: string | null = null
   for (let i = 0; i < userTurns.length; i++) {
     if (isTurnPending(userTurns[i], i)) {
-      activeUserId = userTurns[i].user.info.id
+      activeUserId = userTurns[i].user.entryId
       break
     }
   }
 
   for (const turn of turns) {
     if (turn.user) {
-      items.push({ kind: 'message', key: turn.user.info.id, message: turn.user })
+      items.push({ kind: 'message', key: turn.user.entryId, item: turn.user })
     }
 
     const assistants = turn.assistants
@@ -960,38 +970,38 @@ export function buildProcessTimeline(
     // 无 user 的续段：平铺
     if (!turn.user) {
       for (const m of assistants) {
-        items.push({ kind: 'message', key: m.info.id, message: m })
+        items.push({ kind: 'message', key: m.entryId, item: m })
       }
       continue
     }
 
-    const userId = turn.user.info.id
+    const userId = turn.user.entryId
     const turnIsActive = activeUserId != null && userId === activeUserId
 
     const finalAssistant = assistants.length > 0 ? assistants[assistants.length - 1] : null
-    const finalId = finalAssistant?.info.id ?? null
-    const startedAt = turn.user.info.time.created
+    const finalId = finalAssistant?.entryId ?? null
+    const startedAt = turn.user.timestamp
     const durationMs = turnIsActive
       ? undefined
       : resolveTurnDurationMs(assistants, startedAt, turnDurationMap)
 
     // 进行中：全部进壳；结束：中间全进 + 末尾仅 process
-    const children: Array<{ message: Message; processContentScope: 'process' | 'inline' }> = []
+    const children: Array<{ item: PiTimelineItem; processContentScope: 'process' | 'inline' }> = []
     if (turnIsActive) {
       for (const m of assistants) {
         children.push({
-          message: m,
-          processContentScope: m.info.id === finalId ? 'process' : 'inline',
+          item: m,
+          processContentScope: m.entryId === finalId ? 'process' : 'inline',
         })
       }
     } else {
       for (const m of assistants) {
-        if (m.info.id === finalId) {
+        if (m.entryId === finalId) {
           if (messageHasProcess(m)) {
-            children.push({ message: m, processContentScope: 'process' })
+            children.push({ item: m, processContentScope: 'process' })
           }
         } else {
-          children.push({ message: m, processContentScope: 'inline' })
+          children.push({ item: m, processContentScope: 'inline' })
         }
       }
     }
@@ -1011,17 +1021,17 @@ export function buildProcessTimeline(
         durationMs,
         isActive: turnIsActive,
         children,
-        finalMessage: finalOutside,
+        finalItem: finalOutside,
       })
     } else if (finalOutside) {
       items.push({
         kind: 'message',
-        key: finalOutside.info.id,
-        message: finalOutside,
+        key: finalOutside.entryId,
+        item: finalOutside,
       })
     } else {
       for (const m of assistants) {
-        items.push({ kind: 'message', key: m.info.id, message: m })
+        items.push({ kind: 'message', key: m.entryId, item: m })
       }
     }
   }

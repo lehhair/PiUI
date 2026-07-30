@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { Sidebar } from './features/chat'
-import { ChatPane } from './features/chat/ChatPane'
+import { PiChatPane } from './features/pi-chat/PiChatPane'
 import { SplitContainer } from './features/chat/SplitContainer'
 import type { CommandItem } from './components/CommandPalette'
 import { ToastContainer } from './components/ToastContainer'
@@ -211,10 +211,6 @@ function App() {
     if (!paneId) return
     navigatePaneHome(paneId)
   }, [paneLayout.focusedPaneId, navigatePaneHome])
-
-  const handleEnterSplitMode = useCallback(() => {
-    paneLayoutStore.enterSplitMode(paneLayout.focusedSessionId)
-  }, [paneLayout.focusedSessionId])
 
   const handleToggleFocusedPaneFullscreen = useCallback(() => {
     const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
@@ -502,39 +498,13 @@ function App() {
 
   const renderPaneLeaf = useCallback(
     (paneId: string, paneSessionId: string | null) => (
-      <ChatPane
+      <PiChatPane
         key={paneId}
         paneId={paneId}
         sessionId={paneSessionId}
-        isFocused={paneLayout.focusedPaneId === paneId}
-        paneCount={paneLayout.paneCount}
-        displayMode={paneLayout.isSplit && paneLayout.fullscreenPaneId !== paneId ? 'split' : 'single'}
-        isPaneFullscreen={paneLayout.fullscreenPaneId === paneId}
-        onOpenSidebar={handleOpenSidebar}
-        onToggleRightPanel={handleToggleRightPanel}
-        showSidebarButton={chatViewport.interaction.sidebarBehavior === 'overlay'}
-        onSplitPane={splitPaneEnabled && !paneLayout.fullscreenPaneId ? handleEnterSplitMode : undefined}
-        onTogglePaneFullscreen={paneLayout.isSplit ? handleToggleFocusedPaneFullscreen : undefined}
-        onOpenSettings={openSettings}
-        navigatePaneToSession={navigatePaneToSession}
-        navigatePaneHome={navigatePaneHome}
       />
     ),
-    [
-      paneLayout.focusedPaneId,
-      paneLayout.paneCount,
-      paneLayout.isSplit,
-      paneLayout.fullscreenPaneId,
-      chatViewport.interaction.sidebarBehavior,
-      splitPaneEnabled,
-      handleOpenSidebar,
-      handleToggleRightPanel,
-      handleEnterSplitMode,
-      handleToggleFocusedPaneFullscreen,
-      openSettings,
-      navigatePaneToSession,
-      navigatePaneHome,
-    ],
+    [],
   )
 
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)

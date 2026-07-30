@@ -221,27 +221,26 @@ export function splitProcessRenderItems(items: RenderItem[]): ProcessSplit {
 }
 
 /** 流式未完成时不拆 final：中间 text 后面还可能跟 tool */
-export function assistantStillStreamingProcess(isStreaming: boolean): boolean {
-  return isStreaming
+export function assistantStillStreamingProcess(item: PiAssistantMessageItem): boolean {
+  return Boolean(item.isStreaming)
 }
 
 /** 是否有过程内容（thinking/tool/非尾部 text） */
-export function assistantHasProcessContent(item: PiAssistantMessageItem, isStreaming: boolean): boolean {
+export function assistantHasProcessContent(item: PiAssistantMessageItem): boolean {
   const items = groupBlocksForRender(item)
   if (items.length === 0) return false
-  if (assistantStillStreamingProcess(isStreaming)) return true
+  if (assistantStillStreamingProcess(item)) return true
   return splitProcessRenderItems(items).hasProcess
 }
 
 /** 是否有应留在折叠块外的最终 text（仅消息已结束后才拆） */
-export function assistantHasFinalContent(item: PiAssistantMessageItem, isStreaming: boolean): boolean {
-  if (assistantStillStreamingProcess(isStreaming)) return false
+export function assistantHasFinalContent(item: PiAssistantMessageItem): boolean {
+  if (assistantStillStreamingProcess(item)) return false
   return splitProcessRenderItems(groupBlocksForRender(item)).hasFinal
 }
 
 interface MessageRendererProps {
   item: PiTimelineItem
-  isStreaming?: boolean
   allowStreamingLayoutAnimation?: boolean
   /** 回合总时长（毫秒），仅在回合最后一条 assistant 消息上有值 */
   turnDuration?: number
@@ -263,7 +262,6 @@ interface MessageRendererProps {
 
 export const MessageRenderer = memo(function MessageRenderer({
   item,
-  isStreaming = false,
   allowStreamingLayoutAnimation = false,
   turnDuration,
   isTurnLatestAssistant = true,
@@ -291,7 +289,6 @@ export const MessageRenderer = memo(function MessageRenderer({
     return (
       <AssistantMessageView
         item={item}
-        isStreaming={isStreaming}
         allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
         turnDuration={turnDuration}
         isTurnLatestAssistant={isTurnLatestAssistant}
@@ -607,7 +604,6 @@ const UserMessageView = memo(function UserMessageView({
 
 const AssistantMessageView = memo(function AssistantMessageView({
   item,
-  isStreaming = false,
   allowStreamingLayoutAnimation = false,
   turnDuration,
   isTurnLatestAssistant = true,
@@ -616,7 +612,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
   forkMessageId,
 }: {
   item: PiAssistantMessageItem
-  isStreaming?: boolean
   allowStreamingLayoutAnimation?: boolean
   turnDuration?: number
   isTurnLatestAssistant?: boolean
@@ -625,6 +620,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
   forkMessageId?: string
 }) {
   const { t } = useTranslation('message')
+  const isStreaming = Boolean(item.isStreaming)
   const { message, blocks } = item
   const { stepFinishDisplay, actionsOnLatestAssistantOnly } = useTheme()
   // 分叉/复制：默认只在回合末尾助手消息显示，避免连续多条打断阅读
@@ -644,14 +640,14 @@ const AssistantMessageView = memo(function AssistantMessageView({
     const items = groupBlocksForRender(item)
     if (processContentScope === 'all' || processContentScope === 'inline') return items
     // 流式未完成：整袋当 process，不拆 final
-    if (assistantStillStreamingProcess(isStreaming)) {
+    if (assistantStillStreamingProcess(item)) {
       return processContentScope === 'process' ? items : []
     }
     const split = splitProcessRenderItems(items)
     if (processContentScope === 'process') return split.processItems
     if (processContentScope === 'final') return split.finalItems
     return items
-  }, [item, processContentScope, isStreaming])
+  }, [item, processContentScope])
 
   // 判断哪些 thinking block 已经结束（后面出现了任何其他 block）
   const endedReasoningIndexes = useMemo(() => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { ChatArea, InputBox } from '../chat/index.js'
 import type { Attachment } from '../attachment/index.js'
-import { piBranchToMessages } from '../../pi/piChatViewModel.js'
+import { selectPiTimelineItems } from '../../pi/selectors/index.js'
 import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
@@ -39,14 +39,10 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
   const branch = usePiBranchData()
   const state = usePiSessionRuntimeState()
 
-  const cwd = typeof state?.cwd === 'string' ? state.cwd : ''
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
 
-  const messages = useMemo(
-    () => (sessionId && branch ? piBranchToMessages(branch, sessionId, cwd) : []),
-    [branch, sessionId, cwd],
-  )
+  const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
 
   const handleSend = useCallback(
     async (text: string, _attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
@@ -74,7 +70,7 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ChatArea
-        messages={messages}
+        items={items}
         queuedSteering={queue?.steering ?? []}
         queuedFollowUps={queue?.followUp ?? []}
         sessionId={sessionId}
@@ -94,3 +90,4 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
     </div>
   )
 }
+
