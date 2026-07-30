@@ -36,6 +36,7 @@ describe("Pi capability registry", () => {
         },
       },
       expandPromptTemplates: { type: "boolean" },
+      streamingBehavior: { type: "string", enum: ["steer", "followUp"] },
     })
 
     const branch = getCommandCapability("branch.get")

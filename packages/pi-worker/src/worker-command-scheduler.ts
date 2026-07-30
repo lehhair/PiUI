@@ -22,7 +22,7 @@ function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand 
   const activeIsPrompt = active?.type === "prompt" || active?.type === "sendUserMessage"
   switch (command.type) {
     case "prompt":
-      return active?.type === "prompt" && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
+      return activeIsPrompt && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
     case "steer":
     case "followUp":
     case "abort":

@@ -15,6 +15,7 @@ import { selectPiTimelineItems } from '../../pi/selectors/index.js'
 import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
+  compactPiSession,
   forkPiSession,
   loadMorePiBranchEntries,
   refreshPiBranch,
@@ -22,6 +23,7 @@ import {
   loadPiModels,
   loadPiSessionData,
   openPiSession,
+  sendPiPrompt,
   sendPiUserMessage,
   setPiExtensionEditorState,
   setPiModel,
@@ -158,6 +160,8 @@ export function PiChatPane({
 }: PiChatPaneProps) {
   const onEnterSessionRef = useRef(onEnterSession)
   onEnterSessionRef.current = onEnterSession
+  const onNewChatRef = useRef(onNewChat)
+  onNewChatRef.current = onNewChat
   const { currentDirectory, addDirectory } = useDirectory()
   const currentDirectoryRef = useRef(currentDirectory)
   currentDirectoryRef.current = currentDirectory
@@ -353,6 +357,56 @@ export function PiChatPane({
       // refresh so the user message shows without waiting for the debounce.
       void sendPiUserMessage(sid, text, images.length ? images : undefined, deliverAs).catch(error => {
         console.error('Failed to send message:', error)
+      })
+      window.setTimeout(() => {
+        void refreshPiBranch(sid).catch(() => undefined)
+        void refreshPiSessionState(sid).catch(() => undefined)
+      }, 120)
+      return true
+    },
+    [sessionId, isStreaming],
+  )
+
+  // Slash command dispatch, mirroring pi TUI: frontend built-ins are handled
+  // locally; everything else goes through the native prompt path, where the
+  // SDK executes extension commands and expands skills/prompt templates.
+  const handleCommand = useCallback(
+    async (commandStr: string): Promise<boolean> => {
+      const trimmed = commandStr.trim()
+      const withoutSlash = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
+      const spaceIndex = withoutSlash.indexOf(' ')
+      const command = spaceIndex > 0 ? withoutSlash.slice(0, spaceIndex) : withoutSlash
+      const args = spaceIndex > 0 ? withoutSlash.slice(spaceIndex + 1).trim() : ''
+      if (!command) return false
+
+      if (command === 'new') {
+        onNewChatRef.current?.()
+        return true
+      }
+
+      let targetSessionId = sessionId
+      if (!targetSessionId) {
+        const directory = currentDirectoryRef.current
+        if (!directory) return false
+        const opened = await openPiSession(directory)
+        if (!opened.sessionId) return false
+        targetSessionId = opened.sessionId
+        piEventStream.connect(targetSessionId)
+        onEnterSessionRef.current?.(targetSessionId, directory)
+      }
+      const sid = targetSessionId
+
+      if (command === 'compact') {
+        void compactPiSession(sid, args || undefined).catch(error => {
+          console.error('Failed to compact session:', error)
+        })
+        return true
+      }
+
+      void sendPiPrompt(sid, trimmed, {
+        streamingBehavior: isStreaming ? 'followUp' : undefined,
+      }).catch(error => {
+        console.error('Failed to execute command:', error)
       })
       window.setTimeout(() => {
         void refreshPiBranch(sid).catch(() => undefined)
@@ -588,6 +642,7 @@ export function PiChatPane({
             paneId={paneId}
             sessionId={sessionId}
             onSend={handleSend}
+            onCommand={handleCommand}
             onTextChange={handleTextChange}
             onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
             onNewChat={onNewChat}

@@ -29,7 +29,7 @@ export interface SessionRuntime {
   getAttachment(entryId: string, blockIndex: number): JsonObject | Promise<JsonObject>
   getRegistry(): RegistrySnapshot | Promise<RegistrySnapshot>
 
-  prompt(text: string, images?: ImageInput[], options?: { expandPromptTemplates?: boolean }): Promise<void>
+  prompt(text: string, images?: ImageInput[], options?: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" }): Promise<void>
   steer(text: string, images?: ImageInput[]): Promise<void>
   followUp(text: string, images?: ImageInput[]): Promise<void>
   sendUserMessage(text: string, images?: ImageInput[], deliverAs?: "steer" | "followUp"): Promise<void>
