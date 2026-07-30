@@ -1,17 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ModelsSettings } from './ModelsSettings'
-import type { ModelInfo } from '../../../hooks/useModels'
+import type { AnyModel } from '../../../utils/modelUtils'
 
-const { useModelsMock, useHiddenModelKeysMock, setVisibleMock, setManyVisibleMock } = vi.hoisted(() => ({
-  useModelsMock: vi.fn(),
+const { usePiModelsMock, useHiddenModelKeysMock, setVisibleMock, setManyVisibleMock } = vi.hoisted(() => ({
+  usePiModelsMock: vi.fn(),
   useHiddenModelKeysMock: vi.fn(),
   setVisibleMock: vi.fn(),
   setManyVisibleMock: vi.fn(),
 }))
 
-vi.mock('../../../hooks', () => ({
-  useModels: useModelsMock,
+vi.mock('../../../pi/hooks/index.js', () => ({
+  usePiModels: usePiModelsMock,
 }))
 
 vi.mock('../../../store', () => ({
@@ -23,53 +23,39 @@ vi.mock('../../../store', () => ({
 }))
 
 vi.mock('../../../utils/modelUtils', () => ({
-  getModelKey: (model: ModelInfo) => `${model.providerId}:${model.id}`,
-  groupModelsByProvider: (models: ModelInfo[]) => [
+  getModelKey: (model: AnyModel) => `${model.provider}:${model.id}`,
+  groupModelsByProvider: (models: AnyModel[]) => [
     {
-      providerName: 'OpenAI',
+      providerId: 'openai',
+      providerName: 'openai',
       models,
     },
   ],
 }))
 
-const MODELS: ModelInfo[] = [
-  {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1',
-    providerId: 'openai',
-    providerName: 'OpenAI',
-    family: 'gpt',
-    contextLimit: 128000,
-    outputLimit: 32000,
-    supportsReasoning: true,
-    supportsImages: true,
-    supportsPdf: true,
-    supportsAudio: false,
-    supportsVideo: false,
-    supportsToolcall: true,
-    variants: [],
-  },
-  {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini',
-    providerId: 'openai',
-    providerName: 'OpenAI',
-    family: 'gpt',
-    contextLimit: 128000,
-    outputLimit: 16000,
-    supportsReasoning: false,
-    supportsImages: true,
-    supportsPdf: true,
-    supportsAudio: false,
-    supportsVideo: false,
-    supportsToolcall: true,
-    variants: [],
-  },
+function makeModel(id: string, name: string): AnyModel {
+  return {
+    id,
+    name,
+    api: 'openai-responses',
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 32000,
+  } as AnyModel
+}
+
+const MODELS: AnyModel[] = [
+  makeModel('gpt-4.1', 'GPT-4.1'),
+  makeModel('gpt-4o-mini', 'GPT-4o Mini'),
 ]
 
 describe('ModelsSettings', () => {
   beforeEach(() => {
-    useModelsMock.mockReturnValue({ models: MODELS, isLoading: false })
+    usePiModelsMock.mockReturnValue({ models: MODELS, isLoading: false })
     useHiddenModelKeysMock.mockReturnValue([])
     setVisibleMock.mockReset()
     setManyVisibleMock.mockReset()

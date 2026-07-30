@@ -8,10 +8,10 @@ import {
   EyeOffIcon,
   SearchIcon,
 } from '../../../components/Icons'
-import { useModels } from '../../../hooks'
+import { usePiModels } from '../../../pi/hooks/index.js'
 import { modelVisibilityStore, useHiddenModelKeys } from '../../../store'
 import { groupModelsByProvider, getModelKey } from '../../../utils/modelUtils'
-import type { ModelInfo } from '../../../types/ui'
+import type { AnyModel } from '../../../utils/modelUtils'
 import { SettingsSection } from './SettingsUI'
 
 function formatContext(limit: number): string {
@@ -68,7 +68,7 @@ function ModelVisibilityButton({
 
 export function ModelsSettings() {
   const { t } = useTranslation('settings')
-  const { models, isLoading } = useModels()
+  const { models, isLoading } = usePiModels()
   const hiddenModelKeys = useHiddenModelKeys()
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -91,8 +91,8 @@ export function ModelsSettings() {
       model =>
         normalize(model.name).includes(normalizedQuery) ||
         normalize(model.id).includes(normalizedQuery) ||
-        normalize(model.family).includes(normalizedQuery) ||
-        normalize(model.providerName).includes(normalizedQuery),
+        normalize(model.api).includes(normalizedQuery) ||
+        normalize(model.provider).includes(normalizedQuery),
     )
   }, [models, deferredQuery])
 
@@ -100,7 +100,7 @@ export function ModelsSettings() {
 
   // 当前可见列表的扁平顺序（折叠的 provider 不参与 shift 范围）
   const flatVisibleModels = useMemo(() => {
-    const list: ModelInfo[] = []
+    const list: AnyModel[] = []
     for (const group of groups) {
       const isCollapsed = collapsed.has(group.providerName) && !deferredQuery
       if (isCollapsed) continue
@@ -133,7 +133,7 @@ export function ModelsSettings() {
    * - Ctrl/Cmd+点击：只切换当前项（不打断锚点，方便接着 Shift 扩选）
    */
   const handleModelActivate = useCallback(
-    (model: ModelInfo, e: React.MouseEvent | React.KeyboardEvent) => {
+    (model: AnyModel, e: React.MouseEvent | React.KeyboardEvent) => {
       const key = getModelKey(model)
       const currentlyEnabled = !hiddenModelKeySet.has(key)
       const nextVisible = !currentlyEnabled
@@ -225,7 +225,7 @@ export function ModelsSettings() {
       ) : (
         <div>
           {groups.map((group, groupIndex) => {
-            const providerModels = models.filter(model => model.providerName === group.providerName)
+            const providerModels = models.filter(model => model.provider === group.providerId)
             const providerVisibleCount = providerModels.filter(
               model => !hiddenModelKeySet.has(getModelKey(model)),
             ).length
@@ -280,7 +280,7 @@ export function ModelsSettings() {
                     {group.models.map(model => {
                       const key = getModelKey(model)
                       const enabled = !hiddenModelKeySet.has(key)
-                      const context = formatContext(model.contextLimit)
+                      const context = formatContext(model.contextWindow)
                       const disabled = enabled && visibleCount <= 1
 
                       return (

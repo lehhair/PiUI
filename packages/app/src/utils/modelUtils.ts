@@ -7,7 +7,7 @@
 import type { Model } from '@earendil-works/pi-ai'
 import { serverStorage } from './perServerStorage'
 
-type AnyModel = Model<any>
+export type AnyModel = Model<any>
 
 // ============================================
 // 模型唯一标识
@@ -274,7 +274,7 @@ export interface ModelGroup {
 /**
  * 将模型按 provider 分组，常用的 provider 在前
  */
-export function groupModelsByProvider(models: AnyModel[]): ModelGroup[] {
+export function groupModelsByProvider(models: readonly AnyModel[]): ModelGroup[] {
   const stats = getModelUsageStats()
 
   // 按 provider 分组
