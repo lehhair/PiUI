@@ -127,13 +127,16 @@ export type PiSessionRow = {
 /**
  * Pi timeline item for chat rendering.
  * Each item preserves its raw entry and provides type-safe rendering data.
+ * Tool results are paired back into their owning assistant item so the
+ * message keeps its embedded tool calls (matching chat UI structure).
  */
 export type PiTimelineItem =
   | PiUserMessageItem
   | PiAssistantMessageItem
-  | PiToolExecutionItem
+  | PiBashExecutionItem
   | PiCompactionItem
   | PiBranchSummaryItem
+  | PiSummaryMessageItem
   | PiModelChangeItem
   | PiThinkingLevelItem
   | PiCustomMessageItem
@@ -156,18 +159,16 @@ export type PiAssistantMessageItem = {
   rawEntry: SessionEntry
   message: AssistantMessage
   blocks: (TextContent | ThinkingContent | ToolCall)[]
+  /** Tool results paired by toolCallId; empty while a call has no result yet */
+  toolResults: Record<string, ToolResultMessage>
 }
 
-export type PiToolExecutionItem = {
-  kind: 'tool_execution'
+export type PiBashExecutionItem = {
+  kind: 'bash_execution'
   entryId: string
   timestamp: number
   rawEntry: SessionEntry
-  toolCallId: string
-  toolName: string
-  call: ToolCall
-  result?: ToolResultMessage
-  status: 'pending' | 'running' | 'completed' | 'error'
+  message: BashExecutionMessage
 }
 
 export type PiCompactionItem = {
@@ -189,6 +190,14 @@ export type PiBranchSummaryItem = {
   summary: string
   fromId: string
   details?: unknown
+}
+
+export type PiSummaryMessageItem = {
+  kind: 'summary_message'
+  entryId: string
+  timestamp: number
+  rawEntry: SessionEntry
+  message: BranchSummaryMessage | CompactionSummaryMessage
 }
 
 export type PiModelChangeItem = {

@@ -5,7 +5,7 @@ import { ScrollArea } from '../../../components/ui'
 import { useDisclosureScrollLock } from '../../../hooks'
 import { useTheme } from '../../../hooks/useTheme'
 import { MarkdownRenderer } from '../../../components/MarkdownRenderer'
-import type { ReasoningPart } from '../../../types/message'
+import type { ThinkingContent } from '@earendil-works/pi-ai'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { MSG_SPACING } from '../messageSpacing'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
@@ -14,20 +14,24 @@ import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../mes
 const ITALIC_SHOW_LEADING_GLYPH = false
 
 interface ReasoningPartViewProps {
-  part: ReasoningPart
+  part: ThinkingContent
+  /** Stable key for expand-state persistence (entry id + block index) */
+  partKey: string
+  /** Optional timing for the "thought for Xs" label; omit when unavailable */
+  time?: { start: number; end?: number }
   isStreaming?: boolean
 }
 
-export const ReasoningPartView = memo(function ReasoningPartView({ part, isStreaming }: ReasoningPartViewProps) {
+export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey, time, isStreaming }: ReasoningPartViewProps) {
   const { t } = useTranslation('message')
   const { reasoningDisplayMode } = useTheme()
-  const rawText = part.text || ''
+  const rawText = part.thinking || ''
 
-  const isPartStreaming = isStreaming && !part.time?.end
+  const isPartStreaming = Boolean(isStreaming && !time?.end)
   const hasContent = !!rawText.trim()
 
   const displayText = rawText
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:reasoning:${part.id}`, false)
+  const [expanded, setExpanded] = useUiDisclosureState(`message:reasoning:${partKey}`, false)
   const shouldRenderBody = useMessageExpandRender(expanded)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -45,14 +49,14 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
     return firstLine.trim() || collapsedPreview
   }, [displayText, collapsedPreview])
   const thoughtDurationLabel = useMemo(() => {
-    const start = part.time?.start
-    const end = part.time?.end
+    const start = time?.start
+    const end = time?.end
     if (!start || !end || end <= start) return null
     const durationMs = end - start
     if (durationMs < 1000) return `${Math.max(1, Math.round(durationMs))}ms`
     if (durationMs < 10000) return `${(durationMs / 1000).toFixed(1)}s`
     return `${Math.round(durationMs / 1000)}s`
-  }, [part.time?.start, part.time?.end])
+  }, [time?.start, time?.end])
   const summaryText = collapsedPreview || (isPartStreaming ? t('reasoning.thinking') : '')
   const hasLineBreak = /[\r\n]/.test(rawText)
 
