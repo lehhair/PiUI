@@ -7,7 +7,8 @@ import {
   useManagementEvents,
   type ProviderAuthFlowState,
 } from '../../pi/managementEventStore'
-import { cancelProviderAuth, respondProviderAuth } from '../../pi/sessionApi'
+import type { ProviderAuthPrompt } from '@piui/protocol'
+import { cancelProviderAuth, respondProviderAuth } from '../../pi/transport/index.js'
 
 export function ProviderAuthDialogHost() {
   const { flows } = useManagementEvents()
@@ -18,7 +19,7 @@ export function ProviderAuthDialogHost() {
 
 function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
   const event = flow.event
-  const prompt = event?.type === 'prompt' ? event.prompt : undefined
+  const prompt = event?.type === 'prompt' ? (event.prompt as ProviderAuthPrompt) : undefined
   const [value, setValue] = useState(prompt?.type === 'select' ? prompt.options?.[0]?.id ?? '' : '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +34,7 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
     }
     setSubmitting(true)
     try {
-      await cancelProviderAuth(flow.flowId, flow.sessionId)
+      await cancelProviderAuth(flow.flowId)
       dismissProviderAuthFlow(flow.flowId)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -46,7 +47,7 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
     setSubmitting(true)
     setError(null)
     try {
-      await respondProviderAuth(flow.flowId, event.promptId, value, flow.sessionId)
+      await respondProviderAuth(flow.flowId, event.promptId, value)
       clearProviderAuthEvent(flow.flowId)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -61,10 +62,10 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
         <p className="text-[length:var(--fs-xs)] text-text-400">Provider: {flow.providerId}{flow.sessionId ? ' · session scope' : ' · global scope'}</p>
         {event.type === 'prompt' ? (
           <>
-            <p className="whitespace-pre-wrap text-[length:var(--fs-sm)] text-text-200">{event.prompt.message}</p>
-            {event.prompt.type === 'select' ? (
+            <p className="whitespace-pre-wrap text-[length:var(--fs-sm)] text-text-200">{prompt!.message}</p>
+            {prompt!.type === 'select' ? (
               <div className="space-y-2">
-                {event.prompt.options?.map(option => (
+                {prompt!.options?.map(option => (
                   <label key={option.id} className="flex cursor-pointer gap-2 rounded-md border border-border-100 p-2 text-[length:var(--fs-sm)] text-text-200">
                     <input type="radio" name="provider-auth-option" value={option.id} checked={value === option.id} onChange={() => setValue(option.id)} />
                     <span><span className="block text-text-100">{option.label}</span>{option.description ? <span className="block text-[length:var(--fs-xs)] text-text-400">{option.description}</span> : null}</span>
@@ -74,9 +75,9 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
             ) : (
               <input
                 autoFocus
-                type={event.prompt.type === 'secret' ? 'password' : 'text'}
+                type={prompt!.type === 'secret' ? 'password' : 'text'}
                 value={value}
-                placeholder={event.prompt.placeholder}
+                placeholder={prompt!.placeholder}
                 onChange={input => setValue(input.target.value)}
                 onKeyDown={key => { if (key.key === 'Enter' && value) void submit() }}
                 className="h-9 w-full rounded-md border border-border-200 bg-bg-100 px-3 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100"

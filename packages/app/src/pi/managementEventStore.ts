@@ -1,17 +1,20 @@
 import { useSyncExternalStore } from 'react'
-import type { PackageProgressV1, ProviderAuthEventV1 } from '@piui/protocol'
+import type { JsonObject, ProviderAuthEvent } from '@piui/protocol'
+
+/** packages.progress payload (worker-side emission is not wired yet). */
+export type PackageProgress = JsonObject & { commandId: string }
 
 export interface ProviderAuthFlowState {
   flowId: string
   providerId: string
   sessionId?: string
-  event?: ProviderAuthEventV1
+  event?: ProviderAuthEvent
   notifications: unknown[]
 }
 
 export interface ManagementEventSnapshot {
   flows: Record<string, ProviderAuthFlowState>
-  packageProgress: Record<string, PackageProgressV1>
+  packageProgress: Record<string, PackageProgress>
   resourceRevisions: Record<string, string>
   providerRevision: number
 }
@@ -81,7 +84,7 @@ export function registerProviderAuthFlow(flowId: string, providerId: string, ses
   })
 }
 
-export function receiveProviderAuthEvent(event: ProviderAuthEventV1, sessionId?: string): void {
+export function receiveProviderAuthEvent(event: ProviderAuthEvent, sessionId?: string): void {
   const current = snapshot.flows[event.flowId]
   emit({
     ...snapshot,
@@ -120,7 +123,7 @@ export function receiveProviderAuthUpdated(): void {
   emit({ ...snapshot, providerRevision: snapshot.providerRevision + 1 })
 }
 
-export function receivePackageProgress(progress: PackageProgressV1): void {
+export function receivePackageProgress(progress: PackageProgress): void {
   emit({
     ...snapshot,
     packageProgress: { ...snapshot.packageProgress, [progress.commandId]: progress },

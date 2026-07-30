@@ -8,11 +8,20 @@ import {
   type EventStreamRef,
 } from '@piui/protocol'
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
-import type { SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
+import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase } from './sessionApi.js'
 import { piBranchStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
+import {
+  getTrackedManagementProviders,
+  receivePackageProgress,
+  receiveProviderAuthEvent,
+  receiveProviderAuthUpdated,
+  receiveResourceRevision,
+  subscribeManagementStreams,
+  type PackageProgress,
+} from './managementEventStore'
 import type { SessionStatus } from '../types/session'
 import {
   loadPiSessionData,
@@ -50,6 +59,10 @@ type PiExtensionUiEvent =
  * - sessions.updated: reload global session list
  */
 class PiEventStream {
+  constructor() {
+    queueMicrotask(() => this.ensureManagementWatch())
+  }
+
   private ws: WebSocket | null = null
   private refCounts = new Map<string, number>()
   private cursors = new Map<string, EventCursor>()
@@ -77,11 +90,30 @@ class PiEventStream {
       this.refCounts.set(sessionId, count - 1)
       return
     }
-    if (this.refCounts.size === 0) {
+    if (this.refCounts.size === 0 && getTrackedManagementProviders().length === 0) {
       this.closeSocket()
     } else if (this.ws?.readyState === WebSocket.OPEN) {
       this.sendSubscribe()
     }
+  }
+
+  private managementWatched = false
+
+  /**
+   * Keep provider streams (auth flows) subscribed whenever providers are
+   * tracked, even with no session connected — the socket stays up for them.
+   */
+  private ensureManagementWatch(): void {
+    if (this.managementWatched) return
+    this.managementWatched = true
+    subscribeManagementStreams(() => {
+      if (getTrackedManagementProviders().length > 0) {
+        this.ensureSocket()
+        if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+      } else if (this.refCounts.size === 0) {
+        this.closeSocket()
+      }
+    })
   }
 
   /** Drop everything (server switch etc.). */
@@ -127,7 +159,7 @@ class PiEventStream {
     ws.onclose = () => {
       this.clearPing()
       if (this.ws === ws) this.ws = null
-      if (this.refCounts.size > 0) {
+      if (this.refCounts.size > 0 || getTrackedManagementProviders().length > 0) {
         this.reconnectTimer = setTimeout(() => this.openSocket(), RECONNECT_DELAY_MS)
       }
     }
@@ -143,6 +175,9 @@ class PiEventStream {
       streams.push({ kind: 'session', id: sessionId })
       const cursor = this.cursors.get(sessionId) ?? piBranchStore.getData(sessionId)?.checkpoint?.position
       if (cursor) cursors[eventStreamKey({ kind: 'session', id: sessionId })] = cursor
+    }
+    for (const providerId of getTrackedManagementProviders()) {
+      streams.push({ kind: 'provider', id: providerId })
     }
     this.send({ type: 'subscribe', protocolVersion: PROTOCOL_VERSION, streams, cursors })
   }
@@ -192,6 +227,25 @@ class PiEventStream {
       case 'extension.ui':
         if (sessionId) this.handleExtensionUiEvent(sessionId, envelope.payload as unknown as PiExtensionUiEvent)
         break
+      case 'provider.auth':
+        this.handleProviderAuthEvent(envelope.payload as unknown as ProviderAuthEvent)
+        break
+      case 'packages.progress':
+        receivePackageProgress(envelope.payload as unknown as PackageProgress)
+        break
+      case 'resources.updated': {
+        const payload = envelope.payload as { workspacePath?: string | null } | undefined
+        receiveResourceRevision(payload?.workspacePath ?? undefined, String(envelope.cursor.sequence))
+        break
+      }
+    }
+  }
+
+  private handleProviderAuthEvent(event: ProviderAuthEvent): void {
+    receiveProviderAuthEvent(event)
+    // Terminal auth states change providers.list — bump listeners to refetch
+    if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
+      receiveProviderAuthUpdated()
     }
   }
 

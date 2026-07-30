@@ -28,7 +28,7 @@ const settings = {
 
 vi.mock('../../../hooks', () => ({ useCurrentDirectory: () => '/workspace' }))
 vi.mock('../../../store/messageStoreHooks', () => ({ useCurrentSessionId: () => 'session' }))
-vi.mock('../../../pi/sessionApi', () => ({
+vi.mock('../../../pi/transport/index.js', () => ({
   getPiSettings: vi.fn(async () => settings),
   getProjectTrust: vi.fn(async () => ({
     trusted: false,

@@ -8,7 +8,7 @@ import {
 } from '../../pi/managementEventStore'
 
 const mocks = vi.hoisted(() => ({ respond: vi.fn(), cancel: vi.fn() }))
-vi.mock('../../pi/sessionApi', () => ({
+vi.mock('../../pi/transport/index.js', () => ({
   respondProviderAuth: mocks.respond,
   cancelProviderAuth: mocks.cancel,
 }))
@@ -37,10 +37,10 @@ describe('ProviderAuthDialogHost', () => {
     expect(input).toHaveAttribute('type', 'password')
     fireEvent.change(input, { target: { value: 'secret-value' } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    await waitFor(() => expect(mocks.respond).toHaveBeenCalledWith('flow-1', 'prompt-1', 'secret-value', undefined))
+    await waitFor(() => expect(mocks.respond).toHaveBeenCalledWith('flow-1', 'prompt-1', 'secret-value'))
   })
 
-  it('cancels a session-scoped flow when the dialog closes', async () => {
+  it('cancels the flow when the dialog closes', async () => {
     render(<ProviderAuthDialogHost />)
     act(() => {
       registerProviderAuthFlow('flow-2', 'openai', 'session-1')
@@ -48,6 +48,6 @@ describe('ProviderAuthDialogHost', () => {
     })
     expect(screen.getByRole('link', { name: 'Open authentication URL' })).toHaveAttribute('href', 'https://example.test/login')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith('flow-2', 'session-1'))
+    await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith('flow-2'))
   })
 })

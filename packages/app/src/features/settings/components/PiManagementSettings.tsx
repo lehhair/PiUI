@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type {
-  PiSettingsPatchV1,
-  PiSettingsSnapshotV1,
-  ProjectTrustV1,
-} from '@piui/protocol'
+import type { JsonObject } from '@piui/protocol'
+import type { PiProjectTrust, PiSettingsSnapshot } from '../../../pi/domain'
 import type { HostWorkspace } from '../../../pi/workspaces'
 import { Button } from '../../../components/ui/Button'
 import { useCurrentDirectory } from '../../../hooks'
@@ -13,21 +10,34 @@ import {
   getProjectTrust,
   patchPiSettings,
   setProjectTrust,
-} from '../../../pi/sessionApi'
+} from '../../../pi/transport/index.js'
 import { listHostWorkspaces, resolveWorkspacePath } from '../../../pi/workspaces'
 import { PiProviderManagement } from './PiProviderManagement'
 import { PiPackageManagement } from './PiPackageManagement'
 import { PiResourceManagement } from './PiResourceManagement'
 import { PiSessionManagement } from './PiSessionManagement'
 
-type SettingsDraft = Pick<PiSettingsPatchV1,
-  'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'transport' | 'steeringMode' | 'followUpMode' |
-  'compactionEnabled' | 'retryEnabled' | 'enableSkillCommands' | 'showImages' | 'shellPath' | 'defaultProjectTrust' |
-  'theme' | 'httpProxy'>
+// Draft keys are the worker's flat settings.patch keys.
+type SettingsDraft = {
+  defaultProvider?: string
+  defaultModel?: string
+  defaultThinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  transport?: 'auto' | 'sse' | 'websocket' | 'websocket-cached'
+  steeringMode?: 'all' | 'one-at-a-time'
+  followUpMode?: 'all' | 'one-at-a-time'
+  compactionEnabled?: boolean
+  retryEnabled?: boolean
+  enableSkillCommands?: boolean
+  showImages?: boolean
+  shellPath?: string | null
+  defaultProjectTrust?: 'ask' | 'always' | 'never'
+  theme?: string
+  httpProxy?: string | null
+}
 
 const inputClass = 'h-8 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100'
 
-function draftFromSnapshot(snapshot: PiSettingsSnapshotV1): SettingsDraft {
+function draftFromSnapshot(snapshot: PiSettingsSnapshot): SettingsDraft {
   const settings = snapshot.effective
   return {
     defaultProvider: settings.defaultProvider ?? '',
@@ -36,8 +46,8 @@ function draftFromSnapshot(snapshot: PiSettingsSnapshotV1): SettingsDraft {
     transport: settings.transport,
     steeringMode: settings.steeringMode,
     followUpMode: settings.followUpMode,
-    compactionEnabled: settings.compaction.enabled,
-    retryEnabled: settings.retry.enabled,
+    compactionEnabled: settings.compaction?.enabled,
+    retryEnabled: settings.retry?.enabled,
     enableSkillCommands: settings.enableSkillCommands,
     showImages: settings.showImages,
     shellPath: settings.shellPath ?? '',
@@ -51,9 +61,9 @@ export function PiManagementSettings() {
   const directory = useCurrentDirectory()
   const sessionId = useCurrentSessionId()
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
-  const [settings, setSettings] = useState<PiSettingsSnapshotV1 | null>(null)
+  const [settings, setSettings] = useState<PiSettingsSnapshot | null>(null)
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
-  const [trust, setTrust] = useState<ProjectTrustV1 | null>(null)
+  const [trust, setTrust] = useState<PiProjectTrust | null>(null)
   const [registeredWorkspaces, setRegisteredWorkspaces] = useState<HostWorkspace[]>([])
   const [advancedPatch, setAdvancedPatch] = useState('{}')
   const [busy, setBusy] = useState<string | null>(null)
@@ -171,8 +181,8 @@ export function PiManagementSettings() {
             <JsonScope title="Effective settings" value={settings.effective} />
             <label className="mt-3 block space-y-1"><span className="text-text-400">PiSettingsPatch JSON</span><textarea rows={7} className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-2 font-mono text-text-100" value={advancedPatch} onChange={event => setAdvancedPatch(event.target.value)} /></label>
             <div className="mt-2 flex justify-end"><Button size="sm" disabled={busy !== null} onClick={() => workspacePath && void run('advanced-settings', async () => {
-              let patch: PiSettingsPatchV1
-              try { patch = JSON.parse(advancedPatch) as PiSettingsPatchV1 } catch { throw new Error('Settings patch must be valid JSON') }
+              let patch: JsonObject
+              try { patch = JSON.parse(advancedPatch) as JsonObject } catch { throw new Error('Settings patch must be valid JSON') }
               const saved = await patchPiSettings(workspacePath, patch)
               setSettings(saved)
               setDraft(draftFromSnapshot(saved))
