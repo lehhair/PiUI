@@ -31,6 +31,21 @@ import type {
   PiToolExecution,
   PiUserMessageItem,
 } from '../../pi/domain/index.js'
+import type { ImageContent } from '@earendil-works/pi-ai'
+import { AttachmentItem } from '../attachment/index.js'
+import type { Attachment } from '../attachment/index.js'
+
+/** ImageContent -> Attachment for the attachment capsule renderer */
+function imageToAttachment(block: ImageContent, id: string): Attachment {
+  const ext = block.mimeType.split('/')[1] || 'png'
+  return {
+    id,
+    type: 'file',
+    displayName: `image.${ext}`,
+    url: `data:${block.mimeType};base64,${block.data}`,
+    mime: block.mimeType,
+  }
+}
 import {
   ENTRY_GROW_DURATION_MS,
   isEntryGrowComplete,
@@ -541,7 +556,7 @@ const UserMessageView = memo(function UserMessageView({
 
   const wrapperRef = useEntryGrowAnimation(item.timestamp, true, entryId, onEntryGrowComplete)
 
-  // 文本块拼接；图片块走附件渲染（后续 phase）
+  // 文本块拼接；图片块走附件胶囊渲染（AttachmentItem 通用消费）
   const textBlocks = blocks.filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
   const imageBlocks = blocks.filter((block): block is Extract<typeof block, { type: 'image' }> => block.type === 'image')
   const messageText = textBlocks.map(block => block.text).join('')
@@ -564,15 +579,15 @@ const UserMessageView = memo(function UserMessageView({
           />
         )}
 
-        {/* 图片附件 */}
+        {/* 图片附件（胶囊） */}
         {imageBlocks.length > 0 && (
           <div className="mt-1 flex max-w-full min-w-0 flex-wrap gap-2 justify-end">
             {imageBlocks.map((block, i) => (
-              <img
+              <AttachmentItem
                 key={`${entryId}:img:${i}`}
-                src={`data:${block.mimeType};base64,${block.data}`}
-                alt="attachment"
-                className="max-w-xs rounded-lg"
+                attachment={imageToAttachment(block, `${entryId}:img:${i}`)}
+                expandable
+                size="sm"
               />
             ))}
           </div>
