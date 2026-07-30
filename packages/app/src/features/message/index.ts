@@ -1,8 +1,8 @@
 export {
   MessageRenderer,
   ProcessCollapseBlock,
-  messageHasProcessContent,
-  messageHasFinalContent,
+  assistantHasProcessContent,
+  assistantHasFinalContent,
   splitProcessRenderItems,
 } from './MessageRenderer'
 export type { ProcessContentScope } from './MessageRenderer'
