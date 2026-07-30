@@ -8,9 +8,7 @@ import type {
   PiCompactionItem,
   PiBranchSummaryItem,
   PiModelChangeItem,
-  PiThinkingLevelItem,
   PiCustomMessageItem,
-  PiLabelItem,
   PiUnknownItem,
 } from '../domain/index.js'
 import { piSessionInfoStore } from '../state/index.js'
@@ -137,14 +135,6 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         provider: entry.provider,
         modelId: entry.modelId,
       } as PiModelChangeItem)
-    } else if (entry.type === 'thinking_level_change') {
-      items.push({
-        kind: 'thinking_level_change',
-        entryId: entry.id,
-        timestamp,
-        rawEntry: entry,
-        thinkingLevel: entry.thinkingLevel,
-      } as PiThinkingLevelItem)
     } else if (entry.type === 'custom_message') {
       items.push({
         kind: 'custom_message',
@@ -156,15 +146,12 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         display: entry.display,
         details: entry.details,
       } as PiCustomMessageItem)
-    } else if (entry.type === 'label') {
-      items.push({
-        kind: 'label',
-        entryId: entry.id,
-        timestamp,
-        rawEntry: entry,
-        targetId: entry.targetId,
-        label: entry.label,
-      } as PiLabelItem)
+    } else if (entry.type === 'thinking_level_change' || entry.type === 'label' || entry.type === 'custom') {
+      // Not consumed in the conversation flow (matches pi's official
+      // renderers): thinking level lives in the composer level selector,
+      // labels are markers on their target entries, plain custom entries
+      // are extension state for reload reconstruction.
+      continue
     } else {
       // Unknown entry type, keep as unknown item
       items.push({
