@@ -90,6 +90,7 @@ export function PiChatPane({
   const modelSelectorRef = useRef<ModelSelectorHandle | null>(null)
   const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([])
   const visibleMessageIdsRef = useRef<string[]>([])
+  const [isAtBottom, setIsAtBottom] = useState(true)
   const handleVisibleIdsChange = useCallback((ids: string[]) => {
     const prev = visibleMessageIdsRef.current
     if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return
@@ -100,6 +101,16 @@ export function PiChatPane({
     chatAreaRef.current?.scrollToMessageId(messageId)
   }, [])
   const outlineEntries = useMemo(() => buildOutlineSourceEntries(items), [items])
+
+  // Mount ChatArea only after branch data is ready — the virtual scroller's
+  // cold-start logic estimates the initial offset at the bottom on mount.
+  const chatAreaMountKey = branch ? sessionId : null
+  // Assume at-bottom on session remount so the scroll-to-bottom button
+  // doesn't flash.
+  useEffect(() => {
+    if (chatAreaMountKey == null) return
+    setIsAtBottom(true)
+  }, [chatAreaMountKey])
 
   // Input box height -> ChatArea bottom padding (messages scroll under the dock)
   const [inputBoxHeight, setInputBoxHeight] = useState(0)
@@ -158,20 +169,30 @@ export function PiChatPane({
       </div>
 
       <div className="absolute inset-0">
-        <ChatArea
-          ref={chatAreaRef}
-          items={items}
-          queuedSteering={queue?.steering ?? []}
-          queuedFollowUps={queue?.followUp ?? []}
-          sessionId={sessionId}
-          isStreaming={isStreaming}
-          allowStreamingLayoutAnimation
-          loadState={branch ? 'loaded' : 'loading'}
-          hasMoreHistory={Boolean(branch?.hasMore)}
-          onLoadMore={() => loadMorePiBranchEntries(sessionId)}
-          bottomPadding={inputBoxHeight}
-          onVisibleMessageIdsChange={handleVisibleIdsChange}
-        />
+        {chatAreaMountKey == null ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-text-400 session-loading-indicator">
+              <span className="w-5 h-5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
+            </div>
+          </div>
+        ) : (
+          <ChatArea
+            key={chatAreaMountKey}
+            ref={chatAreaRef}
+            items={items}
+            queuedSteering={queue?.steering ?? []}
+            queuedFollowUps={queue?.followUp ?? []}
+            sessionId={sessionId}
+            isStreaming={isStreaming}
+            allowStreamingLayoutAnimation
+            loadState="loaded"
+            hasMoreHistory={Boolean(branch?.hasMore)}
+            onLoadMore={() => loadMorePiBranchEntries(sessionId)}
+            bottomPadding={inputBoxHeight}
+            onVisibleMessageIdsChange={handleVisibleIdsChange}
+            onAtBottomChange={setIsAtBottom}
+          />
+        )}
       </div>
 
       <OutlineIndex
@@ -188,6 +209,9 @@ export function PiChatPane({
             onSend={handleSend}
             onAbort={() => void abortPiOperation(sessionId).catch(() => undefined)}
             isStreaming={isStreaming}
+            isAtBottom={isAtBottom}
+            showScrollToBottom={!isAtBottom}
+            onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
           />
         </div>
       </div>
