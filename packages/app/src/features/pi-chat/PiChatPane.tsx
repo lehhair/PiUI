@@ -16,6 +16,7 @@ import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
   compactPiSession,
+  executePiBash,
   forkPiSession,
   loadMorePiBranchEntries,
   refreshPiBranch,
@@ -350,6 +351,18 @@ export function PiChatPane({
         onEnterSessionRef.current?.(targetSessionId, directory)
       }
       const sid = targetSessionId
+
+      // pi TUI parity: `!command` runs one-shot bash through the runtime
+      if (text.startsWith('!') && text.length > 1) {
+        void executePiBash(sid, text.slice(1)).catch(error => {
+          console.error('Failed to run bash command:', error)
+        })
+        window.setTimeout(() => {
+          void refreshPiBranch(sid).catch(() => undefined)
+          void refreshPiSessionState(sid).catch(() => undefined)
+        }, 120)
+        return true
+      }
 
       // Fire and refresh: the prompt command stays open for the whole turn,
       // so awaiting it would block the composer until the turn ends. Return
