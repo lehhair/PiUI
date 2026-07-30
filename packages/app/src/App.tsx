@@ -38,7 +38,6 @@ import type { TerminalTab } from './store/layoutStore'
 import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
-import { ExtensionUiDialogHost } from './features/chat/ExtensionUiDialogHost'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 import { loadPiSessionData, openPiSession } from './pi/controllers/index.js'
 import { piEventStream } from './pi/eventStream.js'
@@ -1027,7 +1026,6 @@ function App() {
             </>
           )}
           <ToastContainer onOpenAbout={openAboutSettings} />
-          <ExtensionUiDialogHost />
           <ProviderAuthDialogHost />
         </div>
 

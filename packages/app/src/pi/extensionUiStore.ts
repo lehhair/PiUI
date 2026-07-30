@@ -1,15 +1,16 @@
 import type {
-  ExtensionUiDialogRequestV1,
-  ExtensionUiEditorCommandV1,
-  ExtensionUiSnapshotV1,
-  ExtensionUiStateV1,
+  ExtensionUiDialogRequest,
+  ExtensionUiEditorCommand,
+  ExtensionUiSnapshot,
+  ExtensionUiState,
+  ExtensionUiStatePatch,
 } from "@piui/protocol"
 
 interface ExtensionUiStoreSnapshot {
-  sessions: Readonly<Record<string, ExtensionUiSnapshotV1>>
+  sessions: Readonly<Record<string, ExtensionUiSnapshot>>
 }
 
-const emptyState = (): ExtensionUiStateV1 => ({
+const emptyState = (): ExtensionUiState => ({
   revision: 0,
   statuses: {},
   workingVisible: true,
@@ -18,15 +19,51 @@ const emptyState = (): ExtensionUiStateV1 => ({
   toolsExpanded: false,
 })
 
+function applyStatePatch(state: ExtensionUiState, patch: ExtensionUiStatePatch): ExtensionUiState {
+  const revision = state.revision + 1
+  switch (patch.kind) {
+    case 'status': {
+      const statuses = { ...state.statuses }
+      if (patch.text === undefined) delete statuses[patch.key]
+      else statuses[patch.key] = patch.text
+      return { ...state, revision, statuses }
+    }
+    case 'workingMessage':
+      return { ...state, revision, workingMessage: patch.message }
+    case 'workingVisible':
+      return { ...state, revision, workingVisible: patch.visible }
+    case 'workingIndicator':
+      return {
+        ...state,
+        revision,
+        workingIndicator: patch.frames ? { frames: patch.frames, intervalMs: patch.intervalMs ?? 100 } : undefined,
+      }
+    case 'hiddenThinkingLabel':
+      return { ...state, revision, hiddenThinkingLabel: patch.label }
+    case 'widget': {
+      const widgets = { ...state.widgets }
+      if (!patch.lines) delete widgets[patch.key]
+      else widgets[patch.key] = { lines: patch.lines, placement: patch.placement ?? 'aboveEditor' }
+      return { ...state, revision, widgets }
+    }
+    case 'title':
+      return { ...state, revision, title: patch.title }
+    case 'theme':
+      return { ...state, revision, themeName: patch.name }
+    case 'toolsExpanded':
+      return { ...state, revision, toolsExpanded: patch.expanded }
+  }
+}
+
 let current: ExtensionUiStoreSnapshot = { sessions: {} }
 const listeners = new Set<() => void>()
 
-function update(sessionId: string, value: ExtensionUiSnapshotV1): void {
+function update(sessionId: string, value: ExtensionUiSnapshot): void {
   current = { sessions: { ...current.sessions, [sessionId]: value } }
   for (const listener of listeners) listener()
 }
 
-function existing(sessionId: string): ExtensionUiSnapshotV1 {
+function existing(sessionId: string): ExtensionUiSnapshot {
   return current.sessions[sessionId] ?? { sessionId, state: emptyState(), pending: [] }
 }
 
@@ -40,11 +77,11 @@ export const extensionUiStore = {
     return current
   },
 
-  replace(snapshot: ExtensionUiSnapshotV1): void {
+  replace(snapshot: ExtensionUiSnapshot): void {
     update(snapshot.sessionId, structuredClone(snapshot))
   },
 
-  requestOpened(request: ExtensionUiDialogRequestV1): void {
+  requestOpened(request: ExtensionUiDialogRequest): void {
     const snapshot = existing(request.sessionId)
     update(request.sessionId, {
       ...snapshot,
@@ -58,11 +95,12 @@ export const extensionUiStore = {
     update(sessionId, { ...snapshot, pending: snapshot.pending.filter(item => item.requestId !== requestId) })
   },
 
-  stateUpdated(sessionId: string, state: ExtensionUiStateV1): void {
-    update(sessionId, { ...existing(sessionId), state: structuredClone(state) })
+  statePatched(sessionId: string, patch: ExtensionUiStatePatch): void {
+    const snapshot = existing(sessionId)
+    update(sessionId, { ...snapshot, state: applyStatePatch(snapshot.state, patch) })
   },
 
-  editorCommand(sessionId: string, command: ExtensionUiEditorCommandV1): void {
+  editorCommand(sessionId: string, command: ExtensionUiEditorCommand): void {
     const snapshot = existing(sessionId)
     const editorText = command.kind === "set"
       ? command.text

@@ -216,6 +216,25 @@ export async function renamePiSession(sessionId: string, name: string, signal?: 
 }
 
 /**
+ * Respond to an extension UI dialog request.
+ */
+export async function respondPiExtensionUi(
+  sessionId: string,
+  requestId: string,
+  response: JsonObject,
+  signal?: AbortSignal,
+): Promise<void> {
+  await transport.respondPiExtensionUi(sessionId, requestId, response, signal)
+}
+
+/**
+ * Send editor text state to extensions (composer content sync).
+ */
+export async function setPiExtensionEditorState(sessionId: string, text: string, signal?: AbortSignal): Promise<void> {
+  await transport.setPiExtensionEditorState(sessionId, text, signal)
+}
+
+/**
  * Fork the session at an entry (native fork: new session file, runtime
  * switches to it). fork is a serialized command — submit, then wait for
  * the result carrying targetSessionId.
