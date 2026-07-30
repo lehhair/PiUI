@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { UiSession } from '../types/session'
-import { loadPiSessions, openPiSession, deletePiSession } from '../pi/controllers/index.js'
+import { loadPiSessions, loadPiSessionsForCwd, openPiSession, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -26,7 +26,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      const nativeSessions = await loadPiSessions()
+      // 按当前项目目录过滤数据源（全局模式才拉全量）
+      const nativeSessions = currentDirectory
+        ? await loadPiSessionsForCwd(currentDirectory)
+        : await loadPiSessions()
       const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
       const next = linkPiSessionForks(mapped)
       if (requestId !== requestIdRef.current) return
@@ -53,7 +56,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false)
     }
-  }, [])
+  }, [currentDirectory])
 
   useEffect(() => {
     fetchSessionsRef.current = fetchSessions

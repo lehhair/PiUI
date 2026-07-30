@@ -58,6 +58,18 @@ describe('SessionProvider', () => {
     expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'Keep me' })
   })
 
+  it('loads sessions scoped to the current directory when one is selected', async () => {
+    mocks.currentDirectory = '/workspace/demo'
+    mocks.loadPiSessionsForCwd.mockResolvedValue([sessionInfo('session-1', '/workspace/demo', 'Scoped')])
+    const { result } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
+
+    await waitFor(() => expect(result.current?.isLoading).toBe(false))
+    expect(mocks.loadPiSessionsForCwd).toHaveBeenCalledWith('/workspace/demo')
+    expect(mocks.loadPiSessions).not.toHaveBeenCalled()
+    expect(result.current?.sessions).toHaveLength(1)
+    expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'Scoped' })
+  })
+
   it('keeps a session visible when durable deletion fails', async () => {
     mocks.loadPiSessions.mockResolvedValue([sessionInfo('session-1', '/workspace', 'Keep me')])
     mocks.deletePiSession.mockRejectedValue(new Error('delete failed'))
