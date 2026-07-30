@@ -18,9 +18,6 @@ const Terminal = lazy(() => import('./Terminal').then(module => ({ default: modu
 const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
 const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
-const SessionTreePanel = lazy(() =>
-  import('./SessionTreePanel').then(module => ({ default: module.SessionTreePanel })),
-)
 
 function PanelFallback() {
   const { t } = useTranslation(['components', 'common'])
@@ -162,35 +159,10 @@ export const RightPanel = memo(function RightPanel({
             </Suspense>
           ) : null}
 
-          {activeTab.type === 'session-tree' ? (
-            sessionId ? (
-              <Suspense fallback={<PanelFallback />}>
-                <SessionTreePanel
-                  sessionId={sessionId}
-                  onNavigateSession={onNavigateSession}
-                />
-              </Suspense>
-            ) : (
-              <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
-                {t('rightPanel.noActiveSession')}
-              </div>
-            )
-          ) : null}
-
-          {activeTab.type === 'session-controls' ? (
-            sessionId ? (
-              <Suspense fallback={<PanelFallback />}>
-                <SessionTreePanel
-                  sessionId={sessionId}
-                  mode="controls"
-                  onNavigateSession={onNavigateSession}
-                />
-              </Suspense>
-            ) : (
-              <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
-                {t('rightPanel.noActiveSession')}
-              </div>
-            )
+          {activeTab.type === 'session-tree' || activeTab.type === 'session-controls' ? (
+            <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] px-4 text-center">
+              {t('rightPanel.noActiveSession')}
+            </div>
           ) : null}
         </>
       )
