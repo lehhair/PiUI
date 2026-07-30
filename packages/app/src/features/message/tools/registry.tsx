@@ -84,6 +84,16 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
 
   const result: ExtractedToolData = {}
 
+  // Native inline image blocks (pi tool results carry ImageContent inline)
+  if (toolResult) {
+    const images = toolResult.content.flatMap(block =>
+      block.type === 'image'
+        ? [{ url: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType }]
+        : [],
+    )
+    if (images.length > 0) result.images = images
+  }
+
   // Input
   if (inputObj && Object.keys(inputObj).length > 0) {
     result.input = JSON.stringify(inputObj, null, 2)
