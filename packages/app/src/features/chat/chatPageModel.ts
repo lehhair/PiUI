@@ -817,10 +817,11 @@ export function reuseProcessTimelineItems(
 
 function assistantHasLiveWork(item: PiTimelineItem): boolean {
   if (item.kind !== 'assistant_message') return false
-  if (item.isStreaming) return true
-  return item.blocks.some(
-    (block: PiAssistantMessageItem['blocks'][number]) => block.type === 'toolCall' && !item.toolResults[block.id],
-  )
+  // Only the streaming item counts as live. A persisted assistant whose
+  // toolCall lacks a result is NOT live work — the result either landed in
+  // a later entry (paired already) or lives in an older unloaded page.
+  // Treating it as live would mark historical turns as still-working.
+  return Boolean(item.isStreaming)
 }
 
 function resolveTurnDurationMs(
