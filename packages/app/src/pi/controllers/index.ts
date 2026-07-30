@@ -1,4 +1,4 @@
-import type { JsonObject, RegistrySnapshot, CommandDescriptor } from '@piui/protocol'
+import type { JsonObject, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
@@ -12,6 +12,14 @@ import { mergeLatestBranchPage } from '../branchMerge.js'
 export async function loadPiSlashCommands(sessionId: string, signal?: AbortSignal): Promise<CommandDescriptor[]> {
   const registry = (await transport.getPiSessionRegistry(sessionId, signal)) as RegistrySnapshot | undefined
   return registry?.commands ?? []
+}
+
+/**
+ * Load a session's native tool descriptors from the runtime registry.
+ */
+export async function loadPiSessionTools(sessionId: string, signal?: AbortSignal): Promise<ToolDescriptor[]> {
+  const registry = (await transport.getPiSessionRegistry(sessionId, signal)) as RegistrySnapshot | undefined
+  return registry?.tools ?? []
 }
 
 /**
@@ -148,11 +156,13 @@ export async function sendPiPrompt(
 }
 
 /**
- * Compact the session context (native /compact).
+ * Compact the session context (native /compact). Serialized — submit, then
+ * wait for completion so callers can resolve pending UI.
  */
 export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<void> {
   try {
-    await transport.compactPi(sessionId, customInstructions, signal)
+    const submitted = await transport.compactPi(sessionId, customInstructions, signal)
+    await transport.waitHostCommand(submitted.id, signal)
   } catch (error) {
     console.error('Failed to compact session:', error)
     throw error
@@ -274,6 +284,99 @@ export async function forkPiSession(
   const submitted = await transport.forkPiSession(sessionId, { entryId, position }, signal)
   const result = await transport.waitHostCommand(submitted.id, signal)
   return (result ?? {}) as transport.PiForkResult
+}
+
+/**
+ * Navigate the session tree to an entry (branch switch / undo). Serialized —
+ * submit, then wait for the result carrying editorText/cancelled.
+ */
+export async function navigatePiTree(
+  sessionId: string,
+  params: transport.PiNavigateTreeParams,
+  signal?: AbortSignal,
+): Promise<transport.PiNavigateTreeResult> {
+  const submitted = await transport.navigatePiTree(sessionId, params, signal)
+  const result = await transport.waitHostCommand(submitted.id, signal)
+  return (result ?? {}) as transport.PiNavigateTreeResult
+}
+
+/**
+ * Clone the session at an entry (native clone: new session file, runtime
+ * switches to it). Same replacement shape as fork.
+ */
+export async function clonePiSession(
+  sessionId: string,
+  entryId?: string,
+  signal?: AbortSignal,
+): Promise<transport.PiForkResult> {
+  const submitted = await transport.clonePiSession(sessionId, entryId, signal)
+  const result = await transport.waitHostCommand(submitted.id, signal)
+  return (result ?? {}) as transport.PiForkResult
+}
+
+/**
+ * Import a session file and switch to it. Same replacement shape as fork.
+ */
+export async function importPiSession(
+  sessionId: string,
+  inputPath: string,
+  cwdOverride?: string,
+  signal?: AbortSignal,
+): Promise<transport.PiForkResult> {
+  const submitted = await transport.importPiSession(sessionId, inputPath, cwdOverride, signal)
+  const result = await transport.waitHostCommand(submitted.id, signal)
+  return (result ?? {}) as transport.PiForkResult
+}
+
+/**
+ * Set an entry label, then refresh session state (tree labels ride along).
+ */
+export async function setPiEntryLabel(sessionId: string, entryId: string, label?: string, signal?: AbortSignal): Promise<void> {
+  const submitted = await transport.setPiLabel(sessionId, entryId, label, signal)
+  await transport.waitHostCommand(submitted.id, signal)
+}
+
+export async function setPiActiveTools(sessionId: string, toolNames: string[], signal?: AbortSignal): Promise<void> {
+  const submitted = await transport.setPiActiveTools(sessionId, toolNames, signal)
+  await transport.waitHostCommand(submitted.id, signal)
+}
+
+export async function setPiAutoCompaction(sessionId: string, enabled: boolean, signal?: AbortSignal): Promise<void> {
+  const submitted = await transport.setPiAutoCompaction(sessionId, enabled, signal)
+  await transport.waitHostCommand(submitted.id, signal)
+}
+
+export async function setPiAutoRetry(sessionId: string, enabled: boolean, signal?: AbortSignal): Promise<void> {
+  const submitted = await transport.setPiAutoRetry(sessionId, enabled, signal)
+  await transport.waitHostCommand(submitted.id, signal)
+}
+
+/** Abort an active compaction (immediate). */
+export async function abortPiCompaction(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await transport.abortPiCompaction(sessionId, signal)
+}
+
+/** Abort an active branch summary (immediate). */
+export async function abortPiBranchSummary(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await transport.abortPiBranchSummary(sessionId, signal)
+}
+
+/** Abort an active auto-retry (immediate). */
+export async function abortPiRetry(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await transport.abortPiRetry(sessionId, signal)
+}
+
+/** Clear pending steering/follow-up queues (immediate). */
+export async function clearPiQueue(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await transport.clearPiQueue(sessionId, signal)
+}
+
+export async function setPiSteeringMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<void> {
+  await transport.setPiSteeringMode(sessionId, mode, signal)
+}
+
+export async function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<void> {
+  await transport.setPiFollowUpMode(sessionId, mode, signal)
 }
 
 /**

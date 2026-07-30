@@ -1,5 +1,7 @@
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { JsonObject, JsonValue, ToolDescriptor } from '@piui/protocol'
+import type { SessionEntry } from '../pi/domain'
 import {
   CheckIcon,
   CloseIcon,
@@ -9,7 +11,6 @@ import {
 } from './Icons'
 import { IconButton } from './ui/IconButton'
 import { SegmentedControl, SettingField, SettingRow, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
-import { applySnapshotToUi } from '../pi/applySnapshot'
 import { usePiCapabilities } from '../pi/capabilities'
 import {
   abortPiBranchSummary,
@@ -17,23 +18,26 @@ import {
   abortPiRetry,
   clearPiQueue,
   clonePiSession,
-  compactSession,
+  compactPiSession,
   forkPiSession,
-  fetchPiNativeTree,
   importPiSession,
-  navigatePiSessionTree,
+  loadPiSessionTools,
+  navigatePiTree,
+  refreshPiSessionState,
   setPiActiveTools,
   setPiAutoCompaction,
   setPiAutoRetry,
-  setPiQueueModes,
-  setPiSessionLabel,
-  type SessionReplacementResponse,
-} from '../pi/sessionApi'
+  setPiEntryLabel,
+  setPiFollowUpMode,
+  setPiSteeringMode,
+} from '../pi/controllers/index.js'
+import { getPiTree, type PiForkResult } from '../pi/transport/index.js'
 import { clearSessionEditorDraft, setSessionEditorDraft } from '../pi/sessionEditorDraftStore'
-import { nativeSessionStore } from '../pi/nativeSessionStore'
+import { usePiSessionRuntimeState } from '../pi/hooks/index.js'
+import { selectPiTimelineItems } from '../pi/selectors/index.js'
+import type { PiBranchPage } from '../pi/domain'
 import { SessionTreeCanvas } from './SessionTreeCanvas'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
-import { nativeEntriesToUiMessages, type PiNativeEntry } from '../pi/nativeEntriesToMessages'
 import { MessageRenderer } from '../features/message/MessageRenderer'
 import {
   buildSessionTreeGraph,
@@ -49,6 +53,37 @@ interface SessionTreePanelProps {
   onNavigateSession?: (session: { id: string; directory?: string }) => void
 }
 
+// Typed views over the runtime state JsonObject (state.get). Shapes are
+// defined by the worker's shadows — not SDK types — so local views it is.
+interface CompactionView {
+  autoEnabled?: boolean
+  operation?: { type?: string }
+  lastNotice?: string | null
+  lastError?: string | null
+  lastResult?: { summary?: string; tokensBefore?: number; estimatedTokensAfter?: number | null } | null
+}
+
+interface RetryView {
+  phase?: string
+  attempt?: number
+  maxAttempts?: number
+  autoEnabled?: boolean
+  delayMs?: number
+  errorMessage?: string | null
+  success?: boolean
+  finalError?: string | null
+}
+
+interface QueueView {
+  steering?: string[]
+  followUp?: string[]
+  steeringMode?: 'all' | 'one-at-a-time'
+  followUpMode?: 'all' | 'one-at-a-time'
+}
+
+function record(value: JsonValue | undefined): JsonObject {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
 
 export const SessionTreePanel = memo(function SessionTreePanel({
   sessionId,
@@ -59,11 +94,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const capabilities = usePiCapabilities()
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
-  const snapshot = useSyncExternalStore(
-    nativeSessionStore.subscribe.bind(nativeSessionStore),
-    () => nativeSessionStore.getSnapshot(sessionId),
-    () => null,
-  )
+  const state = usePiSessionRuntimeState(sessionId)
   const [pendingEntryId, setPendingEntryId] = useState<string | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
@@ -76,7 +107,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const [nativeLoading, setNativeLoading] = useState(false)
   const [nativeLoadError, setNativeLoadError] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
-  const nativeRevisionRef = useRef<string | undefined>(undefined)
+  const [tools, setTools] = useState<ToolDescriptor[]>([])
+  const headFingerprintRef = useRef<string | undefined>(undefined)
   const nativeRequestRef = useRef(0)
   const {
     splitHeight: canvasHeight,
@@ -93,15 +125,31 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     minSecondaryHeight: 160,
     defaultPrimaryHeightRatio: 0.55,
   })
+
+  // Runtime state views
+  const compaction = useMemo(() => record(state?.compaction) as CompactionView, [state])
+  const retry = useMemo(() => record(state?.retry) as RetryView, [state])
+  const queue = useMemo(() => record(state?.queue) as QueueView, [state])
+  const activeTools = useMemo(
+    () => (Array.isArray(state?.activeTools) ? state.activeTools.filter((name): name is string => typeof name === 'string') : []),
+    [state],
+  )
+  const head = useMemo(() => record(state?.head), [state])
+  const headRevision = typeof head.revision === 'number' ? head.revision : undefined
+  const leafId = typeof head.leafId === 'string' ? head.leafId : null
+  const headFingerprint = headRevision !== undefined ? `${headRevision}:${leafId ?? ''}` : undefined
+  const compactionOperation = compaction.operation?.type ?? 'none'
+  const retryPhase = retry.phase ?? 'idle'
+
   const loadNativeTree = useCallback(async () => {
     if (!sessionId || mode !== 'tree') return
     const request = ++nativeRequestRef.current
     setNativeLoading(true)
     setNativeLoadError(null)
     try {
-      const tree = await fetchPiNativeTree(sessionId)
+      const tree = await getPiTree(sessionId)
       if (request !== nativeRequestRef.current) return
-      setNativeTree(tree as NativeTreeNode[])
+      setNativeTree(tree as unknown as NativeTreeNode[])
     } catch (cause) {
       if (request !== nativeRequestRef.current) return
       setNativeLoadError(cause instanceof Error ? cause.message : String(cause))
@@ -113,24 +161,36 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   useEffect(() => {
     if (mode !== 'tree') return
     nativeRequestRef.current += 1
-    nativeRevisionRef.current = snapshot ? `${snapshot.native.epoch}:${snapshot.native.revision}` : undefined
+    headFingerprintRef.current = headFingerprint
     setNativeTree([])
     setDetailOpen(false)
     resetSplitHeight()
     const timer = window.setTimeout(() => { void loadNativeTree() }, 0)
     return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadNativeTree, mode])
 
+  // Reload the tree whenever the native head moves (navigate/label/new entries)
   useEffect(() => {
     if (mode !== 'tree') return
-    const revision = snapshot ? `${snapshot.native.epoch}:${snapshot.native.revision}` : undefined
-    if (revision === undefined || revision === nativeRevisionRef.current) return
-    nativeRevisionRef.current = revision
+    if (headFingerprint === undefined || headFingerprint === headFingerprintRef.current) return
+    headFingerprintRef.current = headFingerprint
     void loadNativeTree()
-  }, [loadNativeTree, mode, snapshot?.native.epoch, snapshot?.native.revision])
+  }, [headFingerprint, loadNativeTree, mode])
+
+  // Tools list for the controls tab (registry.get, immediate)
+  useEffect(() => {
+    if (mode !== 'controls') return
+    let cancelled = false
+    void loadPiSessionTools(sessionId)
+      .then(descriptors => { if (!cancelled) setTools(descriptors) })
+      .catch(() => { if (!cancelled) setTools([]) })
+    return () => { cancelled = true }
+  }, [mode, sessionId, state])
+
   const treeGraph = useMemo(
-    () => buildSessionTreeGraph(nativeTree, snapshot?.native.leafId ?? null, type => t(`sessionTree.entryTypes.${type}`)),
-    [nativeTree, snapshot?.native.leafId, t],
+    () => buildSessionTreeGraph(nativeTree, leafId, type => t(`sessionTree.entryTypes.${type}`)),
+    [nativeTree, leafId, t],
   )
   useEffect(() => {
     if (nativeTree.length === 0) {
@@ -164,58 +224,20 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const selectedRole = typeof selectedMessage?.role === 'string' ? selectedMessage.role : undefined
   const selectedIsLeaf = treeGraph.nodes.some(node => node.id === selectedEntryId && node.data.currentLeaf)
   const selectedDetailEntries = selectedEntryId ? treeGraph.detailEntriesById.get(selectedEntryId) ?? [] : []
-  const snapshotDirectory = snapshot?.session.directory
-  const snapshotModelProvider = snapshot?.runtime.model?.provider
-  const snapshotModelId = snapshot?.runtime.model?.id
-  const selectedDetailMessages = useMemo(() => {
-    if (!selectedEntryId || !snapshotDirectory) return []
-    return nativeEntriesToUiMessages(selectedDetailEntries as PiNativeEntry[], {
-      sessionId,
-      directory: snapshotDirectory,
-      model: snapshotModelProvider && snapshotModelId
-        ? { providerID: snapshotModelProvider, modelID: snapshotModelId }
-        : undefined,
-    })
-  }, [selectedDetailEntries, selectedEntryId, sessionId, snapshotDirectory, snapshotModelId, snapshotModelProvider])
+  const selectedDetailItems = useMemo(
+    () => selectPiTimelineItems({ items: selectedDetailEntries as unknown as SessionEntry[] } as unknown as PiBranchPage),
+    [selectedDetailEntries],
+  )
   const splitMaxHeight = Math.max(0, (containerRef.current?.clientHeight ?? 500) - 160)
   const splitMinHeight = Math.min(180, splitMaxHeight)
 
-  useEffect(() => {
-    const handleCommandUpdate = (rawEvent: Event) => {
-      const detail = (rawEvent as CustomEvent<{
-        sessionId?: string
-        status?: string
-        commandType?: string
-        error?: { message?: string }
-      }>).detail
-      if (detail?.sessionId !== sessionId || detail.commandType !== 'session.compact') return
-      if (detail.status === 'completed' || detail.status === 'failed' || detail.status === 'cancelled' ||
-        detail.status === 'unknown_after_crash') {
-        setRuntimePending(current => current === 'compact' ? null : current)
-        if (detail.status !== 'completed' && detail.error?.message) setError(detail.error.message)
-      }
-    }
-    window.addEventListener('piui:command-updated', handleCommandUpdate)
-    return () => window.removeEventListener('piui:command-updated', handleCommandUpdate)
-  }, [sessionId])
-
-  useEffect(() => {
-    if (runtimePending === 'compact' && snapshot?.runtime.compaction.operation.type !== 'none') {
-      setRuntimePending(null)
-    }
-  }, [runtimePending, snapshot?.runtime.compaction.operation.type])
-
   const applyReplacement = useCallback(
-    (
-      result: SessionReplacementResponse<'session.fork' | 'session.clone' | 'session.import'>,
-    ) => {
-      applySnapshotToUi(result.sourceSnapshot, { activate: false })
-      applySnapshotToUi(result.targetSnapshot)
-      if (result.replacement.cancelled) return
+    (result: PiForkResult) => {
+      if (result.cancelled || !result.targetSessionId) return
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
       onNavigateSession?.({
-        id: result.replacement.targetSessionId,
-        directory: result.replacement.targetCwd,
+        id: result.targetSessionId,
+        directory: result.targetCwd ?? undefined,
       })
     },
     [onNavigateSession],
@@ -237,21 +259,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     (entryId: string) => {
       if (!capabilities.sessionNavigate) return
       void runEntryCommand(entryId, async () => {
-        const hasSummaryOptions = Boolean(navigationInstructions.trim() || navigationLabel.trim() || replaceNavigationInstructions)
-        const result = summarizeNavigation
-          ? hasSummaryOptions
-            ? await navigatePiSessionTree(sessionId, entryId, true, {
-                customInstructions: navigationInstructions.trim() || undefined,
-                replaceInstructions: replaceNavigationInstructions,
-                label: navigationLabel.trim() || undefined,
-              })
-            : await navigatePiSessionTree(sessionId, entryId, true)
-          : await navigatePiSessionTree(sessionId, entryId)
-        startTransition(() => {
-          applySnapshotToUi(result.snapshot)
+        const result = await navigatePiTree(sessionId, {
+          entryId,
+          summarize: summarizeNavigation || undefined,
+          customInstructions: navigationInstructions.trim() || undefined,
+          replaceInstructions: replaceNavigationInstructions || undefined,
+          label: navigationLabel.trim() || undefined,
         })
         if (result.cancelled || result.aborted) return
-        if (result.editorText === undefined) clearSessionEditorDraft(sessionId)
+        if (result.editorText == null) clearSessionEditorDraft(sessionId)
         else setSessionEditorDraft(sessionId, result.editorText)
       })
     },
@@ -260,29 +276,28 @@ export const SessionTreePanel = memo(function SessionTreePanel({
 
   const runRuntimeCommand = useCallback(async (
     operation: string,
-    command: () => Promise<{ snapshot?: import('@piui/protocol').SessionSnapshotV1 }>,
-    waitForCommandEvent = false,
+    command: () => Promise<void>,
+    refreshState = true,
   ) => {
     setRuntimePending(operation)
     setError(null)
     try {
-      const result = await command()
-      if (result.snapshot) applySnapshotToUi(result.snapshot, { activate: false })
+      await command()
+      if (refreshState) void refreshPiSessionState(sessionId).catch(() => undefined)
     } catch (commandError) {
-      if (waitForCommandEvent) setRuntimePending(null)
       setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
     } finally {
-      if (!waitForCommandEvent) setRuntimePending(null)
+      setRuntimePending(null)
     }
-  }, [t])
+  }, [sessionId, t])
 
   const handleToggleTool = useCallback((toolName: string, enabled: boolean) => {
-    if (!snapshot || !capabilities.toolsManage) return
+    if (!capabilities.toolsManage) return
     const next = enabled
-      ? [...new Set([...snapshot.runtime.activeTools, toolName])]
-      : snapshot.runtime.activeTools.filter(name => name !== toolName)
+      ? [...new Set([...activeTools, toolName])]
+      : activeTools.filter(name => name !== toolName)
     void runRuntimeCommand('tools', () => setPiActiveTools(sessionId, next))
-  }, [capabilities.toolsManage, runRuntimeCommand, sessionId, snapshot])
+  }, [activeTools, capabilities.toolsManage, runRuntimeCommand, sessionId])
 
   const handleFork = useCallback(
     (entryId: string) => {
@@ -313,10 +328,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     (entryId: string) => {
       void runEntryCommand(entryId, async () => {
         const label = editingLabel.trim()
-        const result = await setPiSessionLabel(sessionId, entryId, label || undefined)
-        startTransition(() => {
-          applySnapshotToUi(result.snapshot)
-        })
+        await setPiEntryLabel(sessionId, entryId, label || undefined)
+        void refreshPiSessionState(sessionId).catch(() => undefined)
         setEditingEntryId(null)
         setEditingLabel('')
       })
@@ -334,16 +347,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     })
   }, [applyReplacement, capabilities.sessionImport, importCwd, importPath, runEntryCommand, sessionId])
 
-  const queuedCount = snapshot
-    ? snapshot.runtime.queue.steering.length + snapshot.runtime.queue.followUp.length
-    : 0
-  const activeToolCount = snapshot?.runtime.activeTools.length ?? 0
-  const totalToolCount = snapshot?.runtime.tools.length ?? 0
-  const runtimeBusy = snapshot
-    ? snapshot.runtime.compaction.operation.type !== 'none' ||
-      snapshot.runtime.retry.phase === 'waiting' ||
-      snapshot.runtime.retry.phase === 'running'
-    : false
+  const queuedCount = (queue.steering?.length ?? 0) + (queue.followUp?.length ?? 0)
+  const activeToolCount = activeTools.length
+  const totalToolCount = tools.length
+  const runtimeBusy = compactionOperation !== 'none' || retryPhase === 'waiting' || retryPhase === 'running'
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg-100">
@@ -352,20 +359,20 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           {runtimeBusy ? (
             <div className="flex shrink-0 items-center gap-2 border-b border-border-200/40 px-4 py-2 text-[length:var(--fs-xs)] text-text-400">
               <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-warning-100" />
-              {snapshot!.runtime.compaction.operation.type !== 'none'
-                ? snapshot!.runtime.compaction.operation.type === 'branchSummary'
+              {compactionOperation !== 'none'
+                ? compactionOperation === 'branchSummary'
                   ? t('sessionTree.summarizingBranch')
                   : t('sessionTree.compacting')
-                : snapshot!.runtime.retry.phase === 'waiting' || snapshot!.runtime.retry.phase === 'running'
+                : retryPhase === 'waiting' || retryPhase === 'running'
                   ? t('sessionTree.retryRunning', {
-                      attempt: snapshot!.runtime.retry.attempt,
-                      max: snapshot!.runtime.retry.maxAttempts,
+                      attempt: retry.attempt,
+                      max: retry.maxAttempts,
                     })
                   : null}
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-      {snapshot && (capabilities.compactionManage || capabilities.retryManage) ? (
+      {state && (capabilities.compactionManage || capabilities.retryManage) ? (
         <SettingsSection title={t('sessionTree.runtimeControls')} description={t('sessionTree.runtimeControlsHint')}>
           {capabilities.compactionManage ? (
             <SettingRow
@@ -373,11 +380,11 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               description={t('sessionTree.autoCompactionHint')}
             >
               <Toggle
-                enabled={snapshot.runtime.compaction.autoEnabled}
+                enabled={compaction.autoEnabled === true}
                 disabled={runtimePending !== null}
                 onChange={() => void runRuntimeCommand(
                   'auto-compaction',
-                  () => setPiAutoCompaction(sessionId, !snapshot.runtime.compaction.autoEnabled),
+                  () => setPiAutoCompaction(sessionId, compaction.autoEnabled !== true),
                 )}
               />
             </SettingRow>
@@ -388,11 +395,11 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               description={t('sessionTree.autoRetryHint')}
             >
               <Toggle
-                enabled={snapshot.runtime.retry.autoEnabled}
+                enabled={retry.autoEnabled === true}
                 disabled={runtimePending !== null}
                 onChange={() => void runRuntimeCommand(
                   'auto-retry',
-                  () => setPiAutoRetry(sessionId, !snapshot.runtime.retry.autoEnabled),
+                  () => setPiAutoRetry(sessionId, retry.autoEnabled !== true),
                 )}
               />
             </SettingRow>
@@ -406,10 +413,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 className="flex items-center gap-2"
                 onSubmit={event => {
                   event.preventDefault()
-                  void runRuntimeCommand('compact', () => compactSession(
+                  void runRuntimeCommand('compact', () => compactPiSession(
                     sessionId,
                     compactInstructions.trim() || undefined,
-                  ), true)
+                  ))
                 }}
               >
                 <input
@@ -420,7 +427,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                   autoComplete="off"
                   className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
                 />
-                {snapshot.runtime.compaction.operation.type === 'none' ? (
+                {compactionOperation === 'none' ? (
                   <button
                     type="submit"
                     disabled={runtimePending !== null}
@@ -434,7 +441,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                     disabled={runtimePending !== null}
                     onClick={() => void runRuntimeCommand(
                       'abort-summary',
-                      () => snapshot.runtime.compaction.operation.type === 'branchSummary'
+                      () => compactionOperation === 'branchSummary'
                         ? abortPiBranchSummary(sessionId)
                         : abortPiCompaction(sessionId),
                     )}
@@ -447,18 +454,18 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               </form>
             </SettingField>
           ) : null}
-          {snapshot.runtime.retry.phase === 'waiting' || snapshot.runtime.retry.phase === 'running' ? (
+          {retryPhase === 'waiting' || retryPhase === 'running' ? (
             <SettingRow
               label={t('sessionTree.stopRetry', {
-                attempt: snapshot.runtime.retry.attempt,
-                max: snapshot.runtime.retry.maxAttempts,
+                attempt: retry.attempt,
+                max: retry.maxAttempts,
               })}
-              description={snapshot.runtime.retry.phase === 'waiting'
+              description={retryPhase === 'waiting'
                 ? t('sessionTree.retryWaiting', {
-                    attempt: snapshot.runtime.retry.attempt,
-                    max: snapshot.runtime.retry.maxAttempts,
-                    delay: snapshot.runtime.retry.delayMs,
-                    error: snapshot.runtime.retry.errorMessage,
+                    attempt: retry.attempt,
+                    max: retry.maxAttempts,
+                    delay: retry.delayMs,
+                    error: retry.errorMessage,
                   })
                 : undefined}
             >
@@ -472,29 +479,29 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               </button>
             </SettingRow>
           ) : null}
-          {snapshot.runtime.compaction.operation.type === 'none' &&
-          (snapshot.runtime.compaction.lastNotice ||
-            snapshot.runtime.compaction.lastError ||
-            snapshot.runtime.compaction.lastResult ||
-            snapshot.runtime.retry.phase === 'finished') ? (
+          {compactionOperation === 'none' &&
+          (compaction.lastNotice ||
+            compaction.lastError ||
+            compaction.lastResult ||
+            retryPhase === 'finished') ? (
             <div className="text-[length:var(--fs-xs)] leading-relaxed">
-              {snapshot.runtime.compaction.lastNotice ? (
-                <p className="text-text-400">{snapshot.runtime.compaction.lastNotice}</p>
-              ) : snapshot.runtime.compaction.lastError ? (
-                <p className="text-danger-100">{snapshot.runtime.compaction.lastError}</p>
-              ) : snapshot.runtime.compaction.lastResult ? (
-                <p className="truncate text-text-400" title={snapshot.runtime.compaction.lastResult.summary}>
+              {compaction.lastNotice ? (
+                <p className="text-text-400">{compaction.lastNotice}</p>
+              ) : compaction.lastError ? (
+                <p className="text-danger-100">{compaction.lastError}</p>
+              ) : compaction.lastResult ? (
+                <p className="truncate text-text-400" title={compaction.lastResult.summary}>
                   {t('sessionTree.compactionResult', {
-                    before: snapshot.runtime.compaction.lastResult.tokensBefore,
-                    after: snapshot.runtime.compaction.lastResult.estimatedTokensAfter ?? '?',
+                    before: compaction.lastResult.tokensBefore,
+                    after: compaction.lastResult.estimatedTokensAfter ?? '?',
                   })}
                 </p>
               ) : null}
-              {snapshot.runtime.retry.phase === 'finished' ? (
-                <p className={snapshot.runtime.retry.success ? 'text-text-400' : 'text-danger-100'}>
-                  {snapshot.runtime.retry.success
-                    ? t('sessionTree.retrySucceeded', { attempt: snapshot.runtime.retry.attempt })
-                    : snapshot.runtime.retry.finalError ?? t('sessionTree.retryFailed')}
+              {retryPhase === 'finished' ? (
+                <p className={retry.success ? 'text-text-400' : 'text-danger-100'}>
+                  {retry.success
+                    ? t('sessionTree.retrySucceeded', { attempt: retry.attempt })
+                    : retry.finalError ?? t('sessionTree.retryFailed')}
                 </p>
               ) : null}
             </div>
@@ -502,7 +509,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         </SettingsSection>
       ) : null}
 
-      {snapshot && capabilities.queueManage ? (
+      {state && capabilities.queueManage ? (
         <SettingsSection
           title={t('sessionTree.queue')}
           description={t('sessionTree.queueHint')}
@@ -522,14 +529,14 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           <SettingField label={t('sessionTree.steering')} description={t('sessionTree.steeringHint')}>
             <div className="w-56 max-w-full">
               <SegmentedControl
-                value={snapshot.runtime.queue.steeringMode}
+                value={queue.steeringMode ?? 'all'}
                 options={[
                   { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
                   { value: 'all' as const, label: t('sessionTree.allAtOnce') },
                 ]}
                 onChange={value => {
                   if (runtimePending !== null) return false
-                  void runRuntimeCommand('queue-mode', () => setPiQueueModes(sessionId, { steeringMode: value }))
+                  void runRuntimeCommand('queue-mode', () => setPiSteeringMode(sessionId, value))
                 }}
               />
             </div>
@@ -537,14 +544,14 @@ export const SessionTreePanel = memo(function SessionTreePanel({
           <SettingField label={t('sessionTree.followUp')} description={t('sessionTree.followUpHint')}>
             <div className="w-56 max-w-full">
               <SegmentedControl
-                value={snapshot.runtime.queue.followUpMode}
+                value={queue.followUpMode ?? 'all'}
                 options={[
                   { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
                   { value: 'all' as const, label: t('sessionTree.allAtOnce') },
                 ]}
                 onChange={value => {
                   if (runtimePending !== null) return false
-                  void runRuntimeCommand('queue-mode', () => setPiQueueModes(sessionId, { followUpMode: value }))
+                  void runRuntimeCommand('queue-mode', () => setPiFollowUpMode(sessionId, value))
                 }}
               />
             </div>
@@ -552,7 +559,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         </SettingsSection>
       ) : null}
 
-      {snapshot && capabilities.toolsManage ? (
+      {state && capabilities.toolsManage ? (
         <SettingsSection
           title={t('sessionTree.tools')}
           description={t('sessionTree.toolsHint')}
@@ -562,7 +569,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
             </span>
           )}
         >
-          {snapshot.runtime.tools.map(tool => (
+          {tools.map(tool => (
             <SettingRow
               key={tool.name}
               label={tool.name}
@@ -570,11 +577,11 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               disabled={runtimePending !== null}
             >
               <Toggle
-                enabled={snapshot.runtime.activeTools.includes(tool.name)}
+                enabled={activeTools.includes(tool.name)}
                 disabled={runtimePending !== null}
                 onChange={() => handleToggleTool(
                   tool.name,
-                  !snapshot.runtime.activeTools.includes(tool.name),
+                  !activeTools.includes(tool.name),
                 )}
               />
             </SettingRow>
@@ -689,10 +696,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               </div>
 
               <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
-                {selectedDetailMessages.length > 0 ? (
+                {selectedDetailItems.length > 0 ? (
                   <div className="space-y-3">
-                    {selectedDetailMessages.map(message => (
-                      <MessageRenderer key={message.info.id} message={message} isTurnLatestAssistant />
+                    {selectedDetailItems.map(item => (
+                      <MessageRenderer key={item.entryId} item={item} isTurnLatestAssistant />
                     ))}
                   </div>
                 ) : (
