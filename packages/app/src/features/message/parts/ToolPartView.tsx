@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { ChevronDownIcon, ChevronRightIcon } from '../../../components/Icons'
-import type { ToolPart } from '../../../types/message'
+import type { PiToolExecution } from '../../../pi/domain/index.js'
 import { useCompositorExpand, useDisclosureScrollLock } from '../../../hooks'
 import { useNow } from '../../../hooks/useNow'
 import { serverStore } from '../../../store/serverStore'
@@ -33,7 +33,9 @@ import { MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
 // ============================================
 
 interface ToolPartViewProps {
-  part: ToolPart
+  execution: PiToolExecution
+  /** Stable key for expand-state persistence (entry id + block index) */
+  partKey: string
   isFirst?: boolean
   isLast?: boolean
   /** Compact layout: icon inline with text (14px column), no timeline connectors.
@@ -43,41 +45,47 @@ interface ToolPartViewProps {
   descriptive?: boolean
   /** Parent assistant message is still streaming. */
   isStreaming?: boolean
+  /** Call start time for the running-duration label (entry timestamp) */
+  startedAt?: number
 }
 
 export const ToolPartView = memo(function ToolPartView({
-  part,
+  execution,
+  partKey,
   isFirst = false,
   isLast = false,
   compact = false,
   descriptive = false,
   isStreaming = false,
+  startedAt,
 }: ToolPartViewProps) {
   const { t } = useTranslation('message')
-  const { state, tool: toolName } = part
-  const title = state.title || getInputDescription(part) || ''
+  const { call, result } = execution
+  const toolName = call.name
+  const status = result ? (result.isError ? 'error' : 'completed') : 'pending'
+  const title = toolName || getInputDescription(execution) || ''
 
-  const isActive = state.status === 'running' || state.status === 'pending'
-  const isError = state.status === 'error'
+  const isActive = status === 'pending'
+  const isError = status === 'error'
   const now = useNow(250, isActive)
-  const startTime = state.time?.start
+  const startTime = startedAt
   const calibratedNow = isActive ? serverStore.getActiveCalibratedNow() : undefined
-  const endTime = state.time?.end ?? (isActive ? (calibratedNow ?? now) : undefined)
+  const endTime = result?.timestamp ?? (isActive ? (calibratedNow ?? now) : undefined)
   const rawDuration = startTime !== undefined && endTime !== undefined ? endTime - startTime : undefined
   const duration = rawDuration !== undefined && isActive ? Math.max(0, rawDuration) : rawDuration
   const { inlineToolRequests, immersiveMode, compactInlinePermission } = useTheme()
 
   const { pendingPermissions, pendingQuestions, onPermissionReply, onQuestionReply, onQuestionReject, isReplying } =
     useInlineToolRequests()
-  const childSessionId = getTaskChildSessionId(part)
+  const childSessionId = getTaskChildSessionId(execution)
   const permissionRequest = inlineToolRequests
-    ? findPermissionRequestForTool(pendingPermissions, part.callID, childSessionId)
+    ? findPermissionRequestForTool(pendingPermissions, call.id, childSessionId)
     : undefined
   const questionRequest = inlineToolRequests
-    ? findQuestionRequestForTool(pendingQuestions, part.callID, childSessionId)
+    ? findQuestionRequestForTool(pendingQuestions, call.id, childSessionId)
     : undefined
 
-  const toolDone = state.status === 'completed' || state.status === 'error'
+  const toolDone = status === 'completed' || status === 'error'
   // ── 延迟卸载 edit/write 权限组件 ──
   // 用户授权后 permissionRequest 会立即消失，但工具结果可能还没到，
   // 为了避免 "权限消失→空白→结果出现" 的跳动，缓存最后一次权限请求，
@@ -124,7 +132,7 @@ export const ToolPartView = memo(function ToolPartView({
     permissionResolved ||
     (immersiveMode && descriptive && isStreaming && isReadable)
 
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:tool:${part.id}`, shouldStartExpanded)
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${partKey}`, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)
   const [isChildFullscreen, setIsChildFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
@@ -180,7 +188,7 @@ export const ToolPartView = memo(function ToolPartView({
       relative flex items-center justify-center transition-colors duration-200
       ${isActive ? 'text-text-300' : ''}
       ${isError ? 'text-danger-100' : ''}
-      ${state.status === 'completed' ? 'text-text-400 group-hover:text-text-300' : ''}
+      ${status === 'completed' ? 'text-text-400 group-hover:text-text-300' : ''}
     `}
     >
       {getToolIcon(toolName)}
@@ -191,7 +199,7 @@ export const ToolPartView = memo(function ToolPartView({
   const displayPermission = permissionRequest || (permissionResolved ? cachedPermissionRequest : undefined)
 
   // Memoize once — shared by both the descriptive header (diffStats) and ToolBody.
-  const toolData = useMemo(() => extractToolData(part), [part])
+  const toolData = useMemo(() => extractToolData(execution), [execution])
 
   const handleFullscreenChange = useCallback((isFullscreen: boolean) => {
     setIsChildFullscreen(isFullscreen)
@@ -200,7 +208,7 @@ export const ToolPartView = memo(function ToolPartView({
   const bodyContent = (
     <>
       {!hideToolBodyForPermission && (
-        <ToolBody part={part} data={toolData} onFullscreenChange={handleFullscreenChange} />
+        <ToolBody execution={execution} partKey={partKey} data={toolData} onFullscreenChange={handleFullscreenChange} />
       )}
       {displayPermission && (
         <div className={hideToolBodyForPermission && !permissionContentHidden ? '' : MSG_SPACING.inner}>
@@ -284,7 +292,7 @@ export const ToolPartView = memo(function ToolPartView({
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {duration !== undefined && (state.status === 'completed' || isActive) && (
+            {duration !== undefined && (status === 'completed' || isActive) && (
               <span
                 className={`text-[length:var(--fs-xxs)] font-mono tabular-nums ${isError ? 'text-danger-100/70' : isActive ? 'reasoning-shimmer-text' : 'text-text-500'}`}
               >
@@ -338,7 +346,7 @@ export const ToolPartView = memo(function ToolPartView({
               )}
             </div>
             <div className="flex items-center gap-2 ml-auto shrink-0">
-              {duration !== undefined && (state.status === 'completed' || isActive) && (
+              {duration !== undefined && (status === 'completed' || isActive) && (
                 <span
                   className={`text-[length:var(--fs-xxs)] font-mono tabular-nums ${
                     isActive ? 'reasoning-shimmer-text' : 'text-text-500'
@@ -423,7 +431,7 @@ export const ToolPartView = memo(function ToolPartView({
           </div>
 
           <div className="flex items-center gap-2 ml-auto shrink-0">
-            {duration !== undefined && (state.status === 'completed' || isActive) && (
+            {duration !== undefined && (status === 'completed' || isActive) && (
               <span
                 className={`text-[length:var(--fs-xxs)] font-mono tabular-nums transition-opacity duration-300 ${
                   isActive ? 'reasoning-shimmer-text' : 'text-text-500'
@@ -515,43 +523,47 @@ function computeDiffPair(before: string, after: string): { additions: number; de
 // ============================================
 
 const ToolBody = memo(function ToolBody({
-  part,
+  execution,
+  partKey,
   data,
   onFullscreenChange,
 }: {
-  part: ToolPart
+  execution: PiToolExecution
+  partKey: string
   data: ReturnType<typeof extractToolData>
   onFullscreenChange?: (isFullscreen: boolean) => void
 }) {
-  const { tool } = part
+  const tool = execution.call.name
   const lowerTool = tool.toLowerCase()
 
   if (lowerTool === 'task') {
-    return <TaskRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+    return <TaskRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
   }
 
-  if (lowerTool.includes('todo') && hasTodos(part)) {
-    return <TodoRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+  if (lowerTool.includes('todo') && hasTodos(execution)) {
+    return <TodoRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
   }
 
   const config = getToolConfig(tool)
   if (config?.renderer) {
     const CustomRenderer = config.renderer
-    return <CustomRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+    return <CustomRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
   }
 
-  return <DefaultRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+  return <DefaultRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
 })
 
-function getTaskChildSessionId(part: ToolPart): string | undefined {
-  if (part.tool.toLowerCase() !== 'task') return undefined
-  const metadata = part.state.metadata as Record<string, unknown> | undefined
+function getTaskChildSessionId(execution: PiToolExecution): string | undefined {
+  if (execution.call.name.toLowerCase() !== 'task') return undefined
+  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
+    ? execution.result.details as Record<string, unknown>
+    : undefined
   return metadata?.sessionId as string | undefined
 }
 
 /** Extract description from tool input as title fallback (available while running) */
-function getInputDescription(part: ToolPart): string | undefined {
-  const input = part.state.input as Record<string, unknown> | undefined
+function getInputDescription(execution: PiToolExecution): string | undefined {
+  const input = execution.call.arguments as Record<string, unknown> | undefined
   return (input?.description as string) || undefined
 }
 

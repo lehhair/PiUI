@@ -13,12 +13,12 @@ import { AuthenticatedImage } from '../../../attachment'
 // 通用的 Input/Output 渲染逻辑
 // ============================================
 
-export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRendererProps) {
+export function DefaultRenderer({ execution, partKey, data, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
-  const { state, tool } = part
+  const tool = execution.call.name
   const { toolCardStyle } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const isCompact = toolCardStyle === 'compact'
-  const isActive = state.status === 'running' || state.status === 'pending'
+  const isActive = !execution.result
 
   const hasInput = !!data.input?.trim()
   const hasError = !!data.error
@@ -37,7 +37,7 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
       {/* Input — compact 模式下不渲染 */}
       {!isCompact && (hasInput || (isActive && !hasInput)) && (
         <ContentBlock
-          stateKey={`message:${part.messageID}:tool:${part.id}:input`}
+          stateKey={`message:${partKey}:input`}
           label={t('defaultRenderer.input')}
           content={data.input || ''}
           language={data.inputLang}
@@ -45,7 +45,7 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
           loadingText=""
           defaultCollapsed={true}
           onFullscreenChange={onFullscreenChange}
-          fullscreenId={`tool:${part.sessionID}:${part.messageID}:${part.id}:input`}
+          fullscreenId={`tool:${partKey}:input`}
         />
       )}
 
@@ -59,8 +59,8 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
           hasOutput={hasOutput}
           compact={isCompact}
           onFullscreenChange={onFullscreenChange}
-          fullscreenBaseId={`tool:${part.sessionID}:${part.messageID}:${part.id}:output`}
-          stateBaseKey={`message:${part.messageID}:tool:${part.id}:output`}
+          fullscreenBaseId={`tool:${partKey}:output`}
+          stateBaseKey={`message:${partKey}:output`}
         />
       )}
       {data.notice ? (

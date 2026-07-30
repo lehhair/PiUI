@@ -1,4 +1,4 @@
-import type { ToolPart } from '../../../../types/message'
+import type { PiToolExecution } from '../../../../pi/domain/index.js'
 
 interface TodoItem {
   id: string
@@ -7,13 +7,12 @@ interface TodoItem {
   priority: 'high' | 'medium' | 'low'
 }
 
-export function extractTodos(part: ToolPart): TodoItem[] {
-  const { state } = part
-  const metadata = state.metadata as Record<string, unknown> | undefined
-  const inputObj = state.input as Record<string, unknown> | undefined
-  return (metadata?.todos as TodoItem[]) || (inputObj?.todos as TodoItem[]) || []
+export function extractTodos(execution: PiToolExecution): TodoItem[] {
+  const inputObj = execution.call.arguments as Record<string, unknown> | undefined
+  const details = execution.result?.details as Record<string, unknown> | undefined
+  return (details?.todos as TodoItem[]) || (inputObj?.todos as TodoItem[]) || []
 }
 
-export function hasTodos(part: ToolPart): boolean {
-  return extractTodos(part).length > 0
+export function hasTodos(execution: PiToolExecution): boolean {
+  return extractTodos(execution).length > 0
 }

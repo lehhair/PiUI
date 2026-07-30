@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import type { ToolPart } from '../../../types/message'
+import type { ToolResultMessage } from '@earendil-works/pi-ai'
+import type { PiToolExecution } from '../../../pi/domain/index.js'
 import type { ToolConfig, ToolRegistry, ExtractedToolData, DiagnosticInfo } from './types'
 import { BashRenderer, QuestionRenderer } from './renderers'
 import {
@@ -60,16 +61,26 @@ interface MetadataDiagnosticEntry {
 // Default Data Extractor
 // ============================================
 
-export function defaultExtractData(part: ToolPart): ExtractedToolData {
-  const { state } = part
-  const inputObj = state.input as Record<string, unknown> | undefined
-  const metadata = state.metadata as Record<string, unknown> | undefined
+function resultText(result: ToolResultMessage): string {
+  return result.content
+    .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+}
+
+export function defaultExtractData(execution: PiToolExecution): ExtractedToolData {
+  const { call, result: toolResult } = execution
+  const inputObj = call.arguments as Record<string, unknown> | undefined
+  const metadata = toolResult?.details && typeof toolResult.details === 'object' && !Array.isArray(toolResult.details)
+    ? toolResult.details as Record<string, unknown>
+    : undefined
   const nativeDetails = metadata?.nativeDetails && typeof metadata.nativeDetails === 'object'
     ? metadata.nativeDetails as Record<string, unknown>
     : undefined
   const normalized = metadata?.normalized && typeof metadata.normalized === 'object'
     ? metadata.normalized as Record<string, unknown>
     : undefined
+  const output = toolResult ? resultText(toolResult) : undefined
 
   const result: ExtractedToolData = {}
 
@@ -80,8 +91,8 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   }
 
   // Error
-  if (state.error) {
-    result.error = String(state.error)
+  if (toolResult?.isError) {
+    result.error = output || 'Tool execution failed'
   }
 
   // FilePath
@@ -208,12 +219,8 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
   }
 
   // Output: 分运行状态取不同的字段
-  const stateOutput = 'output' in state ? state.output : undefined
-  const runningOutput = state.status === 'running' && typeof metadata?.output === 'string' ? metadata.output : undefined
-  const interruptedOutput = metadata?.interrupted === true && typeof metadata.output === 'string' ? metadata.output : undefined
-  const output = stateOutput ?? runningOutput ?? interruptedOutput
-  if (!result.files && !result.diff && output) {
-    result.output = typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+  if (!result.files && !result.diff && output && !toolResult?.isError) {
+    result.output = output
 
     // 推断语言
     if (!result.outputLang && result.output) {
@@ -231,10 +238,12 @@ export function defaultExtractData(part: ToolPart): ExtractedToolData {
 // Tool-Specific Data Extractors
 // ============================================
 
-function bashExtractData(part: ToolPart): ExtractedToolData {
-  const base = defaultExtractData(part)
-  const inputObj = part.state.input as Record<string, unknown> | undefined
-  const metadata = part.state.metadata as Record<string, unknown> | undefined
+function bashExtractData(execution: PiToolExecution): ExtractedToolData {
+  const base = defaultExtractData(execution)
+  const inputObj = execution.call.arguments as Record<string, unknown> | undefined
+  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
+    ? execution.result.details as Record<string, unknown>
+    : undefined
 
   if (inputObj?.command) {
     base.input = String(inputObj.command)
@@ -249,21 +258,20 @@ function bashExtractData(part: ToolPart): ExtractedToolData {
   return base
 }
 
-function readExtractData(part: ToolPart): ExtractedToolData {
-  const base = defaultExtractData(part)
+function readExtractData(execution: PiToolExecution): ExtractedToolData {
+  const base = defaultExtractData(execution)
 
-  if (part.state.output) {
-    const str = String(part.state.output)
-    const match = str.match(/<file[^>]*>([\s\S]*?)<\/file>/i)
-    base.output = match ? match[1] : str
+  if (base.output) {
+    const match = base.output.match(/<file[^>]*>([\s\S]*?)<\/file>/i)
+    base.output = match ? match[1] : base.output
   }
 
   return base
 }
 
-function writeExtractData(part: ToolPart): ExtractedToolData {
-  const base = defaultExtractData(part)
-  const inputObj = part.state.input as Record<string, unknown> | undefined
+function writeExtractData(execution: PiToolExecution): ExtractedToolData {
+  const base = defaultExtractData(execution)
+  const inputObj = execution.call.arguments as Record<string, unknown> | undefined
 
   // 从 input.content 构造 diff（和 editExtractData 一致）
   // 状态控制由渲染层（OutputBlock）统一处理，extractData 只做数据转换
@@ -277,9 +285,9 @@ function writeExtractData(part: ToolPart): ExtractedToolData {
   return base
 }
 
-function editExtractData(part: ToolPart): ExtractedToolData {
-  const base = defaultExtractData(part)
-  const inputObj = part.state.input as Record<string, unknown> | undefined
+function editExtractData(execution: PiToolExecution): ExtractedToolData {
+  const base = defaultExtractData(execution)
+  const inputObj = execution.call.arguments as Record<string, unknown> | undefined
 
   // 如果 metadata 没有 diff，从 input 构造
   if (!base.files && !base.diff && inputObj?.oldString && inputObj?.newString) {
@@ -398,10 +406,10 @@ export function getToolIcon(toolName: string): ReactNode {
 /**
  * 提取工具数据
  */
-export function extractToolData(part: ToolPart): ExtractedToolData {
-  const config = getToolConfig(part.tool)
+export function extractToolData(execution: PiToolExecution): ExtractedToolData {
+  const config = getToolConfig(execution.call.name)
   if (config?.extractData) {
-    return config.extractData(part)
+    return config.extractData(execution)
   }
-  return defaultExtractData(part)
+  return defaultExtractData(execution)
 }

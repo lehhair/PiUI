@@ -27,13 +27,15 @@ const EMPTY_MESSAGES: Message[] = []
 // 4. 按需交互 - 输入框只在需要时显示
 // ============================================
 
-export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChange }: ToolRendererProps) {
+export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
   const { currentDirectory } = useSessionNavigation()
-  const { state } = part
+  const isRunning = !execution.result
+  const isCompleted = Boolean(execution.result && !execution.result.isError)
+  const isError = Boolean(execution.result?.isError)
   const [expanded, setExpanded] = useUiDisclosureState(
-    `message:${part.messageID}:tool:${part.id}:task-body`,
-    state.status === 'running' || state.status === 'pending',
+    `message:${partKey}:task-body`,
+    isRunning,
   )
   const [isContentFullscreen, setIsContentFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
@@ -41,18 +43,23 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
   const shouldRenderBody = useMessageExpandRender(effectiveExpanded)
 
   // 从 input 中提取任务信息
-  const input = state.input as Record<string, unknown> | undefined
+  const input = execution.call.arguments as Record<string, unknown> | undefined
   const description = (input?.description as string) || t('task.subtask')
   const prompt = (input?.prompt as string) || ''
   const agentType = (input?.subagent_type as string) || 'general'
 
   // 获取子 session ID —— 只信任 metadata.sessionId，它是后端为这个 tool call 精确设置的
-  const metadata = state.metadata as Record<string, unknown> | undefined
+  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
+    ? execution.result.details as Record<string, unknown>
+    : undefined
   const targetSessionId = metadata?.sessionId as string | undefined
 
-  const isRunning = state.status === 'running' || state.status === 'pending'
-  const isCompleted = state.status === 'completed'
-  const isError = state.status === 'error'
+  const resultOutput = execution.result
+    ? execution.result.content
+        .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+    : undefined
 
   const handleContentFullscreenChange = useCallback(
     (isFullscreen: boolean) => {
@@ -94,7 +101,7 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
         <TaskHeader
           agentType={agentType}
           description={description}
-          status={state.status}
+          status={isRunning ? 'running' : isError ? 'error' : 'completed'}
           expanded={expanded}
           headerRef={headerRef}
           onToggle={() => withScrollLock(() => setExpanded(!expanded))}
@@ -122,26 +129,26 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
               )}
 
               {/* 完成时的输出 */}
-              {isCompleted && state.output !== undefined && state.output !== null && (
+              {isCompleted && resultOutput !== undefined && resultOutput !== '' && (
                 <ContentBlock
                   label={t('task.result')}
-                  stateKey={`message:${part.messageID}:tool:${part.id}:task-result`}
-                  content={typeof state.output === 'string' ? state.output : JSON.stringify(state.output, null, 2)}
+                  stateKey={`message:${partKey}:task-result`}
+                  content={resultOutput}
                   defaultCollapsed={true}
                   onFullscreenChange={handleContentFullscreenChange}
-                  fullscreenId={`task:${part.sessionID}:${part.messageID}:${part.id}:result`}
+                  fullscreenId={`task:${partKey}:result`}
                 />
               )}
 
               {/* 错误信息 */}
-              {isError && state.error !== undefined && (
+              {isError && (
                 <ContentBlock
                   label={t('task.error')}
-                  stateKey={`message:${part.messageID}:tool:${part.id}:task-error`}
-                  content={typeof state.error === 'string' ? state.error : JSON.stringify(state.error)}
+                  stateKey={`message:${partKey}:task-error`}
+                  content={resultOutput || 'Task failed'}
                   variant="error"
                   onFullscreenChange={handleContentFullscreenChange}
-                  fullscreenId={`task:${part.sessionID}:${part.messageID}:${part.id}:error`}
+                  fullscreenId={`task:${partKey}:error`}
                 />
               )}
             </div>

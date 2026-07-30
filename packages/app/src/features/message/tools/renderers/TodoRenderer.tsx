@@ -21,14 +21,14 @@ interface TodoItem {
 // Todo Renderer
 // ============================================
 
-export function TodoRenderer({ part }: ToolRendererProps) {
-  const todos = extractTodos(part)
+export function TodoRenderer({ execution, partKey }: ToolRendererProps) {
+  const todos = extractTodos(execution)
 
   if (todos.length === 0) {
     return null
   }
 
-  return <TodoList todos={todos} stateKey={`message:${part.messageID}:tool:${part.id}:todo-list`} />
+  return <TodoList todos={todos} stateKey={`message:${partKey}:todo-list`} />
 }
 
 // ============================================
