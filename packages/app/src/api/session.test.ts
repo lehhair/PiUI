@@ -27,8 +27,11 @@ vi.mock('../pi/sessionApi', () => ({
   deletePiSession: mocks.deletePiSession,
   fetchSnapshot: mocks.fetchSnapshot,
   listPiSessions: mocks.listPiSessions,
-  resolveWorkspacePath: mocks.resolveWorkspacePath,
   setPiSessionName: mocks.setPiSessionName,
+}))
+
+vi.mock('../pi/workspaces', () => ({
+  resolveWorkspacePath: mocks.resolveWorkspacePath,
 }))
 
 vi.mock('../pi/applySnapshot', () => ({ applySnapshotToUi: mocks.applySnapshotToUi }))

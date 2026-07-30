@@ -11,11 +11,11 @@ import {
   listWorkspaceFiles,
   readWorkspaceFile,
   moveWorkspaceEntry,
-  resolveWorkspacePath,
   searchWorkspaceFiles,
   searchWorkspaceText,
   writeWorkspaceFile,
 } from '../pi/sessionApi'
+import { resolveWorkspacePath } from '../pi/workspaces'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
 

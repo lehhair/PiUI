@@ -9,9 +9,9 @@ import {
   deletePiSession,
   fetchSnapshot,
   listPiSessions,
-  resolveWorkspacePath,
   setPiSessionName,
 } from '../pi/sessionApi'
+import { resolveWorkspacePath } from '../pi/workspaces'
 import { snapshotToUiSession, toUiSession } from '../pi/sessionModel'
 import type { FileDiff } from './types'
 import type { SessionListParams, SessionStatusMap, UiSession } from '../types/session'

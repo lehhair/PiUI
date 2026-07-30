@@ -130,6 +130,24 @@ export async function postPiSessionCommand<T = JsonValue | undefined>(
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
+// Host commands (workspaces / files / git), POST /api/v1/host/commands/:name
+export async function postHostCommand<T = JsonValue | undefined>(
+  name: string,
+  params?: JsonObject,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await readJson<{ data: T }>(
+    `${getApiBase()}/api/v1/host/commands/${encodeURIComponent(name)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(params ?? {}),
+      signal,
+    },
+  )
+  return response.data
+}
+
 // Session commands
 export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal)

@@ -26,7 +26,20 @@ const mocks = vi.hoisted(() => ({
   deleteWorkspaceEntry: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => mocks)
+vi.mock('../pi/sessionApi', () => ({
+  listWorkspaceFiles: mocks.listWorkspaceFiles,
+  readWorkspaceFile: mocks.readWorkspaceFile,
+  searchWorkspaceFiles: mocks.searchWorkspaceFiles,
+  searchWorkspaceText: mocks.searchWorkspaceText,
+  getWorkspaceGitStatus: mocks.getWorkspaceGitStatus,
+  writeWorkspaceFile: mocks.writeWorkspaceFile,
+  createWorkspaceEntry: mocks.createWorkspaceEntry,
+  moveWorkspaceEntry: mocks.moveWorkspaceEntry,
+  deleteWorkspaceEntry: mocks.deleteWorkspaceEntry,
+}))
+vi.mock('../pi/workspaces', () => ({
+  resolveWorkspacePath: mocks.resolveWorkspacePath,
+}))
 
 describe('Pi workspace file API', () => {
   beforeEach(() => {

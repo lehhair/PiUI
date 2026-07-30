@@ -3,19 +3,18 @@ import type {
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
   ProjectTrustV1,
-  WorkspaceDtoV1,
 } from '@piui/protocol'
+import type { HostWorkspace } from '../../../pi/workspaces'
 import { Button } from '../../../components/ui/Button'
 import { useCurrentDirectory } from '../../../hooks'
 import { useCurrentSessionId } from '../../../store/messageStoreHooks'
 import {
   getPiSettings,
   getProjectTrust,
-  listRegisteredPiWorkspaces,
   patchPiSettings,
-  resolveWorkspacePath,
   setProjectTrust,
 } from '../../../pi/sessionApi'
+import { listHostWorkspaces, resolveWorkspacePath } from '../../../pi/workspaces'
 import { PiProviderManagement } from './PiProviderManagement'
 import { PiPackageManagement } from './PiPackageManagement'
 import { PiResourceManagement } from './PiResourceManagement'
@@ -55,7 +54,7 @@ export function PiManagementSettings() {
   const [settings, setSettings] = useState<PiSettingsSnapshotV1 | null>(null)
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
   const [trust, setTrust] = useState<ProjectTrustV1 | null>(null)
-  const [registeredWorkspaces, setRegisteredWorkspaces] = useState<WorkspaceDtoV1[]>([])
+  const [registeredWorkspaces, setRegisteredWorkspaces] = useState<HostWorkspace[]>([])
   const [advancedPatch, setAdvancedPatch] = useState('{}')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -71,7 +70,7 @@ export function PiManagementSettings() {
       const [nextSettings, nextTrust, nextWorkspaces] = await Promise.all([
         getPiSettings(canonical),
         getProjectTrust(canonical),
-        listRegisteredPiWorkspaces(),
+        listHostWorkspaces(),
       ])
       setSettings(nextSettings)
       setDraft(draftFromSnapshot(nextSettings))
