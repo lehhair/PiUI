@@ -3,7 +3,8 @@ import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore }
 
 /**
  * React bindings for Pi stores.
- * Follows app convention: useSyncExternalStore with stable snapshots.
+ * Session-scoped hooks take sessionId (null yields empty snapshots),
+ * keeping multi-pane renders isolated per session.
  */
 
 export function usePiSessionInfos() {
@@ -14,27 +15,27 @@ export function usePiSessionInfos() {
   )
 }
 
-export function usePiBranchData() {
+export function usePiBranchData(sessionId: string | null) {
   return useSyncExternalStore(
     piBranchStore.subscribe,
-    () => piBranchStore.getData(),
-    () => piBranchStore.getData(),
+    () => (sessionId ? piBranchStore.getData(sessionId) : null),
+    () => (sessionId ? piBranchStore.getData(sessionId) : null),
   )
 }
 
-export function usePiBranchLoading() {
+export function usePiBranchLoading(sessionId: string | null) {
   return useSyncExternalStore(
     piBranchStore.subscribe,
-    () => piBranchStore.isLoading(),
-    () => piBranchStore.isLoading(),
+    () => (sessionId ? piBranchStore.isLoading(sessionId) : false),
+    () => (sessionId ? piBranchStore.isLoading(sessionId) : false),
   )
 }
 
-export function usePiSessionRuntimeState() {
+export function usePiSessionRuntimeState(sessionId: string | null) {
   return useSyncExternalStore(
     piSessionStateStore.subscribe,
-    () => piSessionStateStore.getState(),
-    () => piSessionStateStore.getState(),
+    () => (sessionId ? piSessionStateStore.getState(sessionId) : null),
+    () => (sessionId ? piSessionStateStore.getState(sessionId) : null),
   )
 }
 

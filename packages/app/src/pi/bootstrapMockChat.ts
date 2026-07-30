@@ -80,7 +80,7 @@ export function installPiBackendServerSwitch(): void {
     resetWorkspaceResolutionCache()
     resetManagementEvents()
     setPiBackendState({ status: "booting" })
-    piEventStream.disconnect()
+    piEventStream.disconnectAll()
     void initializePiBackend().then(() => {
       // A switch can arrive while an older bootstrap promise is still active.
       // Re-run against the newly selected server once that promise is released.

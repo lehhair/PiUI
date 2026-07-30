@@ -507,13 +507,18 @@ function App() {
         key={paneId}
         paneId={paneId}
         sessionId={paneSessionId}
+        isFocused={paneLayout.focusedPaneId === paneId}
+        paneCount={paneLayout.paneCount}
+        displayMode={paneLayout.isSplit && paneLayout.fullscreenPaneId !== paneId ? 'split' : 'single'}
+        isPaneFullscreen={paneLayout.fullscreenPaneId === paneId}
         onEnterSession={(sessionId, directory) => navigatePaneToSession(paneId, sessionId, directory)}
         onNewChat={handleNewSession}
         onOpenSidebar={handleOpenSidebar}
         onToggleRightPanel={handleToggleRightPanel}
         onSplitPane={splitPaneEnabled ? handleSplitPane : undefined}
-        isPaneFullscreen={paneLayout.fullscreenPaneId === paneId}
         onTogglePaneFullscreen={paneLayout.isSplit ? handleToggleFocusedPaneFullscreen : undefined}
+        showSidebarButton={chatViewport.interaction.sidebarBehavior === 'overlay'}
+        navigatePaneToSession={navigatePaneToSession}
       />
     ),
     [
@@ -523,9 +528,12 @@ function App() {
       handleToggleRightPanel,
       splitPaneEnabled,
       handleSplitPane,
-      paneLayout.fullscreenPaneId,
+      paneLayout.focusedPaneId,
+      paneLayout.paneCount,
       paneLayout.isSplit,
+      paneLayout.fullscreenPaneId,
       handleToggleFocusedPaneFullscreen,
+      chatViewport.interaction.sidebarBehavior,
     ],
   )
 

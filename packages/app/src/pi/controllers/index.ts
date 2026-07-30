@@ -57,12 +57,12 @@ export async function loadPiSessionData(sessionId: string, signal?: AbortSignal)
       transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
     ])
 
-    piSessionStateStore.setState(state as JsonObject)
-    piBranchStore.setData(branch)
+    piSessionStateStore.setState(sessionId, state as JsonObject)
+    piBranchStore.setData(sessionId, branch)
   } catch (error) {
     console.error('Failed to load session data:', error)
-    piSessionStateStore.setError(error as Error)
-    piBranchStore.setError(error as Error)
+    piSessionStateStore.setError(sessionId, error as Error)
+    piBranchStore.setError(sessionId, error as Error)
     throw error
   }
 }
@@ -74,7 +74,7 @@ export async function loadPiSessionData(sessionId: string, signal?: AbortSignal)
  * first (latest) page — preserve it when merging older pages.
  */
 export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const currentBranch = piBranchStore.getData()
+  const currentBranch = piBranchStore.getData(sessionId)
   if (!currentBranch) {
     throw new Error('No branch data loaded')
   }
@@ -91,7 +91,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
     )
 
     // Prepend older items; keep latest head/hasMore/cursor from the new page
-    piBranchStore.setData({
+    piBranchStore.setData(sessionId, {
       ...olderPage,
       checkpoint: currentBranch.checkpoint,
       items: [...olderPage.items, ...currentBranch.items],
@@ -108,7 +108,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
  */
 export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): Promise<void> {
   const latest = await transport.getPiBranchPage(sessionId, { limit: 200 }, signal)
-  piBranchStore.setData(mergeLatestBranchPage(piBranchStore.getData(), latest))
+  piBranchStore.setData(sessionId, mergeLatestBranchPage(piBranchStore.getData(sessionId), latest))
 }
 
 /**
@@ -117,7 +117,7 @@ export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): 
  */
 export async function refreshPiSessionState(sessionId: string, signal?: AbortSignal): Promise<void> {
   const state = await transport.getPiSessionState(sessionId, signal)
-  piSessionStateStore.setState(state as JsonObject)
+  piSessionStateStore.setState(sessionId, state as JsonObject)
 }
 
 /**
@@ -222,7 +222,7 @@ export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> 
   piModelsStore.setLoading(true)
   try {
     const result = await transport.listPiModels(signal)
-    const models = (Array.isArray(result) ? result : []) as Model<any>[]
+    const models = (Array.isArray(result) ? result : []) as unknown as Model<any>[]
     piModelsStore.setModels(models)
     return models
   } catch (error) {

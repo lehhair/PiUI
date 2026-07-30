@@ -1,14 +1,19 @@
 import type { PiBranchPage } from '../domain/index.js'
 
+interface BranchEntry {
+  data: PiBranchPage | null
+  loading: boolean
+  error: Error | null
+}
+
+const EMPTY_ENTRY: BranchEntry = { data: null, loading: false, error: null }
+
 /**
- * Raw branch page store for active session.
- * Stores the complete branch data as returned from backend.
+ * Raw branch page store, keyed by session id (multi-pane safe).
  * Follows app store convention: subscribe/notify + stable snapshots.
  */
 class PiBranchStore {
-  private data: PiBranchPage | null = null
-  private loading = false
-  private error: Error | null = null
+  private bySessionId = new Map<string, BranchEntry>()
   private listeners = new Set<() => void>()
 
   subscribe = (listener: () => void): (() => void) => {
@@ -20,42 +25,58 @@ class PiBranchStore {
     this.listeners.forEach(l => l())
   }
 
-  setLoading(loading: boolean): void {
-    this.loading = loading
+  private entry(sessionId: string): BranchEntry {
+    let entry = this.bySessionId.get(sessionId)
+    if (!entry) {
+      entry = { data: null, loading: false, error: null }
+      this.bySessionId.set(sessionId, entry)
+    }
+    return entry
+  }
+
+  setLoading(sessionId: string, loading: boolean): void {
+    this.entry(sessionId).loading = loading
     this.notify()
   }
 
-  setData(data: PiBranchPage): void {
-    this.data = data
-    this.error = null
-    this.loading = false
+  setData(sessionId: string, data: PiBranchPage): void {
+    const entry = this.entry(sessionId)
+    entry.data = data
+    entry.error = null
+    entry.loading = false
     this.notify()
   }
 
-  setError(error: Error): void {
-    this.error = error
-    this.loading = false
+  setError(sessionId: string, error: Error): void {
+    const entry = this.entry(sessionId)
+    entry.error = error
+    entry.loading = false
     this.notify()
   }
 
-  getData(): PiBranchPage | null {
-    return this.data
+  getData(sessionId: string): PiBranchPage | null {
+    return this.bySessionId.get(sessionId)?.data ?? null
   }
 
-  isLoading(): boolean {
-    return this.loading
+  isLoading(sessionId: string): boolean {
+    return this.bySessionId.get(sessionId)?.loading ?? false
   }
 
-  getError(): Error | null {
-    return this.error
+  getError(sessionId: string): Error | null {
+    return this.bySessionId.get(sessionId)?.error ?? null
   }
 
-  clear(): void {
-    this.data = null
-    this.loading = false
-    this.error = null
+  clear(sessionId: string): void {
+    this.bySessionId.delete(sessionId)
+    this.notify()
+  }
+
+  clearAll(): void {
+    this.bySessionId.clear()
     this.notify()
   }
 }
 
 export const piBranchStore = new PiBranchStore()
+export type { BranchEntry }
+export { EMPTY_ENTRY as EMPTY_BRANCH_ENTRY }
