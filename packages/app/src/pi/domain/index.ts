@@ -225,6 +225,45 @@ export type PiUnknownItem = {
 export type PiSessionRuntimeState = JsonObject
 
 /**
+ * Native settings snapshot (worker settings.get). Shape is defined by the
+ * worker's catalog: raw scopes plus the resolved effective values.
+ */
+export type PiSettingsSnapshot = {
+  workspacePath: string
+  projectTrusted: boolean
+  global: JsonObject
+  project: JsonObject
+  effective: {
+    defaultProvider?: string
+    defaultModel?: string
+    defaultThinkingLevel?: ThinkingLevel
+    transport?: 'auto' | 'sse' | 'websocket' | 'websocket-cached'
+    steeringMode?: 'all' | 'one-at-a-time'
+    followUpMode?: 'all' | 'one-at-a-time'
+    theme?: string
+    compaction?: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number }
+    retry?: { enabled?: boolean; maxRetries?: number; baseDelayMs?: number }
+    shellPath?: string
+    httpProxy?: string
+    enableSkillCommands?: boolean
+    showImages?: boolean
+    defaultProjectTrust?: 'ask' | 'always' | 'never'
+    [key: string]: JsonValue | undefined
+  }
+  errors: Array<{ scope: string; message: string }>
+}
+
+/** Native project trust state (worker trust.get / trust.set). */
+export type PiProjectTrust = {
+  workspacePath: string
+  required: boolean
+  decision: boolean | null
+  inheritedFrom?: string
+  defaultDecision: 'ask' | 'always' | 'never'
+  trusted: boolean
+}
+
+/**
  * Pi branch page (from branch.get command).
  * Structure comes from protocol EntriesPage; items and liveMessage are
  * narrowed to SDK types since the backend guarantees their shapes.

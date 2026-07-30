@@ -19,7 +19,7 @@ import type {
   FileTextSearchResponse,
 } from '@piui/protocol'
 import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
-import type { PiBranchPage } from '../domain/index.js'
+import type { PiBranchPage, PiProjectTrust, PiSettingsSnapshot } from '../domain/index.js'
 import { getApiBase, piFetch } from '../sessionApi.js'
 
 // Response types
@@ -223,6 +223,100 @@ export function searchHostFilesByName(
 
 export function searchHostFilesText(workspacePath: string, query: string, limit?: number, signal?: AbortSignal): Promise<FileTextSearchResponse> {
   return postHostCommand('files.searchText', { workspacePath, query, limit }, signal)
+}
+
+// Global Pi commands (settings / trust / providers / model runtime / packages)
+export function getPiSettings(cwd: string, signal?: AbortSignal): Promise<PiSettingsSnapshot> {
+  return postPiGlobalCommand('settings.get', { cwd }, signal)
+}
+
+export function patchPiSettings(cwd: string, patch: JsonObject, signal?: AbortSignal): Promise<PiSettingsSnapshot> {
+  return postPiGlobalCommand('settings.patch', { cwd, patch }, signal)
+}
+
+export function getProjectTrust(cwd: string, signal?: AbortSignal): Promise<PiProjectTrust> {
+  return postPiGlobalCommand('trust.get', { cwd }, signal)
+}
+
+export function setProjectTrust(cwd: string, decision: boolean | null, signal?: AbortSignal): Promise<PiProjectTrust> {
+  return postPiGlobalCommand('trust.set', { cwd, decision }, signal)
+}
+
+export function listPiProviders(signal?: AbortSignal): Promise<JsonObject> {
+  return postPiGlobalCommand('providers.list', undefined, signal)
+}
+
+export function startProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('providers.startAuth', { providerId, authType }, signal)
+}
+
+export function respondProviderAuth(flowId: string, promptId: string, value: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('providers.respondAuth', { flowId, promptId, value }, signal)
+}
+
+export function cancelProviderAuth(flowId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('providers.cancelAuth', { flowId }, signal)
+}
+
+export function logoutProvider(providerId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('providers.logout', { providerId }, signal)
+}
+
+export function inspectModelRuntime(signal?: AbortSignal): Promise<JsonObject> {
+  return postPiGlobalCommand('modelRuntime.inspect', undefined, signal)
+}
+
+export function setProviderApiKey(providerId: string, apiKey: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('modelRuntime.setApiKey', { providerId, apiKey }, signal)
+}
+
+export function removeProviderApiKey(providerId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('modelRuntime.removeApiKey', { providerId }, signal)
+}
+
+export function reloadModelRuntime(signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('modelRuntime.reload', undefined, signal)
+}
+
+export function refreshModelRuntime(options?: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('modelRuntime.refresh', options ? { options } : undefined, signal)
+}
+
+export function listPiPackages(cwd: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.list', { cwd }, signal)
+}
+
+export function managePiPackage(
+  cwd: string,
+  params: { commandId?: string; action: 'install' | 'remove' | 'update'; source?: string; local?: boolean; persist?: boolean },
+  signal?: AbortSignal,
+): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.manage', { cwd, ...params }, signal)
+}
+
+export function resolvePiPackages(cwd: string, missingAction?: 'install' | 'skip' | 'error', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.resolve', { cwd, missingAction }, signal)
+}
+
+export function resolvePiExtensionSources(
+  cwd: string,
+  sources: string[],
+  options?: { local?: boolean; temporary?: boolean },
+  signal?: AbortSignal,
+): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.resolveSources', { cwd, sources, ...options }, signal)
+}
+
+export function changePiPackageSource(cwd: string, source: string, operation: 'add' | 'remove', local?: boolean, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.changeSource', { cwd, source, operation, local }, signal)
+}
+
+export function getPiPackageInstalledPath(cwd: string, source: string, scope?: 'user' | 'project', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.installedPath', { cwd, source, scope }, signal)
+}
+
+export function checkPiPackageUpdates(cwd: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('packages.checkUpdates', { cwd }, signal)
 }
 export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal)
