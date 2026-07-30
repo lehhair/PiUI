@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import type { ToolPart } from '../../../types/message'
+import type { PiToolExecution } from '../../../pi/domain/index.js'
 import { defaultExtractData } from './registry'
 
 describe('defaultExtractData', () => {
-  it('extracts files and diagnostics from metadata', () => {
-    const part = {
-      type: 'tool',
-      tool: 'read',
-      id: 'tool-1',
-      callID: 'call-1',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      state: {
-        input: { filePath: 'src/app.ts' },
-        metadata: {
+  it('extracts files and diagnostics from result details', () => {
+    const execution: PiToolExecution = {
+      call: {
+        type: 'toolCall',
+        id: 'call-1',
+        name: 'read',
+        arguments: { filePath: 'src/app.ts' },
+      },
+      result: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'read',
+        content: [{ type: 'text', text: 'file contents' }],
+        isError: false,
+        timestamp: 0,
+        details: {
           files: [
             {
               filePath: 'src/app.ts',
@@ -33,9 +38,9 @@ describe('defaultExtractData', () => {
           },
         },
       },
-    } as unknown as ToolPart
+    }
 
-    const extracted = defaultExtractData(part)
+    const extracted = defaultExtractData(execution)
 
     expect(extracted.files).toEqual([expect.objectContaining({ filePath: 'src/app.ts', additions: 1, deletions: 1 })])
     expect(extracted.diagnostics).toEqual([

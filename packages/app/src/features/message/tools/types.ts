@@ -1,5 +1,5 @@
 import type { ReactNode, ComponentType } from 'react'
-import type { ToolPart } from '../../../types/message'
+import type { PiToolExecution } from '../../../pi/domain/index.js'
 
 // ============================================
 // Tool Registry Types
@@ -58,7 +58,9 @@ export interface FileDiff {
  * 工具渲染器 Props
  */
 export interface ToolRendererProps {
-  part: ToolPart
+  execution: PiToolExecution
+  /** Stable key for expand-state persistence (entry id + block index) */
+  partKey: string
   data: ExtractedToolData
   /** 子组件全屏状态变化时回调，用于阻止父级自动收起 */
   onFullscreenChange?: (isFullscreen: boolean) => void
@@ -82,10 +84,10 @@ export interface ToolConfig {
 
   /**
    * 数据提取器（可选）
-   * 用于从 ToolPart 提取 input/output 等数据
+   * 用于从 tool execution 提取 input/output 等数据
    * 如果不提供，使用默认提取逻辑
    */
-  extractData?: (part: ToolPart) => Partial<ExtractedToolData>
+  extractData?: (execution: PiToolExecution) => Partial<ExtractedToolData>
 }
 
 /**

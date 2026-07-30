@@ -37,12 +37,13 @@ interface QAPair {
 // Main
 // ============================================
 
-export function QuestionRenderer({ part, data }: ToolRendererProps) {
-  const { state } = part
-  const isActive = state.status === 'running' || state.status === 'pending'
-  const inputObj = state.input as Record<string, unknown> | undefined
+export function QuestionRenderer({ execution, data }: ToolRendererProps) {
+  const isActive = !execution.result
+  const inputObj = execution.call.arguments as Record<string, unknown> | undefined
   const output = data.output?.trim()
-  const metadata = state.metadata as Record<string, unknown> | undefined
+  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
+    ? execution.result.details as Record<string, unknown>
+    : undefined
 
   // 从 input 拿问题结构，从 metadata/output 解析答案
   const qaList = useMemo(() => {
@@ -55,7 +56,7 @@ export function QuestionRenderer({ part, data }: ToolRendererProps) {
   }
 
   // 用户跳过 / error 不渲染
-  if (data.error || state.status === 'error') {
+  if (data.error || execution.result?.isError) {
     return null
   }
 

@@ -171,6 +171,15 @@ export type PiBashExecutionItem = {
   message: BashExecutionMessage
 }
 
+/**
+ * One tool execution: the call plus its result (absent while pending).
+ * The neutral contract for the tool rendering chain.
+ */
+export type PiToolExecution = {
+  call: ToolCall
+  result?: ToolResultMessage
+}
+
 export type PiCompactionItem = {
   kind: 'compaction'
   entryId: string
