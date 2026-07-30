@@ -1,6 +1,7 @@
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
+import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type {
+  PiBranchPage,
   PiSessionRow,
   PiTimelineItem,
   PiAssistantMessageItem,
@@ -36,16 +37,17 @@ export function selectPiSessionRows(): PiSessionRow[] {
 }
 
 /**
- * Select timeline items from raw session entries.
+ * Select timeline items from the branch page.
  * Tool results are paired back into their owning assistant item so each
- * message keeps its embedded tool calls. Entries without a conversation
- * representation still surface as their own items.
+ * message keeps its embedded tool calls. The live streaming message (from
+ * the branch checkpoint) is appended as a streaming assistant item.
+ * Entries without a conversation representation still surface as items.
  */
-export function selectPiTimelineItems(entries: SessionEntry[]): PiTimelineItem[] {
+export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
   const items: PiTimelineItem[] = []
   const assistantByCallId = new Map<string, PiAssistantMessageItem>()
 
-  for (const entry of entries) {
+  for (const entry of branch.items) {
     const timestamp = parseTime(entry.timestamp)
 
     if (entry.type === 'message') {
@@ -173,6 +175,29 @@ export function selectPiTimelineItems(entries: SessionEntry[]): PiTimelineItem[]
         entryType: entry.type,
       } as PiUnknownItem)
     }
+  }
+
+  // Append the live streaming message as a streaming assistant item.
+  // Present only while streaming; cleared once the entry persists.
+  const live = branch.checkpoint?.liveMessage
+  if (live && live.message.role === 'assistant') {
+    const message = live.message as AssistantMessage
+    items.push({
+      kind: 'assistant_message',
+      entryId: live.id,
+      timestamp: message.timestamp || Date.now(),
+      rawEntry: {
+        type: 'message',
+        id: live.id,
+        parentId: null,
+        timestamp: new Date(message.timestamp || Date.now()).toISOString(),
+        message,
+      },
+      message,
+      blocks: message.content,
+      toolResults: {},
+      isStreaming: true,
+    })
   }
 
   return items

@@ -1,132 +1,135 @@
-import type { Message, Part } from '../../types/message'
-import { hasRenderableParts, isAbortedMessage, isVisibleReasoningPart, isVisibleTextPart } from '../../types/message'
+import type { PiAssistantMessageItem, PiTimelineItem } from '../../pi/domain/index.js'
 
-function messageHasContent(message: Message): boolean {
-  const hasRenderable = hasRenderableParts(message)
-  // 有非 abort 错误的助手消息始终可见（展示错误信息）。
-  // abort 只有在已经产生可见内容时才显示；空 abort 不占信息流位置。
-  if (message.info.role === 'assistant' && 'error' in message.info && message.info.error) {
-    return isAbortedMessage(message.info) ? hasRenderable : true
+/**
+ * Chat timeline visibility: filters items without renderable content and
+ * merges trailing tool-only assistant items into the preceding one, so a
+ * tool call chain renders as one continuous message.
+ */
+
+function itemHasContent(item: PiTimelineItem): boolean {
+  if (item.kind === 'user_message') {
+    return item.blocks.some(block => block.type === 'text' ? block.text.trim().length > 0 : true)
   }
-  if (message.parts.length === 0) {
-    // 任何角色的空消息都不可见：没有内容可展示
-    // part 到达后自动进入可见列表；abort 后永远不会有 part → 永远不可见
-    return false
+  if (item.kind === 'assistant_message') {
+    const hasRenderable = item.blocks.some(block =>
+      block.type === 'text'
+        ? block.text.trim().length > 0
+        : block.type === 'thinking'
+          ? block.thinking.trim().length > 0
+          : true,
+    )
+    // 有非 abort 错误的助手消息始终可见（展示错误信息）。
+    // abort 只有在已经产生可见内容时才显示；空 abort 不占信息流位置。
+    if (item.message.stopReason === 'error') return true
+    if (item.message.stopReason === 'aborted') return hasRenderable
+    return hasRenderable
   }
-  return hasRenderable
+  // bash/compaction/summary/custom/label/unknown 等系统条目始终保留（不静默丢弃）
+  return true
 }
 
-function isVisibleThinking(part: Part): boolean {
-  return isVisibleReasoningPart(part)
-}
-
-function isVisibleText(part: Part): boolean {
-  return isVisibleTextPart(part)
-}
-
-function endsWithTool(msg: Message): boolean {
-  if (msg.info.role !== 'assistant' || msg.parts.length === 0) return false
-  for (let i = msg.parts.length - 1; i >= 0; i--) {
-    const p = msg.parts[i]
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
-    // skip empty reasoning / empty text — they carry no visible content
-    if (p.type === 'reasoning' && !isVisibleReasoningPart(p)) continue
-    if (p.type === 'text' && !isVisibleTextPart(p)) continue
-    return p.type === 'tool'
+function endsWithTool(item: PiTimelineItem): boolean {
+  if (item.kind !== 'assistant_message' || item.blocks.length === 0) return false
+  for (let i = item.blocks.length - 1; i >= 0; i--) {
+    const block = item.blocks[i]
+    // skip empty thinking / empty text — they carry no visible content
+    if (block.type === 'thinking' && block.thinking.trim().length === 0) continue
+    if (block.type === 'text' && block.text.trim().length === 0) continue
+    return block.type === 'toolCall'
   }
   return false
 }
 
-function isToolOnlyFollowUp(msg: Message): boolean {
-  if (msg.info.role !== 'assistant') return false
+function isToolOnlyFollowUp(item: PiTimelineItem): boolean {
+  if (item.kind !== 'assistant_message') return false
   let sawTool = false
-  for (const p of msg.parts) {
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
-    if (isVisibleThinking(p) || isVisibleText(p)) return false
-    if (p.type === 'tool') sawTool = true
-    else if (p.type === 'retry' || p.type === 'compaction') return false
+  for (const block of item.blocks) {
+    if (block.type === 'thinking' && block.thinking.trim().length > 0) return false
+    if (block.type === 'text' && block.text.trim().length > 0) return false
+    if (block.type === 'toolCall') sawTool = true
   }
   return sawTool
 }
 
-function isMergeableTrailing(msg: Message): boolean {
-  if (msg.info.role !== 'assistant') return false
+function isMergeableTrailing(item: PiTimelineItem): boolean {
+  if (item.kind !== 'assistant_message') return false
   let sawTool = false
   let sawVisibleText = false
-  for (const p of msg.parts) {
-    if (p.type === 'snapshot' || p.type === 'patch' || p.type === 'step-start' || p.type === 'step-finish') continue
-    if (isVisibleThinking(p)) return false
-    if (p.type === 'tool') {
+  for (const block of item.blocks) {
+    if (block.type === 'thinking' && block.thinking.trim().length > 0) return false
+    if (block.type === 'toolCall') {
       sawTool = true
       continue
     }
-    if (isVisibleText(p)) {
+    if (block.type === 'text' && block.text.trim().length > 0) {
       sawVisibleText = true
       continue
     }
-    if (p.type === 'retry' || p.type === 'compaction') return false
   }
   return sawTool && sawVisibleText
 }
 
-export interface VisibleMessageEntry {
-  message: Message
+export interface VisibleTimelineEntry {
+  item: PiTimelineItem
   sourceIds: string[]
 }
 
-export function getVisibleMessageForkTargetId(entry: VisibleMessageEntry): string {
-  return entry.sourceIds[entry.sourceIds.length - 1] || entry.message.info.id
+export function getVisibleTimelineForkTargetId(entry: VisibleTimelineEntry): string {
+  return entry.sourceIds[entry.sourceIds.length - 1] || entry.item.entryId
 }
 
-export function buildVisibleMessageEntries(messages: Message[]): VisibleMessageEntry[] {
+export function buildVisibleTimelineEntries(items: PiTimelineItem[]): VisibleTimelineEntry[] {
   // 防御性去重：保证输入无重复 ID
   const seenIds = new Set<string>()
-  const unique: Message[] = []
-  for (const m of messages) {
-    if (!seenIds.has(m.info.id)) {
-      seenIds.add(m.info.id)
-      unique.push(m)
+  const unique: PiTimelineItem[] = []
+  for (const item of items) {
+    if (!seenIds.has(item.entryId)) {
+      seenIds.add(item.entryId)
+      unique.push(item)
     }
   }
-  const filteredMessages = unique.filter(messageHasContent)
-  const result: VisibleMessageEntry[] = []
+  const filtered = unique.filter(itemHasContent)
+  const result: VisibleTimelineEntry[] = []
 
-  for (let i = 0; i < filteredMessages.length; i++) {
-    const msg = filteredMessages[i]
-    if (!endsWithTool(msg)) {
-      result.push({ message: msg, sourceIds: [msg.info.id] })
+  for (let i = 0; i < filtered.length; i++) {
+    const item = filtered[i]
+    if (!endsWithTool(item)) {
+      result.push({ item, sourceIds: [item.entryId] })
       continue
     }
 
-    const sourceIds = [msg.info.id]
+    const sourceIds = [item.entryId]
     let j = i + 1
 
-    while (j < filteredMessages.length) {
-      if (isToolOnlyFollowUp(filteredMessages[j])) {
-        sourceIds.push(filteredMessages[j].info.id)
+    while (j < filtered.length) {
+      if (isToolOnlyFollowUp(filtered[j])) {
+        sourceIds.push(filtered[j].entryId)
         j++
-      } else if (isMergeableTrailing(filteredMessages[j])) {
-        sourceIds.push(filteredMessages[j].info.id)
+      } else if (isMergeableTrailing(filtered[j])) {
+        sourceIds.push(filtered[j].entryId)
         j++
         // 如果该消息也以 tool 结尾（text 在 tool 前面，是中间说明不是结论），
         // 继续合并链；只有 text 在 tool 后面（真正收尾）才终止
-        if (!endsWithTool(filteredMessages[j - 1])) break
+        if (!endsWithTool(filtered[j - 1])) break
       } else {
         break
       }
     }
 
     if (j === i + 1) {
-      result.push({ message: msg, sourceIds })
+      result.push({ item, sourceIds })
     } else {
-      const mergedMessages = filteredMessages.slice(i + 1, j)
-      const tailParts = mergedMessages.flatMap(message => message.parts)
-      // 合并后如果任何源消息在 streaming，合并结果也应该是 streaming
-      const anyStreaming = msg.isStreaming || mergedMessages.some(m => m.isStreaming)
-      result.push({
-        message: { ...msg, parts: [...msg.parts, ...tailParts], isStreaming: anyStreaming },
-        sourceIds,
-      })
+      const mergedItems = filtered.slice(i + 1, j) as PiAssistantMessageItem[]
+      const first = item as PiAssistantMessageItem
+      const last = mergedItems[mergedItems.length - 1]
+      const merged: PiAssistantMessageItem = {
+        ...first,
+        // message 取最后一条（最新模型状态/stopReason）
+        message: last.message,
+        blocks: [...first.blocks, ...mergedItems.flatMap(m => m.blocks)],
+        toolResults: Object.assign({}, first.toolResults, ...mergedItems.map(m => m.toolResults)),
+      }
+      result.push({ item: merged, sourceIds })
       i = j - 1
     }
   }

@@ -191,8 +191,8 @@ describe('process content split', () => {
   it('keeps streaming assistant as process-only until completed', () => {
     const item = createCompletedAssistantItem([{ type: 'text', text: 'partial' }])
 
-    expect(assistantHasProcessContent(item, true)).toBe(true)
-    expect(assistantHasFinalContent(item, true)).toBe(false)
+    expect(assistantHasProcessContent({ ...item, isStreaming: true })).toBe(true)
+    expect(assistantHasFinalContent({ ...item, isStreaming: true })).toBe(false)
   })
 
   it('splits completed tool+text into process and final', () => {
@@ -201,13 +201,13 @@ describe('process content split', () => {
       { type: 'text', text: 'done' },
     ])
 
-    expect(assistantHasProcessContent(item, false)).toBe(true)
-    expect(assistantHasFinalContent(item, false)).toBe(true)
+    expect(assistantHasProcessContent(item)).toBe(true)
+    expect(assistantHasFinalContent(item)).toBe(true)
 
     // pure text has final only
     const plain = createCompletedAssistantItem([{ type: 'text', text: 'hello' }])
-    expect(assistantHasProcessContent(plain, false)).toBe(false)
-    expect(assistantHasFinalContent(plain, false)).toBe(true)
+    expect(assistantHasProcessContent(plain)).toBe(false)
+    expect(assistantHasFinalContent(plain)).toBe(true)
     void splitProcessRenderItems
   })
 })
