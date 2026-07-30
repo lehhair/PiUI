@@ -10,7 +10,7 @@ import {
   type MentionMenuHandle,
   type MentionItem,
 } from '../mention'
-import { SlashCommandMenu, type SlashCommandMenuHandle } from '../slash-command'
+import { SlashCommandMenu, type Command, type SlashCommandMenuHandle } from '../slash-command'
 import { InputToolbar } from './input/InputToolbar'
 import type { ModelSelectorHandle } from './ModelSelector'
 import { InputFooter } from './input/InputFooter'
@@ -35,7 +35,6 @@ import type { Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../hooks/useModels'
 
 type ModelInfo = Model<any>
-import type { Command } from '../../api/command'
 import { usePiCapabilities } from '../../pi/capabilities'
 import {
   getDroppedPathsInfo,
@@ -1323,7 +1322,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               ref={slashMenuRef}
               isOpen={slashOpen}
               query={slashQuery}
-              rootPath={rootPath}
+              sessionId={sessionId}
               onSelect={handleSlashSelect}
               onClose={handleSlashClose}
             />

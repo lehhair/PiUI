@@ -5,7 +5,8 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getCommands, type Command } from '../../api/command'
+import i18n from '../../i18n'
+import { loadPiSlashCommands } from '../../pi/controllers/index.js'
 import { apiErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 
@@ -13,10 +14,26 @@ import { scrollItemIntoView } from '../../utils/scrollUtils'
 // Types
 // ============================================
 
+export interface Command {
+  name: string
+  description?: string
+  keybind?: string
+  source: 'frontend' | 'api'
+}
+
+// Frontend built-ins that map to local/native actions (pi TUI parity:
+// /new starts a new session, /compact compacts natively).
+function getFrontendCommands(): Command[] {
+  return [
+    { name: 'new', description: i18n.t('commands:slashCommand.newSessionDesc'), source: 'frontend' },
+    { name: 'compact', description: i18n.t('commands:slashCommand.compactDesc'), source: 'frontend' },
+  ]
+}
+
 interface SlashCommandMenuProps {
   isOpen: boolean
   query: string // "/" 之后的文本
-  rootPath?: string // 用于 API 调用
+  sessionId?: string | null // 会话命令来源（无会话时只显示前端内置命令）
   onSelect: (command: Command) => void
   onClose: () => void
 }
@@ -34,7 +51,7 @@ export interface SlashCommandMenuHandle {
 // ============================================
 
 export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandMenuProps>(function SlashCommandMenu(
-  { isOpen, query, rootPath, onSelect, onClose },
+  { isOpen, query, sessionId, onSelect, onClose },
   ref,
 ) {
   const { t } = useTranslation(['commands', 'common'])
@@ -121,24 +138,35 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
     }
   }, [isOpen])
 
-  // 加载命令列表
+  // 加载命令列表：前端内置 + 会话 registry 原生命令
   useEffect(() => {
     if (!isOpen) return
 
     const frameId = requestAnimationFrame(() => {
       const requestId = ++requestIdRef.current
+      const frontend = getFrontendCommands()
+      if (!sessionId) {
+        setCommands(frontend)
+        setSelectedIndex(0)
+        return
+      }
       setLoading(true)
 
-      getCommands(rootPath)
-        .then(cmds => {
+      loadPiSlashCommands(sessionId)
+        .then(descriptors => {
           if (requestId !== requestIdRef.current) return
-          setCommands(cmds)
+          const sessionCommands: Command[] = descriptors.map(descriptor => ({
+            name: descriptor.name,
+            description: descriptor.description,
+            source: 'api',
+          }))
+          setCommands([...frontend, ...sessionCommands])
           setSelectedIndex(0)
         })
         .catch(err => {
           if (requestId !== requestIdRef.current) return
           apiErrorHandler('load commands', err)
-          setCommands([])
+          setCommands(frontend)
         })
         .finally(() => {
           if (requestId === requestIdRef.current) {
@@ -148,7 +176,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
     })
 
     return () => cancelAnimationFrame(frameId)
-  }, [isOpen, rootPath])
+  }, [isOpen, sessionId])
 
   // query 变化时重置选中项
   useEffect(() => {
