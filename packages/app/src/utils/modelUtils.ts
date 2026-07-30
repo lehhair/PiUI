@@ -102,6 +102,21 @@ export function recordModelUsage(model: AnyModel): void {
   }
 }
 
+// ============================================
+// 首选模型（无会话时 composer 的选择）
+// ============================================
+
+const PREFERRED_MODEL_KEY = 'piui-preferred-model-key'
+
+/** Last model picked in the composer; applied to sessions created later. */
+export function getPreferredModelKey(): string | null {
+  return serverStorage.get(PREFERRED_MODEL_KEY)
+}
+
+export function setPreferredModelKey(key: string): void {
+  serverStorage.set(PREFERRED_MODEL_KEY, key)
+}
+
 /**
  * 获取模型的使用次数
  */
