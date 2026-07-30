@@ -10,6 +10,13 @@ import type {
   GitFileDiffResponse,
   GitInfoResponse,
   GitStatusResponse,
+  FileCreateRequest,
+  FileListResponse,
+  FileMoveRequest,
+  FileNameSearchResponse,
+  FileOperationResponse,
+  FileReadResponse,
+  FileTextSearchResponse,
 } from '@piui/protocol'
 import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage } from '../domain/index.js'
@@ -168,6 +175,54 @@ export function getHostGitDiff(workspacePath: string, mode: GitDiffMode, signal?
 
 export function getHostGitFileDiff(workspacePath: string, path: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitFileDiffResponse> {
   return postHostCommand('git.fileDiff', { workspacePath, path, mode }, signal)
+}
+
+// Host file commands (files.*), workspace-scoped
+export function listHostFiles(
+  workspacePath: string,
+  params?: { path?: string; limit?: number; cursor?: string },
+  signal?: AbortSignal,
+): Promise<FileListResponse> {
+  return postHostCommand('files.list', { workspacePath, ...params }, signal)
+}
+
+export function readHostFile(workspacePath: string, path: string, signal?: AbortSignal): Promise<FileReadResponse> {
+  return postHostCommand('files.read', { workspacePath, path }, signal)
+}
+
+export function writeHostFile(
+  workspacePath: string,
+  path: string,
+  content: string,
+  options?: { ifMatch?: string; encoding?: 'utf-8' | 'base64' },
+  signal?: AbortSignal,
+): Promise<FileReadResponse> {
+  return postHostCommand('files.write', { workspacePath, path, content, ...options }, signal)
+}
+
+export function createHostFileEntry(workspacePath: string, request: FileCreateRequest, signal?: AbortSignal): Promise<FileOperationResponse> {
+  return postHostCommand('files.create', { workspacePath, ...request }, signal)
+}
+
+export function moveHostFileEntry(workspacePath: string, request: FileMoveRequest, signal?: AbortSignal): Promise<FileOperationResponse> {
+  return postHostCommand('files.move', { workspacePath, ...request }, signal)
+}
+
+export function deleteHostFileEntry(workspacePath: string, path: string, recursive = false, signal?: AbortSignal): Promise<{ ok: boolean }> {
+  return postHostCommand('files.delete', { workspacePath, path, recursive }, signal)
+}
+
+export function searchHostFilesByName(
+  workspacePath: string,
+  query: string,
+  options?: { type?: 'file' | 'directory'; limit?: number },
+  signal?: AbortSignal,
+): Promise<FileNameSearchResponse> {
+  return postHostCommand('files.searchName', { workspacePath, query, ...options }, signal)
+}
+
+export function searchHostFilesText(workspacePath: string, query: string, limit?: number, signal?: AbortSignal): Promise<FileTextSearchResponse> {
+  return postHostCommand('files.searchText', { workspacePath, query, limit }, signal)
 }
 export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal)
