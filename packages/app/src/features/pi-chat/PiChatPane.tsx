@@ -519,6 +519,11 @@ export function PiChatPane({
             showScrollToBottom={!isAtBottom}
             onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
             fileCapabilities={{ image: imageCapable, pdf: false, audio: false, video: false }}
+            models={[...models]}
+            selectedModelKey={selectedModelKey}
+            onModelChange={handleModelChange}
+            modelsLoading={modelsLoading}
+            modelSelectorRef={modelSelectorRef}
             variants={thinkingLevels}
             selectedVariant={thinkingLevel}
             onVariantChange={handleVariantChange}

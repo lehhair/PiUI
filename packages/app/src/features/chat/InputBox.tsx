@@ -31,7 +31,10 @@ import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
 import { useChatViewport } from './chatViewport'
 import type { ApiAgent } from '../../api/client'
-import type { ModelInfo, FileCapabilities } from '../../hooks/useModels'
+import type { Model } from '@earendil-works/pi-ai'
+import type { FileCapabilities } from '../../hooks/useModels'
+
+type ModelInfo = Model<any>
 import type { Command } from '../../api/command'
 import { usePiCapabilities } from '../../pi/capabilities'
 import {

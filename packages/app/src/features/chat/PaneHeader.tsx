@@ -19,10 +19,9 @@ import {
 } from '../../components/Icons'
 import { IconButton } from '../../components/ui'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
-import { useSessionState } from '../../store'
 import { layoutStore, useLayoutStore } from '../../store/layoutStore'
-import { messageStore } from '../../store'
-import { updateSession } from '../../api'
+import { usePiSessionTitle } from '../../pi/hooks/index.js'
+import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport, canUseSplitPane } from './chatViewport'
@@ -65,7 +64,7 @@ export function PaneHeader({
   const { t } = useTranslation('chat')
   const viewport = useChatViewport()
   const canRename = usePiCapabilities().sessionRename
-  const sessionState = useSessionState(sessionId)
+  const sessionTitle = usePiSessionTitle(sessionId)
   const { currentDirectory } = useDirectory()
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
   const [isEditing, setIsEditing] = useState(false)
@@ -76,7 +75,7 @@ export function PaneHeader({
   // Drag state for swap
   const [isDragOver, setIsDragOver] = useState(false)
 
-  const title = sessionState?.title || t('header.newChat')
+  const title = sessionTitle || t('header.newChat')
   const splitEnabled = canSplitPane ?? canUseSplitPane(viewport)
 
   // Reset editing when session changes
@@ -104,15 +103,14 @@ export function PaneHeader({
       return
     }
     try {
-      const dir = sessionState?.directory || currentDirectory
-      const updated = await updateSession(sessionId, { title: editValue.trim() }, dir)
-      messageStore.updateSessionMetadata(sessionId, { title: updated.title })
+      await renamePiSession(sessionId, editValue.trim())
+      void loadPiSessions().catch(() => undefined)
     } catch (e) {
       uiErrorHandler('rename session', e)
     } finally {
       setIsEditing(false)
     }
-  }, [sessionId, editValue, title, sessionState?.directory, currentDirectory])
+  }, [sessionId, editValue, title])
 
   // ---- Split actions ----
   const handleSplitH = useCallback(() => {
