@@ -7,7 +7,6 @@ import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch
 import {
   createWorkspaceEntry,
   deleteWorkspaceEntry,
-  getWorkspaceGitStatus,
   listWorkspaceFiles,
   readWorkspaceFile,
   moveWorkspaceEntry,
@@ -15,6 +14,7 @@ import {
   searchWorkspaceText,
   writeWorkspaceFile,
 } from '../pi/sessionApi'
+import { getHostGitStatus } from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
@@ -227,7 +227,7 @@ export async function deleteEntry(path: string, directory?: string, recursive = 
  */
 export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
   const workspacePath = await requireWorkspacePath(directory)
-  const status = await getWorkspaceGitStatus(workspacePath)
+  const status = await getHostGitStatus(workspacePath)
   return status.items.map(item => ({
     path: item.path,
     status: item.status === 'added' || item.status === 'untracked' || item.status === 'copied'

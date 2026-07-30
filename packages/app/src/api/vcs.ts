@@ -5,10 +5,10 @@
 import type { FileDiff } from './types'
 import type { VcsDiffMode, VcsInfo } from '../types/api/vcs'
 import {
-  getWorkspaceGitDiff,
-  getWorkspaceGitFileDiff,
-  getWorkspaceGitInfo,
-} from '../pi/sessionApi'
+  getHostGitDiff,
+  getHostGitFileDiff,
+  getHostGitInfo,
+} from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
 import type { GitDiffMode } from '@piui/protocol'
 
@@ -18,9 +18,7 @@ import type { GitDiffMode } from '@piui/protocol'
 export async function getVcsInfo(directory?: string, signal?: AbortSignal): Promise<VcsInfo | null> {
   const workspacePath = await resolveWorkspacePath(directory)
   if (!workspacePath) return null
-  const info = signal
-    ? await getWorkspaceGitInfo(workspacePath, signal)
-    : await getWorkspaceGitInfo(workspacePath)
+  const info = await getHostGitInfo(workspacePath, signal)
   if (!info.root) return null
   return {
     branch: info.branch ?? undefined,
@@ -39,9 +37,7 @@ export async function getVcsInfo(directory?: string, signal?: AbortSignal): Prom
 export async function getVcsDiff(mode: VcsDiffMode, directory?: string, signal?: AbortSignal): Promise<FileDiff[]> {
   const workspacePath = await resolveWorkspacePath(directory)
   if (!workspacePath) return []
-  const diff = signal
-    ? await getWorkspaceGitDiff(workspacePath, toGitMode(mode), signal)
-    : await getWorkspaceGitDiff(workspacePath, toGitMode(mode))
+  const diff = await getHostGitDiff(workspacePath, toGitMode(mode), signal)
   return diff.files.map(file => {
     const mapped: FileDiff = {
       file: file.file,
@@ -63,7 +59,7 @@ export async function getVcsFileDiff(
 ): Promise<FileDiff> {
   const workspacePath = await resolveWorkspacePath(directory)
   if (!workspacePath) throw new Error('No PiUI workspace is available')
-  const diff = await getWorkspaceGitFileDiff(workspacePath, toGitMode(mode), file, signal)
+  const diff = await getHostGitFileDiff(workspacePath, file, toGitMode(mode), signal)
   return {
     file: diff.file,
     oldPath: diff.oldPath,

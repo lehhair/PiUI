@@ -3,15 +3,15 @@ import { getVcsDiff, getVcsFileDiff, getVcsInfo } from './vcs'
 
 const mocks = vi.hoisted(() => ({
   resolveWorkspacePath: vi.fn(),
-  getWorkspaceGitInfo: vi.fn(),
-  getWorkspaceGitDiff: vi.fn(),
-  getWorkspaceGitFileDiff: vi.fn(),
+  getHostGitInfo: vi.fn(),
+  getHostGitDiff: vi.fn(),
+  getHostGitFileDiff: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => ({
-  getWorkspaceGitInfo: mocks.getWorkspaceGitInfo,
-  getWorkspaceGitDiff: mocks.getWorkspaceGitDiff,
-  getWorkspaceGitFileDiff: mocks.getWorkspaceGitFileDiff,
+vi.mock('../pi/transport/index.js', () => ({
+  getHostGitInfo: mocks.getHostGitInfo,
+  getHostGitDiff: mocks.getHostGitDiff,
+  getHostGitFileDiff: mocks.getHostGitFileDiff,
 }))
 vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: mocks.resolveWorkspacePath,
@@ -24,36 +24,36 @@ describe('Pi workspace VCS API', () => {
   })
 
   it('maps branch and tracking counts', async () => {
-    mocks.getWorkspaceGitInfo.mockResolvedValue({ root: true, branch: 'main', ahead: 2, behind: 1 })
+    mocks.getHostGitInfo.mockResolvedValue({ root: true, branch: 'main', ahead: 2, behind: 1 })
 
     await expect(getVcsInfo('C:/workspace')).resolves.toEqual({ branch: 'main', ahead: 2, behind: 1 })
-    expect(mocks.getWorkspaceGitInfo).toHaveBeenCalledWith('/workspace')
+    expect(mocks.getHostGitInfo).toHaveBeenCalledWith('/workspace', undefined)
   })
 
   it('maps supported diff modes to the Pi endpoint', async () => {
-    mocks.getWorkspaceGitDiff.mockResolvedValue({
+    mocks.getHostGitDiff.mockResolvedValue({
       files: [{ file: 'src/app.ts', status: 'modified', additions: 3, deletions: 1 }],
     })
 
     await expect(getVcsDiff('staged', '/workspace')).resolves.toEqual([
       { file: 'src/app.ts', status: 'modified', additions: 3, deletions: 1 },
     ])
-    expect(mocks.getWorkspaceGitDiff).toHaveBeenCalledWith('/workspace', 'staged')
+    expect(mocks.getHostGitDiff).toHaveBeenCalledWith('/workspace', 'staged', undefined)
 
     await getVcsDiff('branch', '/workspace')
-    expect(mocks.getWorkspaceGitDiff).toHaveBeenLastCalledWith('/workspace', 'branch')
+    expect(mocks.getHostGitDiff).toHaveBeenLastCalledWith('/workspace', 'branch', undefined)
   })
 
   it('returns null outside a repository and preserves operational failures', async () => {
-    mocks.getWorkspaceGitInfo.mockResolvedValue({ root: false, branch: null, ahead: 0, behind: 0 })
-    mocks.getWorkspaceGitDiff.mockRejectedValue(new Error('not a repository'))
+    mocks.getHostGitInfo.mockResolvedValue({ root: false, branch: null, ahead: 0, behind: 0 })
+    mocks.getHostGitDiff.mockRejectedValue(new Error('not a repository'))
 
     await expect(getVcsInfo('/workspace')).resolves.toBeNull()
     await expect(getVcsDiff('git', '/workspace')).rejects.toThrow('not a repository')
   })
 
   it('loads a single file patch lazily', async () => {
-    mocks.getWorkspaceGitFileDiff.mockResolvedValue({
+    mocks.getHostGitFileDiff.mockResolvedValue({
       file: 'src/app.ts',
       oldPath: 'src/old.ts',
       status: 'renamed',
@@ -65,6 +65,6 @@ describe('Pi workspace VCS API', () => {
     await expect(getVcsFileDiff('git', 'src/app.ts', '/workspace')).resolves.toMatchObject({
       file: 'src/app.ts', oldPath: 'src/old.ts', patch: 'diff --git ...',
     })
-    expect(mocks.getWorkspaceGitFileDiff).toHaveBeenCalledWith('/workspace', 'git', 'src/app.ts', undefined)
+    expect(mocks.getHostGitFileDiff).toHaveBeenCalledWith('/workspace', 'src/app.ts', 'git', undefined)
   })
 })

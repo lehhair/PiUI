@@ -17,11 +17,6 @@ import type {
   FileReadResponseV1,
   FileNameSearchResponseV1,
   FileTextSearchResponseV1,
-  GitDiffModeV1,
-  GitDiffResponseV1,
-  GitFileDiffResponseV1,
-  GitInfoResponseV1,
-  GitStatusResponseV1,
   PiSettingsPatchV1,
   PiSettingsSnapshotV1,
   ProjectTrustV1,
@@ -655,52 +650,6 @@ export async function hasPiExtensionHandlers(sessionId: string, eventType: strin
   return data.registered
 }
 
-export async function getWorkspaceGitStatus(workspacePath: string, signal?: AbortSignal): Promise<GitStatusResponseV1> {
-  const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/status`,
-    { signal },
-  )
-  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitStatus")
-  return (await res.json()) as GitStatusResponseV1
-}
-
-export async function getWorkspaceGitInfo(workspacePath: string, signal?: AbortSignal): Promise<GitInfoResponseV1> {
-  const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/info`,
-    { signal },
-  )
-  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitInfo")
-  return (await res.json()) as GitInfoResponseV1
-}
-
-export async function getWorkspaceGitDiff(
-  workspacePath: string,
-  mode: GitDiffModeV1,
-  signal?: AbortSignal,
-): Promise<GitDiffResponseV1> {
-  const q = new URLSearchParams({ mode })
-  const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/diff?${q}`,
-    { signal },
-  )
-  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitDiff")
-  return (await res.json()) as GitDiffResponseV1
-}
-
-export async function getWorkspaceGitFileDiff(
-  workspacePath: string,
-  mode: GitDiffModeV1,
-  path: string,
-  signal?: AbortSignal,
-): Promise<GitFileDiffResponseV1> {
-  const q = new URLSearchParams({ mode, path })
-  const res = await fetch(
-    `${getApiBase()}/api/v1/workspaces/${encodeURIComponent(workspacePath)}/git/file-diff?${q}`,
-    { signal },
-  )
-  if (!res.ok) await throwPiApiError(res, "getWorkspaceGitFileDiff")
-  return (await res.json()) as GitFileDiffResponseV1
-}
 
 export async function setSessionModel(sessionId: string, provider: string, modelId: string) {
   const res = await fetch(
