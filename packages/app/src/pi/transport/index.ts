@@ -204,6 +204,47 @@ export function setPiSessionName(sessionId: string, name: string, signal?: Abort
   return postPiSessionCommand(sessionId, 'setSessionName', { name }, signal)
 }
 
+export type PiForkResult = {
+  operation?: string
+  sourceSessionId?: string
+  targetSessionId?: string
+  targetSessionFile?: string | null
+  targetCwd?: string
+  cancelled?: boolean
+  [key: string]: JsonValue | undefined
+}
+
+export function forkPiSession(
+  sessionId: string,
+  params: { entryId: string; position?: 'before' | 'at' },
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'fork', params as unknown as JsonObject, signal)
+}
+
+/**
+ * Poll a submitted command until it completes/fails (serialized commands
+ * like fork return 'accepted' immediately; the result lands later).
+ */
+export async function waitHostCommand(commandId: string, signal?: AbortSignal, timeoutMs = 30_000): Promise<JsonValue> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const record = await readJson<{ command: CommandRecord }>(
+      `${getApiBase()}/api/v1/host/commands/${encodeURIComponent(commandId)}`,
+      { signal },
+    )
+    const status = record.command.status
+    if (status === 'completed') return record.command.result ?? null
+    if (status === 'failed') {
+      throw Object.assign(new Error(record.command.error?.message ?? 'Command failed'), {
+        code: record.command.error?.code,
+      })
+    }
+    if (Date.now() > deadline) throw new Error('Command timed out')
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+}
+
 // Model commands
 export function setPiModel(sessionId: string, params: PiSetModelParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setModel', params, signal)

@@ -216,6 +216,22 @@ export async function renamePiSession(sessionId: string, name: string, signal?: 
 }
 
 /**
+ * Fork the session at an entry (native fork: new session file, runtime
+ * switches to it). fork is a serialized command — submit, then wait for
+ * the result carrying targetSessionId.
+ */
+export async function forkPiSession(
+  sessionId: string,
+  entryId: string,
+  position: 'before' | 'at' = 'at',
+  signal?: AbortSignal,
+): Promise<transport.PiForkResult> {
+  const submitted = await transport.forkPiSession(sessionId, { entryId, position }, signal)
+  const result = await transport.waitHostCommand(submitted.id, signal)
+  return (result ?? {}) as transport.PiForkResult
+}
+
+/**
  * Load available models from the Pi model runtime into the models store.
  */
 export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> {
