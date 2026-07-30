@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
+import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
@@ -49,6 +49,7 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
 
 export class SessionHost {
   private readonly attached = new Map<string, AttachedSession>()
+  private readonly activity = new Map<string, SessionActivityStatus>()
   readonly executor: SessionExecutor
 
   constructor(
@@ -83,6 +84,8 @@ export class SessionHost {
     session.worker.onCrash(() => {
       this.executor.markRuntimeCrashed(session.sessionId)
       this.attached.delete(session.sessionId)
+      this.activity.delete(session.sessionId)
+      this.publishActivity()
       this.hub.publish({ kind: "session", id: session.sessionId }, "sessions.updated", {
         sessionId: session.sessionId,
         crashed: true,
@@ -90,6 +93,8 @@ export class SessionHost {
     })
     session.worker.onClose(() => {
       this.attached.delete(session.sessionId)
+      this.activity.delete(session.sessionId)
+      this.publishActivity()
       this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
         sessionId: session.sessionId,
         detached: true,
@@ -218,6 +223,10 @@ export class SessionHost {
       })
       return
     }
+    if (event.channel === "session.activity") {
+      this.trackActivity(session.sessionId, event.event)
+      return
+    }
     if (event.channel === "session.head") {
       this.hub.publish({ kind: "session", id: session.sessionId }, "session.head", event.head)
       return
@@ -250,6 +259,31 @@ export class SessionHost {
         workspacePath: "workspacePath" in event ? event.workspacePath ?? null : null,
       })
     }
+  }
+
+  /**
+   * Aggregate worker-reported activity status (derived from SDK isStreaming/
+   * isRetrying on the worker side) and broadcast full snapshots on change.
+   */
+  private trackActivity(sessionId: string, event: JsonValue | undefined): void {
+    const status = isJsonObject(event) && isJsonObject(event.status) ? event.status : null
+    const previous = this.activity.get(sessionId)
+    const next = status as SessionActivityStatus | null
+
+    const changed = next === null
+      ? previous !== undefined
+      : !previous || previous.type !== next.type
+    if (next) this.activity.set(sessionId, next)
+    else this.activity.delete(sessionId)
+    if (changed) this.publishActivity()
+  }
+
+  getActivitySnapshot(): SessionsActivitySnapshot {
+    return { sessions: Object.fromEntries(this.activity) }
+  }
+
+  private publishActivity(): void {
+    this.hub.publish({ kind: "server", id: "server" }, "sessions.activity", this.getActivitySnapshot() as unknown as JsonValue)
   }
 
   private emitCommandUpdate(record: CommandRecord): void {

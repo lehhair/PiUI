@@ -97,6 +97,15 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
     channel: "session.head",
     head: head as unknown as JsonObject,
   })))
+  if (current.onActivity) {
+    runtimeUnsubs.push(current.onActivity(status => send({
+      kind: "event",
+      generation: workerGeneration,
+      sessionId: current.getSessionId(),
+      channel: "session.activity",
+      event: { status: status as unknown as JsonValue },
+    })))
+  }
   if (current.onExtensionUi) {
     runtimeUnsubs.push(current.onExtensionUi(event => send({
       kind: "event",

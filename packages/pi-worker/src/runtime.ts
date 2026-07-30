@@ -1,4 +1,4 @@
-import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
+import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from "@piui/protocol"
 
 export interface PiEventMeta {
   epoch: string
@@ -15,6 +15,7 @@ export interface SessionRuntime {
 
   onPiEvent(listener: (event: JsonObject, meta: PiEventMeta) => void): Unsubscribe
   onHead(listener: (head: JsonObject) => void): Unsubscribe
+  onActivity?(listener: (status: SessionActivityStatus | null) => void): Unsubscribe
   onExtensionUi?(listener: (event: JsonObject) => void): Unsubscribe
   onResourcesChanged?(listener: () => void): Unsubscribe
   onReplacement?(listener: (replacement: JsonObject) => void | Promise<void>): Unsubscribe

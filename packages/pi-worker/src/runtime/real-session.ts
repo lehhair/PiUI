@@ -7,7 +7,7 @@ import type {
   ProjectTrustContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent"
-import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
+import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from "@piui/protocol"
 import { isJsonObject, requireJsonValue } from "@piui/protocol"
 import { getLoadedSdk } from "../sdk-host.js"
 import { configuredSessionDir, resolveUserPath } from "./catalog.js"
@@ -193,6 +193,7 @@ export class RealPiSession implements SessionRuntime {
   private extensionsInitialized = false
   private sessionUnsub: (() => void) | null = null
   private readonly piEventListeners = new Set<(event: JsonObject, meta: PiEventMeta) => void>()
+  private readonly activityListeners = new Set<(status: SessionActivityStatus | null) => void>()
   private readonly headListeners = new Set<(head: SessionHead) => void>()
   private readonly resourceListeners = new Set<() => void>()
   private nativeRevision = 1
@@ -283,14 +284,46 @@ export class RealPiSession implements SessionRuntime {
       const meta = this.captureEvent(event, nativeEvent)
       for (const listener of this.piEventListeners) listener(nativeEvent, meta)
       this.emitHeadIfChanged()
+      this.emitActivityIfChanged()
       if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
         queueMicrotask(() => {
           this.clearPersistedLiveMessage()
           this.emitHeadIfChanged()
+          this.emitActivityIfChanged()
         })
       }
     })
   }
+
+  /**
+   * Derive activity status from the SDK's synchronous state (isStreaming /
+   * isRetrying) — the same source state.get exposes. Reported on change so
+   * the host can aggregate a global view without inferring from event types.
+   */
+  private emitActivityIfChanged(): void {
+    const session = this.runtime.session
+    const streaming = Boolean(session.isStreaming)
+    const retrying = Boolean(session.isRetrying)
+    if (streaming === this.lastActivity.streaming && retrying === this.lastActivity.retrying) return
+    this.lastActivity = { streaming, retrying }
+
+    let status: SessionActivityStatus | null = null
+    if (retrying) {
+      const nextAtIso = typeof this.retryShadow.nextAttemptAt === "string" ? this.retryShadow.nextAttemptAt : undefined
+      const nextAt = nextAtIso ? Date.parse(nextAtIso) : 0
+      status = {
+        type: "retry",
+        attempt: typeof this.retryShadow.attempt === "number" ? this.retryShadow.attempt : Number(session.retryAttempt ?? 1),
+        message: typeof this.retryShadow.errorMessage === "string" ? this.retryShadow.errorMessage : "",
+        next: Number.isFinite(nextAt) ? nextAt : 0,
+      }
+    } else if (streaming) {
+      status = { type: "busy" }
+    }
+    for (const listener of this.activityListeners) listener(status)
+  }
+
+  private lastActivity = { streaming: false, retrying: false }
 
   private trackShadowState(event: { type: string; [key: string]: unknown }): void {
     const session = this.runtime.session
@@ -478,6 +511,14 @@ export class RealPiSession implements SessionRuntime {
   onHead(listener: (head: SessionHead) => void): Unsubscribe {
     this.headListeners.add(listener)
     return () => this.headListeners.delete(listener)
+  }
+
+  onActivity(listener: (status: SessionActivityStatus | null) => void): Unsubscribe {
+    this.activityListeners.add(listener)
+    // Push current status immediately so late subscribers get the truth
+    this.lastActivity = { streaming: false, retrying: false }
+    this.emitActivityIfChanged()
+    return () => this.activityListeners.delete(listener)
   }
 
   onExtensionUi(listener: (event: JsonObject) => void): Unsubscribe {
