@@ -5,16 +5,16 @@
 
 import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch } from './types'
 import {
-  createWorkspaceEntry,
-  deleteWorkspaceEntry,
-  listWorkspaceFiles,
-  readWorkspaceFile,
-  moveWorkspaceEntry,
-  searchWorkspaceFiles,
-  searchWorkspaceText,
-  writeWorkspaceFile,
-} from '../pi/sessionApi'
-import { getHostGitStatus } from '../pi/transport/index.js'
+  createHostFileEntry,
+  deleteHostFileEntry,
+  listHostFiles,
+  readHostFile,
+  moveHostFileEntry,
+  searchHostFilesByName,
+  searchHostFilesText,
+  writeHostFile,
+  getHostGitStatus,
+} from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
 
 const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
@@ -84,8 +84,14 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
         : directory
   const workspacePath = await requireWorkspacePath(workspaceDir)
   const rel = toPiRelativePath(path, workspaceDir)
-  const listed = await listWorkspaceFiles(workspacePath, rel)
-  return listed.entries
+  const entries: Awaited<ReturnType<typeof listHostFiles>>['entries'] = []
+  let cursor: string | undefined
+  do {
+    const page = await listHostFiles(workspacePath, { path: rel, limit: 2000, cursor })
+    entries.push(...page.entries)
+    cursor = page.nextCursor
+  } while (cursor && entries.length < 20_000)
+  return entries
     .filter(e => !e.restricted)
     .map(e => ({
       name: e.name,
@@ -109,11 +115,11 @@ export async function searchFiles(
   } = {},
 ): Promise<string[]> {
   const workspacePath = await requireWorkspacePath(options.directory)
-  return searchWorkspaceFiles(workspacePath, query, {
+  const result = await searchHostFilesByName(workspacePath, query, {
     type: options.type,
     limit: options.limit,
-    ...(options.signal ? { signal: options.signal } : {}),
-  })
+  }, options.signal)
+  return result.paths
 }
 
 /**
@@ -162,7 +168,7 @@ export async function prefetchRootDirectory(directory?: string): Promise<void> {
 export async function getFileContent(path: string, directory?: string): Promise<FileContent> {
   const workspacePath = await requireWorkspacePath(directory)
   const rel = toPiRelativePath(path, directory)
-  const file = await readWorkspaceFile(workspacePath, rel)
+  const file = await readHostFile(workspacePath, rel)
   const result: FileContent = {
     type: file.type ?? (file.encoding === 'base64' ? 'binary' : 'text'),
     content: file.content,
@@ -177,12 +183,11 @@ export async function getFileContent(path: string, directory?: string): Promise<
 export async function saveFile(path: string, content: FileContent, directory?: string): Promise<FileContent> {
   const workspacePath = await requireWorkspacePath(directory)
   const relative = toPiRelativePath(path, directory)
-  const saved = await writeWorkspaceFile(
+  const saved = await writeHostFile(
     workspacePath,
     relative,
     content.content,
-    content.etag,
-    content.encoding === 'base64' ? 'base64' : 'utf-8',
+    { ifMatch: content.etag, encoding: content.encoding === 'base64' ? 'base64' : 'utf-8' },
   )
   invalidateWorkspaceFileCaches(directory)
   return {
@@ -197,19 +202,19 @@ export async function saveFile(path: string, content: FileContent, directory?: s
 
 export async function createFile(path: string, directory?: string, content = ''): Promise<void> {
   const workspacePath = await requireWorkspacePath(directory)
-  await createWorkspaceEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'file', content })
+  await createHostFileEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'file', content })
   invalidateWorkspaceFileCaches(directory)
 }
 
 export async function createDirectory(path: string, directory?: string): Promise<void> {
   const workspacePath = await requireWorkspacePath(directory)
-  await createWorkspaceEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'directory' })
+  await createHostFileEntry(workspacePath, { path: toPiRelativePath(path, directory), type: 'directory' })
   invalidateWorkspaceFileCaches(directory)
 }
 
 export async function moveEntry(from: string, to: string, directory?: string): Promise<void> {
   const workspacePath = await requireWorkspacePath(directory)
-  await moveWorkspaceEntry(workspacePath, {
+  await moveHostFileEntry(workspacePath, {
     from: toPiRelativePath(from, directory),
     to: toPiRelativePath(to, directory),
   })
@@ -218,7 +223,7 @@ export async function moveEntry(from: string, to: string, directory?: string): P
 
 export async function deleteEntry(path: string, directory?: string, recursive = false): Promise<void> {
   const workspacePath = await requireWorkspacePath(directory)
-  await deleteWorkspaceEntry(workspacePath, toPiRelativePath(path, directory), recursive)
+  await deleteHostFileEntry(workspacePath, toPiRelativePath(path, directory), recursive)
   invalidateWorkspaceFileCaches(directory)
 }
 
@@ -262,8 +267,8 @@ export async function searchSymbols(query: string, directory?: string): Promise<
 export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<TextSearchMatch[]> {
   const workspacePath = await requireWorkspacePath(directory)
   return signal
-    ? searchWorkspaceText(workspacePath, pattern, 50, signal)
-    : searchWorkspaceText(workspacePath, pattern)
+    ? (await searchHostFilesText(workspacePath, pattern, 50, signal)).matches
+    : (await searchHostFilesText(workspacePath, pattern)).matches
 }
 
 /**

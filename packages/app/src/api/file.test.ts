@@ -26,20 +26,18 @@ const mocks = vi.hoisted(() => ({
   deleteWorkspaceEntry: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => ({
-  listWorkspaceFiles: mocks.listWorkspaceFiles,
-  readWorkspaceFile: mocks.readWorkspaceFile,
-  searchWorkspaceFiles: mocks.searchWorkspaceFiles,
-  searchWorkspaceText: mocks.searchWorkspaceText,
-  writeWorkspaceFile: mocks.writeWorkspaceFile,
-  createWorkspaceEntry: mocks.createWorkspaceEntry,
-  moveWorkspaceEntry: mocks.moveWorkspaceEntry,
-  deleteWorkspaceEntry: mocks.deleteWorkspaceEntry,
-}))
 vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: mocks.resolveWorkspacePath,
 }))
 vi.mock('../pi/transport/index.js', () => ({
+  listHostFiles: mocks.listWorkspaceFiles,
+  readHostFile: mocks.readWorkspaceFile,
+  searchHostFilesByName: mocks.searchWorkspaceFiles,
+  searchHostFilesText: mocks.searchWorkspaceText,
+  writeHostFile: mocks.writeWorkspaceFile,
+  createHostFileEntry: mocks.createWorkspaceEntry,
+  moveHostFileEntry: mocks.moveWorkspaceEntry,
+  deleteHostFileEntry: mocks.deleteWorkspaceEntry,
   getHostGitStatus: mocks.getHostGitStatus,
 }))
 
@@ -68,7 +66,7 @@ describe('Pi workspace file API', () => {
       content: '# PiUI',
       encoding: 'utf-8',
     })
-    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', '')
+    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', { path: '', limit: 2000, cursor: undefined })
     expect(mocks.readWorkspaceFile).toHaveBeenCalledWith('C:/workspace', 'README.md')
   })
 
@@ -81,7 +79,7 @@ describe('Pi workspace file API', () => {
       { name: 'abcc', path: 'abcc', absolute: '/abc/abcc', type: 'directory', ignored: false },
     ])
     expect(mocks.resolveWorkspacePath).toHaveBeenCalledWith('/abc/')
-    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', '')
+    expect(mocks.listWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', { path: '', limit: 2000, cursor: undefined })
   })
 
   it('delegates filename and text searches without an SDK fallback', async () => {
@@ -92,14 +90,14 @@ describe('Pi workspace file API', () => {
       absolute_offset: 0,
       submatches: [{ start: 13, end: 17, match: { text: 'PiUI' } }],
     }]
-    mocks.searchWorkspaceFiles.mockResolvedValue(['src/app.ts'])
-    mocks.searchWorkspaceText.mockResolvedValue(textMatches)
+    mocks.searchWorkspaceFiles.mockResolvedValue({ paths: ['src/app.ts'] })
+    mocks.searchWorkspaceText.mockResolvedValue({ matches: textMatches })
 
     await expect(searchFiles('app', { directory: '/workspace', type: 'file', limit: 20 })).resolves.toEqual([
       'src/app.ts',
     ])
     await expect(searchText('PiUI', '/workspace')).resolves.toEqual(textMatches)
-    expect(mocks.searchWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', 'app', { type: 'file', limit: 20 })
+    expect(mocks.searchWorkspaceFiles).toHaveBeenCalledWith('C:/workspace', 'app', { type: 'file', limit: 20 }, undefined)
     expect(mocks.searchWorkspaceText).toHaveBeenCalledWith('C:/workspace', 'PiUI')
   })
 
@@ -121,7 +119,7 @@ describe('Pi workspace file API', () => {
     await expect(saveFile('src/a.txt', {
       type: 'text', content: 'saved', encoding: 'utf-8', etag: 'old',
     }, '/workspace')).resolves.toMatchObject({ content: 'saved', etag: 'next' })
-    expect(mocks.writeWorkspaceFile).toHaveBeenCalledWith('C:/workspace', 'src/a.txt', 'saved', 'old', 'utf-8')
+    expect(mocks.writeWorkspaceFile).toHaveBeenCalledWith('C:/workspace', 'src/a.txt', 'saved', { ifMatch: 'old', encoding: 'utf-8' })
 
     await createFile('src/new.ts', '/workspace', 'export {}')
     await createDirectory('src/nested', '/workspace')
