@@ -6,7 +6,10 @@ import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewport } from '../chatViewport'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
 import type { ApiAgent } from '../../../api/client'
-import type { ModelInfo, FileCapabilities } from '../../../hooks/useModels'
+import type { Model } from '@earendil-works/pi-ai'
+import type { FileCapabilities } from '../../../hooks/useModels'
+
+type ModelInfo = Model<any>
 
 interface InputToolbarProps {
   agents: ApiAgent[]

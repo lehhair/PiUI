@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { useMemo } from 'react'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 
 /**
@@ -51,4 +52,20 @@ export function usePiModels() {
     () => piModelsStore.isLoading(),
   )
   return { models, isLoading }
+}
+
+/**
+ * Session display title, same chain as the session list:
+ * runtime sessionName -> SessionInfo.name -> firstMessage.
+ */
+export function usePiSessionTitle(sessionId: string | null): string | null {
+  const state = usePiSessionRuntimeState(sessionId)
+  const sessionInfos = usePiSessionInfos()
+  return useMemo(() => {
+    if (!sessionId) return null
+    const stateName = typeof state?.sessionName === 'string' && state.sessionName.trim() ? state.sessionName.trim() : null
+    if (stateName) return stateName
+    const info = sessionInfos.find(item => item.id === sessionId)
+    return info?.name?.trim() || info?.firstMessage?.trim() || null
+  }, [sessionId, state?.sessionName, sessionInfos])
 }
