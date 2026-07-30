@@ -146,10 +146,38 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
     }
   }
 
-  // Append the live streaming message as a streaming assistant item.
+  // Append the live streaming message as a streaming item.
   // Present only while streaming; cleared once the entry persists.
   // Skip empty content (message_start before first update) — nothing to show.
+  // User live messages appear at message_start (native TUI behavior: the
+  // user message is visible immediately). Only in streaming phase — once
+  // persisting, the entry is about to land and takes over.
   const live = branch.checkpoint?.liveMessage
+  if (live && live.message.role === 'user' && live.phase === 'streaming') {
+    const message = live.message
+    const text = typeof message.content === 'string'
+      ? message.content
+      : message.content
+          .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+          .map(block => block.text)
+          .join('')
+    if (text.trim()) {
+      items.push({
+        kind: 'user_message',
+        entryId: live.id,
+        timestamp: message.timestamp || Date.now(),
+        rawEntry: {
+          type: 'message',
+          id: live.id,
+          parentId: null,
+          timestamp: new Date(message.timestamp || Date.now()).toISOString(),
+          message,
+        },
+        message,
+        blocks: Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }],
+      })
+    }
+  }
   if (live && live.message.role === 'assistant' && live.message.content.length > 0) {
     const message = live.message as AssistantMessage
     items.push({
