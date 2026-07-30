@@ -179,8 +179,9 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
 
   // Append the live streaming message as a streaming assistant item.
   // Present only while streaming; cleared once the entry persists.
+  // Skip empty content (message_start before first update) — nothing to show.
   const live = branch.checkpoint?.liveMessage
-  if (live && live.message.role === 'assistant') {
+  if (live && live.message.role === 'assistant' && live.message.content.length > 0) {
     const message = live.message as AssistantMessage
     items.push({
       kind: 'assistant_message',
