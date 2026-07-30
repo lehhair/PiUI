@@ -15,6 +15,11 @@ const QUERY_COMMANDS = new Set([
 
 function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand | undefined): boolean {
   const text = command.params?.text
+  // sendUserMessage is semantically a prompt (SDK runs prompt(streamingBehavior)
+  // under the hood) — query, queue, and abort commands must not block behind
+  // it for the whole turn, or streaming state reads and aborts would only
+  // land after the turn ends.
+  const activeIsPrompt = active?.type === "prompt" || active?.type === "sendUserMessage"
   switch (command.type) {
     case "prompt":
       return active?.type === "prompt" && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
@@ -25,7 +30,7 @@ function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand 
     case "setSteeringMode":
     case "setFollowUpMode":
     case "clearQueue":
-      return active?.type === "prompt"
+      return activeIsPrompt
     case "abortCompaction":
       return active?.type === "compact"
     case "abortBranchSummary":
@@ -39,9 +44,9 @@ function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand 
       return true
     case "sendCustomMessage":
     case "sendUserMessage":
-      return active?.type === "prompt" && command.params?.deliverAs !== undefined
+      return activeIsPrompt && command.params?.deliverAs !== undefined
     default:
-      if (QUERY_COMMANDS.has(command.type)) return active?.type === "prompt"
+      if (QUERY_COMMANDS.has(command.type)) return activeIsPrompt
       return false
   }
 }
