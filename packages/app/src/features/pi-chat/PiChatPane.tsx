@@ -38,7 +38,7 @@ import { useDirectory } from '../../contexts/useDirectory'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
-import { recordModelUsage } from '../../utils/modelUtils'
+import { getPreferredModelKey, recordModelUsage, setPreferredModelKey } from '../../utils/modelUtils'
 
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
@@ -194,16 +194,19 @@ export function PiChatPane({
   // shows an empty flow — user types and sends to create one.
   const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
 
-  // Current model from runtime state (native SDK shape)
+  // Current model from runtime state (native SDK shape); on home (no
+  // session) fall back to the composer's persisted preferred model.
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
+  const [homeModelKey, setHomeModelKey] = useState<string | null>(() => getPreferredModelKey())
   const selectedModelKey =
-    currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : null
+    currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : homeModelKey
 
   // Thinking level: variants filtered by the current model's support map,
   // current value from runtime state — the native home for this control.
   const currentModelObj = useMemo(
-    () => models.find(m => m.provider === currentModel?.provider && m.id === currentModel?.id),
-    [models, currentModel?.provider, currentModel?.id],
+    () => models.find(m => m.provider === currentModel?.provider && m.id === currentModel?.id)
+      ?? (homeModelKey ? models.find(m => `${m.provider}:${m.id}` === homeModelKey) : undefined),
+    [models, currentModel?.provider, currentModel?.id, homeModelKey],
   )
   const thinkingLevels = useMemo(() => {
     if (!currentModelObj?.reasoning) return ['off']
@@ -222,8 +225,11 @@ export function PiChatPane({
 
   const handleModelChange = useCallback(
     (_modelKey: string, model: Model<any>) => {
-      if (!sessionId) return
       recordModelUsage(model)
+      const key = `${model.provider}:${model.id}`
+      setHomeModelKey(key)
+      setPreferredModelKey(key)
+      if (!sessionId) return
       void setPiModel(sessionId, model.provider, model.id).catch(() => undefined)
     },
     [sessionId],
@@ -349,6 +355,12 @@ export function PiChatPane({
         targetSessionId = opened.sessionId
         piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
+        // Apply the composer's preferred model to the fresh session
+        const preferred = getPreferredModelKey()
+        const preferredModel = preferred ? models.find(m => `${m.provider}:${m.id}` === preferred) : undefined
+        if (preferredModel) {
+          void setPiModel(targetSessionId, preferredModel.provider, preferredModel.id).catch(() => undefined)
+        }
       }
       const sid = targetSessionId
 
@@ -377,7 +389,7 @@ export function PiChatPane({
       }, 120)
       return true
     },
-    [sessionId, isStreaming],
+    [sessionId, isStreaming, models],
   )
 
   // Slash command dispatch, mirroring pi TUI: frontend built-ins are handled
