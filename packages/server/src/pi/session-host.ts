@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { homedir } from "node:os"
+import { readdir } from "node:fs/promises"
+import { open } from "node:fs/promises"
+import { join } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
@@ -160,14 +164,23 @@ export class SessionHost {
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
+    // Scan the Pi sessions directory directly for `<ts>_<sessionId>.jsonl` —
+    // more reliable than the catalog list, and reads cwd from the file header.
     try {
-      const list = await this.catalogCommand("session.listAll", undefined, { retry: true })
-      if (!Array.isArray(list)) return undefined
-      const found = list.find(item =>
-        isJsonObject(item) && item.id === sessionId && typeof item.path === "string" && typeof item.cwd === "string",
-      )
-      if (!isJsonObject(found)) return undefined
-      return { cwd: found.cwd as string, sessionFile: found.path as string }
+      const root = join(homedir(), ".pi", "agent", "sessions")
+      const suffix = `_${sessionId}.jsonl`
+      const dirs = await readdir(root, { withFileTypes: true }).catch(() => [])
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue
+        const files = await readdir(join(root, dir.name)).catch(() => [])
+        const match = files.find(file => file.endsWith(suffix))
+        if (!match) continue
+        const sessionFile = join(root, dir.name, match)
+        const firstLine = await readFirstLine(sessionFile)
+        const cwd = firstLine ? parseHeaderCwd(firstLine) : undefined
+        if (cwd) return { cwd, sessionFile }
+      }
+      return undefined
     } catch {
       return undefined
     }
@@ -332,4 +345,28 @@ function mergeCapabilities(local: PiCapability[], remote: PiCapability[]): PiCap
   for (const capability of remote) merged.set(capability.name, capability)
   for (const capability of local) merged.set(capability.name, capability)
   return [...merged.values()]
+}
+
+async function readFirstLine(filePath: string): Promise<string | undefined> {
+  try {
+    const handle = await open(filePath, "r")
+    try {
+      const iterator = handle.readLines({ encoding: "utf8" })[Symbol.asyncIterator]()
+      const { value } = await iterator.next()
+      return value
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function parseHeaderCwd(line: string): string | undefined {
+  try {
+    const header = JSON.parse(line) as { cwd?: unknown }
+    return typeof header.cwd === "string" && header.cwd ? header.cwd : undefined
+  } catch {
+    return undefined
+  }
 }
