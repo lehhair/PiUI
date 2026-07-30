@@ -284,8 +284,19 @@ export function PiChatPane({
         piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
       }
+      const sid = targetSessionId
 
-      await sendPiUserMessage(targetSessionId, text, images.length ? images : undefined, deliverAs)
+      // Fire and refresh: the prompt command stays open for the whole turn,
+      // so awaiting it would block the composer until the turn ends. Return
+      // immediately; the event stream drives updates, and we kick the first
+      // refresh so the user message shows without waiting for the debounce.
+      void sendPiUserMessage(sid, text, images.length ? images : undefined, deliverAs).catch(error => {
+        console.error('Failed to send message:', error)
+      })
+      window.setTimeout(() => {
+        void refreshPiBranch(sid).catch(() => undefined)
+        void refreshPiSessionState(sid).catch(() => undefined)
+      }, 120)
       return true
     },
     [sessionId, isStreaming],
