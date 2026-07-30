@@ -9,7 +9,7 @@ import { invalidateWorkspaceFileCaches, listDirectory, getFileContent, getFileSt
 import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
-import { resolveWorkspacePath } from '../pi/sessionApi'
+import { resolveWorkspacePath } from '../pi/workspaces'
 
 export interface FileTreeNode extends FileNode {
   children?: FileTreeNode[]

@@ -7,7 +7,13 @@ const mocks = vi.hoisted(() => ({
   listPiModels: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => mocks)
+vi.mock('../pi/sessionApi', () => ({
+  getWorkspaceGitInfo: mocks.getWorkspaceGitInfo,
+  listPiModels: mocks.listPiModels,
+}))
+vi.mock('../pi/workspaces', () => ({
+  resolveWorkspacePath: mocks.resolveWorkspacePath,
+}))
 
 describe('Pi project and model adapters', () => {
   beforeEach(() => {

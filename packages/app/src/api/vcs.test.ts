@@ -8,7 +8,14 @@ const mocks = vi.hoisted(() => ({
   getWorkspaceGitFileDiff: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => mocks)
+vi.mock('../pi/sessionApi', () => ({
+  getWorkspaceGitInfo: mocks.getWorkspaceGitInfo,
+  getWorkspaceGitDiff: mocks.getWorkspaceGitDiff,
+  getWorkspaceGitFileDiff: mocks.getWorkspaceGitFileDiff,
+}))
+vi.mock('../pi/workspaces', () => ({
+  resolveWorkspacePath: mocks.resolveWorkspacePath,
+}))
 
 describe('Pi workspace VCS API', () => {
   beforeEach(() => {

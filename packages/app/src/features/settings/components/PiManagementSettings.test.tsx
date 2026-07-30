@@ -36,10 +36,12 @@ vi.mock('../../../pi/sessionApi', () => ({
     required: true,
     defaultDecision: 'ask',
   })),
-  listRegisteredPiWorkspaces: vi.fn(async () => []),
   patchPiSettings: (...args: unknown[]) => patchSettingsMock(...args),
-  resolveWorkspacePath: vi.fn(async () => '/workspace'),
   setProjectTrust: vi.fn(),
+}))
+vi.mock('../../../pi/workspaces', () => ({
+  listHostWorkspaces: vi.fn(async () => []),
+  resolveWorkspacePath: vi.fn(async () => '/workspace'),
 }))
 vi.mock('./PiProviderManagement', () => ({ PiProviderManagement: () => null }))
 vi.mock('./PiPackageManagement', () => ({ PiPackageManagement: () => null }))

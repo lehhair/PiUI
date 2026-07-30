@@ -3,7 +3,8 @@
 // ============================================
 
 import type { ModelInfo, ApiProject, ApiPath } from './types'
-import { getWorkspaceGitInfo, listPiModels, resolveWorkspacePath } from '../pi/sessionApi'
+import { getWorkspaceGitInfo, listPiModels } from '../pi/sessionApi'
+import { resolveWorkspacePath } from '../pi/workspaces'
 
 // Re-export all types
 export * from './types'

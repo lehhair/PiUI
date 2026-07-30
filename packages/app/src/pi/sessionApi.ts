@@ -35,13 +35,12 @@ import type {
   ResolvedPackageResourcesV1,
   PackageResolveMissingActionV1,
   PackageUpdateV1,
-  WorkspaceDtoV1,
   PiNativeEntriesPageV1,
   PiNativeJsonValueV1,
 } from "@piui/protocol"
 import type { PiSessionSummary } from "../types/session"
 import type { Attachment } from "../features/attachment/types"
-import { reconcilePiSessions, trackPiSession, trackPiWorkspace, untrackPiSession } from "./piSessionIndex"
+import { reconcilePiSessions, trackPiSession, untrackPiSession } from "./piSessionIndex"
 import { nativeSessionStore } from "./nativeSessionStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { LOCAL_SERVER_ID, makeBasicAuthHeader, serverStore } from "../store/serverStore"
@@ -183,87 +182,6 @@ export async function deletePiSession(sessionId: string): Promise<{
   return result
 }
 
-let defaultWorkspacePromise: Promise<string | null> | null = null
-const workspaceResolutionPromises = new Map<string, Promise<string>>()
-
-export function resetWorkspaceResolutionCache(): void {
-  workspaceResolutionPromises.clear()
-  defaultWorkspacePromise = null
-}
-
-export async function listRegisteredPiWorkspaces(): Promise<WorkspaceDtoV1[]> {
-  const data = await getPiJson<{ data: { workspaces: WorkspaceDtoV1[] } }>(
-    "/api/v1/host/commands/workspaces.list",
-    "listRegisteredPiWorkspaces",
-    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-  )
-  return data.data.workspaces
-}
-
-export async function getRegisteredPiWorkspace(workspacePath: string): Promise<WorkspaceDtoV1> {
-  const data = await getPiJson<{ workspace: WorkspaceDtoV1 }>(
-    `/api/v1/workspaces/${encodeURIComponent(workspacePath)}`,
-    "getRegisteredPiWorkspace",
-  )
-  return data.workspace
-}
-
-async function ensureDefaultWorkspacePath(): Promise<string | null> {
-  if (!defaultWorkspacePromise) {
-    defaultWorkspacePromise = (async () => {
-      try {
-        const res = await fetch(`${getApiBase()}/api/v1/host/commands/workspaces.list`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        })
-        if (!res.ok) return null
-        const data = (await res.json()) as { data: { workspaces: Array<{ path: string }> } }
-        const first = data.data.workspaces[0]
-        if (!first) return null
-        trackPiWorkspace(first.path)
-        return first.path
-      } catch {
-        return null
-      }
-    })()
-  }
-  try {
-    return await defaultWorkspacePromise
-  } finally {
-    defaultWorkspacePromise = null
-  }
-}
-
-/** Return the selected absolute path, or ask the server for its default. */
-export async function resolveWorkspacePath(directory?: string): Promise<string | null> {
-  if (directory) {
-    if (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("/")) {
-      const key = directory.replace(/\\/g, "/").replace(/\/+$/, "")
-      let pending = workspaceResolutionPromises.get(key)
-      if (!pending) {
-        pending = (async () => {
-          const res = await fetch(`${getApiBase()}/api/v1/host/commands/workspaces.open`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ rootPath: directory }),
-          })
-          if (!res.ok) await throwPiApiError(res, "resolveWorkspacePath")
-          const workspacePath = ((await res.json()) as { data: { workspace: { path: string } } }).data.workspace.path
-          trackPiWorkspace(workspacePath)
-          return workspacePath
-        })().catch(error => {
-          workspaceResolutionPromises.delete(key)
-          throw error
-        })
-        workspaceResolutionPromises.set(key, pending)
-      }
-      return pending
-    }
-  }
-  // empty / global mode: still allow file tree against default workspace
-  return ensureDefaultWorkspacePath()
-}
 
 export async function listWorkspaceFiles(
   workspacePath: string,

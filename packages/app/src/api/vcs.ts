@@ -8,9 +8,9 @@ import {
   getWorkspaceGitDiff,
   getWorkspaceGitFileDiff,
   getWorkspaceGitInfo,
-  resolveWorkspacePath,
 } from '../pi/sessionApi'
-import type { GitDiffModeV1 } from '@piui/protocol'
+import { resolveWorkspacePath } from '../pi/workspaces'
+import type { GitDiffMode } from '@piui/protocol'
 
 /**
  * 获取 VCS 信息
@@ -75,7 +75,7 @@ export async function getVcsFileDiff(
   }
 }
 
-function toGitMode(mode: VcsDiffMode): GitDiffModeV1 {
+function toGitMode(mode: VcsDiffMode): GitDiffMode {
   if (mode === 'branch' || mode === 'staged' || mode === 'unstaged') return mode
   return 'git'
 }
