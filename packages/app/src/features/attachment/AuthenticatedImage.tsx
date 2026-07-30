@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { piFetch } from '../../pi/sessionApi'
+import { piFetch } from '../../pi/httpClient'
 
 export function useAuthenticatedObjectUrl(url: string | undefined, requiresAuth = false, enabled = true): string | undefined {
   const [objectUrl, setObjectUrl] = useState<string>()

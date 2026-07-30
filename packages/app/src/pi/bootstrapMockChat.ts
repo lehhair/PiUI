@@ -2,7 +2,7 @@
 import { getPiBackendState, setPiBackendState } from "./serverMode"
 import { serverStore } from "../store/serverStore"
 import { clearPiSessionIndex } from "./piSessionIndex"
-import { nativeSessionStore } from "./nativeSessionStore"
+import { piBranchStore, piModelsStore, piSessionStateStore } from "./state/index.js"
 import { piSessionInfoStore } from "./piSessionInfoStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { messageStore } from "../store/messageStore"
@@ -72,7 +72,9 @@ export function installPiBackendServerSwitch(): void {
   serverSwitchInstalled = true
   serverStore.onServerChange(() => {
     clearPiSessionIndex()
-    nativeSessionStore.clear()
+    piBranchStore.clearAll()
+    piSessionStateStore.clearAll()
+    piModelsStore.clear()
     piSessionInfoStore.clear()
     extensionUiStore.reset()
     messageStore.clearAll()

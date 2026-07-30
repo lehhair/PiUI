@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
-import { ShareDialog } from '../ShareDialog'
 import { ContextDetailsDialog } from './ContextDetailsDialog'
 import {
   CogIcon,
@@ -10,12 +9,10 @@ import {
   SystemIcon,
   MaximizeIcon,
   MinimizeIcon,
-  ShareIcon,
 } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
 import { useHasMessages } from '../../../store'
-import { usePiCapabilities } from '../../../pi/capabilities'
 
 // 状态指示器 - 圆环 + 右下角状态点
 function StatusIndicator({
@@ -81,14 +78,12 @@ export function SidebarFooter({
   onOpenSettings,
 }: SidebarFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
-  const canShare = usePiCapabilities().share
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, isWideMode, toggleWideMode } = useTheme()
   // 统计与 hasMessages 留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
   const hasMessages = useHasMessages()
   const stats = useSessionStats(contextLimit)
   const [isOpen, setIsOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 260, fromBottom: false })
-  const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const prevShowLabelsRef = useRef(showLabels)
@@ -306,17 +301,6 @@ export function SidebarFooter({
               </button>
             )}
 
-            {canShare && <button
-              onClick={() => {
-                closeMenu()
-                setShareDialogOpen(true)
-              }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[length:var(--fs-sm)] text-text-300 hover:text-text-100 hover:bg-bg-200/50 transition-colors text-left"
-            >
-              <ShareIcon size={14} />
-              <span>{t('sidebar.shareChat')}</span>
-            </button>}
-
             <button
               onClick={() => {
                 closeMenu()
@@ -385,7 +369,6 @@ export function SidebarFooter({
       </div>
 
       {floatingMenu}
-      {canShare && <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />}
       <ContextDetailsDialog
         isOpen={contextDialogOpen}
         onClose={() => setContextDialogOpen(false)}

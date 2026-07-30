@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthenticatedImage } from './AuthenticatedImage'
 
 const piFetch = vi.hoisted(() => vi.fn())
-vi.mock('../../pi/sessionApi', () => ({ piFetch }))
+vi.mock('../../pi/httpClient', () => ({ piFetch }))
 
 describe('AuthenticatedImage', () => {
   beforeEach(() => {

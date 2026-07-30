@@ -12,7 +12,6 @@
 // 与 notificationStore 完全独立，不互相依赖
 
 import { useCallback, useSyncExternalStore } from 'react'
-import type { SessionSnapshotV1 } from '@piui/protocol'
 import type { SessionStatus, SessionStatusMap } from '../types/session'
 
 // ============================================
@@ -320,37 +319,11 @@ class ActiveSessionStore {
     this.notify()
   }
 
-  syncPiSnapshot(snapshot: SessionSnapshotV1) {
-    const { session, runtime } = snapshot
-    const existing = this.sessionMeta.get(session.id)
-    this.sessionMeta.set(session.id, {
-      title: session.title ?? existing?.title,
-      directory: session.directory || existing?.directory,
-    })
-
-    if (session.state === 'retrying' && (runtime.retry.phase === 'waiting' || runtime.retry.phase === 'running')) {
-      const waiting = runtime.retry.phase === 'waiting' ? runtime.retry : undefined
-      const parsedNext = waiting ? Date.parse(waiting.nextAttemptAt) : Number.NaN
-      this.updateStatus(session.id, {
-        type: 'retry',
-        attempt: runtime.retry.attempt,
-        message: waiting?.errorMessage ?? 'Retrying',
-        next: Number.isFinite(parsedNext) ? parsedNext : Date.now() + (waiting?.delayMs ?? 0),
-      })
-      return
-    }
-
-    this.updateStatus(
-      session.id,
-      session.state === 'running' || session.state === 'compacting' ? { type: 'busy' } : { type: 'idle' },
-    )
-  }
-
   syncPiSummary(summary: {
     id: string
     title?: string
     directory?: string
-    state?: SessionSnapshotV1['session']['state']
+    state?: 'running' | 'idle' | 'compacting' | 'retrying'
   }) {
     this.syncPiSummaries([summary])
   }
@@ -359,7 +332,7 @@ class ActiveSessionStore {
     id: string
     title?: string
     directory?: string
-    state?: SessionSnapshotV1['session']['state']
+    state?: 'running' | 'idle' | 'compacting' | 'retrying'
   }>) {
     const nextMap = { ...this.state.statusMap }
     let changed = false

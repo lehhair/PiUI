@@ -31,6 +31,13 @@ class PiModelsStore {
     this.notify()
   }
 
+  clear(): void {
+    this.models = []
+    this.error = null
+    this.loading = false
+    this.notify()
+  }
+
   setError(error: Error): void {
     this.error = error
     this.loading = false

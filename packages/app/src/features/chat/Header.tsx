@@ -11,7 +11,6 @@ import {
 } from '../../components/Icons'
 import { IconButton } from '../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from './ModelSelector'
-import { ShareDialog } from './ShareDialog'
 import { usePiCapabilities } from '../../pi/capabilities'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -141,7 +140,6 @@ export function Header({
   const { presentation, interaction } = useChatViewport()
   const capabilities = usePiCapabilities()
 
-  const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const titleInputRef = useRef<HTMLInputElement>(null)
@@ -201,7 +199,6 @@ export function Header({
       handleRename={handleRename}
       handleStartEdit={handleStartEdit}
       canRename={capabilities.sessionRename}
-      onShare={capabilities.share ? () => setShareDialogOpen(true) : undefined}
       clickToRenameTitle={t('header.clickToRename')}
       shareTitle={t('header.shareSession')}
     />
@@ -281,7 +278,6 @@ export function Header({
         </div>
       </div>
 
-      {capabilities.share && <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />}
 
       <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
     </div>

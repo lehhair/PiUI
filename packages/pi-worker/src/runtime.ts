@@ -28,6 +28,7 @@ export interface SessionRuntime {
   getTree(): JsonValue | Promise<JsonValue>
   getAttachment(entryId: string, blockIndex: number): JsonObject | Promise<JsonObject>
   getRegistry(): RegistrySnapshot | Promise<RegistrySnapshot>
+  listSkills(): JsonValue | Promise<JsonValue>
 
   prompt(text: string, images?: ImageInput[], options?: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" }): Promise<void>
   steer(text: string, images?: ImageInput[]): Promise<void>

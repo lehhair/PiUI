@@ -1,9 +1,8 @@
 // ============================================
-// PiUI API barrel and project/model adapters
+// PiUI API barrel and project adapter
 // ============================================
 
-import type { ModelInfo, ApiProject, ApiPath } from './types'
-import { listPiModels } from '../pi/sessionApi'
+import type { ApiProject } from './types'
 import { getHostGitInfo } from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
 
@@ -14,11 +13,8 @@ export * from './types'
 export { fromFilePart, fromAgentPart } from '../features/attachment'
 
 // Re-export from sub-modules
-export * from './session'
-export * from './message'
 export * from './permission'
 export * from './file'
-export * from './agent'
 export * from './skill'
 export * from './events'
 export * from './config'
@@ -27,38 +23,6 @@ export * from './mcp'
 export * from './pty'
 export * from './worktree'
 export * from './global'
-export * from './tool'
-export * from './lsp'
-
-// ============================================
-// Model API Functions
-// ============================================
-
-export async function getActiveModels(directory?: string): Promise<ModelInfo[]> {
-  void directory
-  const { models } = await listPiModels()
-  return models.map(model => ({
-    id: model.id,
-    name: model.name,
-    providerId: model.provider,
-    providerName: model.provider,
-    family: model.api,
-    contextLimit: model.contextWindow,
-    outputLimit: model.maxTokens,
-    supportsReasoning: model.reasoning,
-    supportsImages: model.input.includes('image'),
-    supportsPdf: false,
-    supportsAudio: false,
-    supportsVideo: false,
-    supportsToolcall: true,
-    variants: model.reasoning ? ['off', 'minimal', 'low', 'medium', 'high'] : ['off'],
-  }))
-}
-
-export async function getDefaultModels(directory?: string): Promise<Record<string, string>> {
-  void directory
-  throw new Error('PiUI does not expose provider default models')
-}
 
 // ============================================
 // Project API Functions
@@ -86,37 +50,4 @@ export async function getCurrentProject(directory?: string): Promise<ApiProject>
  */
 export async function getProjects(directory?: string): Promise<ApiProject[]> {
   return directory ? [await getCurrentProject(directory)] : []
-}
-
-/**
- * 初始化 Git 仓库
- */
-export async function initGitProject(directory?: string): Promise<ApiProject> {
-  void directory
-  throw new Error('PiUI does not support Git repository initialization yet')
-}
-
-/**
- * 更新项目
- */
-export async function updateProject(
-  projectId: string,
-  params: {
-    name?: string
-    icon?: { url?: string; override?: string; color?: string }
-  },
-  directory?: string,
-): Promise<ApiProject> {
-  void projectId
-  void params
-  void directory
-  throw new Error('PiUI does not support project metadata updates yet')
-}
-
-// ============================================
-// Path API Functions
-// ============================================
-
-export async function getPath(): Promise<ApiPath> {
-  throw new Error('PiUI does not expose host path metadata')
 }
