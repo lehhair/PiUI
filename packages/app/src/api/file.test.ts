@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   readWorkspaceFile: vi.fn(),
   searchWorkspaceFiles: vi.fn(),
   searchWorkspaceText: vi.fn(),
-  getWorkspaceGitStatus: vi.fn(),
+  getHostGitStatus: vi.fn(),
   writeWorkspaceFile: vi.fn(),
   createWorkspaceEntry: vi.fn(),
   moveWorkspaceEntry: vi.fn(),
@@ -31,7 +31,6 @@ vi.mock('../pi/sessionApi', () => ({
   readWorkspaceFile: mocks.readWorkspaceFile,
   searchWorkspaceFiles: mocks.searchWorkspaceFiles,
   searchWorkspaceText: mocks.searchWorkspaceText,
-  getWorkspaceGitStatus: mocks.getWorkspaceGitStatus,
   writeWorkspaceFile: mocks.writeWorkspaceFile,
   createWorkspaceEntry: mocks.createWorkspaceEntry,
   moveWorkspaceEntry: mocks.moveWorkspaceEntry,
@@ -39,6 +38,9 @@ vi.mock('../pi/sessionApi', () => ({
 }))
 vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: mocks.resolveWorkspacePath,
+}))
+vi.mock('../pi/transport/index.js', () => ({
+  getHostGitStatus: mocks.getHostGitStatus,
 }))
 
 describe('Pi workspace file API', () => {
@@ -102,7 +104,7 @@ describe('Pi workspace file API', () => {
   })
 
   it('maps Git status and reports unsupported symbol search explicitly', async () => {
-    mocks.getWorkspaceGitStatus.mockResolvedValue({
+    mocks.getHostGitStatus.mockResolvedValue({
       items: [{ path: 'src/app.ts', status: 'modified' }],
     })
 

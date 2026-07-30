@@ -5,6 +5,11 @@ import type {
   PiRegistrySnapshot,
   HostRegistrySnapshot,
   CommandRecord,
+  GitDiffMode,
+  GitDiffResponse,
+  GitFileDiffResponse,
+  GitInfoResponse,
+  GitStatusResponse,
 } from '@piui/protocol'
 import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage } from '../domain/index.js'
@@ -148,7 +153,22 @@ export async function postHostCommand<T = JsonValue | undefined>(
   return response.data
 }
 
-// Session commands
+// Host git commands (git.*), workspace-scoped
+export function getHostGitInfo(workspacePath: string, signal?: AbortSignal): Promise<GitInfoResponse> {
+  return postHostCommand('git.info', { workspacePath }, signal)
+}
+
+export function getHostGitStatus(workspacePath: string, signal?: AbortSignal): Promise<GitStatusResponse> {
+  return postHostCommand('git.status', { workspacePath }, signal)
+}
+
+export function getHostGitDiff(workspacePath: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitDiffResponse> {
+  return postHostCommand('git.diff', { workspacePath, mode }, signal)
+}
+
+export function getHostGitFileDiff(workspacePath: string, path: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitFileDiffResponse> {
+  return postHostCommand('git.fileDiff', { workspacePath, path, mode }, signal)
+}
 export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal)
 }

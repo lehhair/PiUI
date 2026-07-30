@@ -3,13 +3,15 @@ import { getActiveModels, getCurrentProject, getDefaultModels, getPath, initGitP
 
 const mocks = vi.hoisted(() => ({
   resolveWorkspacePath: vi.fn(),
-  getWorkspaceGitInfo: vi.fn(),
+  getHostGitInfo: vi.fn(),
   listPiModels: vi.fn(),
 }))
 
 vi.mock('../pi/sessionApi', () => ({
-  getWorkspaceGitInfo: mocks.getWorkspaceGitInfo,
   listPiModels: mocks.listPiModels,
+}))
+vi.mock('../pi/transport/index.js', () => ({
+  getHostGitInfo: mocks.getHostGitInfo,
 }))
 vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: mocks.resolveWorkspacePath,
@@ -22,7 +24,7 @@ describe('Pi project and model adapters', () => {
   })
 
   it('maps the current workspace and Git state to a project', async () => {
-    mocks.getWorkspaceGitInfo.mockResolvedValue({ root: true, branch: 'main', ahead: 0, behind: 0 })
+    mocks.getHostGitInfo.mockResolvedValue({ root: true, branch: 'main', ahead: 0, behind: 0 })
 
     await expect(getCurrentProject('C:/work/PiUI')).resolves.toEqual({
       id: 'C:/work/PiUI',
@@ -30,7 +32,7 @@ describe('Pi project and model adapters', () => {
       name: 'PiUI',
       vcs: 'git',
     })
-    expect(mocks.getWorkspaceGitInfo).toHaveBeenCalledWith('C:/work/PiUI')
+    expect(mocks.getHostGitInfo).toHaveBeenCalledWith('C:/work/PiUI')
   })
 
   it('maps only models reported by the Pi server', async () => {
