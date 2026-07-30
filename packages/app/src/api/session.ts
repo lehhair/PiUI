@@ -3,7 +3,6 @@
 // ============================================
 
 import { UnsupportedPiCapabilityError } from './errors'
-import { applySnapshotToUi } from '../pi/applySnapshot'
 import {
   abortSessionCommand,
   createPiSession,
@@ -70,7 +69,6 @@ export async function createSession(
   const workspacePath = await resolveWorkspacePath(params.directory)
   if (!workspacePath) throw new Error('No Pi workspace is available')
   const { snapshot } = await createPiSession({ workspacePath, title: params.title })
-  applySnapshotToUi(snapshot)
   return snapshotToUiSession(snapshot, params.directory)
 }
 
@@ -83,7 +81,6 @@ export async function updateSession(
     return unsupported('session metadata updates')
   }
   const { snapshot } = await setPiSessionName(sessionId, params.title)
-  applySnapshotToUi(snapshot)
   return snapshotToUiSession(snapshot, directory)
 }
 
@@ -96,7 +93,6 @@ export async function deleteSession(sessionId: string, _directory?: string): Pro
 
 export async function abortSession(sessionId: string, _directory?: string): Promise<boolean> {
   const result = await abortSessionCommand(sessionId)
-  if (result) applySnapshotToUi(result.snapshot)
   return result != null
 }
 

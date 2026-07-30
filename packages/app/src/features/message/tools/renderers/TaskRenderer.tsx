@@ -1,21 +1,13 @@
-import { memo, useState, useCallback, useRef, useEffect, type RefCallback } from 'react'
+import { memo, useState, useCallback, useEffect, type RefCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
-import { useDisclosureScrollLock, useResponsiveMaxHeight } from '../../../../hooks'
-import { useSessionState, messageStore } from '../../../../store'
+import { useDisclosureScrollLock } from '../../../../hooks'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
 import { abortSession } from '../../../../api'
-import { sessionErrorHandler } from '../../../../utils'
-import { formatToolName } from '../../../../utils/formatUtils'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
 import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
-import type { Message, TextPart, ToolPart } from '../../../../types/message'
-import { isVisibleTextPart } from '../../../../types/message'
-import { loadPiSessionToUi } from '../../../../pi/applySnapshot'
-
-const EMPTY_MESSAGES: Message[] = []
 
 // ============================================
 // Task Tool Renderer (子 agent)
@@ -288,181 +280,12 @@ interface SubSessionViewProps {
   isParentRunning: boolean
 }
 
-const SubSessionView = memo(function SubSessionView({ sessionId }: SubSessionViewProps) {
+const SubSessionView = memo(function SubSessionView(_props: SubSessionViewProps) {
   const { t } = useTranslation('message')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const loadedRef = useRef(false)
-  const isAtBottomRef = useRef(true)
-  const subSessionMaxHeight = useResponsiveMaxHeight(0.25, 120, 240)
-
-  const sessionState = useSessionState(sessionId)
-  const messages = sessionState?.messages ?? EMPTY_MESSAGES
-  const isStreaming = sessionState?.isStreaming || false
-  const isLoading = sessionState?.loadState === 'loading'
-
-  // 挂载即加载（SubSessionView 只在 task 展开时才渲染，loadedRef 防止重复请求）
-  useEffect(() => {
-    if (loadedRef.current) return
-
-    const state = messageStore.getSessionState(sessionId)
-    if (state && (state.messages.length > 0 || state.isStreaming)) {
-      loadedRef.current = true
-      return
-    }
-
-    loadedRef.current = true
-    messageStore.setLoadState(sessionId, 'loading')
-
-    loadPiSessionToUi(sessionId, { activate: false })
-      .catch(err => {
-        sessionErrorHandler('load sub-session', err)
-        messageStore.setLoadState(sessionId, 'error')
-      })
-  }, [sessionId])
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  }, [])
-
-  // 用户不在底部时不强制滚动
-  useEffect(() => {
-    if (!isStreaming) return
-    const el = scrollRef.current
-    if (!el || !isAtBottomRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [messages, isStreaming])
-
-  // 过滤有内容的消息
-  const visibleMessages = messages.filter((msg: Message) =>
-    msg.parts.some((part: Message['parts'][0]) => {
-      if (part.type === 'text') return isVisibleTextPart(part)
-      if (part.type === 'tool') return true
-      if (part.type === 'reasoning') return true
-      return false
-    }),
-  )
-
-  if (isLoading && messages.length === 0) {
-    return <MessageSkeleton />
-  }
-
-  if (visibleMessages.length === 0) {
-    return <div className="text-[length:var(--fs-sm)] text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
-  }
-
-  return (
-    <div className="rounded-md bg-bg-100/50 border border-border-200/30 overflow-hidden">
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="overflow-y-auto custom-scrollbar px-3 py-2 space-y-2"
-        style={{ maxHeight: subSessionMaxHeight }}
-      >
-        {visibleMessages.map((msg: Message, idx: number) => (
-          <MessageItem key={msg.info.id} message={msg} isLast={idx === visibleMessages.length - 1} />
-        ))}
-      </div>
-    </div>
-  )
+  // Sub-agent sessions are an opencode concept with no Pi equivalent yet —
+  // task tools never appear in Pi timelines, so this view stays a placeholder.
+  return <div className="text-[length:var(--fs-sm)] text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
 })
-
-// ============================================
-// Message Item
-// ============================================
-
-interface MessageItemProps {
-  message: Message
-  isLast: boolean
-}
-
-const MessageItem = memo(function MessageItem({ message, isLast }: MessageItemProps) {
-  const { info, parts } = message
-  const isUser = info.role === 'user'
-
-  const textParts = parts.filter((p): p is TextPart => p.type === 'text' && !!p.text?.trim())
-  const toolParts = parts.filter((p): p is ToolPart => p.type === 'tool')
-
-  const textContent = textParts
-    .map(p => p.text)
-    .join('\n')
-    .trim()
-
-  if (isUser) {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] px-2.5 py-1.5 rounded-md bg-bg-300 text-text-100 text-[length:var(--fs-xs)] whitespace-pre-wrap break-words">
-          {textContent}
-        </div>
-      </div>
-    )
-  }
-
-  // Assistant message
-  return (
-    <div className="space-y-1.5">
-      {/* Text content */}
-      {textContent && (
-        <div className="text-[length:var(--fs-xs)] text-text-200 leading-relaxed whitespace-pre-wrap">
-          {textContent.length > 500 && !isLast ? textContent.slice(0, 500) + '...' : textContent}
-        </div>
-      )}
-
-      {/* Tool calls - compact summary */}
-      {toolParts.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {toolParts.map((tool, idx) => (
-            <ToolBadge key={idx} tool={tool} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-})
-
-// ============================================
-// Tool Badge
-// ============================================
-
-const ToolBadge = memo(function ToolBadge({ tool }: { tool: ToolPart }) {
-  const { state, tool: toolName } = tool
-  const isRunning = state.status === 'running' || state.status === 'pending'
-  const isError = state.status === 'error'
-
-  const title = state.title || formatToolName(toolName)
-  const displayTitle = title.length > 30 ? title.slice(0, 30) + '...' : title
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xs text-[length:var(--fs-xxs)] font-mono ${
-        isRunning
-          ? 'bg-accent-main-100/10 text-accent-main-100'
-          : isError
-            ? 'bg-danger-100/10 text-danger-100'
-            : 'bg-bg-200 text-text-400'
-      }`}
-    >
-      {isRunning && <span className="w-1 h-1 rounded-full bg-current animate-pulse" />}
-      {displayTitle}
-    </span>
-  )
-})
-
-// ============================================
-// Message Skeleton
-// ============================================
-
-function MessageSkeleton() {
-  return (
-    <div className="rounded-md bg-bg-100/50 border border-border-200/30 p-3 space-y-2">
-      <div className="h-3 bg-bg-300/50 rounded animate-pulse w-3/4" />
-      <div className="h-3 bg-bg-300/50 rounded animate-pulse w-1/2" />
-      <div className="h-3 bg-bg-300/50 rounded animate-pulse w-2/3" />
-    </div>
-  )
-}
 
 // ============================================
 // Icons & Helpers

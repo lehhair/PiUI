@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SessionSnapshotV1 } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
-import { applySnapshotToUi } from '../../../pi/applySnapshot'
 import {
   abortPiBash,
   appendPiCustomEntry,
@@ -106,9 +105,9 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
 
       <div className="flex flex-wrap gap-2 border-y border-border-100 py-2">
         <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('new', async () => applyReplacement(await createNativePiSession(sessionId, sessionId)))}>New native session</Button>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('cycle-model', async () => { const result = await cyclePiSessionModel(sessionId); applySnapshotToUi(result.snapshot); setSnapshot(result.snapshot) })}>Next model</Button>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('cycle-thinking', async () => { const result = await cyclePiThinkingLevel(sessionId); applySnapshotToUi(result.snapshot); setSnapshot(result.snapshot) })}>Cycle thinking</Button>
-        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('idle', async () => { const result = await waitForPiSessionIdle(sessionId); applySnapshotToUi(result.snapshot); setSnapshot(result.snapshot) })}>Wait for idle</Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('cycle-model', async () => { const result = await cyclePiSessionModel(sessionId); setSnapshot(result.snapshot) })}>Next model</Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('cycle-thinking', async () => { const result = await cyclePiThinkingLevel(sessionId); setSnapshot(result.snapshot) })}>Cycle thinking</Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('idle', async () => { const result = await waitForPiSessionIdle(sessionId); setSnapshot(result.snapshot) })}>Wait for idle</Button>
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -134,7 +133,7 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
       </div>
 
       <label className="block space-y-1"><span className="text-[length:var(--fs-xs)] text-text-400">Scoped model patterns, one per line</span><textarea rows={3} className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-2 font-mono text-[length:var(--fs-xs)] text-text-100" value={scopedModels} onChange={event => setScopedModels(event.target.value)} /></label>
-      <Button size="sm" disabled={busy !== null} onClick={() => void run('scoped-models', async () => { const result = await setPiScopedModels(sessionId, scopedModels.split(/\r?\n/).map(item => item.trim()).filter(Boolean)); applySnapshotToUi(result.snapshot); setSnapshot(result.snapshot) })}>Apply model scope</Button>
+      <Button size="sm" disabled={busy !== null} onClick={() => void run('scoped-models', async () => { const result = await setPiScopedModels(sessionId, scopedModels.split(/\r?\n/).map(item => item.trim()).filter(Boolean)); setSnapshot(result.snapshot) })}>Apply model scope</Button>
 
       <div className="space-y-2 border-t border-border-100 pt-3"><div className="flex flex-wrap gap-2"><input className={`${inputClass} min-w-44 flex-1`} value={bashCommand} placeholder="One-shot bash command" onChange={event => setBashCommand(event.target.value)} /><Button size="sm" disabled={busy !== null || !bashCommand.trim()} onClick={() => void run('bash', async () => setBashResult((await executePiBash(sessionId, bashCommand.trim(), bashExcludeFromContext)).result))}>Run</Button><Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run('abort-bash', async () => { const result = await abortPiBash(sessionId); applySnapshotToUi(result.snapshot) })}>Abort</Button></div><Toggle label="Exclude bash output from session context" checked={bashExcludeFromContext} onChange={setBashExcludeFromContext} /></div>
       {bashResult !== undefined ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-bg-200/40 p-2 text-[length:var(--fs-xs)] text-text-300">{formatValue(bashResult)}</pre> : null}
