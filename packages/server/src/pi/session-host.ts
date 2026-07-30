@@ -135,12 +135,42 @@ export class SessionHost {
   }
 
   async sessionQuery(sessionId: string, type: string, params?: JsonObject): Promise<JsonValue | undefined> {
-    const session = this.requireAttached(sessionId)
+    const session = await this.ensureAttached(sessionId)
     const capability = this.getSessionCapability(type)
     if (capability?.queue !== "immediate") {
       throw Object.assign(new Error(`${type} is not a query command`), { code: "INVALID_REQUEST" })
     }
     return session.worker.command(type, params)
+  }
+
+  /**
+   * Self-heal attach: when a session isn't attached (e.g. after a server
+   * restart, or a client deep-linking to a session id), locate it on disk
+   * via the global session list and attach it before failing.
+   */
+  private async ensureAttached(sessionId: string): Promise<AttachedSession> {
+    const existing = this.attached.get(sessionId)
+    if (existing) return existing
+    const found = await this.findSessionOnDisk(sessionId)
+    if (!found) {
+      throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
+    }
+    await this.openSession(found.cwd, found.sessionFile)
+    return this.requireAttached(sessionId)
+  }
+
+  private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
+    try {
+      const list = await this.catalogCommand("session.listAll", undefined, { retry: true })
+      if (!Array.isArray(list)) return undefined
+      const found = list.find(item =>
+        isJsonObject(item) && item.id === sessionId && typeof item.path === "string" && typeof item.cwd === "string",
+      )
+      if (!isJsonObject(found)) return undefined
+      return { cwd: found.cwd as string, sessionFile: found.path as string }
+    } catch {
+      return undefined
+    }
   }
 
   async piRegistry(): Promise<PiRegistrySnapshot> {
@@ -166,7 +196,7 @@ export class SessionHost {
     return this.catalogCommand(type, params, { retry: true })
   }
 
-  executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string): JsonValue | SubmittedCommand | Promise<JsonValue | undefined> {
+  executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string): JsonValue | SubmittedCommand | Promise<JsonValue | SubmittedCommand | undefined> {
     if (type === "session.close") {
       return this.closeSession(sessionId).then(() => ({ ok: true }))
     }
@@ -176,14 +206,17 @@ export class SessionHost {
     return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
 
-  submitSessionCommand(sessionId: string, envelope: Omit<CommandEnvelope, "sessionId">): SubmittedCommand {
-    const session = this.requireAttached(sessionId)
+  submitSessionCommand(sessionId: string, envelope: Omit<CommandEnvelope, "sessionId">): SubmittedCommand | Promise<SubmittedCommand> {
     const full: CommandEnvelope = { ...envelope, sessionId }
-    return this.executor.submit(full, async () => {
-      const data = await session.worker.command(full.type, full.params)
-      this.trackReplacement(session, data)
-      return data
-    })
+    const submit = (session: AttachedSession): SubmittedCommand =>
+      this.executor.submit(full, async () => {
+        const data = await session.worker.command(full.type, full.params)
+        this.trackReplacement(session, data)
+        return data
+      })
+    const existing = this.attached.get(sessionId)
+    if (existing) return submit(existing)
+    return this.ensureAttached(sessionId).then(submit)
   }
 
   getCommand(commandId: string): CommandRecord | undefined {
