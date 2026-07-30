@@ -1,4 +1,4 @@
-import type { JsonObject, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
+import type { CommandRecord, JsonObject, JsonValue, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
@@ -167,6 +167,79 @@ export async function compactPiSession(sessionId: string, customInstructions?: s
     console.error('Failed to compact session:', error)
     throw error
   }
+}
+
+/**
+ * Reload runtime resources (extensions, skills, prompts, themes). Serialized
+ * — submit, then wait for completion.
+ */
+export async function reloadPiSessionResources(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const submitted = await transport.reloadPiSession(sessionId, signal)
+  await transport.waitHostCommand(submitted.id, signal)
+}
+
+/**
+ * Load the session's full runtime registry (tools, commands, extensions,
+ * event handlers).
+ */
+export async function loadPiSessionRegistry(sessionId: string, signal?: AbortSignal): Promise<RegistrySnapshot | undefined> {
+  return (await transport.getPiSessionRegistry(sessionId, signal)) as RegistrySnapshot | undefined
+}
+
+/** Submit a serialized session command and wait for its result. */
+async function submitAndWait(submit: () => Promise<CommandRecord>, signal?: AbortSignal): Promise<JsonValue> {
+  const submitted = await submit()
+  return transport.waitHostCommand(submitted.id, signal)
+}
+
+/** Create a new native session from the current runtime (replacement). */
+export async function newPiSessionFrom(sessionId: string, signal?: AbortSignal): Promise<transport.PiForkResult> {
+  return (await submitAndWait(() => transport.newPiSession(sessionId, sessionId), signal) ?? {}) as transport.PiForkResult
+}
+
+export async function cyclePiModel(sessionId: string, direction?: 'forward' | 'backward', signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.cyclePiModel(sessionId, direction, signal), signal)
+}
+
+export async function cyclePiThinkingLevel(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.cyclePiThinkingLevel(sessionId, signal), signal)
+}
+
+export async function setPiScopedModels(sessionId: string, patterns: string[], signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.setPiScopedModels(sessionId, patterns, signal), signal)
+}
+
+/** Run a one-shot bash command; resolves with the native result. */
+export async function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, signal?: AbortSignal): Promise<JsonValue> {
+  return submitAndWait(() => transport.executePiBash(sessionId, command, excludeFromContext, signal), signal)
+}
+
+export async function abortPiBashExecution(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await transport.abortPiBash(sessionId, signal)
+}
+
+/** Export the session; resolves with the native result (output path etc.). */
+export async function exportPiSession(sessionId: string, format: 'html' | 'jsonl', outputPath?: string, signal?: AbortSignal): Promise<JsonValue> {
+  const submit = format === 'html'
+    ? () => transport.exportPiSessionHtml(sessionId, outputPath, signal)
+    : () => transport.exportPiSessionJsonl(sessionId, outputPath, signal)
+  return submitAndWait(submit, signal)
+}
+
+export async function waitForPiIdle(sessionId: string, signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.waitPiForIdle(sessionId, signal), signal)
+}
+
+export async function sendPiCustomMessage(
+  sessionId: string,
+  params: Parameters<typeof transport.sendPiCustomMessage>[1],
+  signal?: AbortSignal,
+): Promise<void> {
+  await submitAndWait(() => transport.sendPiCustomMessage(sessionId, params, signal), signal)
+}
+
+export async function appendPiCustomEntry(sessionId: string, customType: string, data: JsonValue, signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.appendPiCustomEntry(sessionId, customType, data, signal), signal)
 }
 
 /**

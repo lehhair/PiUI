@@ -19,7 +19,7 @@ import type {
   FileTextSearchResponse,
 } from '@piui/protocol'
 import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
-import type { PiBranchPage, PiProjectTrust, PiSettingsSnapshot } from '../domain/index.js'
+import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, piFetch } from '../sessionApi.js'
 
 // Response types
@@ -242,11 +242,11 @@ export function setProjectTrust(cwd: string, decision: boolean | null, signal?: 
   return postPiGlobalCommand('trust.set', { cwd, decision }, signal)
 }
 
-export function listPiProviders(signal?: AbortSignal): Promise<JsonObject> {
+export function listPiProviders(signal?: AbortSignal): Promise<PiProviderAuthInfo[]> {
   return postPiGlobalCommand('providers.list', undefined, signal)
 }
 
-export function startProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<JsonValue> {
+export function startProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<{ flowId: string }> {
   return postPiGlobalCommand('providers.startAuth', { providerId, authType }, signal)
 }
 
@@ -262,7 +262,7 @@ export function logoutProvider(providerId: string, signal?: AbortSignal): Promis
   return postPiGlobalCommand('providers.logout', { providerId }, signal)
 }
 
-export function inspectModelRuntime(signal?: AbortSignal): Promise<JsonObject> {
+export function inspectModelRuntime(signal?: AbortSignal): Promise<PiModelRuntimeSnapshot> {
   return postPiGlobalCommand('modelRuntime.inspect', undefined, signal)
 }
 
@@ -282,7 +282,7 @@ export function refreshModelRuntime(options?: JsonObject, signal?: AbortSignal):
   return postPiGlobalCommand('modelRuntime.refresh', options ? { options } : undefined, signal)
 }
 
-export function listPiPackages(cwd: string, signal?: AbortSignal): Promise<JsonValue> {
+export function listPiPackages(cwd: string, signal?: AbortSignal): Promise<PiConfiguredPackage[]> {
   return postPiGlobalCommand('packages.list', { cwd }, signal)
 }
 
@@ -290,11 +290,11 @@ export function managePiPackage(
   cwd: string,
   params: { commandId?: string; action: 'install' | 'remove' | 'update'; source?: string; local?: boolean; persist?: boolean },
   signal?: AbortSignal,
-): Promise<JsonValue> {
+): Promise<PiConfiguredPackage[]> {
   return postPiGlobalCommand('packages.manage', { cwd, ...params }, signal)
 }
 
-export function resolvePiPackages(cwd: string, missingAction?: 'install' | 'skip' | 'error', signal?: AbortSignal): Promise<JsonValue> {
+export function resolvePiPackages(cwd: string, missingAction?: 'install' | 'skip' | 'error', signal?: AbortSignal): Promise<ResolvedPaths> {
   return postPiGlobalCommand('packages.resolve', { cwd, missingAction }, signal)
 }
 
@@ -303,19 +303,19 @@ export function resolvePiExtensionSources(
   sources: string[],
   options?: { local?: boolean; temporary?: boolean },
   signal?: AbortSignal,
-): Promise<JsonValue> {
+): Promise<ResolvedPaths> {
   return postPiGlobalCommand('packages.resolveSources', { cwd, sources, ...options }, signal)
 }
 
-export function changePiPackageSource(cwd: string, source: string, operation: 'add' | 'remove', local?: boolean, signal?: AbortSignal): Promise<JsonValue> {
+export function changePiPackageSource(cwd: string, source: string, operation: 'add' | 'remove', local?: boolean, signal?: AbortSignal): Promise<{ changed: boolean; packages: PiConfiguredPackage[] }> {
   return postPiGlobalCommand('packages.changeSource', { cwd, source, operation, local }, signal)
 }
 
-export function getPiPackageInstalledPath(cwd: string, source: string, scope?: 'user' | 'project', signal?: AbortSignal): Promise<JsonValue> {
+export function getPiPackageInstalledPath(cwd: string, source: string, scope?: 'user' | 'project', signal?: AbortSignal): Promise<string | null> {
   return postPiGlobalCommand('packages.installedPath', { cwd, source, scope }, signal)
 }
 
-export function checkPiPackageUpdates(cwd: string, signal?: AbortSignal): Promise<JsonValue> {
+export function checkPiPackageUpdates(cwd: string, signal?: AbortSignal): Promise<PiPackageUpdate[]> {
   return postPiGlobalCommand('packages.checkUpdates', { cwd }, signal)
 }
 export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
@@ -379,6 +379,59 @@ export function abortPi(sessionId: string, signal?: AbortSignal): Promise<Comman
 
 export function compactPi(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'compact', customInstructions ? { customInstructions } : undefined, signal)
+}
+
+export function reloadPiSession(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'reload', undefined, signal)
+}
+
+export function newPiSession(sessionId: string, parentSession?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'newSession', parentSession ? { parentSession } : undefined, signal)
+}
+
+export function setPiScopedModels(sessionId: string, patterns: string[], signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setScopedModels', { patterns }, signal)
+}
+
+export function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'bash', { command, excludeFromContext }, signal)
+}
+
+export function abortPiBash(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'abortBash', undefined, signal)
+}
+
+export function exportPiSessionHtml(sessionId: string, outputPath?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'exportHtml', outputPath ? { outputPath } : undefined, signal)
+}
+
+export function exportPiSessionJsonl(sessionId: string, outputPath?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'exportJsonl', outputPath ? { outputPath } : undefined, signal)
+}
+
+export function waitPiForIdle(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'waitForIdle', undefined, signal)
+}
+
+export type PiCustomMessageContent = Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>
+
+export function sendPiCustomMessage(
+  sessionId: string,
+  params: {
+    customType: string
+    content: PiCustomMessageContent
+    display: boolean
+    details?: JsonValue
+    triggerTurn?: boolean
+    deliverAs?: 'steer' | 'followUp' | 'nextTurn'
+  },
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'sendCustomMessage', params as unknown as JsonObject, signal)
+}
+
+export function appendPiCustomEntry(sessionId: string, customType: string, data: JsonValue, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'appendCustomEntry', { customType, data: data === undefined ? null : data }, signal)
 }
 
 export type PiImageInput = {

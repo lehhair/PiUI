@@ -192,7 +192,7 @@ export function PiManagementSettings() {
         </section>
       ) : null}
 
-      <PiProviderManagement sessionId={sessionId} />
+      <PiProviderManagement />
       {workspacePath ? <PiPackageManagement workspacePath={workspacePath} /> : null}
       {workspacePath ? <PiResourceManagement sessionId={sessionId} workspacePath={workspacePath} /> : null}
       {workspacePath ? <PiSessionManagement sessionId={sessionId} workspacePath={workspacePath} /> : null}

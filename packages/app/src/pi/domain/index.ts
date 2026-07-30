@@ -102,7 +102,8 @@ import type {
   ImageContent,
   ToolCall,
 } from '@earendil-works/pi-ai'
-import type { JsonObject, EntriesPage, BranchCheckpoint, LiveMessage } from '@piui/protocol'
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
+import type { JsonObject, JsonValue, EntriesPage, BranchCheckpoint, LiveMessage } from '@piui/protocol'
 
 /**
  * Pi Session row for sidebar display.
@@ -261,6 +262,53 @@ export type PiProjectTrust = {
   inheritedFrom?: string
   defaultDecision: 'ask' | 'always' | 'never'
   trusted: boolean
+}
+
+/** Native provider auth info (worker providers.list). */
+export type PiProviderAuthMethod = {
+  type: 'api_key' | 'oauth'
+  name?: string
+  loginAvailable: boolean
+}
+
+export type PiProviderAuthInfo = {
+  id: string
+  name: string
+  methods: PiProviderAuthMethod[]
+  configured: boolean
+  status?: JsonValue
+}
+
+/** Native model runtime inspection (worker modelRuntime.inspect). */
+export type PiModelRuntimeSnapshot = {
+  providers: PiProviderAuthInfo[]
+  models: JsonValue
+  availableModels: JsonValue[]
+  availableSnapshot?: JsonValue
+  credentials?: JsonValue
+  registeredProviderIds: string[]
+  registeredProviderConfigs?: JsonObject
+  authChecks?: JsonObject
+  error?: string | null
+}
+
+// SDK package shapes (core/package-manager). ResolvedPaths/ResolvedResource
+// are publicly exported; ConfiguredPackage/PackageUpdate are not, so they
+// are mirrored here from the SDK declarations.
+export type { ResolvedPaths, ResolvedResource } from '@earendil-works/pi-coding-agent'
+
+export type PiConfiguredPackage = {
+  source: string
+  scope: 'user' | 'project'
+  filtered: boolean
+  installedPath?: string
+}
+
+export type PiPackageUpdate = {
+  source: string
+  displayName: string
+  type: 'npm' | 'git'
+  scope: 'user' | 'project'
 }
 
 /**
