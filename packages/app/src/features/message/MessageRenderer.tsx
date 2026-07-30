@@ -689,10 +689,10 @@ const AssistantMessageView = memo(function AssistantMessageView({
     !isStreaming && stepFinishDisplay.turnDuration && turnDuration != null && turnDuration > 0
   const showCompletedAtFooter = false
 
-  if (!isStreaming && blocks.length === 0) {
-    // process/final 空内容时不占位
-    if (processContentScope === 'process' || processContentScope === 'final') return null
-    // 有错误时直接显示错误信息
+  if (blocks.length === 0) {
+    // Pi has no parts hydration — empty content is truly empty.
+    // Streaming shells (Working indicator) are handled by the process
+    // collapse layer; an empty message must not occupy a row.
     if (messageError) {
       return (
         <div className={`flex flex-col ${MSG_SPACING.stack} w-full`}>
@@ -700,8 +700,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
         </div>
       )
     }
-    // blocks 尚未 hydrate — 保留最小占位减少 CLS
-    return <div className="w-full min-h-[40px]" />
+    return null
   }
 
   // process/final 拆完后可能为空
