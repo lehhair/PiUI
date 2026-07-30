@@ -1,7 +1,8 @@
 import type { JsonObject } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
+import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
-import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
+import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
 
 /**
@@ -188,6 +189,29 @@ export async function setPiThinkingLevel(sessionId: string, level: string, signa
     await transport.setPiThinkingLevel(sessionId, { level }, signal)
   } catch (error) {
     console.error('Failed to set thinking level:', error)
+    throw error
+  }
+}
+
+/**
+ * Rename a Pi session.
+ */
+export async function renamePiSession(sessionId: string, name: string, signal?: AbortSignal): Promise<void> {
+  await transport.setPiSessionName(sessionId, name, signal)
+}
+
+/**
+ * Load available models from the Pi model runtime into the models store.
+ */
+export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> {
+  piModelsStore.setLoading(true)
+  try {
+    const result = await transport.listPiModels(signal)
+    const models = (Array.isArray(result) ? result : []) as Model<any>[]
+    piModelsStore.setModels(models)
+    return models
+  } catch (error) {
+    piModelsStore.setError(error as Error)
     throw error
   }
 }

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
+import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 
 /**
  * React bindings for Pi stores.
@@ -36,4 +36,18 @@ export function usePiSessionRuntimeState() {
     () => piSessionStateStore.getState(),
     () => piSessionStateStore.getState(),
   )
+}
+
+export function usePiModels() {
+  const models = useSyncExternalStore(
+    piModelsStore.subscribe,
+    () => piModelsStore.getModels(),
+    () => piModelsStore.getModels(),
+  )
+  const isLoading = useSyncExternalStore(
+    piModelsStore.subscribe,
+    () => piModelsStore.isLoading(),
+    () => piModelsStore.isLoading(),
+  )
+  return { models, isLoading }
 }

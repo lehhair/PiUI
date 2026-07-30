@@ -143,6 +143,11 @@ export function deletePiSession(cwd: string, sessionFile: string, signal?: Abort
   return postPiGlobalCommand('session.delete', { cwd, sessionFile }, signal)
 }
 
+// Catalog commands
+export function listPiModels(signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand<JsonValue>('models.list', undefined, signal)
+}
+
 // State commands
 export function getPiSessionState(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'state.get', undefined, signal)
@@ -179,6 +184,10 @@ export function followUpPi(sessionId: string, params: PiFollowUpParams, signal?:
 
 export function abortPi(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'abort', undefined, signal)
+}
+
+export function setPiSessionName(sessionId: string, name: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setSessionName', { name }, signal)
 }
 
 // Model commands

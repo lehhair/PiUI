@@ -18,11 +18,11 @@
 
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import type { CSSProperties } from 'react'
-import type { Message } from '../types/message'
+import type { PiTimelineItem } from '../pi/domain/index.js'
 import { useChatViewport } from '../features/chat/chatViewport'
 import { buildOutlineSourceEntries, truncateOutlineLabel, type OutlineSourceEntry } from './outlineIndexModel'
 
-const EMPTY_MESSAGES: Message[] = []
+const EMPTY_ITEMS: PiTimelineItem[] = []
 
 // ─── Types ──────────────────────────────────
 
@@ -34,7 +34,7 @@ interface OutlineEntry {
 }
 
 interface OutlineIndexProps {
-  messages?: Message[]
+  items?: PiTimelineItem[]
   sourceEntries?: OutlineSourceEntry[]
   ownerByMessageId?: Map<string, string>
   visibleMessageIds?: string[]
@@ -350,7 +350,7 @@ function TickRail({ entries, visual }: TickRailProps) {
 // ─── Entry Point ────────────────────────────
 
 export const OutlineIndex = memo(function OutlineIndex({
-  messages = EMPTY_MESSAGES,
+  items = EMPTY_ITEMS,
   sourceEntries,
   ownerByMessageId,
   visibleMessageIds,
@@ -359,7 +359,7 @@ export const OutlineIndex = memo(function OutlineIndex({
 }: OutlineIndexProps) {
   const { interaction, presentation } = useChatViewport()
   const visual = presentation.isCompact ? COMPACT_VISUAL : DESKTOP_VISUAL
-  const outlineSourceEntries = useMemo(() => sourceEntries ?? buildOutlineSourceEntries(messages), [messages, sourceEntries])
+  const outlineSourceEntries = useMemo(() => sourceEntries ?? buildOutlineSourceEntries(items), [items, sourceEntries])
   const allEntries = useMemo(() => formatEntries(outlineSourceEntries, visual), [outlineSourceEntries, visual])
   const entries = useMemo(
     () => sliceAroundVisible(allEntries, visibleMessageIds ?? [], visual.maxEntries),
@@ -370,12 +370,12 @@ export const OutlineIndex = memo(function OutlineIndex({
 
     let lastUserMsgId: string | null = null
     const ownerMap = new Map<string, string>()
-    for (const msg of messages) {
-      if (msg.info.role === 'user') lastUserMsgId = msg.info.id
-      if (lastUserMsgId) ownerMap.set(msg.info.id, lastUserMsgId)
+    for (const item of items) {
+      if (item.kind === 'user_message') lastUserMsgId = item.entryId
+      if (lastUserMsgId) ownerMap.set(item.entryId, lastUserMsgId)
     }
     return ownerMap
-  }, [messages, ownerByMessageId])
+  }, [items, ownerByMessageId])
 
   // 构建 territory 映射：每个消息 ID → 所属 user prompt 的 ID
   const ownerVisibleIds = useMemo(() => {

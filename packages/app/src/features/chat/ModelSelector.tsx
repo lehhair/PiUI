@@ -9,7 +9,9 @@ import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, us
 import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, SearchIcon, ThinkingIcon, EyeIcon, CheckIcon, PinIcon } from '../../components/Icons'
 import { DropdownMenu } from '../../components/ui'
-import type { ModelInfo } from '../../hooks/useModels'
+import type { Model } from '@earendil-works/pi-ai'
+
+type ModelInfo = Model<any>
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import {
   getModelKey,
@@ -260,7 +262,7 @@ const ModelListPanel = memo(function ModelListPanel({
                     onTouchStart={onTouchStart ? () => onTouchStart(model) : undefined}
                     onTouchEnd={onTouchEnd}
                     onTouchMove={onTouchEnd}
-                    title={`${model.name} · ${model.providerName}${model.contextLimit ? ` · ${formatContext(model.contextLimit)}` : ''}`}
+                    title={`${model.name} · ${model.provider}${model.contextWindow ? ` · ${formatContext(model.contextWindow)}` : ''}`}
                     className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md bg-transparent border-none p-0 text-left text-[length:var(--fs-base)] outline-none focus-visible:outline-none"
                   >
                     {/* Left: name + capability icons */}
@@ -272,15 +274,15 @@ const ModelListPanel = memo(function ModelListPanel({
                         aria-hidden="true"
                         className={`flex items-center gap-1 flex-shrink-0 transition-opacity ${isHL || isSelected ? 'opacity-60' : 'opacity-25'}`}
                       >
-                        {model.supportsReasoning && <ThinkingIcon size={12} />}
-                        {model.supportsImages && <EyeIcon size={13} />}
+                        {model.reasoning && <ThinkingIcon size={12} />}
+                        {model.input.includes('image') && <EyeIcon size={13} />}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 text-[length:var(--fs-sm)] font-mono flex-shrink-0">
-                      <span className="text-text-500 max-w-[100px] truncate text-right">{model.providerName}</span>
-                      {model.contextLimit > 0 && (
-                        <span className="text-text-500 w-[4ch] text-right hidden sm:inline">{formatContext(model.contextLimit)}</span>
+                      <span className="text-text-500 max-w-[100px] truncate text-right">{model.provider}</span>
+                      {model.contextWindow > 0 && (
+                        <span className="text-text-500 w-[4ch] text-right hidden sm:inline">{formatContext(model.contextWindow)}</span>
                       )}
                       {isSelected && (
                         <span className="w-5 flex items-center justify-center flex-shrink-0 text-accent-secondary-100">
@@ -385,8 +387,7 @@ export const ModelSelector = memo(
         m =>
           normalize(m.name).includes(query) ||
           normalize(m.id).includes(query) ||
-          normalize(m.family).includes(query) ||
-          normalize(m.providerName).includes(query),
+          normalize(m.provider).includes(query),
       )
     }, [models, searchQuery])
 

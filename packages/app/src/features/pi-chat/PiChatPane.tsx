@@ -1,30 +1,51 @@
-import { useCallback, useEffect, useMemo } from 'react'
-import { ChatArea, InputBox } from '../chat/index.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Model } from '@earendil-works/pi-ai'
+import { ChatArea, Header, InputBox, type ChatAreaHandle } from '../chat/index.js'
+import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
 import type { Attachment } from '../attachment/index.js'
+import { OutlineIndex } from '../../components/OutlineIndex'
+import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
 import { selectPiTimelineItems } from '../../pi/selectors/index.js'
 import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
   loadMorePiBranchEntries,
+  loadPiModels,
   loadPiSessionData,
   sendPiFollowUp,
   sendPiPrompt,
   sendPiSteer,
+  setPiModel,
 } from '../../pi/controllers/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
-import { usePiBranchData, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { recordModelUsage } from '../../utils/modelUtils'
 
 interface PiChatPaneProps {
   paneId: string
   sessionId: string | null
+  onOpenSidebar?: () => void
+  onToggleRightPanel?: () => void
+  onSplitPane?: () => void
+  isPaneFullscreen?: boolean
+  onTogglePaneFullscreen?: () => void
 }
 
 /**
  * Pi-native chat pane. All rendering reuses the existing chat components
- * (ChatArea, InputBox); only the data source is new — raw Pi stores via
- * selectors. The event stream keeps stores fresh while the pane is open.
+ * (Header, ChatArea, OutlineIndex, InputBox); only the data source is new —
+ * raw Pi stores via selectors. The event stream keeps stores fresh while
+ * the pane is open.
  */
-export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
+export function PiChatPane({
+  paneId,
+  sessionId,
+  onOpenSidebar,
+  onToggleRightPanel,
+  onSplitPane,
+  isPaneFullscreen = false,
+  onTogglePaneFullscreen,
+}: PiChatPaneProps) {
   // Self-heal on mount / session switch: make sure the event stream is
   // connected and session data is present (covers direct navigation where
   // App-level open was skipped, e.g. SESSION_BUSY reuse).
@@ -36,6 +57,12 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
     }
   }, [sessionId])
 
+  // Models catalog (loaded once per app lifecycle)
+  const { models, isLoading: modelsLoading } = usePiModels()
+  useEffect(() => {
+    void loadPiModels().catch(() => undefined)
+  }, [])
+
   const branch = usePiBranchData()
   const state = usePiSessionRuntimeState()
 
@@ -43,6 +70,50 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
 
   const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
+
+  // Current model from runtime state (native SDK shape)
+  const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
+  const selectedModelKey =
+    currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : null
+
+  const handleModelChange = useCallback(
+    (_modelKey: string, model: Model<any>) => {
+      if (!sessionId) return
+      recordModelUsage(model)
+      void setPiModel(sessionId, model.provider, model.id).catch(() => undefined)
+    },
+    [sessionId],
+  )
+
+  // Outline index (reuses ChatArea's visible-id tracking + imperative scroll)
+  const chatAreaRef = useRef<ChatAreaHandle>(null)
+  const modelSelectorRef = useRef<ModelSelectorHandle | null>(null)
+  const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([])
+  const visibleMessageIdsRef = useRef<string[]>([])
+  const handleVisibleIdsChange = useCallback((ids: string[]) => {
+    const prev = visibleMessageIdsRef.current
+    if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return
+    visibleMessageIdsRef.current = ids
+    setVisibleMessageIds(ids)
+  }, [])
+  const handleOutlineScrollToMessage = useCallback((messageId: string) => {
+    chatAreaRef.current?.scrollToMessageId(messageId)
+  }, [])
+  const outlineEntries = useMemo(() => buildOutlineSourceEntries(items), [items])
+
+  // Input box height -> ChatArea bottom padding (messages scroll under the dock)
+  const [inputBoxHeight, setInputBoxHeight] = useState(0)
+  const inputBoxWrapperRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = inputBoxWrapperRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const height = entries[0]?.contentRect.height ?? 0
+      setInputBoxHeight(height)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const handleSend = useCallback(
     async (text: string, _attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
@@ -68,26 +139,58 @@ export function PiChatPane({ paneId, sessionId }: PiChatPaneProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <ChatArea
-        items={items}
-        queuedSteering={queue?.steering ?? []}
-        queuedFollowUps={queue?.followUp ?? []}
-        sessionId={sessionId}
-        isStreaming={isStreaming}
-        allowStreamingLayoutAnimation
-        loadState={branch ? 'loaded' : 'loading'}
-        hasMoreHistory={Boolean(branch?.hasMore)}
-        onLoadMore={() => loadMorePiBranchEntries(sessionId)}
+    <div className="flex-1 relative overflow-hidden flex flex-col min-h-0 h-full">
+      <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
+        <div className="pointer-events-auto">
+          <Header
+            models={[...models]}
+            modelsLoading={modelsLoading}
+            selectedModelKey={selectedModelKey}
+            onModelChange={handleModelChange}
+            onOpenSidebar={onOpenSidebar}
+            onToggleRightPanel={onToggleRightPanel}
+            onSplitPane={onSplitPane}
+            isPaneFullscreen={isPaneFullscreen}
+            onTogglePaneFullscreen={onTogglePaneFullscreen}
+            modelSelectorRef={modelSelectorRef}
+          />
+        </div>
+      </div>
+
+      <div className="absolute inset-0">
+        <ChatArea
+          ref={chatAreaRef}
+          items={items}
+          queuedSteering={queue?.steering ?? []}
+          queuedFollowUps={queue?.followUp ?? []}
+          sessionId={sessionId}
+          isStreaming={isStreaming}
+          allowStreamingLayoutAnimation
+          loadState={branch ? 'loaded' : 'loading'}
+          hasMoreHistory={Boolean(branch?.hasMore)}
+          onLoadMore={() => loadMorePiBranchEntries(sessionId)}
+          bottomPadding={inputBoxHeight}
+          onVisibleMessageIdsChange={handleVisibleIdsChange}
+        />
+      </div>
+
+      <OutlineIndex
+        sourceEntries={outlineEntries}
+        visibleMessageIds={visibleMessageIds}
+        onScrollToMessageId={handleOutlineScrollToMessage}
       />
-      <InputBox
-        paneId={paneId}
-        sessionId={sessionId}
-        onSend={handleSend}
-        onAbort={() => void abortPiOperation(sessionId).catch(() => undefined)}
-        isStreaming={isStreaming}
-      />
+
+      <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
+        <div className="pointer-events-auto">
+          <InputBox
+            paneId={paneId}
+            sessionId={sessionId}
+            onSend={handleSend}
+            onAbort={() => void abortPiOperation(sessionId).catch(() => undefined)}
+            isStreaming={isStreaming}
+          />
+        </div>
+      </div>
     </div>
   )
 }
-
