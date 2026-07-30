@@ -10,7 +10,7 @@ import {
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase } from './httpClient.js'
-import { piBranchStore } from './state/index.js'
+import { piBranchStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import {
@@ -45,6 +45,16 @@ type PiExtensionUiEvent =
   | { type: 'state'; sessionId: string; patch: import('@piui/protocol').ExtensionUiStatePatch }
   | { type: 'notify'; sessionId: string; message: string; notifyType?: 'info' | 'warning' | 'error' }
   | { type: 'editor'; sessionId: string; command: import('@piui/protocol').ExtensionUiEditorCommand }
+
+type SessionsUpdatedPayload = {
+  sessionId?: string
+  attached?: boolean
+  detached?: boolean
+  replaced?: boolean
+  sourceSessionId?: string
+  targetSessionId?: string
+  targetCwd?: string
+}
 
 /**
  * WebSocket event stream client for /api/v1/events (multi-session).
@@ -219,7 +229,7 @@ class PiEventStream {
         if (sessionId) this.scheduleBranchRefresh(sessionId)
         break
       case 'sessions.updated':
-        void loadPiSessions().catch(() => undefined)
+        this.handleSessionsUpdated(envelope.payload as SessionsUpdatedPayload | undefined)
         break
       case 'sessions.activity':
         this.handleActivitySnapshot(envelope.payload as unknown as SessionsActivitySnapshot)
@@ -247,6 +257,23 @@ class PiEventStream {
     if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
       receiveProviderAuthUpdated()
     }
+  }
+
+  private handleSessionsUpdated(payload: SessionsUpdatedPayload | undefined): void {
+    if (payload?.replaced && payload.sourceSessionId && payload.targetSessionId) {
+      // Runtime replacement (fork/clone/new/import): the worker now owns a
+      // different session id. Drop the old session's cursors and keyed
+      // data; panes re-subscribe and reload under the new id when they
+      // follow piui:session-replaced (their connect effect owns ref counts).
+      this.cursors.delete(payload.sourceSessionId)
+      this.branchRefreshTimers.delete(payload.sourceSessionId)
+      this.stateRefreshTimers.delete(payload.sourceSessionId)
+      piBranchStore.clear(payload.sourceSessionId)
+      piSessionStateStore.clear(payload.sourceSessionId)
+      window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
+    }
+    void loadPiSessions().catch(() => undefined)
+    window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }
 
   private handleExtensionUiEvent(sessionId: string, event: PiExtensionUiEvent): void {

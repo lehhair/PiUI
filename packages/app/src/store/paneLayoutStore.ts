@@ -87,6 +87,26 @@ function replaceNode(node: PaneNode, targetId: string, replacement: PaneNode): P
   }
 }
 
+function remapSessionInNode(node: PaneNode, sourceId: string, targetId: string): { node: PaneNode; changed: boolean } {
+  if (node.type === 'leaf') {
+    if (node.sessionId !== sourceId) return { node, changed: false }
+    return { node: { ...node, sessionId: targetId }, changed: true }
+  }
+
+  const first = remapSessionInNode(node.first, sourceId, targetId)
+  const second = remapSessionInNode(node.second, sourceId, targetId)
+  if (!first.changed && !second.changed) return { node, changed: false }
+
+  return {
+    node: {
+      ...node,
+      first: first.node,
+      second: second.node,
+    },
+    changed: true,
+  }
+}
+
 function clearSessionFromNode(node: PaneNode, sessionId: string): { node: PaneNode; changed: boolean } {
   if (node.type === 'leaf') {
     if (node.sessionId !== sessionId) return { node, changed: false }
@@ -307,6 +327,14 @@ function createPaneLayoutStore() {
 
     clearSession(sessionId: string) {
       const result = clearSessionFromNode(_root, sessionId)
+      if (!result.changed) return
+      _root = result.node
+      _refreshSnapshot()
+    },
+
+    /** Point panes showing sourceId at targetId (runtime replacement). */
+    remapSession(sourceId: string, targetId: string) {
+      const result = remapSessionInNode(_root, sourceId, targetId)
       if (!result.changed) return
       _root = result.node
       _refreshSnapshot()
