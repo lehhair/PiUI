@@ -3,46 +3,92 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { ExtensionUiDialogHost } from './ExtensionUiDialogHost'
 
-const { respondExtensionUi } = vi.hoisted(() => ({ respondExtensionUi: vi.fn() }))
+const { respondPiExtensionUi } = vi.hoisted(() => ({ respondPiExtensionUi: vi.fn() }))
 
-vi.mock('../../pi/sessionApi', () => ({ respondExtensionUi }))
-vi.mock('../../components/ui/Dialog', () => ({
-  Dialog: ({ isOpen, title, children }: { isOpen: boolean; title: React.ReactNode; children: React.ReactNode }) =>
-    isOpen ? <div role="dialog" aria-label={String(title)}>{children}</div> : null,
+vi.mock('../../pi/controllers/index.js', () => ({ respondPiExtensionUi }))
+vi.mock('../../hooks', () => ({
+  usePresence: () => ({ shouldRender: true, ref: () => undefined }),
 }))
-vi.mock('../../components/ui/Button', () => ({
-  Button: ({ children, isLoading: _isLoading, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { isLoading?: boolean }) =>
-    <button {...props}>{children}</button>,
-}))
+
+function selectRequest(overrides?: Partial<import('@piui/protocol').ExtensionUiDialogRequest>) {
+  return {
+    requestId: 'request-1',
+    sessionId: 'session-1',
+    kind: 'select',
+    title: 'Choose mode',
+    options: ['plan', 'build'],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  } as import('@piui/protocol').ExtensionUiDialogRequest
+}
 
 describe('ExtensionUiDialogHost', () => {
   beforeEach(() => {
     extensionUiStore.reset()
-    respondExtensionUi.mockReset()
-    respondExtensionUi.mockResolvedValue({ accepted: true, alreadySettled: false })
+    respondPiExtensionUi.mockReset()
+    respondPiExtensionUi.mockResolvedValue(undefined)
   })
 
-  it('renders and submits a pending select request', async () => {
-    extensionUiStore.requestOpened({
-      requestId: 'request-1',
-      sessionId: 'session-1',
-      workerGeneration: 'generation-1',
-      kind: 'select',
-      title: 'Choose mode',
-      options: ['plan', 'build'],
-      createdAt: '2026-01-01T00:00:00.000Z',
-    })
-    render(<ExtensionUiDialogHost />)
+  it('renders a select request and submits the chosen option', async () => {
+    extensionUiStore.requestOpened(selectRequest())
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'build' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    fireEvent.click(screen.getByText('build'))
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
 
-    await waitFor(() => expect(respondExtensionUi).toHaveBeenCalledWith(
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
       'session-1',
       'request-1',
       expect.objectContaining({ value: 'build', responseId: expect.any(String) }),
-      'generation-1',
     ))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('submits confirmed=true for a confirm request', async () => {
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-confirm',
+      kind: 'confirm',
+      title: 'Delete file?',
+      message: 'This cannot be undone',
+      options: undefined,
+    } as never))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    expect(screen.getByText('This cannot be undone')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /confirm|确认/i }))
+
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
+      'session-1',
+      'request-confirm',
+      expect.objectContaining({ confirmed: true }),
+    ))
+  })
+
+  it('shows only the current session pending requests', () => {
+    extensionUiStore.requestOpened(selectRequest({ sessionId: 'other-session' }))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    expect(screen.queryByText('Choose mode')).toBeNull()
+  })
+
+  it('shows queue count when multiple requests are pending', () => {
+    extensionUiStore.requestOpened(selectRequest())
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-2',
+      title: 'Second question',
+      createdAt: '2026-01-01T00:01:00.000Z',
+    }))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    expect(screen.getByText('Choose mode')).toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
+  })
+
+  it('clears the settled request from the store after submit', async () => {
+    extensionUiStore.requestOpened(selectRequest())
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText('Choose mode')).toBeNull())
   })
 })

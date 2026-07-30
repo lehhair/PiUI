@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { ExtensionUiStateV1 } from '@piui/protocol'
+import type { ExtensionUiState } from '@piui/protocol'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 
 export function ExtensionUiSurface({ sessionId, placement }: { sessionId: string | null; placement: 'aboveEditor' | 'belowEditor' }) {
@@ -32,7 +32,7 @@ export function ExtensionUiSurface({ sessionId, placement }: { sessionId: string
   )
 }
 
-function WorkingIndicator({ indicator }: { indicator: NonNullable<ExtensionUiStateV1['workingIndicator']> }) {
+function WorkingIndicator({ indicator }: { indicator: NonNullable<ExtensionUiState['workingIndicator']> }) {
   const [frame, setFrame] = useState(0)
   useEffect(() => {
     if (indicator.frames.length < 2) return

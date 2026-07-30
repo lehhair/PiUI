@@ -204,6 +204,19 @@ export function setPiSessionName(sessionId: string, name: string, signal?: Abort
   return postPiSessionCommand(sessionId, 'setSessionName', { name }, signal)
 }
 
+export function respondPiExtensionUi(
+  sessionId: string,
+  requestId: string,
+  response: JsonObject,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'respondExtensionUi', { requestId, response }, signal)
+}
+
+export function setPiExtensionEditorState(sessionId: string, text: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setExtensionEditorState', { text }, signal)
+}
+
 export type PiForkResult = {
   operation?: string
   sourceSessionId?: string

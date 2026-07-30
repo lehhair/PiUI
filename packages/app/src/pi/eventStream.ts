@@ -11,6 +11,7 @@ import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/in
 import type { SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase } from './sessionApi.js'
 import { piBranchStore } from './state/index.js'
+import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import type { SessionStatus } from '../types/session'
 import {
@@ -28,6 +29,13 @@ type PiEventPayload = {
   event: AgentSessionEvent
   meta: EventCursor & { liveMessage?: { id: string; revision: number } }
 }
+
+type PiExtensionUiEvent =
+  | { type: 'requested'; request: import('@piui/protocol').ExtensionUiDialogRequest }
+  | { type: 'settled'; requestId: string; sessionId: string }
+  | { type: 'state'; sessionId: string; patch: import('@piui/protocol').ExtensionUiStatePatch }
+  | { type: 'notify'; sessionId: string; message: string; notifyType?: 'info' | 'warning' | 'error' }
+  | { type: 'editor'; sessionId: string; command: import('@piui/protocol').ExtensionUiEditorCommand }
 
 /**
  * WebSocket event stream client for /api/v1/events (multi-session).
@@ -180,6 +188,31 @@ class PiEventStream {
         break
       case 'sessions.activity':
         this.handleActivitySnapshot(envelope.payload as unknown as SessionsActivitySnapshot)
+        break
+      case 'extension.ui':
+        if (sessionId) this.handleExtensionUiEvent(sessionId, envelope.payload as unknown as PiExtensionUiEvent)
+        break
+    }
+  }
+
+  private handleExtensionUiEvent(sessionId: string, event: PiExtensionUiEvent): void {
+    switch (event.type) {
+      case 'requested':
+        extensionUiStore.requestOpened(event.request)
+        // Surface as pending action on the sidebar (awaiting user input)
+        activeSessionStore.updateStatus(sessionId, { type: 'busy' })
+        break
+      case 'settled':
+        extensionUiStore.requestSettled(sessionId, event.requestId)
+        break
+      case 'state':
+        extensionUiStore.statePatched(sessionId, event.patch)
+        break
+      case 'editor':
+        extensionUiStore.editorCommand(sessionId, event.command)
+        break
+      case 'notify':
+        // Notifications surface through the extension UI state/status
         break
     }
   }
