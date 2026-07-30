@@ -131,8 +131,10 @@ export function PiChatPane({
     setIsAtBottom(true)
   }, [chatAreaMountKey])
 
-  // Input box height -> ChatArea bottom padding (messages scroll under the dock)
-  const [inputBoxHeight, setInputBoxHeight] = useState(0)
+  // Input box height -> ChatArea bottom spacer (messages scroll under the
+  // dock). Seed with the typical expanded height so the spacer never falls
+  // back to the 256px default before ResizeObserver reports.
+  const [inputBoxHeight, setInputBoxHeight] = useState(96)
   const inputBoxWrapperRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = inputBoxWrapperRef.current
