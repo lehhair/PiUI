@@ -17,9 +17,21 @@ import {
   sendPiSteer,
   setPiModel,
 } from '../../pi/controllers/index.js'
-import { piBranchStore } from '../../pi/state/index.js'
+import { piBranchStore, piSessionStateStore } from '../../pi/state/index.js'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { recordModelUsage } from '../../utils/modelUtils'
+import type { PiBranchPage } from '../../pi/domain/index.js'
+
+/**
+ * Session id that owns this branch page (from the persisted session header).
+ */
+function branchSessionIdOf(branch: PiBranchPage): string | null {
+  const header = branch.head.header
+  if (header && typeof header === 'object' && 'id' in header && typeof header.id === 'string') {
+    return header.id
+  }
+  return null
+}
 
 interface PiChatPaneProps {
   paneId: string
@@ -46,13 +58,18 @@ export function PiChatPane({
   isPaneFullscreen = false,
   onTogglePaneFullscreen,
 }: PiChatPaneProps) {
-  // Self-heal on mount / session switch: make sure the event stream is
-  // connected and session data is present (covers direct navigation where
-  // App-level open was skipped, e.g. SESSION_BUSY reuse).
+  // Self-heal on mount / session switch: connect the event stream and make
+  // sure session data belongs to THIS session — the branch store is a
+  // singleton, so stale data from the previous session must be dropped
+  // before the ChatArea mounts (its cold-start bottom estimate runs once
+  // at mount).
   useEffect(() => {
     if (!sessionId) return
     piEventStream.connect(sessionId)
-    if (!piBranchStore.getData()) {
+    const current = piBranchStore.getData()
+    if (!current || branchSessionIdOf(current) !== sessionId) {
+      piBranchStore.clear()
+      piSessionStateStore.clear()
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
   }, [sessionId])
@@ -102,9 +119,11 @@ export function PiChatPane({
   }, [])
   const outlineEntries = useMemo(() => buildOutlineSourceEntries(items), [items])
 
-  // Mount ChatArea only after branch data is ready — the virtual scroller's
-  // cold-start logic estimates the initial offset at the bottom on mount.
-  const chatAreaMountKey = branch ? sessionId : null
+  // Mount ChatArea only after branch data for THIS session is ready — the
+  // virtual scroller's cold-start logic estimates the initial offset at the
+  // bottom on mount, and it must not see another session's items.
+  const branchSessionId = branch ? branchSessionIdOf(branch) : null
+  const chatAreaMountKey = branch && branchSessionId === sessionId ? sessionId : null
   // Assume at-bottom on session remount so the scroll-to-bottom button
   // doesn't flash.
   useEffect(() => {
