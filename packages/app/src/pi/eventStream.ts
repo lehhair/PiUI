@@ -199,11 +199,17 @@ class PiEventStream {
     switch (event.type) {
       case 'requested':
         extensionUiStore.requestOpened(event.request)
-        // Surface as pending action on the sidebar (awaiting user input)
-        activeSessionStore.updateStatus(sessionId, { type: 'busy' })
+        // Surface as pending action on the sidebar (awaiting permission/answer)
+        activeSessionStore.addPendingRequest(
+          event.request.requestId,
+          sessionId,
+          event.request.kind === 'confirm' ? 'permission' : 'question',
+          event.request.title,
+        )
         break
       case 'settled':
         extensionUiStore.requestSettled(sessionId, event.requestId)
+        activeSessionStore.resolvePendingRequest(event.requestId)
         break
       case 'state':
         extensionUiStore.statePatched(sessionId, event.patch)
