@@ -18,6 +18,8 @@ const MAX_BUFFERED_BYTES = 8 * 1024 * 1024
 export interface EventWebSocketOptions {
   eventHub: EventHub
   authToken?: string | null
+  /** Called after a client (re)subscribes — push per-connection snapshots */
+  onSubscribe?: (send: (message: EventServerMessage) => void) => void
 }
 
 export function attachEventWebSocket(server: HttpServer, options: EventWebSocketOptions) {
@@ -41,7 +43,7 @@ export function attachEventWebSocket(server: HttpServer, options: EventWebSocket
   })
 
   wss.on("connection", (ws: WebSocket) => {
-    attachConnection(ws, eventHub)
+    attachConnection(ws, eventHub, options.onSubscribe)
   })
 
   return wss
@@ -55,7 +57,7 @@ export function closeEventWebSocket(
   wss.close(callback)
 }
 
-function attachConnection(ws: WebSocket, eventHub: EventHub): void {
+function attachConnection(ws: WebSocket, eventHub: EventHub, onSubscribe?: (send: (message: EventServerMessage) => void) => void): void {
   const subscribed = new Set<string>()
   send(ws, {
     type: "hello",
@@ -98,6 +100,7 @@ function attachConnection(ws: WebSocket, eventHub: EventHub): void {
       if (Object.keys(resync).length > 0) {
         send(ws, { channel: "control", type: "resync_required", streams: resync })
       }
+      onSubscribe?.(message => send(ws, message))
     } catch {
       /* ignore malformed client messages */
     }

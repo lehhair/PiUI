@@ -52,6 +52,7 @@ export type EventChannel =
   | "workspace.files"
   | "workspace.git"
   | "sessions.updated"
+  | "sessions.activity"
   | "resources.updated"
 
 export type EventEnvelope = {

@@ -1,4 +1,4 @@
-import { DEFAULT_HTTP_BASE } from "@piui/protocol"
+import { DEFAULT_HTTP_BASE, PROTOCOL_VERSION } from "@piui/protocol"
 import { getDriverMode } from "@piui/pi-worker"
 import { authTokenPath, resolveAuthToken } from "./host/auth-token.ts"
 import { createAppServer } from "./http.ts"
@@ -15,7 +15,29 @@ const driver = getDriverMode()
 
 const authToken = resolveAuthToken()
 const app = createAppServer({ authToken })
-const eventServer = attachEventWebSocket(app.server, { eventHub: app.eventHub, authToken })
+const eventServer = attachEventWebSocket(app.server, {
+  eventHub: app.eventHub,
+  authToken,
+  onSubscribe: send => {
+    // Push the current activity snapshot so fresh subscribers see busy
+    // sessions without waiting for the next change
+    const snapshot = app.sessionHost.getActivitySnapshot()
+    if (Object.keys(snapshot.sessions).length > 0) {
+      send({
+        channel: "event",
+        event: {
+          protocolVersion: PROTOCOL_VERSION,
+          stream: { kind: "server", id: "server" },
+          channel: "sessions.activity",
+          cursor: app.eventHub.getCursor({ kind: "server", id: "server" }),
+          eventId: `activity-snapshot-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          payload: snapshot as never,
+        },
+      })
+    }
+  },
+})
 app.server.listen(PORT, HOST, () => {
   console.info(`[piui-server] listening http://${HOST}:${PORT} (base ${DEFAULT_HTTP_BASE})`)
   console.info(`[piui-server] events ws://${HOST}:${PORT}/api/v1/events`)

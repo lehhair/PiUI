@@ -8,8 +8,11 @@ import {
   type EventStreamRef,
 } from '@piui/protocol'
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
+import type { SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase } from './sessionApi.js'
 import { piBranchStore } from './state/index.js'
+import { activeSessionStore } from '../store/activeSessionStore'
+import type { SessionStatus } from '../types/session'
 import {
   loadPiSessionData,
   loadPiSessions,
@@ -175,8 +178,29 @@ class PiEventStream {
       case 'sessions.updated':
         void loadPiSessions().catch(() => undefined)
         break
+      case 'sessions.activity':
+        this.handleActivitySnapshot(envelope.payload as unknown as SessionsActivitySnapshot)
+        break
     }
   }
+
+  /**
+   * Global session activity (worker-derived from SDK isStreaming/isRetrying).
+   * Feeds activeSessionStore so the sidebar shows working/retrying dots.
+   */
+  private handleActivitySnapshot(snapshot: SessionsActivitySnapshot): void {
+    const active = snapshot?.sessions ?? {}
+    for (const [sessionId, status] of Object.entries(active)) {
+      activeSessionStore.updateStatus(sessionId, activityToSessionStatus(status))
+    }
+    // Sessions no longer active -> idle (clears their dot)
+    for (const sessionId of this.knownActiveSessions) {
+      if (!(sessionId in active)) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+    }
+    this.knownActiveSessions = new Set(Object.keys(active))
+  }
+
+  private knownActiveSessions = new Set<string>()
 
   private handlePiEvent(sessionId: string, payload: PiEventPayload): void {
     const { event, meta } = payload
@@ -259,6 +283,13 @@ class PiEventStream {
 }
 
 export const piEventStream = new PiEventStream()
+
+function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
+  if (status.type === 'retry') {
+    return { type: 'retry', attempt: status.attempt, message: status.message, next: status.next }
+  }
+  return { type: 'busy' }
+}
 
 function wsEventsUrl(): string {
   const base = getApiBase()
