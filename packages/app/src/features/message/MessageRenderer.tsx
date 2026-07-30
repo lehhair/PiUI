@@ -20,6 +20,7 @@ import {
   ToolPartView,
   MessageErrorView,
 } from './parts'
+import { PiSystemItemView } from './parts/PiSystemItemViews'
 import { extractToolData } from './tools'
 import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
@@ -299,7 +300,7 @@ export const MessageRenderer = memo(function MessageRenderer({
     )
   }
 
-  return null
+  return <PiSystemItemView item={item} />
 })
 
 // ============================================
