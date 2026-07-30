@@ -45,7 +45,6 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
       checkedAt: Date.now(),
     })
     console.info("[PiUI] server up, driver=", driver ?? "unknown")
-    void import("../hooks/useModels").then(m => m.refreshModels?.()).catch(() => {})
     retryAttempt = 0
     if (retryTimer) {
       clearTimeout(retryTimer)

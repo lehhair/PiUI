@@ -192,8 +192,12 @@ export function resetWorkspaceResolutionCache(): void {
 }
 
 export async function listRegisteredPiWorkspaces(): Promise<WorkspaceDtoV1[]> {
-  const data = await getPiJson<{ workspaces: WorkspaceDtoV1[] }>("/api/v1/workspaces", "listRegisteredPiWorkspaces")
-  return data.workspaces
+  const data = await getPiJson<{ data: { workspaces: WorkspaceDtoV1[] } }>(
+    "/api/v1/host/commands/workspaces.list",
+    "listRegisteredPiWorkspaces",
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+  )
+  return data.data.workspaces
 }
 
 export async function getRegisteredPiWorkspace(workspacePath: string): Promise<WorkspaceDtoV1> {
@@ -208,11 +212,17 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
   if (!defaultWorkspacePromise) {
     defaultWorkspacePromise = (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/api/v1/workspaces/default`)
+        const res = await fetch(`${getApiBase()}/api/v1/host/commands/workspaces.list`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        })
         if (!res.ok) return null
-        const data = (await res.json()) as { workspace: { path: string } }
-        trackPiWorkspace(data.workspace.path)
-        return data.workspace.path
+        const data = (await res.json()) as { data: { workspaces: Array<{ path: string }> } }
+        const first = data.data.workspaces[0]
+        if (!first) return null
+        trackPiWorkspace(first.path)
+        return first.path
       } catch {
         return null
       }
@@ -233,13 +243,13 @@ export async function resolveWorkspacePath(directory?: string): Promise<string |
       let pending = workspaceResolutionPromises.get(key)
       if (!pending) {
         pending = (async () => {
-          const res = await fetch(`${getApiBase()}/api/v1/workspaces`, {
+          const res = await fetch(`${getApiBase()}/api/v1/host/commands/workspaces.open`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ rootPath: directory }),
           })
           if (!res.ok) await throwPiApiError(res, "resolveWorkspacePath")
-          const workspacePath = ((await res.json()) as { workspace: { path: string } }).workspace.path
+          const workspacePath = ((await res.json()) as { data: { workspace: { path: string } } }).data.workspace.path
           trackPiWorkspace(workspacePath)
           return workspacePath
         })().catch(error => {
