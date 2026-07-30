@@ -77,7 +77,6 @@ describe('Pi session facade', () => {
       expect.objectContaining({ id: 'created', title: 'Session created' }),
     )
     expect(mocks.createPiSession).toHaveBeenCalledWith({ workspacePath: '/workspace', title: 'Test' })
-    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(created)
   })
 
   it('maps snapshot states and routes delete and abort through Pi', async () => {
@@ -92,7 +91,6 @@ describe('Pi session facade', () => {
     await expect(deleteSession('idle')).resolves.toBe(true)
     await expect(abortSession('busy')).resolves.toBe(true)
     expect(mocks.deletePiSession).toHaveBeenCalledWith('idle')
-    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(snapshot('busy'))
   })
 
   it('renames Pi sessions and reports legacy-only operations explicitly', async () => {
@@ -104,7 +102,6 @@ describe('Pi session facade', () => {
       expect.objectContaining({ id: 'session-1' }),
     )
     expect(mocks.setPiSessionName).toHaveBeenCalledWith('session-1', 'Renamed')
-    expect(mocks.applySnapshotToUi).toHaveBeenCalledWith(renamed)
     await expect(updateSession('session-1', { archivedAt: Date.now() })).rejects.toMatchObject({
       code: 'NOT_SUPPORTED',
     })

@@ -8,7 +8,7 @@ const ROW_Y_ASSISTANT_AFTER_USER = 'pt-3 pb-1'
 const ROW_Y_ASSISTANT_BEFORE_USER = 'pt-1 pb-3'
 
 function isAssistantMessageItem(item: ProcessTimelineItem | undefined): boolean {
-  return item?.kind === 'message' && item.message.info.role === 'assistant'
+  return item?.kind === 'message' && item.item.kind === 'assistant_message'
 }
 
 /**
@@ -20,7 +20,7 @@ export function getTimelineRowYClass(
   prev?: ProcessTimelineItem,
   next?: ProcessTimelineItem,
 ): string {
-  if (item.kind === 'process-shell' || item.message.info.role === 'user') return ROW_Y_TURN
+  if (item.kind === 'process-shell' || item.item.kind === 'user_message') return ROW_Y_TURN
 
   const prevAssistant = isAssistantMessageItem(prev)
   const nextAssistant = isAssistantMessageItem(next)
