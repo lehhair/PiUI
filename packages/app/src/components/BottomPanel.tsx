@@ -18,6 +18,7 @@ const SessionChangesPanel = lazy(() =>
 const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ default: module.FileExplorer })))
 const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
+const ExtensionsPanel = lazy(() => import('./ExtensionsPanel').then(module => ({ default: module.ExtensionsPanel })))
 const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
 
 interface BottomPanelProps {
@@ -197,6 +198,12 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
           {ptyEnabled && activeTab.type === 'terminal' ? (
             <Suspense fallback={<PanelFallback />}>
               <TerminalContent activeTab={activeTab} directory={directory} />
+            </Suspense>
+          ) : null}
+
+          {activeTab.type === 'extensions' ? (
+            <Suspense fallback={<PanelFallback />}>
+              <ExtensionsPanel sessionId={sessionId} />
             </Suspense>
           ) : null}
 
