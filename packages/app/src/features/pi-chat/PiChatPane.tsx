@@ -12,14 +12,15 @@ import {
   loadMorePiBranchEntries,
   loadPiModels,
   loadPiSessionData,
-  sendPiFollowUp,
-  sendPiPrompt,
-  sendPiSteer,
+  openPiSession,
+  sendPiUserMessage,
   setPiModel,
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
+import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore, piSessionStateStore } from '../../pi/state/index.js'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { useDirectory } from '../../contexts/useDirectory'
 import { recordModelUsage } from '../../utils/modelUtils'
 import type { PiBranchPage } from '../../pi/domain/index.js'
 
@@ -214,6 +215,7 @@ export function PiChatPane({
         const directory = currentDirectoryRef.current
         if (!directory) return false
         const opened = await openPiSession(directory)
+        if (!opened.sessionId) return false
         targetSessionId = opened.sessionId
         piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
@@ -225,13 +227,12 @@ export function PiChatPane({
     [sessionId, isStreaming],
   )
 
-  if (!sessionId) {
-    return (
-      <div className="flex h-full items-center justify-center text-[length:var(--fs-sm)] text-text-500">
-        Select a session to start chatting
-      </div>
-    )
-  }
+  // Image attachment capability from the current model's native input
+  // kinds; home (unknown default model) optimistically allows when any
+  // catalog model supports images — backend validates on send.
+  const imageCapable = currentModelObj
+    ? currentModelObj.input.includes('image')
+    : models.some(model => model.input.includes('image'))
 
   return (
     <div className="flex-1 relative overflow-hidden flex flex-col min-h-0 h-full">
@@ -271,7 +272,7 @@ export function PiChatPane({
             allowStreamingLayoutAnimation
             loadState="loaded"
             hasMoreHistory={Boolean(branch?.hasMore)}
-            onLoadMore={() => loadMorePiBranchEntries(sessionId)}
+            onLoadMore={() => (sessionId ? loadMorePiBranchEntries(sessionId) : undefined)}
             bottomPadding={inputBoxHeight}
             onVisibleMessageIdsChange={handleVisibleIdsChange}
             onAtBottomChange={setIsAtBottom}
@@ -291,7 +292,8 @@ export function PiChatPane({
             paneId={paneId}
             sessionId={sessionId}
             onSend={handleSend}
-            onAbort={() => void abortPiOperation(sessionId).catch(() => undefined)}
+            onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
+            fileCapabilities={{ image: imageCapable, pdf: false, audio: false, video: false }}
             isStreaming={isStreaming}
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}
