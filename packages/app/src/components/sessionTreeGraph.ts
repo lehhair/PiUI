@@ -1,8 +1,11 @@
 import dagre from '@dagrejs/dagre'
 import { MarkerType, type Edge, type Node } from '@xyflow/react'
-import type { PiNativeJsonValueV1 } from '@piui/protocol'
+import type { JsonObject, JsonValue } from '@piui/protocol'
 
-export type NativeEntry = { [key: string]: PiNativeJsonValueV1 }
+// Tree entries arrive as SDK SessionEntry/SessionTreeNode; the graph renders
+// any entry shape (including future unknown types) so it reads fields
+// duck-typed over JSON records.
+export type NativeEntry = JsonObject
 export type NativeTreeNode = NativeEntry & {
   entry: NativeEntry
   children: NativeTreeNode[]
@@ -37,11 +40,11 @@ const NODE_WIDTH = 240
 const MESSAGE_HEIGHT = 78
 const EVENT_HEIGHT = 54
 
-function asRecord(value: PiNativeJsonValueV1 | undefined): NativeEntry {
+function asRecord(value: JsonValue | undefined): NativeEntry {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
-function textFromNative(value: PiNativeJsonValueV1 | undefined): string {
+function textFromNative(value: JsonValue | undefined): string {
   if (typeof value === 'string') return value
   if (!Array.isArray(value)) return ''
   let text = ''

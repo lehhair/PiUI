@@ -6,13 +6,16 @@ import type {
   HostRegistrySnapshot,
   CommandRecord,
 } from '@piui/protocol'
-import type { SessionEntry, SessionInfo } from '@earendil-works/pi-coding-agent'
+import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage } from '../domain/index.js'
 import { getApiBase, piFetch } from '../sessionApi.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
-  data: T extends undefined ? null : T
+  data?: T extends undefined ? null : T
+  // Serialized commands are accepted with 202 and carry the command record
+  // instead of data; the result lands later (poll waitHostCommand).
+  command?: CommandRecord
 }
 
 export type PiSessionOpenResult = {
@@ -105,7 +108,7 @@ export async function postPiGlobalCommand<T = JsonValue | undefined>(
     body,
     signal,
   })
-  return response.data
+  return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
 export async function postPiSessionCommand<T = JsonValue | undefined>(
@@ -124,7 +127,7 @@ export async function postPiSessionCommand<T = JsonValue | undefined>(
       signal,
     },
   )
-  return response.data
+  return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
 // Session commands
@@ -162,7 +165,7 @@ export function getPiBranchPage(sessionId: string, params: PiBranchGetParams, si
   return postPiSessionCommand(sessionId, 'branch.get', params, signal)
 }
 
-export function getPiTree(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+export function getPiTree(sessionId: string, signal?: AbortSignal): Promise<SessionTreeNode[]> {
   return postPiSessionCommand(sessionId, 'tree.get', undefined, signal)
 }
 
@@ -238,6 +241,73 @@ export function forkPiSession(
   signal?: AbortSignal,
 ): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'fork', params as unknown as JsonObject, signal)
+}
+
+export type PiNavigateTreeParams = {
+  entryId: string
+  summarize?: boolean
+  customInstructions?: string
+  replaceInstructions?: boolean
+  label?: string
+}
+
+export type PiNavigateTreeResult = {
+  editorText?: string | null
+  cancelled?: boolean
+  aborted?: boolean
+}
+
+export function navigatePiTree(sessionId: string, params: PiNavigateTreeParams, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'navigateTree', params as unknown as JsonObject, signal)
+}
+
+export function clonePiSession(sessionId: string, entryId?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'clone', entryId ? { entryId } : undefined, signal)
+}
+
+export function importPiSession(sessionId: string, inputPath: string, cwdOverride?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'importSession', { inputPath, cwdOverride }, signal)
+}
+
+export function setPiLabel(sessionId: string, entryId: string, label?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setLabel', { entryId, label }, signal)
+}
+
+export function setPiActiveTools(sessionId: string, toolNames: string[], signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setActiveTools', { toolNames }, signal)
+}
+
+export function setPiAutoCompaction(sessionId: string, enabled: boolean, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setAutoCompaction', { enabled }, signal)
+}
+
+export function setPiAutoRetry(sessionId: string, enabled: boolean, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'setAutoRetry', { enabled }, signal)
+}
+
+// Immediate runtime commands (200 data responses)
+export function abortPiCompaction(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'abortCompaction', undefined, signal)
+}
+
+export function abortPiBranchSummary(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'abortBranchSummary', undefined, signal)
+}
+
+export function abortPiRetry(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'abortRetry', undefined, signal)
+}
+
+export function clearPiQueue(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'clearQueue', undefined, signal)
+}
+
+export function setPiSteeringMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'setSteeringMode', { mode }, signal)
+}
+
+export function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'setFollowUpMode', { mode }, signal)
 }
 
 /**
