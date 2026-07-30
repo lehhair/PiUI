@@ -138,9 +138,7 @@ export type PiTimelineItem =
   | PiBranchSummaryItem
   | PiSummaryMessageItem
   | PiModelChangeItem
-  | PiThinkingLevelItem
   | PiCustomMessageItem
-  | PiLabelItem
   | PiUnknownItem
 
 export type PiUserMessageItem = {
@@ -220,14 +218,6 @@ export type PiModelChangeItem = {
   modelId: string
 }
 
-export type PiThinkingLevelItem = {
-  kind: 'thinking_level_change'
-  entryId: string
-  timestamp: number
-  rawEntry: SessionEntry
-  thinkingLevel: string
-}
-
 export type PiCustomMessageItem = {
   kind: 'custom_message'
   entryId: string
@@ -237,15 +227,6 @@ export type PiCustomMessageItem = {
   content: string | (TextContent | ImageContent)[]
   display: boolean
   details?: unknown
-}
-
-export type PiLabelItem = {
-  kind: 'label'
-  entryId: string
-  timestamp: number
-  rawEntry: SessionEntry
-  targetId: string
-  label?: string
 }
 
 export type PiUnknownItem = {

@@ -16,11 +16,14 @@ import {
   sendPiPrompt,
   sendPiSteer,
   setPiModel,
+  setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import { piBranchStore, piSessionStateStore } from '../../pi/state/index.js'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { recordModelUsage } from '../../utils/modelUtils'
 import type { PiBranchPage } from '../../pi/domain/index.js'
+
+const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
  * Session id that owns this branch page (from the persisted session header).
@@ -92,6 +95,27 @@ export function PiChatPane({
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
   const selectedModelKey =
     currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : null
+
+  // Thinking level: variants filtered by the current model's support map,
+  // current value from runtime state — the native home for this control.
+  const currentModelObj = useMemo(
+    () => models.find(m => m.provider === currentModel?.provider && m.id === currentModel?.id),
+    [models, currentModel?.provider, currentModel?.id],
+  )
+  const thinkingLevels = useMemo(() => {
+    if (!currentModelObj?.reasoning) return ['off']
+    const map = currentModelObj.thinkingLevelMap as Record<string, string | null> | undefined
+    return PI_THINKING_LEVELS.filter(level => !map || map[level] !== null)
+  }, [currentModelObj])
+  const thinkingLevel = typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined
+
+  const handleVariantChange = useCallback(
+    (variant: string | undefined) => {
+      if (!sessionId || !variant) return
+      void setPiThinkingLevel(sessionId, variant).catch(() => undefined)
+    },
+    [sessionId],
+  )
 
   const handleModelChange = useCallback(
     (_modelKey: string, model: Model<any>) => {
@@ -233,6 +257,9 @@ export function PiChatPane({
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}
             onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
+            variants={thinkingLevels}
+            selectedVariant={thinkingLevel}
+            onVariantChange={handleVariantChange}
           />
         </div>
       </div>

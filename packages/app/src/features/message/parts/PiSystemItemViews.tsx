@@ -5,10 +5,8 @@ import type {
   PiBranchSummaryItem,
   PiCompactionItem,
   PiCustomMessageItem,
-  PiLabelItem,
   PiModelChangeItem,
   PiSummaryMessageItem,
-  PiThinkingLevelItem,
   PiTimelineItem,
   PiToolExecution,
   PiUnknownItem,
@@ -43,12 +41,8 @@ export const PiSystemItemView = memo(function PiSystemItemView({ item }: { item:
       return <SummaryMessageItemView item={item} />
     case 'model_change':
       return <ModelChangeItemView item={item} />
-    case 'thinking_level_change':
-      return <ThinkingLevelItemView item={item} />
     case 'custom_message':
       return item.display ? <CustomMessageItemView item={item} /> : null
-    case 'label':
-      return item.label ? <LabelItemView item={item} /> : null
     case 'unknown':
       return <UnknownItemView item={item} />
     default:
@@ -154,11 +148,6 @@ function ModelChangeItemView({ item }: { item: PiModelChangeItem }) {
   return <DividerRow partKey={item.entryId} label={t('system.modelChanged', { model: `${item.provider}/${item.modelId}` })} />
 }
 
-function ThinkingLevelItemView({ item }: { item: PiThinkingLevelItem }) {
-  const { t } = useTranslation('message')
-  return <DividerRow partKey={item.entryId} label={t('system.thinkingLevel', { level: item.thinkingLevel })} />
-}
-
 function CustomMessageItemView({ item }: { item: PiCustomMessageItem }) {
   const text = typeof item.content === 'string'
     ? item.content
@@ -168,10 +157,6 @@ function CustomMessageItemView({ item }: { item: PiCustomMessageItem }) {
         .join('\n')
   if (!text.trim()) return null
   return <MarkdownRenderer content={text} />
-}
-
-function LabelItemView({ item }: { item: PiLabelItem }) {
-  return <DividerRow partKey={item.entryId} label={item.label ?? ''} />
 }
 
 function UnknownItemView({ item }: { item: PiUnknownItem }) {
