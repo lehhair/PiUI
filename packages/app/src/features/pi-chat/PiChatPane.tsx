@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Model } from '@earendil-works/pi-ai'
-import { ChatArea, Header, InputBox, type ChatAreaHandle } from '../chat/index.js'
+import { ChatArea, Header, InputBox, type ChatAreaHandle, type InputBoxHandle } from '../chat/index.js'
 import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
 import { PaneHeader } from '../chat/PaneHeader.js'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from '../chat/PaneDropOverlay.js'
@@ -23,11 +23,13 @@ import {
   loadPiSessionData,
   openPiSession,
   sendPiUserMessage,
+  setPiExtensionEditorState,
   setPiModel,
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
+import { extensionUiStore } from '../../pi/extensionUiStore'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
@@ -284,6 +286,41 @@ export function PiChatPane({
     })
     ro.observe(el)
     return () => ro.disconnect()
+  }, [])
+
+  // ============================================
+  // Extension editor bridge: extension set/paste -> composer; composer
+  // text -> extension editor state (debounced)
+  // ============================================
+  const inputBoxRef = useRef<InputBoxHandle>(null)
+  const extensionState = useSyncExternalStore(
+    extensionUiStore.subscribe,
+    () => (sessionId ? extensionUiStore.getSnapshot().sessions[sessionId]?.state : undefined),
+    () => undefined,
+  )
+  const lastEditorTextRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!extensionState || extensionState.editorText === lastEditorTextRef.current) return
+    lastEditorTextRef.current = extensionState.editorText
+    inputBoxRef.current?.setEditorText(extensionState.editorText)
+  }, [extensionState])
+
+  const editorSyncTimerRef = useRef<number | null>(null)
+  const handleTextChange = useCallback(
+    (text: string) => {
+      if (!sessionId) return
+      if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
+      editorSyncTimerRef.current = window.setTimeout(() => {
+        editorSyncTimerRef.current = null
+        void setPiExtensionEditorState(sessionId, text).catch(() => undefined)
+      }, 500)
+    },
+    [sessionId],
+  )
+  useEffect(() => {
+    return () => {
+      if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
+    }
   }, [])
 
   const handleSend = useCallback(
@@ -547,9 +584,11 @@ export function PiChatPane({
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
         <div className="pointer-events-auto">
           <InputBox
+            ref={inputBoxRef}
             paneId={paneId}
             sessionId={sessionId}
             onSend={handleSend}
+            onTextChange={handleTextChange}
             onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
             onNewChat={onNewChat}
             isStreaming={isStreaming}

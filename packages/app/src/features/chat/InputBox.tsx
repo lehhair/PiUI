@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -128,6 +128,7 @@ export interface InputBoxProps {
   ) => Promise<boolean> | boolean
   onAbort?: () => void
   onCommand?: (command: string) => Promise<boolean> | boolean // 斜杠命令回调，接收完整命令字符串如 "/help"
+  onTextChange?: (text: string) => void // 输入框文本变化（扩展 editor 状态同步）
   onNewChat?: () => void // 新建对话回调
   disabled?: boolean
   isStreaming?: boolean
@@ -170,7 +171,12 @@ export interface InputBoxProps {
 // InputBox Component
 // ============================================
 
-function InputBoxComponent({
+export interface InputBoxHandle {
+  /** Replace the composer text (extension editor set/paste commands) */
+  setEditorText: (text: string) => void
+}
+
+const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function InputBoxComponent({
   paneId,
   onSend,
   onAbort,
@@ -207,7 +213,9 @@ function InputBoxComponent({
   onScrollToBottom,
   collapsedPermission,
   collapsedQuestion,
-}: InputBoxProps) {
+  /** Composer text change callback (extension editor state sync) */
+  onTextChange,
+}: InputBoxProps, ref: React.Ref<InputBoxHandle>) {
   const { t } = useTranslation('chat')
   // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
   const fileCaps: FileCapabilities = useMemo(
@@ -227,6 +235,16 @@ function InputBoxComponent({
 
   // 文本状态
   const [text, setText] = useState('')
+
+  // 扩展 editor 命令接口（set/paste 已由 store 合并为全量文本）
+  useImperativeHandle(ref, () => ({
+    setEditorText: (next: string) => setText(next),
+  }), [])
+
+  // 文本变化同步（扩展 editor 状态回传）
+  useEffect(() => {
+    onTextChange?.(text)
+  }, [text, onTextChange])
   // 附件状态（图片、文件、文件夹、agent）
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -1451,7 +1469,7 @@ function InputBoxComponent({
       </div>
     </div>
   )
-}
+})
 
 // ============================================
 // Export with memo for performance optimization
