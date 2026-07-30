@@ -178,6 +178,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     ),
   "tree.get": async (ctx) => ctx.requireRuntime().getTree(),
   "registry.get": async (ctx) => ctx.requireRuntime().getRegistry(),
+  "skills.list": async (ctx) => ctx.requireRuntime().listSkills(),
   "attachment.get": async (ctx, p) =>
     ctx.requireRuntime().getAttachment(P.reqString(p, "entryId"), P.reqNumber(p, "blockIndex")),
 
@@ -397,6 +398,7 @@ const COMMAND_REGISTRY = [
   registerPiCapability({ name: "branch.get", scope: "session", description: "Read a page of the active Pi branch", paramsSchema: pageParams(), queue: "immediate", idempotent: true, handler: command("branch.get") }),
   registerPiCapability({ name: "tree.get", scope: "session", description: "Read the Pi session tree", queue: "immediate", idempotent: true, handler: command("tree.get") }),
   registerPiCapability({ name: "registry.get", scope: "session", description: "Read runtime tools, commands, extensions, and handlers", queue: "immediate", idempotent: true, handler: command("registry.get") }),
+  registerPiCapability({ name: "skills.list", scope: "session", description: "List loaded Pi skills", queue: "immediate", idempotent: true, handler: command("skills.list") }),
   registerPiCapability({ name: "attachment.get", scope: "session", description: "Read an attachment from a Pi entry", paramsSchema: objectSchema({ entryId: STRING, blockIndex: { type: "integer", minimum: 0 } }, ["entryId", "blockIndex"]), queue: "immediate", idempotent: true, handler: command("attachment.get") }),
   registerPiCapability({ name: "session.list", scope: "global", description: "List Pi sessions for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true, handler: command("session.list") }),
   registerPiCapability({ name: "session.listAll", scope: "global", description: "List all Pi sessions", queue: "immediate", idempotent: true, handler: command("session.listAll") }),

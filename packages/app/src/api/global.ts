@@ -1,5 +1,5 @@
 import { UnsupportedPiCapabilityError } from './errors'
-import { isPiServerUp } from '../pi/sessionApi'
+import { isPiServerUp } from '../pi/httpClient'
 
 export interface HealthInfo {
   healthy: boolean

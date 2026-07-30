@@ -1,4 +1,3 @@
-import type { SessionSnapshotV1 } from '@piui/protocol'
 
 export interface UiSession {
   id: string
@@ -19,7 +18,7 @@ export interface UiSession {
 export interface PiSessionSummary {
   id: string
   directory: string
-  state?: SessionSnapshotV1['session']['state']
+  state?: 'running' | 'idle' | 'compacting' | 'retrying'
   title: string
   createdAt: string
   updatedAt: string

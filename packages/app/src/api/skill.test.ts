@@ -3,7 +3,7 @@ import { getSkills } from './skill'
 
 const listSessionSkills = vi.hoisted(() => vi.fn())
 
-vi.mock('../pi/sessionApi', () => ({ listSessionSkills }))
+vi.mock('../pi/transport/index.js', () => ({ getPiSkills: listSessionSkills }))
 
 describe('Pi skill facade', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -14,16 +14,14 @@ describe('Pi skill facade', () => {
   })
 
   it('maps skills from the active Pi session', async () => {
-    listSessionSkills.mockResolvedValue({
-      skills: [{
-        name: 'review',
-        description: 'Review code',
-        filePath: '/skills/review/SKILL.md',
-        baseDir: '/skills/review',
-        sourceInfo: { origin: 'top-level' },
-        disableModelInvocation: false,
-      }],
-    })
+    listSessionSkills.mockResolvedValue([{
+      name: 'review',
+      description: 'Review code',
+      filePath: '/skills/review/SKILL.md',
+      baseDir: '/skills/review',
+      sourceInfo: { origin: 'top-level' },
+      disableModelInvocation: false,
+    }])
 
     await expect(getSkills('session-1')).resolves.toEqual([
       {

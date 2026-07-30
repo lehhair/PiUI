@@ -1,4 +1,4 @@
-import { getAuthHeader } from './http'
+import { makeBasicAuthHeader, serverStore } from '../store/serverStore'
 import { getPtyConnectUrl } from './pty'
 
 /** Unified bridge event from Rust */
@@ -38,7 +38,8 @@ export async function connectTauriPty({
 }: ConnectTauriPtyParams): Promise<TauriPtyConnection> {
   const { invoke, Channel } = await import('@tauri-apps/api/core')
   const url = getPtyConnectUrl(ptyId, directory, { includeAuthInUrl: false, cursor })
-  const authHeader = getAuthHeader()['Authorization'] || null
+  const activeAuth = serverStore.getActiveAuth()
+  const authHeader = activeAuth?.password ? makeBasicAuthHeader(activeAuth) : null
   const onEvent = new Channel<BridgeEvent>()
   let closed = false
 

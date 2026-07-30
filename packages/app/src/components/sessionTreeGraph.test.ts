@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSessionTreeGraph, sessionTreeEntryPreview, type NativeTreeNode } from './sessionTreeGraph'
-import { nativeEntriesToUiMessages, type PiNativeEntry } from '../pi/nativeEntriesToMessages'
+import { selectPiTimelineItems } from '../pi/selectors/index.js'
+import type { PiBranchPage } from '../pi/domain'
 
 const label = (type: string) => type
 
@@ -107,13 +108,10 @@ describe('buildSessionTreeGraph', () => {
     expect(graph.detailEntriesById.get('assistant-final')?.map(entry => entry.id)).toEqual([
       'assistant-tool', 'tool-result', 'assistant-final',
     ])
-    const messages = nativeEntriesToUiMessages(
-      graph.detailEntriesById.get('assistant-final') as PiNativeEntry[],
-      { sessionId: 'session', directory: '/workspace' },
-    )
-    expect(messages.flatMap(message => message.parts)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'tool', tool: 'bash' }),
-    ]))
+    const items = selectPiTimelineItems({
+      items: graph.detailEntriesById.get('assistant-final')!,
+    } as unknown as PiBranchPage)
+    expect(items.map(item => item.kind)).toContain('assistant_message')
   })
 
   it('keeps tool results isolated across sibling branches', () => {

@@ -1,45 +1,67 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { messageStore } from '../store/messageStore'
+import type { JsonObject, JsonValue } from '@piui/protocol'
 import { paneLayoutStore } from '../store/paneLayoutStore'
-import { nativeSessionStore } from '../pi/nativeSessionStore'
-import { computeSessionStats, isSameSessionStats } from './sessionStatsCompute'
+import { piSessionStateStore } from '../pi/state/index.js'
+import { isSameSessionStats } from './sessionStatsCompute'
 import type { SessionStats } from './sessionStatsTypes'
 
 export type { SessionStats } from './sessionStatsTypes'
 export { formatTokens, formatCost } from './sessionStatsUtils'
 
-/** 流式时 footer 统计最多每 200ms 推一次；结束/非流式立即更新 */
-const STREAMING_STATS_INTERVAL_MS = 200
+function record(value: JsonValue | undefined): JsonObject {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function num(value: JsonValue | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+const EMPTY_STATS: SessionStats = {
+  inputTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  totalCost: 0,
+  contextUsed: 0,
+  contextLimit: 200000,
+  contextPercent: 0,
+  contextEstimated: true,
+}
 
 /**
- * 当前 focused session 的统计。
- * 直接订 messageStore，流式期间节流通知，避免 footer 每 token 重渲。
+ * 当前 focused session 的统计，来自原生 state.get 的
+ * sessionStats/contextUsage（SDK getSessionStats/getContextUsage）。
  */
 export function useSessionStats(contextLimit: number = 200000): SessionStats {
   const cacheRef = useRef<SessionStats | null>(null)
 
   const getSnapshot = useCallback((): SessionStats => {
     const sessionId = paneLayoutStore.getFocusedSessionId()
-    const messages = messageStore.getVisibleMessages(sessionId)
-    const fallback = computeSessionStats(messages, contextLimit)
-    const runtime = nativeSessionStore.getSnapshot(sessionId)?.runtime
-    const authoritative = runtime?.sessionStats
-    const usage = runtime?.contextUsage
-    const contextUsed = usage?.contextTokens ?? fallback.contextUsed
-    const resolvedContextLimit = usage?.contextWindow ?? contextLimit
-    const next = authoritative ? {
-      inputTokens: authoritative.tokens.input,
-      outputTokens: authoritative.tokens.output,
+    const state = sessionId ? piSessionStateStore.getState(sessionId) : null
+    if (!state) return EMPTY_STATS
+
+    const stats = record(state.sessionStats)
+    const tokens = record(stats.tokens as JsonValue)
+    const usage = record(state.contextUsage)
+
+    const contextUsed = num(usage.tokens) ?? 0
+    const resolvedContextLimit = num(usage.contextWindow) ?? contextLimit
+    const percent = num(usage.percent)
+    const next: SessionStats = {
+      inputTokens: num(tokens.input) ?? 0,
+      outputTokens: num(tokens.output) ?? 0,
       reasoningTokens: 0,
-      cacheRead: authoritative.tokens.cacheRead,
-      cacheWrite: authoritative.tokens.cacheWrite,
-      totalTokens: authoritative.tokens.total,
-      totalCost: authoritative.cost,
+      cacheRead: num(tokens.cacheRead) ?? 0,
+      cacheWrite: num(tokens.cacheWrite) ?? 0,
+      totalTokens: num(tokens.total) ?? 0,
+      totalCost: num(stats.cost as JsonValue) ?? 0,
       contextUsed,
       contextLimit: resolvedContextLimit,
-      contextPercent: usage?.percent ?? (resolvedContextLimit > 0 ? (contextUsed / resolvedContextLimit) * 100 : 0),
-      contextEstimated: usage?.contextTokens == null,
-    } : fallback
+      contextPercent: percent ?? (resolvedContextLimit > 0 ? (contextUsed / resolvedContextLimit) * 100 : 0),
+      contextEstimated: usage.tokens == null,
+    }
     const prev = cacheRef.current
     if (prev && isSameSessionStats(prev, next)) return prev
     cacheRef.current = next
@@ -47,37 +69,11 @@ export function useSessionStats(contextLimit: number = 200000): SessionStats {
   }, [contextLimit])
 
   const subscribe = useCallback((onStoreChange: () => void) => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-
-    const notifyNow = () => {
-      if (timer) {
-        clearTimeout(timer)
-        timer = null
-      }
-      onStoreChange()
-    }
-
-    const schedule = () => {
-      const sessionId = paneLayoutStore.getFocusedSessionId()
-      if (!messageStore.getIsStreaming(sessionId)) {
-        notifyNow()
-        return
-      }
-      if (timer) return
-      timer = setTimeout(() => {
-        timer = null
-        onStoreChange()
-      }, STREAMING_STATS_INTERVAL_MS)
-    }
-
-    const unsubMessage = messageStore.subscribe(schedule)
-    const unsubPane = paneLayoutStore.subscribe(schedule)
-    const unsubProjection = nativeSessionStore.subscribe(schedule)
+    const unsubState = piSessionStateStore.subscribe(onStoreChange)
+    const unsubPane = paneLayoutStore.subscribe(onStoreChange)
     return () => {
-      unsubMessage()
+      unsubState()
       unsubPane()
-      unsubProjection()
-      if (timer) clearTimeout(timer)
     }
   }, [])
 

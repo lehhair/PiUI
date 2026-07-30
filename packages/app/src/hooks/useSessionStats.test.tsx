@@ -1,7 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Message, TextPart, UserMessageInfo } from '../types/message'
-import { messageStore } from '../store/messageStore'
+import { piSessionStateStore } from '../pi/state/index.js'
 import { useSessionStats } from './useSessionStats'
 
 vi.mock('../store/paneLayoutStore', () => ({
@@ -11,123 +10,70 @@ vi.mock('../store/paneLayoutStore', () => ({
   },
 }))
 
-function createUserMessage(id: string, created: number): UserMessageInfo {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'user',
-    time: { created },
-    agent: 'build',
-    model: { providerID: 'provider-1', modelID: 'model-1' },
-  }
-}
-
-function createTextPart(
-  id: string,
-  messageID: string,
-  text: string,
-): TextPart {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'text',
-    text,
-  }
-}
-
-function createMessageWithParts(id: string, text: string, created: number): Message {
-  return {
-    info: createUserMessage(id, created),
-    parts: [createTextPart(`part-${id}`, id, text)],
-  }
-}
-
 describe('useSessionStats', () => {
   beforeEach(() => {
-    messageStore.clearAll()
+    piSessionStateStore.clearAll()
   })
 
-  it('returns estimated context after a compaction turn', async () => {
-    messageStore.setUiMessages('session-1', [
-      {
-        info: {
-          id: 'user-1',
-          role: 'user',
-          time: { created: 1 },
-          sessionID: 'session-1',
-          agent: 'build',
-          model: { providerID: 'p', modelID: 'm' },
-        },
-        parts: [{ type: 'text', text: 'hello world', id: 'p1', sessionID: 's1', messageID: 'user-1' }],
+  it('reads authoritative stats and context usage from the native state', () => {
+    piSessionStateStore.setState('session-1', {
+      sessionStats: {
+        tokens: { input: 12000, output: 800, cacheRead: 100, cacheWrite: 50, total: 12950 },
+        cost: 0.42,
       },
-      {
-        info: {
-          id: 'assistant-1',
-          role: 'assistant',
-          sessionID: 'session-1',
-          time: { created: 2 },
-          parentID: 'user-1',
-          modelID: 'model',
-          providerID: 'provider',
-          mode: 'chat',
-          agent: 'default',
-          path: { cwd: '/', root: '/' },
-          cost: 0,
-          tokens: { input: 12000, output: 800, reasoning: 200, cache: { read: 0, write: 0 } },
-        },
-        parts: [{ type: 'text', text: 'long reply', id: 'p2', sessionID: 's1', messageID: 'assistant-1' }],
-      },
-      {
-        info: {
-          id: 'user-2',
-          role: 'user',
-          time: { created: 3 },
-          sessionID: 'session-1',
-          agent: 'build',
-          model: { providerID: 'p', modelID: 'm' },
-        },
-        parts: [{ type: 'compaction', id: 'p3', sessionID: 's1', messageID: 'user-2', auto: false }],
-      },
-      {
-        info: {
-          id: 'assistant-2',
-          role: 'assistant',
-          sessionID: 'session-1',
-          time: { created: 4 },
-          parentID: 'user-2',
-          modelID: 'model',
-          providerID: 'provider',
-          mode: 'compaction',
-          agent: 'compaction',
-          path: { cwd: '/', root: '/' },
-          cost: 0,
-          summary: true,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        },
-        parts: [{ type: 'text', text: 'short summary', id: 'p4', sessionID: 's1', messageID: 'assistant-2' }],
-      },
-    ])
+      contextUsage: { tokens: 64000, contextWindow: 200000, percent: 32 },
+    })
 
-    await act(async () => {
-      await new Promise(resolve => requestAnimationFrame(resolve))
+    const { result } = renderHook(() => useSessionStats(200000))
+
+    expect(result.current).toMatchObject({
+      inputTokens: 12000,
+      outputTokens: 800,
+      cacheRead: 100,
+      cacheWrite: 50,
+      totalTokens: 12950,
+      totalCost: 0.42,
+      contextUsed: 64000,
+      contextLimit: 200000,
+      contextPercent: 32,
+      contextEstimated: false,
+    })
+  })
+
+  it('marks context as estimated when the native tokens are unknown', () => {
+    piSessionStateStore.setState('session-1', {
+      sessionStats: { tokens: { input: 10, output: 5, total: 15 }, cost: 0 },
+      contextUsage: { tokens: null, contextWindow: 128000, percent: null },
     })
 
     const { result } = renderHook(() => useSessionStats(200000))
 
     expect(result.current.contextEstimated).toBe(true)
-    expect(result.current.contextUsed).toBeLessThan(12000)
-    expect(result.current.contextUsed).toBeGreaterThan(0)
+    expect(result.current.contextLimit).toBe(128000)
+    expect(result.current.contextPercent).toBe(0)
+  })
+
+  it('returns empty stats without a loaded session state', () => {
+    const { result } = renderHook(() => useSessionStats(200000))
+
+    expect(result.current.totalTokens).toBe(0)
+    expect(result.current.contextEstimated).toBe(true)
   })
 
   it('reuses the same stats object when numeric fields do not change', async () => {
-    messageStore.setUiMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
-    await act(async () => {
-      await new Promise(resolve => requestAnimationFrame(resolve))
+    piSessionStateStore.setState('session-1', {
+      sessionStats: { tokens: { input: 1, output: 2, total: 3 }, cost: 0 },
+      contextUsage: { tokens: 10, contextWindow: 100, percent: 10 },
     })
 
     const { result, rerender } = renderHook(() => useSessionStats(200000))
     const first = result.current
+    await act(async () => {
+      piSessionStateStore.setState('session-1', {
+        sessionStats: { tokens: { input: 1, output: 2, total: 3 }, cost: 0 },
+        contextUsage: { tokens: 10, contextWindow: 100, percent: 10 },
+      })
+    })
     rerender()
     expect(result.current).toBe(first)
   })

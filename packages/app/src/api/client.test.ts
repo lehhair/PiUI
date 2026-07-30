@@ -1,15 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getActiveModels, getCurrentProject, getDefaultModels, getPath, initGitProject } from './client'
+import { getCurrentProject, getProjects } from './client'
 
 const mocks = vi.hoisted(() => ({
   resolveWorkspacePath: vi.fn(),
   getHostGitInfo: vi.fn(),
-  listPiModels: vi.fn(),
 }))
 
-vi.mock('../pi/sessionApi', () => ({
-  listPiModels: mocks.listPiModels,
-}))
 vi.mock('../pi/transport/index.js', () => ({
   getHostGitInfo: mocks.getHostGitInfo,
 }))
@@ -17,7 +13,7 @@ vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: mocks.resolveWorkspacePath,
 }))
 
-describe('Pi project and model adapters', () => {
+describe('Pi project adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.resolveWorkspacePath.mockResolvedValue('C:/work/PiUI')
@@ -35,30 +31,27 @@ describe('Pi project and model adapters', () => {
     expect(mocks.getHostGitInfo).toHaveBeenCalledWith('C:/work/PiUI')
   })
 
-  it('maps only models reported by the Pi server', async () => {
-    mocks.listPiModels.mockResolvedValue({
-      models: [{
-        id: 'model-1',
-        name: 'Model One',
-        provider: 'provider-1',
-        api: 'test-api',
-        baseUrl: 'https://example.test',
-        contextWindow: 100,
-        maxTokens: 20,
-        reasoning: true,
-        input: ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      }],
-    })
+  it('omits vcs outside a repository and tolerates git failures', async () => {
+    mocks.getHostGitInfo.mockRejectedValue(new Error('not a repo'))
 
-    await expect(getActiveModels()).resolves.toEqual([
-      expect.objectContaining({ id: 'model-1', providerId: 'provider-1', variants: ['off', 'minimal', 'low', 'medium', 'high'] }),
-    ])
+    await expect(getCurrentProject('C:/work/PiUI')).resolves.toEqual({
+      id: 'C:/work/PiUI',
+      worktree: 'C:/work/PiUI',
+      name: 'PiUI',
+      vcs: undefined,
+    })
   })
 
-  it('rejects unsupported host path and Git initialization operations explicitly', async () => {
-    await expect(getDefaultModels()).rejects.toThrow('PiUI does not expose provider default models')
-    await expect(getPath()).rejects.toThrow('PiUI does not expose host path metadata')
-    await expect(initGitProject('/workspace')).rejects.toThrow('PiUI does not support Git repository initialization yet')
+  it('lists the selected directory as the only project', async () => {
+    mocks.getHostGitInfo.mockResolvedValue({ root: false })
+
+    await expect(getProjects('C:/work/PiUI')).resolves.toHaveLength(1)
+    await expect(getProjects()).resolves.toEqual([])
+  })
+
+  it('fails when no workspace is available', async () => {
+    mocks.resolveWorkspacePath.mockResolvedValue(null)
+
+    await expect(getCurrentProject()).rejects.toThrow('No PiUI workspace is available')
   })
 })

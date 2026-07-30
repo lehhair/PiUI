@@ -4,7 +4,7 @@ import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
 import { useDisclosureScrollLock } from '../../../../hooks'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
-import { abortSession } from '../../../../api'
+import { abortPiOperation } from '../../../../pi/controllers/index.js'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
 import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
@@ -21,7 +21,6 @@ import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 
 export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
-  const { currentDirectory } = useSessionNavigation()
   const isRunning = !execution.result
   const isCompleted = Boolean(execution.result && !execution.result.isError)
   const isError = Boolean(execution.result?.isError)
@@ -66,9 +65,9 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
     (e: React.MouseEvent) => {
       e.stopPropagation()
       if (!targetSessionId) return
-      abortSession(targetSessionId, currentDirectory || '')
+      void abortPiOperation(targetSessionId).catch(() => undefined)
     },
-    [targetSessionId, currentDirectory],
+    [targetSessionId],
   )
 
   // 运行时自动展开

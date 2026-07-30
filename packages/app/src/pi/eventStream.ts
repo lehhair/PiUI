@@ -9,7 +9,7 @@ import {
 } from '@piui/protocol'
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
-import { getApiBase } from './sessionApi.js'
+import { getApiBase } from './httpClient.js'
 import { piBranchStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'

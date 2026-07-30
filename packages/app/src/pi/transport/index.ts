@@ -20,7 +20,7 @@ import type {
 } from '@piui/protocol'
 import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
-import { getApiBase, piFetch } from '../sessionApi.js'
+import { getApiBase, piFetch } from '../httpClient.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
@@ -358,6 +358,10 @@ export function getPiTree(sessionId: string, signal?: AbortSignal): Promise<Sess
 
 export function getPiSessionRegistry(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'registry.get', undefined, signal)
+}
+
+export function getPiSkills(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'skills.list', undefined, signal)
 }
 
 // Action commands

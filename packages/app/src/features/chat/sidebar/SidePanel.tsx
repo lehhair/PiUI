@@ -31,13 +31,13 @@ import { notificationStore, useNotifications, useUnreadNotificationCount } from 
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
 import type { NotificationEntry } from '../../../store/notificationStore'
 import {
-  updateSession,
   subscribeToConnectionState,
   type ConnectionInfo,
 } from '../../../api'
 import type { UiSession } from '../../../types/session'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
+import { renamePiSession } from '../../../pi/controllers/index.js'
 import { usePiCapabilities } from '../../../pi/capabilities'
 
 // 侧边栏设计模式：
@@ -656,7 +656,7 @@ export function SidePanel({
   const handleRename = useCallback(
     async (sessionId: string, newTitle: string) => {
       try {
-        await updateSession(sessionId, { title: newTitle }, currentDirectory)
+        await renamePiSession(sessionId, newTitle)
         pinnedSessionsStore.update(sessionId, { title: newTitle })
         refresh()
       } catch (e) {
@@ -680,7 +680,7 @@ export function SidePanel({
   const handleRenameFolderSession = useCallback(
     async (session: UiSession, newTitle: string) => {
       try {
-        await updateSession(session.id, { title: newTitle }, session.directory)
+        await renamePiSession(session.id, newTitle)
         pinnedSessionsStore.update(session.id, { title: newTitle })
         if (!currentDirectory || isSameDirectory(currentDirectory, session.directory)) {
           await refresh()

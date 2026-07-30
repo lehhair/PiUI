@@ -22,7 +22,6 @@ import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { layoutStore, useLayoutStore } from '../../store/layoutStore'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
-import { useDirectory } from '../../contexts/useDirectory'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport, canUseSplitPane } from './chatViewport'
 import { usePiCapabilities } from '../../pi/capabilities'
@@ -65,7 +64,6 @@ export function PaneHeader({
   const viewport = useChatViewport()
   const canRename = usePiCapabilities().sessionRename
   const sessionTitle = usePiSessionTitle(sessionId)
-  const { currentDirectory } = useDirectory()
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
