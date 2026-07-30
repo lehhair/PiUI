@@ -84,26 +84,9 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
           rawEntry: entry,
           message,
         })
-      } else if (message.role === 'custom') {
-        items.push({
-          kind: 'custom_message',
-          entryId: entry.id,
-          timestamp,
-          rawEntry: entry,
-          customType: message.customType,
-          content: message.content,
-          display: message.display,
-          details: message.details,
-        })
-      } else if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
-        items.push({
-          kind: 'summary_message',
-          entryId: entry.id,
-          timestamp,
-          rawEntry: entry,
-          message,
-        })
       }
+      // role custom is persisted as custom_message entry; summary roles are
+      // runtime projections — neither exists in persisted entries.
     } else if (entry.type === 'compaction') {
       items.push({
         kind: 'compaction',
@@ -140,22 +123,25 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
       entry.type === 'thinking_level_change' ||
       entry.type === 'model_change' ||
       entry.type === 'label' ||
-      entry.type === 'custom'
+      entry.type === 'custom' ||
+      entry.type === 'session_info'
     ) {
       // Not consumed in the conversation flow: model and thinking level
       // live in the header model selector / composer level selector
       // (repeated model_change entries are just noise here), labels are
       // markers on their target entries, plain custom entries are
-      // extension state for reload reconstruction.
+      // extension state for reload reconstruction, session_info is
+      // metadata (name lives in the header/session list).
       continue
     } else {
-      // Unknown entry type, keep as unknown item
+      // Unknown entry type (future SDK additions) — keep visible, never drop
+      const unknown = entry as { id: string; type: string }
       items.push({
         kind: 'unknown',
-        entryId: entry.id,
+        entryId: unknown.id,
         timestamp,
         rawEntry: entry,
-        entryType: entry.type,
+        entryType: unknown.type,
       } as PiUnknownItem)
     }
   }
