@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   PanelRightIcon,
@@ -16,7 +16,7 @@ import { usePiCapabilities } from '../../pi/capabilities'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
 import { useSessionContext } from '../../contexts/useSessionContext'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
-import { usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { usePiSessionInfos, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport } from './chatViewport'
 import type { Model } from '@earendil-works/pi-ai'
@@ -133,8 +133,14 @@ export function Header({
 }: HeaderProps) {
   const { t } = useTranslation('chat')
   const piState = usePiSessionRuntimeState()
+  const sessionInfos = usePiSessionInfos()
   const sessionId = typeof piState?.sessionId === 'string' ? piState.sessionId : null
-  const currentSessionTitle = typeof piState?.sessionName === 'string' ? piState.sessionName : null
+  // Title chain matches the session list: session name, then first message
+  const sessionInfo = useMemo(() => sessionInfos.find(info => info.id === sessionId), [sessionInfos, sessionId])
+  const stateName = typeof piState?.sessionName === 'string' && piState.sessionName.trim() ? piState.sessionName : null
+  const infoName = sessionInfo?.name?.trim() || null
+  const firstMessage = sessionInfo?.firstMessage?.trim() || null
+  const currentSessionTitle = stateName ?? infoName ?? firstMessage
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
   const { refresh } = useSessionContext()
   const { presentation, interaction } = useChatViewport()
