@@ -14,7 +14,10 @@ import { selectPiTimelineItems } from '../../pi/selectors/index.js'
 import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
+  forkPiSession,
   loadMorePiBranchEntries,
+  refreshPiBranch,
+  refreshPiSessionState,
   loadPiModels,
   loadPiSessionData,
   openPiSession,
@@ -214,6 +217,26 @@ export function PiChatPane({
       if (!sessionId) return
       recordModelUsage(model)
       void setPiModel(sessionId, model.provider, model.id).catch(() => undefined)
+    },
+    [sessionId],
+  )
+
+  // Fork at a message (native fork: runtime switches to the new session
+  // file; the pane follows it). forkMessageId is the merged tail entry id
+  // from ChatArea's visibility model.
+  const handleFork = useCallback(
+    async (entryId: string, forkMessageId?: string) => {
+      if (!sessionId) return
+      try {
+        const result = await forkPiSession(sessionId, forkMessageId ?? entryId, 'at')
+        if (result.cancelled || !result.targetSessionId) return
+        const directory = result.targetCwd ?? currentDirectoryRef.current
+        if (directory) {
+          onEnterSessionRef.current?.(result.targetSessionId, directory)
+        }
+      } catch (error) {
+        console.error('Failed to fork session:', error)
+      }
     },
     [sessionId],
   )
@@ -507,6 +530,7 @@ export function PiChatPane({
             bottomPadding={inputBoxHeight}
             onVisibleMessageIdsChange={handleVisibleIdsChange}
             onAtBottomChange={setIsAtBottom}
+            onFork={handleFork}
           />
         )}
       </div>
