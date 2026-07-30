@@ -49,6 +49,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   prompt: async (ctx, p) => {
     await ctx.requireRuntime().prompt(P.reqString(p, "text"), P.optImages(p), {
       expandPromptTemplates: P.optBoolean(p, "expandPromptTemplates"),
+      streamingBehavior: P.optEnum(p, "streamingBehavior", ["steer", "followUp"] as const),
     })
   },
   steer: async (ctx, p) => {
@@ -345,7 +346,7 @@ function pageParams(): JsonObject {
   })
 }
 
-const PROMPT_PARAMS = objectSchema({ text: STRING, images: IMAGES, expandPromptTemplates: BOOLEAN }, ["text"])
+const PROMPT_PARAMS = objectSchema({ text: STRING, images: IMAGES, expandPromptTemplates: BOOLEAN, streamingBehavior: { type: "string", enum: ["steer", "followUp"] } }, ["text"])
 const TEXT_IMAGES_PARAMS = objectSchema({ text: STRING, images: IMAGES }, ["text"])
 const OUTPUT_PATH_PARAMS = objectSchema({ outputPath: STRING }, ["outputPath"])
 const CWD_PARAMS = objectSchema({ cwd: STRING }, ["cwd"])

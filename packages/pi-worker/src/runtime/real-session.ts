@@ -706,12 +706,13 @@ export class RealPiSession implements SessionRuntime {
     }
   }
 
-  async prompt(text: string, images?: ImageInput[], options: { expandPromptTemplates?: boolean } = {}): Promise<void> {
+  async prompt(text: string, images?: ImageInput[], options: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" } = {}): Promise<void> {
     try {
       this.assertImageSupport(images)
       await this.runtime.session.prompt(text, {
         images: images?.length ? images : undefined,
         expandPromptTemplates: options.expandPromptTemplates,
+        streamingBehavior: options.streamingBehavior,
         source: "rpc",
       })
     } finally {

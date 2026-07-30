@@ -123,12 +123,29 @@ export async function refreshPiSessionState(sessionId: string, signal?: AbortSig
 /**
  * Send a prompt to Pi session.
  */
-export async function sendPiPrompt(sessionId: string, text: string, signal?: AbortSignal): Promise<void> {
+export async function sendPiPrompt(
+  sessionId: string,
+  text: string,
+  options?: { streamingBehavior?: 'steer' | 'followUp' },
+  signal?: AbortSignal,
+): Promise<void> {
   try {
-    await transport.promptPi(sessionId, { text }, signal)
+    await transport.promptPi(sessionId, { text, streamingBehavior: options?.streamingBehavior }, signal)
     // State will be updated via events
   } catch (error) {
     console.error('Failed to send prompt:', error)
+    throw error
+  }
+}
+
+/**
+ * Compact the session context (native /compact).
+ */
+export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<void> {
+  try {
+    await transport.compactPi(sessionId, customInstructions, signal)
+  } catch (error) {
+    console.error('Failed to compact session:', error)
     throw error
   }
 }

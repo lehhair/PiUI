@@ -27,6 +27,7 @@ export type PiSessionOpenResult = {
 export type PiPromptParams = {
   text: string
   expandPromptTemplates?: boolean
+  streamingBehavior?: 'steer' | 'followUp'
   images?: string[]
 }
 
@@ -184,6 +185,10 @@ export function followUpPi(sessionId: string, params: PiFollowUpParams, signal?:
 
 export function abortPi(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'abort', undefined, signal)
+}
+
+export function compactPi(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'compact', customInstructions ? { customInstructions } : undefined, signal)
 }
 
 export type PiImageInput = {

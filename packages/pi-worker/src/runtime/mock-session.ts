@@ -510,8 +510,14 @@ export class MockPiSession implements SessionRuntime {
     }
   }
 
-  async prompt(text: string): Promise<void> {
-    if (this.streaming) throw Object.assign(new Error("mock session is already streaming"), { code: "SESSION_BUSY" })
+  async prompt(text: string, _images?: ImageInput[], options: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" } = {}): Promise<void> {
+    if (this.streaming) {
+      if (!options.streamingBehavior) {
+        throw Object.assign(new Error("mock session is already streaming"), { code: "SESSION_BUSY" })
+      }
+      if (options.streamingBehavior === "followUp") return this.followUp(text)
+      return this.steer(text)
+    }
     this.appendUserMessage(text)
     this.runMockTurn(text)
   }
