@@ -186,6 +186,20 @@ export function abortPi(sessionId: string, signal?: AbortSignal): Promise<Comman
   return postPiSessionCommand(sessionId, 'abort', undefined, signal)
 }
 
+export type PiImageInput = {
+  type: 'image'
+  data: string
+  mimeType: string
+}
+
+export function sendPiUserMessage(
+  sessionId: string,
+  params: { text: string; images?: PiImageInput[]; deliverAs?: 'steer' | 'followUp' },
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'sendUserMessage', params as unknown as JsonObject, signal)
+}
+
 export function setPiSessionName(sessionId: string, name: string, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setSessionName', { name }, signal)
 }

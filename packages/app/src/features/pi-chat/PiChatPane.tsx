@@ -39,11 +39,21 @@ function branchSessionIdOf(branch: PiBranchPage): string | null {
 interface PiChatPaneProps {
   paneId: string
   sessionId: string | null
+  /** Home flow: called after the first send creates a session */
+  onEnterSession?: (sessionId: string, directory: string) => void
   onOpenSidebar?: () => void
   onToggleRightPanel?: () => void
   onSplitPane?: () => void
   isPaneFullscreen?: boolean
   onTogglePaneFullscreen?: () => void
+}
+
+/** Convert a data-url attachment to a native ImageContent block */
+function attachmentToImage(attachment: Attachment): PiImageInput | null {
+  if (!attachment.url?.startsWith('data:') || !attachment.mime?.startsWith('image/')) return null
+  const commaIndex = attachment.url.indexOf(',')
+  if (commaIndex === -1) return null
+  return { type: 'image', data: attachment.url.slice(commaIndex + 1), mimeType: attachment.mime }
 }
 
 /**
@@ -55,12 +65,18 @@ interface PiChatPaneProps {
 export function PiChatPane({
   paneId,
   sessionId,
+  onEnterSession,
   onOpenSidebar,
   onToggleRightPanel,
   onSplitPane,
   isPaneFullscreen = false,
   onTogglePaneFullscreen,
 }: PiChatPaneProps) {
+  const onEnterSessionRef = useRef(onEnterSession)
+  onEnterSessionRef.current = onEnterSession
+  const { currentDirectory } = useDirectory()
+  const currentDirectoryRef = useRef(currentDirectory)
+  currentDirectoryRef.current = currentDirectory
   // Self-heal on mount / session switch: connect the event stream and make
   // sure session data belongs to THIS session — the branch store is a
   // singleton, so stale data from the previous session must be dropped
@@ -89,7 +105,12 @@ export function PiChatPane({
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
 
-  const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
+  // Timeline items only when the branch belongs to this session; home
+  // (no session) shows an empty flow — user types and sends to create one.
+  const items = useMemo(() => {
+    if (!sessionId) return []
+    return branch && branchSessionIdOf(branch) === sessionId ? selectPiTimelineItems(branch) : []
+  }, [branch, sessionId])
 
   // Current model from runtime state (native SDK shape)
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
@@ -146,8 +167,13 @@ export function PiChatPane({
   // Mount ChatArea only after branch data for THIS session is ready — the
   // virtual scroller's cold-start logic estimates the initial offset at the
   // bottom on mount, and it must not see another session's items.
+  // Home mounts immediately with an empty flow.
   const branchSessionId = branch ? branchSessionIdOf(branch) : null
-  const chatAreaMountKey = branch && branchSessionId === sessionId ? sessionId : null
+  const chatAreaMountKey = sessionId
+    ? branch && branchSessionId === sessionId
+      ? sessionId
+      : null
+    : 'home'
   // Assume at-bottom on session remount so the scroll-to-bottom button
   // doesn't flash.
   useEffect(() => {
@@ -172,15 +198,28 @@ export function PiChatPane({
   }, [])
 
   const handleSend = useCallback(
-    async (text: string, _attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
-      if (!sessionId) return false
-      if (options?.delivery === 'steer') {
-        await sendPiSteer(sessionId, text)
-      } else if (options?.delivery === 'followUp' || isStreaming) {
-        await sendPiFollowUp(sessionId, text)
-      } else {
-        await sendPiPrompt(sessionId, text)
+    async (text: string, attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
+      // Native image blocks from data-url attachments (pi only accepts
+      // ImageContent; backend also validates model image support)
+      const images = attachments
+        .map(attachmentToImage)
+        .filter((image): image is PiImageInput => image !== null)
+      // Unified native entry; deliverAs required while streaming — default
+      // to followUp (don't interrupt the running turn)
+      const deliverAs = options?.delivery ?? (isStreaming ? 'followUp' : undefined)
+
+      let targetSessionId = sessionId
+      if (!targetSessionId) {
+        // Home: create the session on first send, then enter it
+        const directory = currentDirectoryRef.current
+        if (!directory) return false
+        const opened = await openPiSession(directory)
+        targetSessionId = opened.sessionId
+        piEventStream.connect(targetSessionId)
+        onEnterSessionRef.current?.(targetSessionId, directory)
       }
+
+      await sendPiUserMessage(targetSessionId, text, images.length ? images : undefined, deliverAs)
       return true
     },
     [sessionId, isStreaming],

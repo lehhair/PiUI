@@ -158,6 +158,21 @@ export async function sendPiFollowUp(sessionId: string, text: string, signal?: A
 }
 
 /**
+ * Send a user message through the unified native entry (sendUserMessage).
+ * deliverAs: 'steer' interrupts the current turn, 'followUp' queues after
+ * it; omit when idle. Images are native ImageContent blocks.
+ */
+export async function sendPiUserMessage(
+  sessionId: string,
+  text: string,
+  images?: transport.PiImageInput[],
+  deliverAs?: 'steer' | 'followUp',
+  signal?: AbortSignal,
+): Promise<void> {
+  await transport.sendPiUserMessage(sessionId, { text, images, deliverAs }, signal)
+}
+
+/**
  * Abort current Pi operation.
  */
 export async function abortPiOperation(sessionId: string, signal?: AbortSignal): Promise<void> {
