@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ModelInfo } from '../types/ui'
+import type { Model } from '@earendil-works/pi-ai'
 
-function model(providerId: string, id: string): ModelInfo {
+function model(provider: string, id: string): Model<any> {
   return {
     id,
     name: id,
-    providerId,
-    providerName: providerId,
-  } as ModelInfo
+    api: 'openai-completions',
+    provider,
+    baseUrl: '',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 0,
+    maxTokens: 0,
+  } as Model<any>
 }
 
 function readHiddenKeys(): string[] {

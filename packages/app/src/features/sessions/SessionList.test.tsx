@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UiSession } from '../../types/session'
 import { pinnedSessionsStore } from '../../store/pinnedSessionsStore'
 import { SessionListItem } from './SessionList'
-import { setPiCapabilities } from '../../pi/capabilities'
+import { piNativeStatusForTest } from '../../pi/nativeStatus'
 
 const { useSessionActiveEntryMock, useHasUnreadCompletedNotificationMock, markSessionNotificationsReadMock } = vi.hoisted(() => ({
   useSessionActiveEntryMock: vi.fn(),
@@ -48,7 +48,7 @@ describe('SessionListItem', () => {
     useHasUnreadCompletedNotificationMock.mockReturnValue(false)
     markSessionNotificationsReadMock.mockReset()
     pinnedSessionsStore.unpin('session-1')
-    setPiCapabilities({ sessionRename: false })
+    piNativeStatusForTest({ sessionCommands: [] })
   })
 
   it('renders the session row as a semantic button and selects it', () => {
@@ -89,7 +89,7 @@ describe('SessionListItem', () => {
 
   it('shows durable delete only when the Pi capability is enabled', () => {
     const onDelete = vi.fn()
-    setPiCapabilities({ sessionDelete: true })
+    piNativeStatusForTest({ sessionCommands: [{ name: 'session.delete', scope: 'session', source: 'pi-sdk' }] })
     render(
       <SessionListItem
         session={session}

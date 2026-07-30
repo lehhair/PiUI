@@ -218,6 +218,11 @@ function App() {
     paneLayoutStore.togglePaneFullscreen(paneId)
   }, [paneLayout.focusedPaneId])
 
+  const handleSplitPane = useCallback(() => {
+    const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
+    if (paneId) paneLayoutStore.splitPane(paneId, 'horizontal')
+  }, [paneLayout.focusedPaneId])
+
   const isMobilePanelLayout = chatViewport.interaction.sidebarBehavior === 'overlay'
   const mobileLeftPanelWidth = chatViewport.layout.sidebar.overlayWidth
   const mobilePageWidth = Math.max(1, chatViewport.layout.viewportWidth)
@@ -502,9 +507,22 @@ function App() {
         key={paneId}
         paneId={paneId}
         sessionId={paneSessionId}
+        onOpenSidebar={handleOpenSidebar}
+        onToggleRightPanel={handleToggleRightPanel}
+        onSplitPane={splitPaneEnabled ? handleSplitPane : undefined}
+        isPaneFullscreen={paneLayout.fullscreenPaneId === paneId}
+        onTogglePaneFullscreen={paneLayout.isSplit ? handleToggleFocusedPaneFullscreen : undefined}
       />
     ),
-    [],
+    [
+      handleOpenSidebar,
+      handleToggleRightPanel,
+      splitPaneEnabled,
+      handleSplitPane,
+      paneLayout.fullscreenPaneId,
+      paneLayout.isSplit,
+      handleToggleFocusedPaneFullscreen,
+    ],
   )
 
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)

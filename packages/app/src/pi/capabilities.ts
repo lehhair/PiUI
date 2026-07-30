@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react"
-import type { PiRegistrySnapshot } from "@piui/protocol"
+import { getPiNativeStatus, subscribePiNativeStatus } from "./nativeStatus"
 
 export interface PiCapabilities {
   pty: boolean
@@ -49,33 +49,55 @@ const unavailable: PiCapabilities = {
   config: false,
 }
 
-let current = unavailable
-const listeners = new Set<() => void>()
-
-export function setPiCapabilities(value: Partial<PiCapabilities> | undefined) {
-  current = { ...unavailable, ...value }
-  for (const listener of listeners) listener()
+/**
+ * Capability -> registry command name (null: no backing command yet).
+ * Capabilities derive natively from the Pi registry — a feature is
+ * available exactly when the backend registry advertises its command.
+ */
+const COMMAND_MAP: Record<keyof PiCapabilities, string | null> = {
+  pty: null,
+  share: null,
+  fork: 'fork',
+  sessionTree: 'tree.get',
+  sessionNavigate: 'navigateTree',
+  sessionDelete: 'session.delete',
+  sessionClone: 'clone',
+  sessionImport: 'importSession',
+  promptSteer: 'steer',
+  promptFollowUp: 'followUp',
+  queueManage: 'clearQueue',
+  retryManage: 'setAutoRetry',
+  compactionManage: 'compact',
+  toolsManage: 'setActiveTools',
+  fileWrite: null,
+  gitDiff: null,
+  sessionRename: 'setSessionName',
+  sessionArchive: null,
+  mcp: null,
+  worktree: null,
+  config: null,
 }
 
-export function setPiRegistryCapabilities(registry: PiRegistrySnapshot | undefined) {
-  if (!registry) {
-    setPiCapabilities(undefined)
-    return
-  }
-  // UI gates are enabled only after their native adapters are wired. The
-  // registry itself remains available through nativeStatus for discovery.
-  setPiCapabilities({})
-}
+let cachedRegistry: unknown = undefined
+let cachedResult: PiCapabilities = unavailable
 
 export function getPiCapabilities(): PiCapabilities {
-  return current
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  const registry = getPiNativeStatus().registry
+  if (!registry) return unavailable
+  if (registry === cachedRegistry) return cachedResult
+  const names = new Set([
+    ...registry.globalCommands.map(command => command.name),
+    ...registry.sessionCommands.map(command => command.name),
+  ])
+  const result = { ...unavailable }
+  for (const [key, command] of Object.entries(COMMAND_MAP)) {
+    if (command && names.has(command)) result[key as keyof PiCapabilities] = true
+  }
+  cachedRegistry = registry
+  cachedResult = result
+  return result
 }
 
 export function usePiCapabilities(): PiCapabilities {
-  return useSyncExternalStore(subscribe, getPiCapabilities, getPiCapabilities)
+  return useSyncExternalStore(subscribePiNativeStatus, getPiCapabilities, getPiCapabilities)
 }

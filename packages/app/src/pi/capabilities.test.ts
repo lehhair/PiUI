@@ -1,23 +1,29 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { getPiCapabilities, setPiCapabilities, setPiRegistryCapabilities } from "./capabilities"
+import { getPiCapabilities } from "./capabilities"
+import { piNativeStatusForTest } from "./nativeStatus"
 
 describe("Pi capability registry", () => {
-  beforeEach(() => setPiCapabilities(undefined))
+  beforeEach(() => piNativeStatusForTest(undefined))
 
-  it("keeps UI gates disabled until each native adapter is wired", () => {
-    setPiRegistryCapabilities({
-      protocolVersion: 1,
-      revision: 1,
-      sdkVersion: "test",
-      driver: "mock",
-      globalCommands: [],
-      sessionCommands: [{
-        name: "fork",
-        scope: "session",
-        source: "pi-sdk",
-      }],
+  it("derives capabilities from registry commands natively", () => {
+    piNativeStatusForTest({
+      sessionCommands: [
+        { name: "fork", scope: "session", source: "pi-sdk" },
+        { name: "setSessionName", scope: "session", source: "pi-sdk" },
+      ],
+      globalCommands: [{ name: "session.delete", scope: "global", source: "pi-sdk" }],
     })
 
+    const caps = getPiCapabilities()
+    expect(caps.fork).toBe(true)
+    expect(caps.sessionRename).toBe(true)
+    expect(caps.sessionDelete).toBe(true)
+    expect(caps.sessionTree).toBe(false)
+    expect(caps.pty).toBe(false)
+  })
+
+  it("is unavailable without a registry", () => {
     expect(getPiCapabilities().fork).toBe(false)
+    expect(getPiCapabilities().sessionDelete).toBe(false)
   })
 })

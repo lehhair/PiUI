@@ -13,14 +13,15 @@ import { IconButton } from '../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from './ModelSelector'
 import { ShareDialog } from './ShareDialog'
 import { usePiCapabilities } from '../../pi/capabilities'
-import { messageStore, useHeaderSessionMeta } from '../../store'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
 import { useSessionContext } from '../../contexts/useSessionContext'
-import { updateSession } from '../../api'
-import { useDirectory } from '../../contexts/useDirectory'
+import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
+import { usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport } from './chatViewport'
-import type { ModelInfo } from '../../hooks/useModels'
+import type { Model } from '@earendil-works/pi-ai'
+
+type ModelInfo = Model<any>
 
 interface HeaderProps {
   models: ModelInfo[]
@@ -131,10 +132,11 @@ export function Header({
   modelSelectorRef,
 }: HeaderProps) {
   const { t } = useTranslation('chat')
-  const { sessionId, sessionDirectory, sessionTitle: currentSessionTitle } = useHeaderSessionMeta()
+  const piState = usePiSessionRuntimeState()
+  const sessionId = typeof piState?.sessionId === 'string' ? piState.sessionId : null
+  const currentSessionTitle = typeof piState?.sessionName === 'string' ? piState.sessionName : null
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
   const { refresh } = useSessionContext()
-  const { currentDirectory } = useDirectory()
   const { presentation, interaction } = useChatViewport()
   const capabilities = usePiCapabilities()
 
@@ -176,8 +178,8 @@ export function Header({
       return
     }
     try {
-      const updated = await updateSession(sessionId, { title: editTitle.trim() }, sessionDirectory || currentDirectory)
-      messageStore.updateSessionMetadata(sessionId, { title: updated.title })
+      await renamePiSession(sessionId, editTitle.trim())
+      void loadPiSessions().catch(() => undefined)
       refresh()
     } catch (e) {
       uiErrorHandler('rename session', e)

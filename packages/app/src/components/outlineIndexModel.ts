@@ -1,5 +1,4 @@
-import type { Message } from '../types/message'
-import { getMessageText, hasRenderableParts, isAbortedMessage, isUserMessage } from '../types/message'
+import type { PiTimelineItem } from '../pi/domain/index.js'
 
 const FULL_TITLE_MAX = 80
 
@@ -9,41 +8,44 @@ export interface OutlineSourceEntry {
 }
 
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max) + '\u2026'
+  return s.length <= max ? s : s.slice(0, max) + '…'
 }
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
-function messageHasContent(msg: Message): boolean {
-  const hasRenderable = hasRenderableParts(msg)
-  if (msg.info.role === 'assistant' && 'error' in msg.info && msg.info.error) {
-    return isAbortedMessage(msg.info) ? hasRenderable : true
+function itemHasContent(item: PiTimelineItem): boolean {
+  if (item.kind === 'user_message') {
+    return item.blocks.some(block => block.type === 'text' && block.text.trim().length > 0)
   }
-  if (msg.parts.length === 0) return true
-  return hasRenderable
+  if (item.kind === 'assistant_message') {
+    if (item.message.stopReason === 'error') return true
+    return item.blocks.length > 0
+  }
+  return false
 }
 
 export function truncateOutlineLabel(s: string, max: number): string {
   return truncate(s, max)
 }
 
-export function buildOutlineSourceEntries(messages: Message[]): OutlineSourceEntry[] {
+export function buildOutlineSourceEntries(items: PiTimelineItem[]): OutlineSourceEntry[] {
   const entries: OutlineSourceEntry[] = []
-  for (const msg of messages.filter(messageHasContent)) {
-    if (!isUserMessage(msg.info)) continue
-    const raw =
-      msg.info.summary?.title?.trim() ||
-      getMessageText(msg)
-        .trim()
-        .split(/\r?\n/)
-        .map(l => l.trim())
-        .find(Boolean)
+  for (const item of items.filter(itemHasContent)) {
+    if (item.kind !== 'user_message') continue
+    const raw = item.blocks
+      .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+      .map(block => block.text)
+      .join('\n')
+      .trim()
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .find(Boolean)
     if (!raw) continue
     const n = normalizeWhitespace(raw)
     entries.push({
-      messageId: msg.info.id,
+      messageId: item.entryId,
       title: truncate(n, FULL_TITLE_MAX),
     })
   }

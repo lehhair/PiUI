@@ -1,5 +1,4 @@
 /** PiUI backend bootstrap. */
-import { setPiCapabilities } from "./capabilities"
 import { getPiBackendState, setPiBackendState } from "./serverMode"
 import { serverStore } from "../store/serverStore"
 import { clearPiSessionIndex } from "./piSessionIndex"
@@ -60,7 +59,6 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
       error: message,
       checkedAt: Date.now(),
     })
-    setPiCapabilities(undefined)
     console.info("[PiUI] server not up — run npm run dev:server or npm run dev:server:pi")
     if (import.meta.env.DEV && error instanceof Error) {
       console.info("[PiUI] backend bootstrap:", error.message)
@@ -81,7 +79,6 @@ export function installPiBackendServerSwitch(): void {
     messageStore.clearAll()
     resetWorkspaceResolutionCache()
     resetManagementEvents()
-    setPiCapabilities(undefined)
     setPiBackendState({ status: "booting" })
     piEventStream.disconnect()
     void initializePiBackend().then(() => {

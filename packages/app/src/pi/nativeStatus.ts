@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { HealthResponse, PiRegistrySnapshot } from '@piui/protocol'
 import { fetchHostHealth, fetchPiRegistry } from './transport/index.js'
-import { setPiRegistryCapabilities } from './capabilities'
 
 const CORE_PI_COMMANDS = [
   'session.open',
@@ -51,12 +50,10 @@ export async function refreshPiNativeStatus(signal?: AbortSignal): Promise<PiNat
       missingCoreCommands,
       checkedAt: Date.now(),
     }
-    setPiRegistryCapabilities(registry)
     setStatus(next)
     return next
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    setPiRegistryCapabilities(undefined)
     const next: PiNativeStatus = {
       status: /\b(401|403)\b/.test(message) ? 'unauthorized' : 'offline',
       missingCoreCommands: CORE_PI_COMMANDS,
@@ -71,6 +68,30 @@ export async function refreshPiNativeStatus(signal?: AbortSignal): Promise<PiNat
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+export { subscribe as subscribePiNativeStatus }
+
+/**
+ * Test helper: inject a fake registry into the native status snapshot.
+ */
+export function piNativeStatusForTest(registry: Partial<import('@piui/protocol').PiRegistrySnapshot> | undefined): void {
+  setStatus({
+    status: registry ? 'online' : 'offline',
+    registry: registry
+      ? {
+          protocolVersion: 1,
+          revision: 1,
+          sdkVersion: 'test',
+          driver: 'mock',
+          globalCommands: [],
+          sessionCommands: [],
+          ...registry,
+        } as import('@piui/protocol').PiRegistrySnapshot
+      : undefined,
+    missingCoreCommands: [],
+    checkedAt: Date.now(),
+  })
 }
 
 function setStatus(next: PiNativeStatus): void {
