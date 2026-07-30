@@ -55,7 +55,8 @@
     "renameTerminal": "重命名终端",
     "moveToRight": "移动到右侧面板",
     "moveToBottom": "移动到底部面板",
-    "mcpServers": "MCP 服务器"
+    "mcpServers": "MCP 服务器",
+    "extensions": "扩展"
   },
   "sessionTree": {
     "empty": "暂无会话历史",

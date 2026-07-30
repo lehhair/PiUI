@@ -17,6 +17,7 @@ const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ defau
 const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
+const ExtensionsPanel = lazy(() => import('./ExtensionsPanel').then(module => ({ default: module.ExtensionsPanel })))
 const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
 
 function PanelFallback() {
@@ -144,6 +145,12 @@ export const RightPanel = memo(function RightPanel({
           {activeTab.type === 'mcp' ? (
             <Suspense fallback={<PanelFallback />}>
               <McpPanel isResizing={isPanelResizing} />
+            </Suspense>
+          ) : null}
+
+          {activeTab.type === 'extensions' ? (
+            <Suspense fallback={<PanelFallback />}>
+              <ExtensionsPanel sessionId={sessionId ?? null} />
             </Suspense>
           ) : null}
 

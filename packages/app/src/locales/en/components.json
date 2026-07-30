@@ -55,7 +55,8 @@
     "renameTerminal": "Rename Terminal",
     "moveToRight": "Move to Right Panel",
     "moveToBottom": "Move to Bottom Panel",
-    "mcpServers": "MCP Servers"
+    "mcpServers": "MCP Servers",
+    "extensions": "Extensions"
   },
   "sessionTree": {
     "empty": "No session history yet",

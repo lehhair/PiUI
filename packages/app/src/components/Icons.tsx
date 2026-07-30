@@ -71,6 +71,7 @@ import {
   Square,
   LoaderCircle,
   CircleHelp,
+  Puzzle,
   Slash,
   FileDiff,
   Waypoints,
@@ -195,6 +196,7 @@ export const StopIcon = ({ size = 16, ...props }: IconProps) => (
 
 export const SpinnerIcon = wrap(LoaderCircle)
 export const QuestionIcon = wrap(CircleHelp)
+export const PuzzleIcon = wrap(Puzzle)
 export const PathAutoIcon = wrap(Sun)
 export const PathUnixIcon = wrap(Slash)
 

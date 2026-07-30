@@ -6,7 +6,7 @@
 export type PanelPosition = 'bottom' | 'right'
 
 // 面板内容类型
-export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'mcp' | 'skill' | 'worktree'
+export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'mcp' | 'skill' | 'worktree' | 'extensions'
 type PersistedPanelTabType = Exclude<PanelTabType, 'terminal'>
 
 // 统一的面板标签
@@ -298,6 +298,7 @@ export class LayoutStore {
       { id: 'files', type: 'files', position: 'right', previewFile: null, previewFiles: [] },
       { id: 'changes', type: 'changes', position: 'right' },
       { id: 'session-tree', type: 'session-tree', position: 'right' },
+      { id: 'extensions', type: 'extensions', position: 'right' },
     ],
     activeTabId: {
       bottom: null,

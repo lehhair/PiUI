@@ -17,6 +17,7 @@ import {
   TeachIcon,
   GitWorktreeIcon,
   GitBranchIcon,
+  PuzzleIcon,
   SettingsIcon,
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
@@ -51,6 +52,7 @@ const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
   mcp: <PlugIcon size={12} />,
   skill: <TeachIcon size={12} />,
   worktree: <GitWorktreeIcon size={12} />,
+  extensions: <PuzzleIcon size={12} />,
 }
 
 // Tab 显示名称
@@ -81,6 +83,8 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
       return t('panelContainer.skills')
     case 'worktree':
       return t('panelContainer.worktrees')
+    case 'extensions':
+      return t('panelContainer.extensions')
     default:
       return t('panelContainer.tab')
   }
