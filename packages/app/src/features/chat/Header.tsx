@@ -24,6 +24,8 @@ import type { Model } from '@earendil-works/pi-ai'
 type ModelInfo = Model<any>
 
 interface HeaderProps {
+  /** Owning pane's session (null on home) — drives title/meta */
+  sessionId: string | null
   models: ModelInfo[]
   modelsLoading: boolean
   selectedModelKey: string | null
@@ -120,6 +122,7 @@ function SessionTitleControl({
 }
 
 export function Header({
+  sessionId,
   models,
   modelsLoading,
   selectedModelKey,
@@ -132,9 +135,8 @@ export function Header({
   modelSelectorRef,
 }: HeaderProps) {
   const { t } = useTranslation('chat')
-  const piState = usePiSessionRuntimeState()
+  const piState = usePiSessionRuntimeState(sessionId)
   const sessionInfos = usePiSessionInfos()
-  const sessionId = typeof piState?.sessionId === 'string' ? piState.sessionId : null
   // Title chain matches the session list: session name, then first message
   const sessionInfo = useMemo(() => sessionInfos.find(info => info.id === sessionId), [sessionInfos, sessionId])
   const stateName = typeof piState?.sessionName === 'string' && piState.sessionName.trim() ? piState.sessionName : null

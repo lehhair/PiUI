@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Model } from '@earendil-works/pi-ai'
 import { ChatArea, Header, InputBox, type ChatAreaHandle } from '../chat/index.js'
 import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
+import { PaneHeader } from '../chat/PaneHeader.js'
+import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from '../chat/PaneDropOverlay.js'
+import { useFolderProjectDrop } from '../chat/useFolderProjectDrop.js'
+import { FolderProjectDropOverlay } from '../chat/FolderProjectDropOverlay.js'
+import { ChatViewportProvider, useChatViewportMaybe, type ChatViewportValue } from '../chat/chatViewport.js'
 import type { Attachment } from '../attachment/index.js'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
@@ -18,36 +23,102 @@ import {
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import type { PiImageInput } from '../../pi/transport/index.js'
-import { piBranchStore, piSessionStateStore } from '../../pi/state/index.js'
+import { piBranchStore } from '../../pi/state/index.js'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
+import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
+import { paneLayoutStore } from '../../store/paneLayoutStore'
+import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import { recordModelUsage } from '../../utils/modelUtils'
-import type { PiBranchPage } from '../../pi/domain/index.js'
 
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
-/**
- * Session id that owns this branch page (from the persisted session header).
- */
-function branchSessionIdOf(branch: PiBranchPage): string | null {
-  const header = branch.head.header
-  if (header && typeof header === 'object' && 'id' in header && typeof header.id === 'string') {
-    return header.id
+// ============================================
+// Compact viewport shell for split panes (from ocui ChatPane).
+// Layout/presentation stay fixed; enableCollapsedInputDock is inherited
+// from the app viewport.
+// ============================================
+const PANE_VIEWPORT: ChatViewportValue = {
+  presentation: {
+    surfaceVariant: 'compact',
+    isCompact: true,
+  },
+  interaction: {
+    mode: 'pointer',
+    touchCapable: false,
+    sidebarBehavior: 'overlay',
+    rightPanelBehavior: 'overlay',
+    bottomPanelBehavior: 'overlay',
+    outlineInteraction: 'pointer',
+    enableCollapsedInputDock: false,
+  },
+  layout: {
+    viewportWidth: 800,
+    viewportHeight: 600,
+    surfaceWidth: 800,
+    surfaceMinWidth: 380,
+    sidebar: {
+      railWidth: 0,
+      requestedWidth: 0,
+      openWidth: 0,
+      dockedWidth: 0,
+      overlayWidth: 0,
+      hardMinWidth: 0,
+      preferredMinWidth: 0,
+      maxWidth: 0,
+      resizeMaxWidth: 0,
+    },
+    rightPanel: {
+      requestedWidth: 0,
+      dockedWidth: 0,
+      hardMinWidth: 0,
+      maxWidth: 0,
+      resizeMaxWidth: 0,
+    },
+    bottomPanel: {
+      maxHeight: 0,
+    },
+  },
+  actions: {
+    setSidebarRequestedWidth: () => {},
+  },
+}
+
+let splitSessionNavigationToken = 0
+
+function scheduleSplitSessionNavigation(callback: () => void) {
+  const token = ++splitSessionNavigationToken
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (token !== splitSessionNavigationToken) return
+      splitSessionNavigationToken = 0
+      callback()
+    })
+  })
+}
+
+function cancelPendingSplitSessionNavigation() {
+  if (splitSessionNavigationToken !== 0) {
+    splitSessionNavigationToken += 1
   }
-  return null
 }
 
 interface PiChatPaneProps {
   paneId: string
   sessionId: string | null
+  isFocused?: boolean
+  paneCount?: number
+  displayMode?: 'single' | 'split'
+  isPaneFullscreen?: boolean
   /** Home flow: called after the first send creates a session */
   onEnterSession?: (sessionId: string, directory: string) => void
   onNewChat?: () => void
   onOpenSidebar?: () => void
   onToggleRightPanel?: () => void
   onSplitPane?: () => void
-  isPaneFullscreen?: boolean
   onTogglePaneFullscreen?: () => void
+  showSidebarButton?: boolean
+  navigatePaneToSession?: (paneId: string, sessionId: string, directory?: string) => void
 }
 
 /** Convert a data-url attachment to a native ImageContent block */
@@ -59,67 +130,58 @@ function attachmentToImage(attachment: Attachment): PiImageInput | null {
 }
 
 /**
- * Pi-native chat pane. All rendering reuses the existing chat components
- * (Header, ChatArea, OutlineIndex, InputBox); only the data source is new —
- * raw Pi stores via selectors. The event stream keeps stores fresh while
- * the pane is open.
+ * Pi-native chat pane. Shell structure mirrors ocui's ChatPane (single and
+ * split modes, compact pane shell, session drag & drop); only the data
+ * source is Pi (keyed stores via hooks, event stream per session).
  */
 export function PiChatPane({
   paneId,
   sessionId,
+  isFocused = false,
+  paneCount = 1,
+  displayMode = 'single',
+  isPaneFullscreen = false,
   onEnterSession,
   onNewChat,
   onOpenSidebar,
   onToggleRightPanel,
   onSplitPane,
-  isPaneFullscreen = false,
   onTogglePaneFullscreen,
+  showSidebarButton = false,
+  navigatePaneToSession,
 }: PiChatPaneProps) {
   const onEnterSessionRef = useRef(onEnterSession)
   onEnterSessionRef.current = onEnterSession
-  const { currentDirectory } = useDirectory()
+  const { currentDirectory, addDirectory } = useDirectory()
   const currentDirectoryRef = useRef(currentDirectory)
   currentDirectoryRef.current = currentDirectory
-  // Self-heal on mount / session switch: connect the event stream and make
-  // sure session data belongs to THIS session — the branch store is a
-  // singleton, so stale data from the previous session must be dropped
-  // before the ChatArea mounts (its cold-start bottom estimate runs once
-  // at mount). Home (null) releases the session entirely so the header
-  // and stores don't keep showing the previous session.
+
+  // ============================================
+  // Pi data layer: event stream + keyed stores
+  // ============================================
   useEffect(() => {
-    if (!sessionId) {
-      piEventStream.disconnect()
-      piBranchStore.clear()
-      piSessionStateStore.clear()
-      return
-    }
+    if (!sessionId) return
     piEventStream.connect(sessionId)
-    const current = piBranchStore.getData()
-    if (!current || branchSessionIdOf(current) !== sessionId) {
-      piBranchStore.clear()
-      piSessionStateStore.clear()
+    if (!piBranchStore.getData(sessionId)) {
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
+    return () => piEventStream.disconnect(sessionId)
   }, [sessionId])
 
-  // Models catalog (loaded once per app lifecycle)
   const { models, isLoading: modelsLoading } = usePiModels()
   useEffect(() => {
     void loadPiModels().catch(() => undefined)
   }, [])
 
-  const branch = usePiBranchData()
-  const state = usePiSessionRuntimeState()
+  const branch = usePiBranchData(sessionId)
+  const state = usePiSessionRuntimeState(sessionId)
 
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
 
-  // Timeline items only when the branch belongs to this session; home
-  // (no session) shows an empty flow — user types and sends to create one.
-  const items = useMemo(() => {
-    if (!sessionId) return []
-    return branch && branchSessionIdOf(branch) === sessionId ? selectPiTimelineItems(branch) : []
-  }, [branch, sessionId])
+  // Timeline items from this session's keyed branch; home (no session)
+  // shows an empty flow — user types and sends to create one.
+  const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
 
   // Current model from runtime state (native SDK shape)
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
@@ -173,16 +235,10 @@ export function PiChatPane({
   }, [])
   const outlineEntries = useMemo(() => buildOutlineSourceEntries(items), [items])
 
-  // Mount ChatArea only after branch data for THIS session is ready — the
-  // virtual scroller's cold-start logic estimates the initial offset at the
-  // bottom on mount, and it must not see another session's items.
-  // Home mounts immediately with an empty flow.
-  const branchSessionId = branch ? branchSessionIdOf(branch) : null
-  const chatAreaMountKey = sessionId
-    ? branch && branchSessionId === sessionId
-      ? sessionId
-      : null
-    : 'home'
+  // Mount ChatArea only after this session's branch data is ready — the
+  // virtual scroller's cold-start logic estimates the initial offset at
+  // the bottom on mount. Home mounts immediately with an empty flow.
+  const chatAreaMountKey = sessionId ? (branch ? sessionId : null) : 'home'
   // Assume at-bottom on session remount so the scroll-to-bottom button
   // doesn't flash.
   useEffect(() => {
@@ -242,24 +298,180 @@ export function PiChatPane({
     ? currentModelObj.input.includes('image')
     : models.some(model => model.input.includes('image'))
 
-  return (
-    <div className="flex-1 relative overflow-hidden flex flex-col min-h-0 h-full">
-      <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
-        <div className="pointer-events-auto">
-          <Header
-            models={[...models]}
-            modelsLoading={modelsLoading}
-            selectedModelKey={selectedModelKey}
-            onModelChange={handleModelChange}
-            onOpenSidebar={onOpenSidebar}
-            onToggleRightPanel={onToggleRightPanel}
-            onSplitPane={onSplitPane}
-            isPaneFullscreen={isPaneFullscreen}
-            onTogglePaneFullscreen={onTogglePaneFullscreen}
-            modelSelectorRef={modelSelectorRef}
-          />
+  // ============================================
+  // Pane focus + drag & drop (ocui shell behavior)
+  // ============================================
+  const splitPaneEnabled = displayMode === 'split' || paneCount > 1 || Boolean(onSplitPane)
+  const handlePaneFocus = useCallback(() => {
+    paneLayoutStore.focusPane(paneId)
+  }, [paneId])
+
+  const overlayRef = useRef<PaneDropOverlayHandle>(null)
+  const paneRootRef = useRef<HTMLDivElement>(null)
+  const isFolderDropActive = useFolderProjectDrop(paneRootRef, addDirectory)
+  const currentZoneRef = useRef<DropZone | null>(null)
+  const pendingZoneRef = useRef<DropZone | null>(null)
+  const dropRafRef = useRef<number | null>(null)
+
+  const writeZone = useCallback((zone: DropZone | null) => {
+    if (currentZoneRef.current === zone) return
+    currentZoneRef.current = zone
+    overlayRef.current?.setZone(zone)
+  }, [])
+
+  const cancelPendingZone = useCallback(() => {
+    if (dropRafRef.current !== null) {
+      cancelAnimationFrame(dropRafRef.current)
+      dropRafRef.current = null
+    }
+    pendingZoneRef.current = null
+  }, [])
+
+  const resetDropState = useCallback(() => {
+    cancelPendingZone()
+    writeZone(null)
+  }, [cancelPendingZone, writeZone])
+
+  useEffect(() => {
+    return () => {
+      if (dropRafRef.current !== null) cancelAnimationFrame(dropRafRef.current)
+    }
+  }, [])
+
+  const updateSessionDropZoneAt = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!splitPaneEnabled) return null
+      const element = paneRootRef.current
+      if (!element) return null
+      const rect = element.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return null
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null
+
+      const xRel = (clientX - rect.left) / rect.width
+      const yRel = (clientY - rect.top) / rect.height
+      const zone = resolveDropZone({ xRel, yRel })
+      pendingZoneRef.current = zone
+
+      if (dropRafRef.current === null) {
+        dropRafRef.current = requestAnimationFrame(() => {
+          dropRafRef.current = null
+          writeZone(pendingZoneRef.current)
+        })
+      }
+
+      return zone
+    },
+    [splitPaneEnabled, writeZone],
+  )
+
+  const clearSessionDropZoneAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const element = paneRootRef.current
+      if (!element) return resetDropState()
+      const rect = element.getBoundingClientRect()
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        resetDropState()
+      }
+    },
+    [resetDropState],
+  )
+
+  const handleSessionDrop = useCallback(
+    (payload: { sessionId: string; directory?: string }, zone: DropZone) => {
+      resetDropState()
+      cancelPendingSplitSessionNavigation()
+
+      if (payload.sessionId === sessionId && zone === 'center') return
+
+      if (zone === 'center') {
+        navigatePaneToSession?.(paneId, payload.sessionId, payload.directory)
+        return
+      }
+
+      const previousFocusedPaneId = paneLayoutStore.getFocusedPaneId()
+      const newPaneId = paneLayoutStore.splitPaneToSide(paneId, zone, null)
+      if (newPaneId) {
+        if (previousFocusedPaneId && paneLayoutStore.findLeaf(previousFocusedPaneId)) {
+          paneLayoutStore.focusPane(previousFocusedPaneId)
+        }
+
+        scheduleSplitSessionNavigation(() => {
+          if (!paneLayoutStore.findLeaf(newPaneId)) return
+          navigatePaneToSession?.(newPaneId, payload.sessionId, payload.directory)
+        })
+      }
+    },
+    [paneId, sessionId, navigatePaneToSession, resetDropState],
+  )
+
+  useEffect(() => {
+    return subscribeInternalDrag(() => {
+      const active = getInternalDragSnapshot().active
+      if (!active || active.payload.kind !== 'session') {
+        resetDropState()
+        return
+      }
+
+      const zone = updateSessionDropZoneAt(active.current.x, active.current.y)
+      if (!zone) clearSessionDropZoneAt(active.current.x, active.current.y)
+    })
+  }, [clearSessionDropZoneAt, resetDropState, updateSessionDropZoneAt])
+
+  useEffect(() => {
+    return subscribeInternalDrop(event => {
+      if (event.payload.kind !== 'session') return
+      const zone = updateSessionDropZoneAt(event.point.x, event.point.y)
+      if (!zone) {
+        resetDropState()
+        return
+      }
+
+      handleSessionDrop(
+        {
+          sessionId: event.payload.sessionId,
+          directory: event.payload.directory,
+        },
+        zone,
+      )
+    })
+  }, [handleSessionDrop, resetDropState, updateSessionDropZoneAt])
+
+  // ============================================
+  // Shell (ocui structure)
+  // ============================================
+  const showCompactShell = displayMode === 'split' && !isPaneFullscreen
+  const outerViewport = useChatViewportMaybe()
+
+  const navigationCtx = useMemo<SessionNavigationContextValue>(
+    () => ({
+      navigateToSession: (sid, dir) => navigatePaneToSession?.(paneId, sid, dir),
+      currentSessionId: sessionId,
+      currentDirectory: currentDirectory ?? undefined,
+    }),
+    [navigatePaneToSession, paneId, sessionId, currentDirectory],
+  )
+
+  const chatContent = (
+    <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
+      {displayMode === 'single' && (
+        <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
+          <div className="pointer-events-auto">
+            <Header
+              sessionId={sessionId}
+              models={[...models]}
+              modelsLoading={modelsLoading}
+              selectedModelKey={selectedModelKey}
+              onModelChange={handleModelChange}
+              onOpenSidebar={onOpenSidebar}
+              onToggleRightPanel={onToggleRightPanel}
+              onSplitPane={onSplitPane}
+              isPaneFullscreen={isPaneFullscreen}
+              onTogglePaneFullscreen={onTogglePaneFullscreen}
+              modelSelectorRef={modelSelectorRef}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="absolute inset-0">
         {chatAreaMountKey == null ? (
@@ -315,4 +527,62 @@ export function PiChatPane({
       </div>
     </div>
   )
+
+  const content = (
+    <SessionNavigationContext.Provider value={navigationCtx}>
+      <div
+        ref={paneRootRef}
+        data-chat-pane-root="true"
+        className={
+          showCompactShell
+            ? `relative h-full flex flex-col overflow-hidden rounded-lg transition-colors duration-200 ${
+                isFocused
+                  ? 'ring-1 ring-accent-main-100/60 bg-bg-100'
+                  : 'ring-1 ring-border-200/30 bg-bg-100 hover:ring-border-200/50'
+              }`
+            : 'relative h-full flex flex-col overflow-hidden bg-bg-100'
+        }
+        onClick={handlePaneFocus}
+      >
+        {showCompactShell && (
+          <PaneHeader
+            paneId={paneId}
+            sessionId={sessionId}
+            isFocused={isFocused}
+            paneCount={paneCount}
+            showSidebarButton={showSidebarButton}
+            onOpenSidebar={onOpenSidebar}
+            onToggleRightPanel={onToggleRightPanel}
+            canSplitPane={splitPaneEnabled}
+            isPaneFullscreen={isPaneFullscreen}
+            onTogglePaneFullscreen={onTogglePaneFullscreen}
+            onFocus={handlePaneFocus}
+          />
+        )}
+        {chatContent}
+        <PaneDropOverlay ref={overlayRef} />
+        <FolderProjectDropOverlay active={isFolderDropActive} />
+      </div>
+    </SessionNavigationContext.Provider>
+  )
+
+  // Always wrap with ChatViewportProvider to keep the React tree structure
+  // stable across fullscreen toggles (ocui pattern). Split shell keeps
+  // compact presentation but inherits the input-dock setting.
+  const viewportValue = useMemo((): ChatViewportValue => {
+    if (!showCompactShell) return outerViewport ?? PANE_VIEWPORT
+    const enableCollapsedInputDock = outerViewport?.interaction.enableCollapsedInputDock ?? false
+    if (enableCollapsedInputDock === PANE_VIEWPORT.interaction.enableCollapsedInputDock) {
+      return PANE_VIEWPORT
+    }
+    return {
+      ...PANE_VIEWPORT,
+      interaction: {
+        ...PANE_VIEWPORT.interaction,
+        enableCollapsedInputDock,
+      },
+    }
+  }, [showCompactShell, outerViewport])
+
+  return <ChatViewportProvider value={viewportValue}>{content}</ChatViewportProvider>
 }

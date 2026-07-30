@@ -1,14 +1,17 @@
 import type { JsonObject } from '@piui/protocol'
 
+interface StateEntry {
+  state: JsonObject | null
+  loading: boolean
+  error: Error | null
+}
+
 /**
- * Raw session runtime state store.
- * Stores state.get result for active session.
+ * Raw session runtime state store, keyed by session id (multi-pane safe).
  * Follows app store convention: subscribe/notify + stable snapshots.
  */
 class PiSessionStateStore {
-  private state: JsonObject | null = null
-  private loading = false
-  private error: Error | null = null
+  private bySessionId = new Map<string, StateEntry>()
   private listeners = new Set<() => void>()
 
   subscribe = (listener: () => void): (() => void) => {
@@ -20,40 +23,54 @@ class PiSessionStateStore {
     this.listeners.forEach(l => l())
   }
 
-  setLoading(loading: boolean): void {
-    this.loading = loading
+  private entry(sessionId: string): StateEntry {
+    let entry = this.bySessionId.get(sessionId)
+    if (!entry) {
+      entry = { state: null, loading: false, error: null }
+      this.bySessionId.set(sessionId, entry)
+    }
+    return entry
+  }
+
+  setLoading(sessionId: string, loading: boolean): void {
+    this.entry(sessionId).loading = loading
     this.notify()
   }
 
-  setState(state: JsonObject): void {
-    this.state = state
-    this.error = null
-    this.loading = false
+  setState(sessionId: string, state: JsonObject): void {
+    const entry = this.entry(sessionId)
+    entry.state = state
+    entry.error = null
+    entry.loading = false
     this.notify()
   }
 
-  setError(error: Error): void {
-    this.error = error
-    this.loading = false
+  setError(sessionId: string, error: Error): void {
+    const entry = this.entry(sessionId)
+    entry.error = error
+    entry.loading = false
     this.notify()
   }
 
-  getState(): JsonObject | null {
-    return this.state
+  getState(sessionId: string): JsonObject | null {
+    return this.bySessionId.get(sessionId)?.state ?? null
   }
 
-  isLoading(): boolean {
-    return this.loading
+  isLoading(sessionId: string): boolean {
+    return this.bySessionId.get(sessionId)?.loading ?? false
   }
 
-  getError(): Error | null {
-    return this.error
+  getError(sessionId: string): Error | null {
+    return this.bySessionId.get(sessionId)?.error ?? null
   }
 
-  clear(): void {
-    this.state = null
-    this.loading = false
-    this.error = null
+  clear(sessionId: string): void {
+    this.bySessionId.delete(sessionId)
+    this.notify()
+  }
+
+  clearAll(): void {
+    this.bySessionId.clear()
     this.notify()
   }
 }
