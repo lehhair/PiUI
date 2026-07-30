@@ -223,6 +223,7 @@ export function selectPiCurrentModel(state: { model?: { provider: string; modelI
 }
 
 function parseTime(value: unknown): number {
+  if (value instanceof Date) return value.getTime()
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value !== 'string') return 0
   const parsed = Date.parse(value)

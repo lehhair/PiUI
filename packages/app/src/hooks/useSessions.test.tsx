@@ -13,22 +13,22 @@ function createDeferred<T>() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFn = (...args: any[]) => any
 const {
-  listPiNativeSessionsMock,
-  listPiNativeSessionsForCwdMock,
-  openPiNativeSessionMock,
-  postPiGlobalCommandMock,
+  loadPiSessionsMock,
+  loadPiSessionsForCwdMock,
+  openPiSessionMock,
+  deletePiSessionMock,
 } = vi.hoisted(() => ({
-  listPiNativeSessionsMock: vi.fn<AnyFn>(),
-  listPiNativeSessionsForCwdMock: vi.fn<AnyFn>(),
-  openPiNativeSessionMock: vi.fn<AnyFn>(),
-  postPiGlobalCommandMock: vi.fn<AnyFn>(),
+  loadPiSessionsMock: vi.fn<AnyFn>(),
+  loadPiSessionsForCwdMock: vi.fn<AnyFn>(),
+  openPiSessionMock: vi.fn<AnyFn>(),
+  deletePiSessionMock: vi.fn<AnyFn>(),
 }))
 
-vi.mock('../pi/nativeApi', () => ({
-  listPiNativeSessions: (...args: unknown[]) => listPiNativeSessionsMock(...args),
-  listPiNativeSessionsForCwd: (...args: unknown[]) => listPiNativeSessionsForCwdMock(...args),
-  openPiNativeSession: (...args: unknown[]) => openPiNativeSessionMock(...args),
-  postPiGlobalCommand: (...args: unknown[]) => postPiGlobalCommandMock(...args),
+vi.mock('../pi/controllers/index.js', () => ({
+  loadPiSessions: (...args: unknown[]) => loadPiSessionsMock(...args),
+  loadPiSessionsForCwd: (...args: unknown[]) => loadPiSessionsForCwdMock(...args),
+  openPiSession: (...args: unknown[]) => openPiSessionMock(...args),
+  deletePiSession: (...args: unknown[]) => deletePiSessionMock(...args),
 }))
 
 vi.mock('../pi/piSessionIndex', () => ({
@@ -51,14 +51,14 @@ function makeSession(id: string, directory = '/workspace/demo') {
 describe('useSessions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    listPiNativeSessionsMock.mockReset()
-    listPiNativeSessionsForCwdMock.mockReset()
-    openPiNativeSessionMock.mockReset()
-    postPiGlobalCommandMock.mockReset()
-    listPiNativeSessionsMock.mockResolvedValue([])
-    listPiNativeSessionsForCwdMock.mockResolvedValue([])
-    openPiNativeSessionMock.mockResolvedValue({ sessionId: 'new', sessionFile: '/sessions/new.jsonl', cwd: '/workspace/demo' })
-    postPiGlobalCommandMock.mockResolvedValue(undefined)
+    loadPiSessionsMock.mockReset()
+    loadPiSessionsForCwdMock.mockReset()
+    openPiSessionMock.mockReset()
+    deletePiSessionMock.mockReset()
+    loadPiSessionsMock.mockResolvedValue([])
+    loadPiSessionsForCwdMock.mockResolvedValue([])
+    openPiSessionMock.mockResolvedValue({ sessionId: 'new', sessionFile: '/sessions/new.jsonl', cwd: '/workspace/demo' })
+    deletePiSessionMock.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -70,7 +70,7 @@ describe('useSessions', () => {
       initialProps: { enabled: false },
     })
 
-    expect(listPiNativeSessionsForCwdMock).not.toHaveBeenCalled()
+    expect(loadPiSessionsForCwdMock).not.toHaveBeenCalled()
 
     rerender({ enabled: true })
 
@@ -79,11 +79,11 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
   })
 
   it('passes the scoped directory when removing a session', async () => {
-    listPiNativeSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
+    loadPiSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
 
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
 
@@ -98,14 +98,11 @@ describe('useSessions', () => {
       await result.current.remove('session-1')
     })
 
-    expect(postPiGlobalCommandMock).toHaveBeenCalledWith('session.delete', {
-      cwd: '/workspace/demo',
-      sessionFile: '/sessions/session-1.jsonl',
-    })
+    expect(deletePiSessionMock).toHaveBeenCalledWith('/workspace/demo', '/sessions/session-1.jsonl')
   })
 
   it('requests sessions with the scoped cwd', async () => {
-    listPiNativeSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
+    loadPiSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
 
     const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
 
@@ -114,7 +111,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
   })
 
@@ -126,7 +123,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    listPiNativeSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
+    loadPiSessionsForCwdMock.mockResolvedValue([makeSession('session-1')])
     await act(async () => {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
       await Promise.resolve()
@@ -141,7 +138,7 @@ describe('useSessions', () => {
     const secondRequest = createDeferred<ReturnType<typeof makeSession>[]>()
     const thirdRequest = createDeferred<ReturnType<typeof makeSession>[]>()
 
-    listPiNativeSessionsForCwdMock
+    loadPiSessionsForCwdMock
       .mockImplementationOnce(() => firstRequest.promise)
       .mockImplementationOnce(() => secondRequest.promise)
       .mockImplementationOnce(() => thirdRequest.promise)
@@ -173,7 +170,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(2)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       secondRequest.resolve([makeSession('session-2')])
@@ -181,7 +178,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(3)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(3)
 
     await act(async () => {
       thirdRequest.resolve([{ ...makeSession('session-3'), name: 'Branch session' }])
@@ -193,7 +190,7 @@ describe('useSessions', () => {
   })
 
   it('retries the initial fetch after a startup failure', async () => {
-    listPiNativeSessionsForCwdMock
+    loadPiSessionsForCwdMock
       .mockRejectedValueOnce(new Error('service not ready'))
       .mockResolvedValueOnce([makeSession('session-1')])
 
@@ -205,7 +202,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(1)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       vi.advanceTimersByTime(500)
@@ -213,7 +210,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(2)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(2)
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
   })
 
@@ -221,7 +218,7 @@ describe('useSessions', () => {
     const staleRequest = createDeferred<ReturnType<typeof makeSession>[]>()
     const freshRequest = createDeferred<ReturnType<typeof makeSession>[]>()
 
-    listPiNativeSessionsForCwdMock
+    loadPiSessionsForCwdMock
       .mockImplementationOnce(() => staleRequest.promise)
       .mockImplementationOnce(() => freshRequest.promise)
 
@@ -232,14 +229,14 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(1)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(1)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       staleRequest.resolve([makeSession('stale')])
@@ -247,7 +244,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(listPiNativeSessionsForCwdMock).toHaveBeenCalledTimes(2)
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       freshRequest.resolve([makeSession('fresh')])

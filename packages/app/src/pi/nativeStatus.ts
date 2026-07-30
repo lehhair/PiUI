@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { HealthResponse, PiRegistrySnapshot } from '@piui/protocol'
-import { fetchHostHealth, fetchPiRegistry } from './nativeApi'
+import { fetchHostHealth, fetchPiRegistry } from './transport/index.js'
 import { setPiRegistryCapabilities } from './capabilities'
 
 const CORE_PI_COMMANDS = [

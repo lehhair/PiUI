@@ -2,15 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { autoDetectPathStyle, isSameDirectory } from '../utils'
-import {
-  listPiNativeSessions,
-  listPiNativeSessionsForCwd,
-  openPiNativeSession,
-  postPiGlobalCommand,
-} from '../pi/nativeApi'
+import { loadPiSessions, loadPiSessionsForCwd, openPiSession, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
-import { piSessionInfoStore } from '../pi/piSessionInfoStore'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -105,8 +99,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
       try {
         const nativeSessions = normalizedDirectory
-          ? piSessionInfoStore.replaceForCwd(normalizedDirectory, await listPiNativeSessionsForCwd(normalizedDirectory))
-          : piSessionInfoStore.replaceAll(await listPiNativeSessions())
+          ? await loadPiSessionsForCwd(normalizedDirectory)
+          : await loadPiSessions()
         const mapped = nativeSessions
           .map(piSessionInfoToUiSession)
           .filter((session): session is UiSession => session !== null)
@@ -225,7 +219,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const create = useCallback(
     async (title?: string) => {
       if (!normalizedDirectory) throw new Error('A project directory is required')
-      const opened = await openPiNativeSession(normalizedDirectory)
+      const opened = await openPiSession(normalizedDirectory)
       if (!opened.sessionFile) throw new Error('Pi did not return a session file')
       const now = Date.now()
       const newSession: UiSession = {
@@ -261,7 +255,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     async (sessionId: string) => {
       const session = sessions.find(item => item.id === sessionId)
       if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-      await postPiGlobalCommand('session.delete', { cwd: session.directory, sessionFile: session.path })
+      await deletePiSession(session.directory, session.path)
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))

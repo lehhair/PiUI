@@ -40,7 +40,8 @@ import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
 import { ExtensionUiDialogHost } from './features/chat/ExtensionUiDialogHost'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
-import { openPiNativeSession } from './pi/nativeApi'
+import { loadPiSessionData, openPiSession } from './pi/controllers/index.js'
+import { piEventStream } from './pi/eventStream.js'
 import { trackPiSession } from './pi/piSessionIndex'
 import { useSessionContext } from './contexts/useSessionContext'
 
@@ -186,12 +187,15 @@ function App() {
         navigatePaneToSession(paneId, sessionId, directory)
       }
       setOpeningSessionId(session.id)
-      void openPiNativeSession(directory, listed?.path)
+      void openPiSession(directory, listed?.path)
         .then(opened => {
+          piEventStream.connect(opened.sessionId)
           enterSession(opened.sessionId)
         })
         .catch(error => {
           if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') {
+            piEventStream.connect(session.id)
+            void loadPiSessionData(session.id).catch(() => undefined)
             enterSession(session.id)
             return
           }

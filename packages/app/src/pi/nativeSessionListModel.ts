@@ -1,7 +1,7 @@
 import type { UiSession } from '../types/session'
-import type { PiNativeSessionInfo } from './nativeApi'
+import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 
-export function piSessionInfoToUiSession(item: PiNativeSessionInfo): UiSession | null {
+export function piSessionInfoToUiSession(item: SessionInfo): UiSession | null {
   if (!item.id || !item.cwd || !item.path) return null
   const name = firstString(item.name)
   const firstMessage = firstString(item.firstMessage)
@@ -55,6 +55,7 @@ function firstString(...values: unknown[]): string | undefined {
 }
 
 function parseTime(value: unknown): number {
+  if (value instanceof Date) return value.getTime()
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value !== 'string') return 0
   const parsed = Date.parse(value)

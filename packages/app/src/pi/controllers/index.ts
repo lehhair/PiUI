@@ -1,4 +1,5 @@
 import type { JsonObject } from '@piui/protocol'
+import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
@@ -6,51 +7,42 @@ import { mergeLatestBranchPage } from '../branchMerge.js'
 /**
  * Load all Pi sessions globally.
  */
-export async function loadPiSessions(signal?: AbortSignal): Promise<void> {
-  try {
-    const sessions = await transport.listAllPiSessions(signal)
-    piSessionInfoStore.replaceAll(sessions)
-  } catch (error) {
-    console.error('Failed to load Pi sessions:', error)
-    throw error
-  }
+export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
+  const sessions = await transport.listAllPiSessions(signal)
+  piSessionInfoStore.replaceAll(sessions)
+  return sessions
 }
 
 /**
  * Load Pi sessions for specific working directory.
  */
-export async function loadPiSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<void> {
-  try {
-    const sessions = await transport.listPiSessions({ cwd }, signal)
-    piSessionInfoStore.replaceForCwd(cwd, sessions)
-  } catch (error) {
-    console.error(`Failed to load Pi sessions for ${cwd}:`, error)
-    throw error
-  }
+export async function loadPiSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<SessionInfo[]> {
+  const sessions = await transport.listPiSessions({ cwd }, signal)
+  piSessionInfoStore.replaceForCwd(cwd, sessions)
+  return sessions
+}
+
+/**
+ * Delete a Pi session file.
+ */
+export async function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal): Promise<void> {
+  await transport.deletePiSession(cwd, sessionFile, signal)
 }
 
 /**
  * Open a Pi session and load its initial data.
  */
-export async function openPiSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<{ sessionId: string; state: JsonObject }> {
-  try {
-    const result = await transport.openPiSession({ cwd, sessionFile }, signal)
+export async function openPiSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<transport.PiSessionOpenResult> {
+  const result = await transport.openPiSession({ cwd, sessionFile }, signal)
 
-    if (!result.sessionId) {
-      throw new Error('Session open failed: no sessionId returned')
-    }
-
-    // Load initial state and branch data
-    await loadPiSessionData(result.sessionId, signal)
-
-    return {
-      sessionId: result.sessionId,
-      state: result.state as JsonObject,
-    }
-  } catch (error) {
-    console.error('Failed to open Pi session:', error)
-    throw error
+  if (!result.sessionId) {
+    throw new Error('Session open failed: no sessionId returned')
   }
+
+  // Load initial state and branch data
+  await loadPiSessionData(result.sessionId, signal)
+
+  return result
 }
 
 /**
