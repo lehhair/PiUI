@@ -5,7 +5,6 @@ import type {
   PiBranchSummaryItem,
   PiCompactionItem,
   PiCustomMessageItem,
-  PiSummaryMessageItem,
   PiTimelineItem,
   PiToolExecution,
   PiUnknownItem,
@@ -36,8 +35,6 @@ export const PiSystemItemView = memo(function PiSystemItemView({ item }: { item:
       return <CompactionItemView item={item} />
     case 'branch_summary':
       return <BranchSummaryItemView item={item} />
-    case 'summary_message':
-      return <SummaryMessageItemView item={item} />
     case 'custom_message':
       return item.display ? <CustomMessageItemView item={item} /> : null
     case 'unknown':
@@ -132,12 +129,6 @@ function CompactionItemView({ item }: { item: PiCompactionItem }) {
 function BranchSummaryItemView({ item }: { item: PiBranchSummaryItem }) {
   const { t } = useTranslation('message')
   return <DividerRow partKey={item.entryId} label={t('system.branchSummary')} detail={item.summary} />
-}
-
-function SummaryMessageItemView({ item }: { item: PiSummaryMessageItem }) {
-  const { t } = useTranslation('message')
-  const label = item.message.role === 'branchSummary' ? t('system.branchSummary') : t('system.contextCompacted')
-  return <DividerRow partKey={item.entryId} label={label} detail={item.message.summary} />
 }
 
 function CustomMessageItemView({ item }: { item: PiCustomMessageItem }) {
