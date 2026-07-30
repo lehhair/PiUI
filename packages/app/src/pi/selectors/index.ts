@@ -1,12 +1,9 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
-import type { UserMessage, AssistantMessage, ToolResultMessage, TextContent, ThinkingContent, ToolCall } from '@earendil-works/pi-ai'
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type {
   PiSessionRow,
   PiTimelineItem,
-  PiUserMessageItem,
   PiAssistantMessageItem,
-  PiToolExecutionItem,
   PiCompactionItem,
   PiBranchSummaryItem,
   PiModelChangeItem,
@@ -40,73 +37,73 @@ export function selectPiSessionRows(): PiSessionRow[] {
 
 /**
  * Select timeline items from raw session entries.
- * Groups message entries into user/assistant/tool items.
+ * Tool results are paired back into their owning assistant item so each
+ * message keeps its embedded tool calls. Entries without a conversation
+ * representation still surface as their own items.
  */
 export function selectPiTimelineItems(entries: SessionEntry[]): PiTimelineItem[] {
   const items: PiTimelineItem[] = []
-  const toolCallMap = new Map<string, { call: ToolCall; result?: ToolResultMessage; entryId: string; timestamp: number }>()
+  const assistantByCallId = new Map<string, PiAssistantMessageItem>()
 
   for (const entry of entries) {
     const timestamp = parseTime(entry.timestamp)
 
     if (entry.type === 'message') {
-      const message = entry.message as AgentMessage
+      const message = entry.message
 
       if (message.role === 'user') {
-        const userMsg = message as UserMessage
         items.push({
           kind: 'user_message',
           entryId: entry.id,
           timestamp,
           rawEntry: entry,
-          message: userMsg,
-          blocks: Array.isArray(userMsg.content) ? userMsg.content : [{ type: 'text', text: userMsg.content }],
-        } as PiUserMessageItem)
+          message,
+          blocks: Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }],
+        })
       } else if (message.role === 'assistant') {
-        const assistantMsg = message as AssistantMessage
-        const toolCalls: ToolCall[] = []
-        const blocks: (TextContent | ThinkingContent)[] = []
-
-        for (const block of assistantMsg.content) {
-          if (block.type === 'toolCall') {
-            toolCalls.push(block)
-          } else {
-            blocks.push(block)
-          }
-        }
-
-        items.push({
+        const item: PiAssistantMessageItem = {
           kind: 'assistant_message',
           entryId: entry.id,
           timestamp,
           rawEntry: entry,
-          message: assistantMsg,
-          blocks,
-        } as PiAssistantMessageItem)
-
-        // Track tool calls for pairing with results
-        for (const call of toolCalls) {
-          toolCallMap.set(call.id, { call, entryId: entry.id, timestamp })
+          message,
+          blocks: message.content,
+          toolResults: {},
+        }
+        items.push(item)
+        for (const block of message.content) {
+          if (block.type === 'toolCall') assistantByCallId.set(block.id, item)
         }
       } else if (message.role === 'toolResult') {
-        const toolResult = message as ToolResultMessage
-        const tracked = toolCallMap.get(toolResult.toolCallId)
-
-        if (tracked) {
-          // Found matching tool call, create tool execution item
-          items.push({
-            kind: 'tool_execution',
-            entryId: entry.id,
-            timestamp,
-            rawEntry: entry,
-            toolCallId: toolResult.toolCallId,
-            toolName: toolResult.toolName,
-            call: tracked.call,
-            result: toolResult,
-            status: toolResult.isError ? 'error' : 'completed',
-          } as PiToolExecutionItem)
-          toolCallMap.delete(toolResult.toolCallId)
-        }
+        const owner = assistantByCallId.get(message.toolCallId)
+        if (owner) owner.toolResults[message.toolCallId] = message
+      } else if (message.role === 'bashExecution') {
+        items.push({
+          kind: 'bash_execution',
+          entryId: entry.id,
+          timestamp,
+          rawEntry: entry,
+          message,
+        })
+      } else if (message.role === 'custom') {
+        items.push({
+          kind: 'custom_message',
+          entryId: entry.id,
+          timestamp,
+          rawEntry: entry,
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+        })
+      } else if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
+        items.push({
+          kind: 'summary_message',
+          entryId: entry.id,
+          timestamp,
+          rawEntry: entry,
+          message,
+        })
       }
     } else if (entry.type === 'compaction') {
       items.push({
@@ -176,20 +173,6 @@ export function selectPiTimelineItems(entries: SessionEntry[]): PiTimelineItem[]
         entryType: entry.type,
       } as PiUnknownItem)
     }
-  }
-
-  // Add any remaining tool calls without results as pending
-  for (const [toolCallId, tracked] of toolCallMap) {
-    items.push({
-      kind: 'tool_execution',
-      entryId: tracked.entryId,
-      timestamp: tracked.timestamp,
-      rawEntry: entries.find(e => e.id === tracked.entryId)!,
-      toolCallId,
-      toolName: tracked.call.name,
-      call: tracked.call,
-      status: 'pending',
-    } as PiToolExecutionItem)
   }
 
   return items
