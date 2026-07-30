@@ -97,10 +97,7 @@
     "filesChanged": "{{count}} 个文件变更",
     "filesChanged_other": "{{count}} 个文件变更",
     "branchSummary": "分支摘要",
-    "modelChanged": "模型：{{model}}",
-    "thinkingLevel": "思考强度：{{level}}",
-    "unsupportedEntry": "未支持的条目：{{type}}",
-    "customMessage": "扩展消息"
+    "unsupportedEntry": "未支持的条目：{{type}}"
   },
   "stepFinish": {
     "inputTokens": "Input: {{input}}",

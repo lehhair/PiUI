@@ -121,10 +121,7 @@
     "filesChanged": "{{count}} file changed",
     "filesChanged_other": "{{count}} files changed",
     "branchSummary": "Branch summary",
-    "modelChanged": "Model: {{model}}",
-    "thinkingLevel": "Thinking: {{level}}",
-    "unsupportedEntry": "Unsupported entry: {{type}}",
-    "customMessage": "Extension message"
+    "unsupportedEntry": "Unsupported entry: {{type}}"
   },
   "stepFinish": {
     "inputTokens": "Input: {{input}}",
