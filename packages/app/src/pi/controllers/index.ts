@@ -321,7 +321,9 @@ export async function setPiThinkingLevel(sessionId: string, level: string, signa
  * Rename a Pi session.
  */
 export async function renamePiSession(sessionId: string, name: string, signal?: AbortSignal): Promise<void> {
-  await transport.setPiSessionName(sessionId, name, signal)
+  // 序列化命令，等它真正执行完——否则调用方紧接着刷新列表读到的还是旧名字
+  const submitted = await transport.setPiSessionName(sessionId, name, signal)
+  await transport.waitHostCommand(submitted.id, signal)
 }
 
 /**
