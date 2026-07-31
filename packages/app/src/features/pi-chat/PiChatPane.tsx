@@ -185,21 +185,6 @@ export function PiChatPane({
   // ============================================
   // Pi data layer: event stream + keyed stores
   // ============================================
-  useEffect(() => {
-    if (!sessionId) return
-    piEventStream.connect(sessionId)
-    if (!piBranchStore.getData(sessionId)) {
-      void loadPiSessionData(sessionId).catch(() => undefined)
-    }
-    return () => piEventStream.disconnect(sessionId)
-  }, [sessionId])
-
-  // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框
-  const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
-  useEffect(() => {
-    setForkSeedText(sessionId ? takeForkText(sessionId) : undefined)
-  }, [sessionId])
-
   const { models, isLoading: modelsLoading } = usePiModels()
   useEffect(() => {
     void loadPiModels().catch(() => undefined)
@@ -213,6 +198,32 @@ export function PiChatPane({
   // 不能永远停在 loading
   const sessionUnavailable = Boolean(sessionId && !branch && branchError)
   sessionUnavailableRef.current = sessionUnavailable
+
+  useEffect(() => {
+    // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
+    if (!sessionId || sessionUnavailable) return
+    piEventStream.connect(sessionId)
+    if (!piBranchStore.getData(sessionId)) {
+      void loadPiSessionData(sessionId).catch(() => undefined)
+    }
+    return () => piEventStream.disconnect(sessionId)
+  }, [sessionId, sessionUnavailable])
+
+  // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
+  // 用 ref 防重：StrictMode 挂载会跑两遍 effect，take 是一次性的，
+  // 第二遍会拿到 undefined 把第一遍的结果冲掉
+  const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
+  const forkSeedForRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!sessionId) {
+      forkSeedForRef.current = null
+      setForkSeedText(undefined)
+      return
+    }
+    if (forkSeedForRef.current === sessionId) return
+    forkSeedForRef.current = sessionId
+    setForkSeedText(takeForkText(sessionId))
+  }, [sessionId])
 
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
