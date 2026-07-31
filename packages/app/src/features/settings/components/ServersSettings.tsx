@@ -12,7 +12,7 @@ import {
   RetryIcon,
 } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
-import { messageStore } from '../../../store'
+import { clearSessionRuntimeState } from '../../../utils/sessionLifecycle'
 import { settingsFieldClass, SettingsSection } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 
@@ -530,7 +530,7 @@ export function ServersSettings() {
 
       // 清理当前 session 的 store 状态
       if (routeSessionId) {
-        messageStore.clearSession(routeSessionId)
+        clearSessionRuntimeState(routeSessionId)
       }
 
       setActiveServer(id) // 内部触发 serverChangeListeners → reconnectSSE()

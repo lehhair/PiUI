@@ -1,11 +1,11 @@
-import { memo, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore, useCallback } from 'react'
+import { memo, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { RefObject } from 'react'
 import { CheckIcon, ClockIcon, CircleIcon, CloseIcon, FastForwardIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
-import { useTodos, useTodoStats, useCurrentTask } from '../../../store'
+import { usePiSessionTodos } from '../../../pi/hooks/index.js'
 import { autoApproveStore, type FullAutoMode } from '../../../store/autoApproveStore'
-import type { TodoItem } from '../../../types/api/event'
+import type { PiTodoItem as TodoItem } from '../../../pi/hooks/index.js'
 
 // ============================================
 // Full Auto 状态 hook
@@ -38,9 +38,16 @@ export const InputFooter = memo(function InputFooter({
   inputContainerRef,
 }: InputFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
-  const todos = useTodos(sessionId ?? null)
-  const stats = useTodoStats(sessionId ?? null)
-  const currentTask = useCurrentTask(sessionId ?? null)
+  const todos = usePiSessionTodos(sessionId ?? null)
+  const stats = useMemo(() => ({
+    total: todos.length,
+    completed: todos.filter(todo => todo.status === 'completed').length,
+    inProgress: todos.filter(todo => todo.status === 'in_progress').length,
+  }), [todos])
+  const currentTask = useMemo(
+    () => todos.find(todo => todo.status === 'in_progress') ?? todos.find(todo => todo.status === 'pending') ?? null,
+    [todos],
+  )
   const [panelState, setPanelState] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed')
   const popoverRef = useRef<HTMLDivElement>(null)
   const closeTimerRef = useRef<number | null>(null)

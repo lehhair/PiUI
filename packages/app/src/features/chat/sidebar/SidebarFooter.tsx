@@ -12,7 +12,7 @@ import {
 } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
-import { useHasMessages } from '../../../store'
+import { useFocusedSessionHasEntries } from '../../../pi/hooks/index.js'
 
 // 状态指示器 - 圆环 + 右下角状态点
 function StatusIndicator({
@@ -80,7 +80,7 @@ export function SidebarFooter({
   const { t } = useTranslation(['chat', 'common'])
   const { mode: themeMode, setThemeWithAnimation: onThemeChange, isWideMode, toggleWideMode } = useTheme()
   // 统计与 hasMessages 留在 footer：流式时不让整个 SidePanel 跟着 messages 重渲
-  const hasMessages = useHasMessages()
+  const hasMessages = useFocusedSessionHasEntries()
   const stats = useSessionStats(contextLimit)
   const [isOpen, setIsOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 260, fromBottom: false })

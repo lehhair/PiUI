@@ -1,12 +1,75 @@
 import { useSyncExternalStore } from 'react'
 import { useMemo } from 'react'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
+import { paneLayoutStore } from '../../store/paneLayoutStore'
 
 /**
  * React bindings for Pi stores.
  * Session-scoped hooks take sessionId (null yields empty snapshots),
  * keeping multi-pane renders isolated per session.
  */
+
+/** Focused pane's session id (the app-wide "current session"). */
+export function useFocusedSessionId(): string | null {
+  return useSyncExternalStore(
+    paneLayoutStore.subscribe,
+    () => paneLayoutStore.getFocusedSessionId(),
+    () => paneLayoutStore.getFocusedSessionId(),
+  )
+}
+
+/** Whether the focused session has any timeline entries. */
+export function useFocusedSessionHasEntries(): boolean {
+  const sessionId = useFocusedSessionId()
+  return useSyncExternalStore(
+    piBranchStore.subscribe,
+    () => (sessionId ? (piBranchStore.getData(sessionId)?.items.length ?? 0) > 0 : false),
+    () => false,
+  )
+}
+
+export type PiTodoItem = {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  priority: 'high' | 'medium' | 'low'
+}
+
+function extractTodosFromExecution(callArguments: unknown, resultDetails: unknown): PiTodoItem[] {
+  const input = callArguments && typeof callArguments === 'object' ? (callArguments as Record<string, unknown>) : undefined
+  const details = resultDetails && typeof resultDetails === 'object' && !Array.isArray(resultDetails)
+    ? (resultDetails as Record<string, unknown>)
+    : undefined
+  return (details?.todos as PiTodoItem[]) || (input?.todos as PiTodoItem[]) || []
+}
+
+/**
+ * Latest todoWrite todos in the branch (native: the todo list lives in the
+ * most recent todo tool call/result, not in a side store).
+ */
+export function usePiSessionTodos(sessionId: string | null): PiTodoItem[] {
+  const branch = usePiBranchData(sessionId)
+  return useMemo(() => {
+    const items = branch?.items ?? []
+    let latest: PiTodoItem[] = []
+    for (const entry of items) {
+      if (entry.type !== 'message') continue
+      const message = entry.message
+      if (message.role === 'assistant') {
+        for (const block of message.content) {
+          if (block.type === 'toolCall' && block.name.toLowerCase().includes('todo')) {
+            const todos = extractTodosFromExecution(block.arguments, undefined)
+            if (todos.length > 0) latest = todos
+          }
+        }
+      } else if (message.role === 'toolResult' && message.toolName.toLowerCase().includes('todo')) {
+        const todos = extractTodosFromExecution(undefined, message.details)
+        if (todos.length > 0) latest = todos
+      }
+    }
+    return latest
+  }, [branch])
+}
 
 export function usePiSessionInfos() {
   return useSyncExternalStore(

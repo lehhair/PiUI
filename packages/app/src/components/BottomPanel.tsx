@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useCallback, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PanelContainer } from './PanelContainer'
 import { layoutStore, useLayoutStore, type PanelTab } from '../store/layoutStore'
-import { useCurrentSessionId } from '../store'
+import { useFocusedSessionId } from '../pi/hooks/index.js'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
 
@@ -29,7 +29,7 @@ function PanelFallback() {
 export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelProps) {
   const { t } = useTranslation(['components', 'common'])
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
-  const sessionId = useCurrentSessionId()
+  const sessionId = useFocusedSessionId()
   const { interaction, layout } = useChatViewport()
 
   // 追踪面板 resize 状态
