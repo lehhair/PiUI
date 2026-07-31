@@ -4,7 +4,7 @@ import type { PiProjectTrust, PiSettingsSnapshot } from '../../../pi/domain'
 import type { HostWorkspace } from '../../../pi/workspaces'
 import { Button } from '../../../components/ui/Button'
 import { useCurrentDirectory } from '../../../hooks'
-import { useCurrentSessionId } from '../../../store/messageStoreHooks'
+import { useFocusedSessionId } from '../../../pi/hooks/index.js'
 import {
   getPiSettings,
   getProjectTrust,
@@ -59,7 +59,7 @@ function draftFromSnapshot(snapshot: PiSettingsSnapshot): SettingsDraft {
 
 export function PiManagementSettings() {
   const directory = useCurrentDirectory()
-  const sessionId = useCurrentSessionId()
+  const sessionId = useFocusedSessionId()
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [settings, setSettings] = useState<PiSettingsSnapshot | null>(null)
   const [draft, setDraft] = useState<SettingsDraft | null>(null)

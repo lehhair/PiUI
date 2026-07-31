@@ -3,16 +3,19 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBox } from './InputBox'
 import type { Command } from '../slash-command'
-import type { Message } from '../../types/message'
+import type { PiBranchPage } from '../../pi/domain'
 
 let slashCommands: Command[] = []
-let messagesMock: Message[] = []
+let historyTexts: string[] = []
 
-function createHistoryMessage(text: string): Message {
+function historyBranch(): PiBranchPage {
   return {
-    info: { role: 'user' },
-    parts: [{ type: 'text', text, synthetic: false }],
-  } as unknown as Message
+    items: historyTexts.map((text, index) => ({
+      id: `user-${index}`,
+      type: 'message',
+      message: { role: 'user', content: text, timestamp: index },
+    })),
+  } as unknown as PiBranchPage
 }
 
 vi.mock('../attachment', () => ({
@@ -94,8 +97,9 @@ vi.mock('../../hooks', () => ({
   usePresence: (show: boolean) => ({ shouldRender: show, ref: { current: null } }),
 }))
 
-vi.mock('../../store/messageStoreHooks', () => ({
-  useMessages: () => messagesMock,
+vi.mock('../../pi/hooks/index.js', () => ({
+  useFocusedSessionId: () => 'session-1',
+  usePiBranchData: () => historyBranch(),
 }))
 
 vi.mock('../../store/keybindingStore', () => ({
@@ -108,7 +112,7 @@ vi.mock('../../store/keybindingStore', () => ({
 describe('InputBox slash command selection', () => {
   beforeEach(() => {
     slashCommands = []
-    messagesMock = []
+    historyTexts = []
   })
 
   it('executes frontend commands immediately on selection', async () => {
@@ -331,7 +335,7 @@ describe('InputBox slash command selection', () => {
   })
 
   it('keeps navigating multiline history entries with ArrowUp', async () => {
-    messagesMock = [createHistoryMessage('first line\nsecond line'), createHistoryMessage('third line\nfourth line')]
+    historyTexts = ['first line\nsecond line', 'third line\nfourth line']
 
     render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
 
@@ -355,7 +359,7 @@ describe('InputBox slash command selection', () => {
   })
 
   it('moves the caret to the end when navigating forward with ArrowDown', async () => {
-    messagesMock = [createHistoryMessage('older line\nentry'), createHistoryMessage('newer line\nentry')]
+    historyTexts = ['older line\nentry', 'newer line\nentry']
 
     render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
 

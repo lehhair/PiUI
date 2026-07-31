@@ -20,8 +20,8 @@ vi.mock('../../../hooks', () => ({
   useRouter: () => ({ navigateHome: navigateHomeMock, sessionId: 'session-1' }),
 }))
 
-vi.mock('../../../store', () => ({
-  messageStore: { clearSession: clearSessionMock },
+vi.mock('../../../utils/sessionLifecycle', () => ({
+  clearSessionRuntimeState: clearSessionMock,
 }))
 
 const localServer = { id: 'local', name: 'Local', url: 'http://127.0.0.1:4096', isDefault: true }
