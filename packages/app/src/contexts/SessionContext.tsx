@@ -97,6 +97,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     pendingRef.current.set(session.id, Date.now())
     allSessionsRef.current = [session, ...allSessionsRef.current.filter(item => item.id !== session.id)]
     setSessions(filterPiSessionList(allSessionsRef.current, searchRef.current))
+    // 落盘广播丢失（消息发送失败、worker 崩了）时，靠延迟对账把幽灵
+    // 条目清出列表
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+    }, 15_000)
   }, [])
 
   const createSession = useCallback(async (title?: string) => {

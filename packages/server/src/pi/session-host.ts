@@ -73,6 +73,23 @@ export class SessionHost {
   }
 
   async openSession(cwd: string, sessionFile?: string): Promise<JsonObject> {
+    // Idempotent attach: reopening an already-attached session file reuses
+    // its runtime instead of spawning a second worker that would lose the
+    // session lease (SESSION_BUSY 409).
+    if (sessionFile) {
+      const existing = [...this.attached.values()].find(
+        session => session.sessionFile && arePathsEqual(session.sessionFile, sessionFile),
+      )
+      if (existing) {
+        const state = await existing.worker.command("state.get") as JsonObject | undefined
+        return {
+          sessionId: existing.sessionId,
+          sessionFile: existing.sessionFile ?? null,
+          cwd: existing.cwd,
+          state: state ?? null,
+        }
+      }
+    }
     const worker = await this.supervisor.open(cwd, sessionFile)
     const session: AttachedSession = {
       sessionId: worker.getSessionId(),
