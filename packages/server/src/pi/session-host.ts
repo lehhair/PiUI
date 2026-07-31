@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
@@ -51,6 +51,12 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
   paramsSchema: { type: "object", additionalProperties: false, properties: {} },
   queue: "immediate",
 }]
+
+/** Path comparison that ignores slash direction and case on Windows. */
+function arePathsEqual(a: string, b: string): boolean {
+  const normalize = (value: string) => resolve(value).replace(/\\/g, "/").toLowerCase()
+  return normalize(a) === normalize(b)
+}
 
 export class SessionHost {
   private readonly attached = new Map<string, AttachedSession>()
@@ -232,6 +238,18 @@ export class SessionHost {
       return this.openSession(cwd, sessionFile)
     }
     if (type === "session.attached") return this.listAttachedIds()
+    if (type === "session.delete") {
+      // Detach a live runtime before the file goes away: an attached worker
+      // keeps serving the session from memory and would rewrite the file on
+      // its next append, resurrecting the deleted session.
+      const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
+      if (sessionFile) {
+        const live = [...this.attached.values()].find(
+          session => session.sessionFile && arePathsEqual(session.sessionFile, sessionFile),
+        )
+        if (live) await this.closeSession(live.sessionId)
+      }
+    }
     return this.catalogCommand(type, params, { retry: true })
   }
 

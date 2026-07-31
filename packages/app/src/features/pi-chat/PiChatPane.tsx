@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Model } from '@earendil-works/pi-ai'
 import { ChatArea, Header, InputBox, type ChatAreaHandle, type InputBoxHandle } from '../chat/index.js'
 import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
@@ -34,8 +35,9 @@ import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
-import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
+import { useSessionContext } from '../../contexts/useSessionContext'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
@@ -166,11 +168,15 @@ export function PiChatPane({
   showSidebarButton = false,
   navigatePaneToSession,
 }: PiChatPaneProps) {
+  const { t } = useTranslation(['chat', 'common'])
   const onEnterSessionRef = useRef(onEnterSession)
   onEnterSessionRef.current = onEnterSession
   const onNewChatRef = useRef(onNewChat)
   onNewChatRef.current = onNewChat
   const { currentDirectory, addDirectory } = useDirectory()
+  const { registerSession } = useSessionContext()
+  const registerSessionRef = useRef(registerSession)
+  registerSessionRef.current = registerSession
   const currentDirectoryRef = useRef(currentDirectory)
   currentDirectoryRef.current = currentDirectory
 
@@ -192,7 +198,11 @@ export function PiChatPane({
   }, [])
 
   const branch = usePiBranchData(sessionId)
+  const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
+  // 会话不存在（已删除/文件丢失）：branch 加载失败且无数据，
+  // 不能永远停在 loading
+  const sessionUnavailable = Boolean(sessionId && !branch && branchError)
 
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
@@ -375,10 +385,20 @@ export function PiChatPane({
         if (!opened.sessionId) return false
         targetSessionId = opened.sessionId
         trackPiSession(targetSessionId, opened.cwd ?? directory)
+        // 本地创建的会话本地就有全部信息，直接进列表——磁盘扫描要等
+        // 首个条目落盘才能看到它
+        registerSessionRef.current({
+          id: targetSessionId,
+          directory: opened.cwd ?? directory,
+          title: text.trim().slice(0, 60) || 'New chat',
+          firstMessage: text.trim().slice(0, 200),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          path: opened.sessionFile ?? undefined,
+        })
         piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
-        // 首页没有常驻 socket，attach 时的 sessions.updated 没人收，
-        //  sidebar 列表靠这里补一次刷新
+        // 刷新其他列表消费者（文件夹分组等）；挂起合并保证新会话不被冲掉
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
         // Apply the composer's preferred model and thinking level BEFORE the
         // first prompt — afterwards they'd queue behind the active turn and
@@ -657,7 +677,21 @@ export function PiChatPane({
       )}
 
       <div className="absolute inset-0">
-        {chatAreaMountKey == null ? (
+        {sessionUnavailable ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-text-400 max-w-xs text-center">
+              <p className="text-[length:var(--fs-md)] font-medium text-text-200">{t('chat:chatArea.sessionNotFound')}</p>
+              <p className="text-[length:var(--fs-sm)] text-text-400">{t('chat:chatArea.sessionNotFoundDesc')}</p>
+              <button
+                type="button"
+                onClick={() => onNewChatRef.current?.()}
+                className="mt-1 h-8 px-3 rounded-md text-[length:var(--fs-sm)] font-medium text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+              >
+                {t('chat:chatArea.backToHome')}
+              </button>
+            </div>
+          </div>
+        ) : chatAreaMountKey == null ? (
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-text-400 session-loading-indicator">
               <span className="w-5 h-5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />

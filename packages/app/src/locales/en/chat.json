@@ -16,7 +16,10 @@
     "currentTurnQueue": "Waiting for current turn · {{count}}",
     "nextTurnQueue": "Waiting for next turn · {{count}}",
     "dropFolderToAddProject": "Add as project",
-    "dropFolderToAddProjectHint": "Drop a folder here"
+    "dropFolderToAddProjectHint": "Drop a folder here",
+    "sessionNotFound": "Session unavailable",
+    "sessionNotFoundDesc": "This session was deleted or its file is missing on the server.",
+    "backToHome": "Back to home"
   },
   "emptyState": {
     "title": "Start a new conversation",

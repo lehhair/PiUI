@@ -16,7 +16,10 @@
     "currentTurnQueue": "等待本轮追加 · {{count}}",
     "nextTurnQueue": "等待下一轮 · {{count}}",
     "dropFolderToAddProject": "添加为项目",
-    "dropFolderToAddProjectHint": "将文件夹放到此处"
+    "dropFolderToAddProjectHint": "将文件夹放到此处",
+    "sessionNotFound": "会话不可用",
+    "sessionNotFoundDesc": "该会话已被删除，或服务端找不到对应的会话文件。",
+    "backToHome": "返回首页"
   },
   "emptyState": {
     "title": "开始新对话",

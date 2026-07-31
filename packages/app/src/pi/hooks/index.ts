@@ -95,6 +95,14 @@ export function usePiBranchLoading(sessionId: string | null) {
   )
 }
 
+export function usePiBranchError(sessionId: string | null) {
+  return useSyncExternalStore(
+    piBranchStore.subscribe,
+    () => (sessionId ? piBranchStore.getError(sessionId) : null),
+    () => (sessionId ? piBranchStore.getError(sessionId) : null),
+  )
+}
+
 export function usePiSessionRuntimeState(sessionId: string | null) {
   return useSyncExternalStore(
     piSessionStateStore.subscribe,
