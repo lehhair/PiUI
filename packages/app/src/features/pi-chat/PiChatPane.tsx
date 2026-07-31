@@ -214,6 +214,7 @@ export function PiChatPane({
   // 第二遍会拿到 undefined 把第一遍的结果冲掉
   const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
   const forkSeedForRef = useRef<string | null>(null)
+  const lastEditorTextRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!sessionId) {
       forkSeedForRef.current = null
@@ -222,7 +223,15 @@ export function PiChatPane({
     }
     if (forkSeedForRef.current === sessionId) return
     forkSeedForRef.current = sessionId
-    setForkSeedText(takeForkText(sessionId))
+    const seed = takeForkText(sessionId)
+    setForkSeedText(seed)
+    if (seed) {
+      // 让扩展编辑器状态和种子一致：worker 端新会话的 editorText 是空，
+      // 同步 effect 会把种子抹掉；同时推到 worker，刷新后也能恢复
+      extensionUiStore.editorCommand(sessionId, { kind: 'set', text: seed })
+      lastEditorTextRef.current = seed
+      void setPiExtensionEditorState(sessionId, seed).catch(() => undefined)
+    }
   }, [sessionId])
 
   const isStreaming = Boolean(state?.isStreaming)
@@ -365,7 +374,6 @@ export function PiChatPane({
     () => (sessionId ? extensionUiStore.getSnapshot().sessions[sessionId]?.state : undefined),
     () => undefined,
   )
-  const lastEditorTextRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!extensionState || extensionState.editorText === lastEditorTextRef.current) return
     lastEditorTextRef.current = extensionState.editorText
