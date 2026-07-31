@@ -506,9 +506,11 @@ class ServerStore {
       return health
     }
 
-    // 标记为检查中
-    this.healthMap.set(serverId, { status: 'checking' })
-    this.notify()
+    // 首次检查才标为检查中；已有结果的轮询保持原状态，避免指示器抖动
+    if (!this.healthMap.has(serverId)) {
+      this.healthMap.set(serverId, { status: 'checking' })
+      this.notify()
+    }
 
     const startTime = Date.now()
     const controller = new AbortController()
