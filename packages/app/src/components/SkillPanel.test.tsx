@@ -4,8 +4,8 @@ import { SkillPanel } from './SkillPanel'
 
 const getSkillsMock = vi.fn()
 
-vi.mock('../api/skill', () => ({
-  getSkills: (...args: unknown[]) => getSkillsMock(...args),
+vi.mock('../pi/transport/index.js', () => ({
+  getPiSkills: (...args: unknown[]) => getSkillsMock(...args),
 }))
 
 vi.mock('../utils', () => ({
@@ -19,8 +19,10 @@ describe('SkillPanel', () => {
       {
         name: 'deploy-to-vercel',
         description: 'Deploy app to Vercel',
-        location: 'file:///skills/deploy-to-vercel',
-        content: 'skill content',
+        filePath: '/skills/deploy-to-vercel/SKILL.md',
+        baseDir: '/skills/deploy-to-vercel',
+        sourceInfo: { origin: 'top-level', source: 'user' },
+        disableModelInvocation: false,
       },
     ])
   })
@@ -41,6 +43,6 @@ describe('SkillPanel', () => {
     fireEvent.click(itemButton)
 
     expect(itemButton).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('skill content')).toBeInTheDocument()
+    expect(screen.getByText(/baseDir/)).toBeInTheDocument()
   })
 })

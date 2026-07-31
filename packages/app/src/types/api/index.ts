@@ -140,7 +140,6 @@ export type {
 } from './mcp'
 
 // Skill types
-export type { Skill, SkillList } from './skill'
 
 // PTY types
 export type { Pty, PtySize, PtyCreateParams, PtyUpdateParams } from './pty'
