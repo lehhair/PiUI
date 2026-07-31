@@ -56,8 +56,8 @@ type Subscriber = () => void
 // Constants
 // ============================================
 
-const STORAGE_KEY = 'opencode:sound-settings'
-const IDB_NAME = 'opencode-sounds'
+const STORAGE_KEY = 'piui:sound-settings'
+const IDB_NAME = 'piui-sounds'
 const IDB_STORE = 'custom-audio'
 const IDB_VERSION = 1
 

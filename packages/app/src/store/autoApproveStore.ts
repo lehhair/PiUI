@@ -49,11 +49,11 @@ class AutoApproveStore {
   // 功能开关（存 localStorage，持久化）
   // true = 前端临时记住规则；false = 交给后端始终允许
   private _enabled: boolean = true
-  private readonly STORAGE_KEY = 'opencode-auto-approve-enabled'
+  private readonly STORAGE_KEY = 'piui-auto-approve-enabled'
 
   // Full Auto 开启时是否追补已经等待中的权限（危险操作，默认关闭）
   private _approvePendingOnFullAuto: boolean = false
-  private readonly STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO = 'opencode-approve-pending-on-full-auto'
+  private readonly STORAGE_KEY_APPROVE_PENDING_ON_FULL_AUTO = 'piui-approve-pending-on-full-auto'
 
   // Full Auto 模式（纯内存，不持久化，刷新即关）
   // off: 不自动放行

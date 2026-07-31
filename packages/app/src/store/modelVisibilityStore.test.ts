@@ -17,7 +17,7 @@ function model(provider: string, id: string): Model<any> {
 }
 
 function readHiddenKeys(): string[] {
-  const key = Object.keys(localStorage).find(k => k.endsWith(':hidden-model-keys'))
+  const key = Object.keys(localStorage).find(k => k.endsWith(':piui-hidden-model-keys'))
   if (!key) return []
   const raw = localStorage.getItem(key)
   if (!raw) return []

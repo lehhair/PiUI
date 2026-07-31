@@ -53,8 +53,8 @@ type Subscriber = () => void
 const TOAST_DURATION = 8000
 const MAX_TOASTS = 3
 const EXIT_ANIMATION_MS = 200
-const STORAGE_KEY = 'opencode:notifications'
-const TOAST_ENABLED_KEY = 'opencode:toast-enabled'
+const STORAGE_KEY = 'piui:notifications'
+const TOAST_ENABLED_KEY = 'piui:toast-enabled'
 const MAX_NOTIFICATIONS = 50
 
 // ============================================

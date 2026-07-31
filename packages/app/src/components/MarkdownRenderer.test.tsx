@@ -828,7 +828,7 @@ $$`
     expect(frame.getAttribute('srcdoc')).toContain('Content-Security-Policy')
     expect(frame.getAttribute('srcdoc')).toContain('name="viewport" content="width=device-width, initial-scale=1"')
     expect(frame.getAttribute('srcdoc')).toContain('overflow:hidden')
-    expect(frame.getAttribute('srcdoc')).toContain('opencode-html-resize')
+    expect(frame.getAttribute('srcdoc')).toContain('piui-html-resize')
     expect(frame).not.toHaveAttribute('scrolling')
     expect(frame.parentElement?.parentElement?.className).toContain('overflow-x-auto')
     expect(frame.parentElement?.parentElement?.className).toContain('code-scrollbar')
@@ -871,7 +871,7 @@ $$`
 
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-resize', id: resizeId, height: 180, width: 1200 },
+        data: { type: 'piui-html-resize', id: resizeId, height: 180, width: 1200 },
         source: frame.contentWindow,
       }),
     )
@@ -893,7 +893,7 @@ $$`
     Object.defineProperty(scrollport, 'clientWidth', { configurable: true, value: 360 })
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-resize', id: resizeId, height: 180, width: 1200 },
+        data: { type: 'piui-html-resize', id: resizeId, height: 180, width: 1200 },
         source: frame.contentWindow,
       }),
     )
@@ -904,7 +904,7 @@ $$`
     Object.defineProperty(scrollport, 'clientWidth', { configurable: true, value: 1300 })
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-resize', id: resizeId, height: 180, width: 1200 },
+        data: { type: 'piui-html-resize', id: resizeId, height: 180, width: 1200 },
         source: frame.contentWindow,
       }),
     )
@@ -924,7 +924,7 @@ $$`
 
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-resize', id: resizeId, height: 480, width: 320 },
+        data: { type: 'piui-html-resize', id: resizeId, height: 480, width: 320 },
         source: frame.contentWindow,
       }),
     )
@@ -934,7 +934,7 @@ $$`
 
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-resize', id: resizeId, height: 160, width: 320 },
+        data: { type: 'piui-html-resize', id: resizeId, height: 160, width: 320 },
         source: frame.contentWindow,
       }),
     )
@@ -967,7 +967,7 @@ $$`
 
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'opencode-html-interaction', id: resizeId },
+        data: { type: 'piui-html-interaction', id: resizeId },
         source: (frame as HTMLIFrameElement).contentWindow,
       }),
     )
@@ -993,7 +993,7 @@ $$`
 
     await waitFor(() => {
       expect(screen.getByTitle('HTML preview')).toHaveStyle({ colorScheme: 'dark' })
-      expect(postMessage).toHaveBeenCalledWith({ type: 'opencode-html-theme', theme: 'dark' }, '*')
+      expect(postMessage).toHaveBeenCalledWith({ type: 'piui-html-theme', theme: 'dark' }, '*')
     })
     expect(screen.getByTitle('HTML preview')).toBe(lightFrame)
     expect(lightFrame.getAttribute('srcdoc')).toBe(initialSrcDoc)
@@ -1009,11 +1009,11 @@ $$`
 
     const frame = screen.getByTitle('HTML preview')
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
-    expect(frame.getAttribute('srcdoc')).toContain('opencode-html-stream')
+    expect(frame.getAttribute('srcdoc')).toContain('piui-html-stream')
     expect(frame.getAttribute('srcdoc')).toContain('name="viewport" content="width=device-width, initial-scale=1"')
     expect(frame.getAttribute('srcdoc')).toContain('overflow:hidden')
-    expect(frame.getAttribute('srcdoc')).toContain('opencode-html-measure')
-    expect(frame.getAttribute('srcdoc')).toContain('opencode-html-resize')
+    expect(frame.getAttribute('srcdoc')).toContain('piui-html-measure')
+    expect(frame.getAttribute('srcdoc')).toContain('piui-html-resize')
     expect(frame).not.toHaveAttribute('scrolling')
     expect(frame.parentElement?.parentElement?.className).toContain('overflow-x-auto')
     expect(frame.getAttribute('srcdoc')).toContain('scriptQueue')

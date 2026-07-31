@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const STORAGE_SUFFIX = 'opencode-pinned-sessions'
+const STORAGE_SUFFIX = 'piui-pinned-sessions'
 
 function serverKey(serverId: string) {
   return `srv:${serverId}:${STORAGE_SUFFIX}`

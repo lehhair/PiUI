@@ -129,7 +129,7 @@ describe('serverStore health check', () => {
 
   it('checks the local default server same-origin even with a legacy stored url', async () => {
     localStorage.setItem(
-      'opencode-servers',
+      'piui-servers',
       JSON.stringify([{ id: 'local', name: 'Local', url: '/api', isDefault: true }]),
     )
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1 }))

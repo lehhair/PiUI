@@ -66,6 +66,6 @@ describe('UpdateStore', () => {
 
     expect(store.getSnapshot().dismissedVersion).toBe('0.5.2')
     expect(shouldShowUpdateToast(store.getSnapshot())).toBe(false)
-    expect(localStorage.getItem('opencode:update-check')).toContain('0.5.2')
+    expect(localStorage.getItem('piui:update-check')).toContain('0.5.2')
   })
 })

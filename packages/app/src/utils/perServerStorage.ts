@@ -7,9 +7,9 @@
 //
 // 用法：
 //   import { serverStorage } from '../utils/perServerStorage'
-//   serverStorage.get('last-directory')        // 读取当前服务器的值
-//   serverStorage.set('last-directory', '/foo') // 写入当前服务器的值
-//   serverStorage.remove('last-directory')      // 删除当前服务器的值
+//   serverStorage.get('piui-last-directory')        // 读取当前服务器的值
+//   serverStorage.set('piui-last-directory', '/foo') // 写入当前服务器的值
+//   serverStorage.remove('piui-last-directory')      // 删除当前服务器的值
 
 import { serverStore } from '../store/serverStore'
 
@@ -81,7 +81,7 @@ export interface PerServerStorageBackup {
   entries: Record<string, string>
 }
 
-const SERVER_STORAGE_PREFIX = 'srv:'
+const SERVER_STORAGE_PREFIX = 'piui-srv:'
 
 export function exportPerServerStorageBackup(): PerServerStorageBackup {
   const entries: Record<string, string> = {}

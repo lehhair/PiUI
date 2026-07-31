@@ -119,8 +119,8 @@ function formatExceptionDiagnostics(url: string, err: unknown): string {
     .join('\n\n') + cause
 }
 
-const STORAGE_KEY = 'opencode-servers'
-const ACTIVE_SERVER_KEY = 'opencode-active-server'
+const STORAGE_KEY = 'piui-servers'
+const ACTIVE_SERVER_KEY = 'piui-active-server'
 export const LOCAL_SERVER_ID = 'local'
 
 /**
