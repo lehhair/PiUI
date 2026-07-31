@@ -73,7 +73,11 @@ export class RuntimeSupervisor {
     try {
       return await catalog.command(type, params)
     } catch (error) {
-      if (this.disposed || this.catalog === catalog) throw error
+      // 失败的 catalog（握手超时、崩溃）立刻丢弃，下次命令重新孵化——
+      // 握不上手的 worker ready 已拒，留着只会无限 500
+      if (this.catalog === catalog) this.catalog = undefined
+      void catalog.dispose().catch(() => undefined)
+      if (this.disposed) throw error
       if (!options.retry) {
         throw Object.assign(
           new Error("Pi catalog worker crashed before confirming the command result", { cause: error }),
