@@ -89,6 +89,10 @@ export class SessionHost {
       this.executor.markRuntimeCrashed(session.sessionId)
       this.attached.delete(session.sessionId)
       this.activity.delete(session.sessionId)
+      // Dispose so the process exits and the supervisor releases the lease —
+      // without this a crashed runtime orphans the session (permanent
+      // SESSION_BUSY on reattach).
+      void session.worker.dispose().catch(() => undefined)
       this.publishActivity()
       this.hub.publish({ kind: "session", id: session.sessionId }, "sessions.updated", {
         sessionId: session.sessionId,
@@ -267,6 +271,10 @@ export class SessionHost {
     session.sessionFile = typeof data.targetSessionFile === "string" ? data.targetSessionFile : session.sessionFile
     session.cwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
     session.worker.updateSessionIdentity(session.sessionId, session.sessionFile, session.cwd)
+    // Swap the lease to the target session — otherwise the source session's
+    // ports stay held and it can never be attached again (SESSION_BUSY).
+    void this.supervisor.replaceRuntimeLease(session.worker, session.sessionFile, session.sessionId)
+      .catch(() => undefined)
     this.attached.set(session.sessionId, session)
     this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
       replaced: true,
