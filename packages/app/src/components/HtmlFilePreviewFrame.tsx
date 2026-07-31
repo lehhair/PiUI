@@ -53,7 +53,7 @@ export function HtmlFilePreviewFrame({
   }, [directory, filePath, html, resourceKey])
 
   const sendTheme = useCallback(() => {
-    frameRef.current?.contentWindow?.postMessage({ type: 'opencode-html-theme', theme }, '*')
+    frameRef.current?.contentWindow?.postMessage({ type: 'piui-html-theme', theme }, '*')
   }, [theme])
 
   useEffect(() => {

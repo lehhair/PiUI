@@ -28,8 +28,8 @@ export type PathMode = 'auto' | 'unix' | 'windows'
  */
 export type DetectedPathStyle = 'unix' | 'windows'
 
-const STORAGE_KEY_PATH_MODE = 'opencode-path-mode'
-const STORAGE_KEY_DETECTED_STYLE = 'opencode-detected-path-style'
+const STORAGE_KEY_PATH_MODE = 'piui-path-mode'
+const STORAGE_KEY_DETECTED_STYLE = 'piui-detected-path-style'
 
 let _pathMode: PathMode | null = null
 let _detectedStyle: DetectedPathStyle | null = null

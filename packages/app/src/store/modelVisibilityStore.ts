@@ -5,7 +5,7 @@ import { serverStore } from './serverStore'
 
 type Listener = () => void
 
-const STORAGE_KEY_HIDDEN_MODELS = 'hidden-model-keys'
+const STORAGE_KEY_HIDDEN_MODELS = 'piui-hidden-model-keys'
 
 function loadHiddenModelKeys(): string[] {
   const stored = serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)

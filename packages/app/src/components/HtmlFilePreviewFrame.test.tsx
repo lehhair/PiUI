@@ -34,7 +34,7 @@ describe('HtmlFilePreviewFrame', () => {
     expect(frame.getAttribute('srcdoc')).toContain('body{height:100%;width:100%;margin:0;overflow:auto')
     expect(frame.getAttribute('srcdoc')).toContain('::-webkit-scrollbar-thumb')
     expect(frame.getAttribute('srcdoc')).toContain('rgba(100,100,100,.35)')
-    expect(frame.getAttribute('srcdoc')).toContain('opencode-html-interaction')
+    expect(frame.getAttribute('srcdoc')).toContain('piui-html-interaction')
   })
 
   it('preserves an existing document viewport instead of injecting a duplicate', () => {
@@ -61,7 +61,7 @@ describe('HtmlFilePreviewFrame', () => {
 
     await waitFor(() => {
       expect(frame).toHaveStyle({ colorScheme: 'dark' })
-      expect(postMessage).toHaveBeenCalledWith({ type: 'opencode-html-theme', theme: 'dark' }, '*')
+      expect(postMessage).toHaveBeenCalledWith({ type: 'piui-html-theme', theme: 'dark' }, '*')
     })
     expect(screen.getByTitle('index.html')).toBe(frame)
     expect(frame.getAttribute('srcdoc')).toBe(initialSrcDoc)

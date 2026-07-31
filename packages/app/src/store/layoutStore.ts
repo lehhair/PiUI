@@ -71,14 +71,14 @@ interface LayoutState {
 
 type Subscriber = () => void
 
-const STORAGE_KEY_WAKE_LOCK = 'opencode-wake-lock'
-const STORAGE_KEY_SIDEBAR = 'opencode-sidebar-expanded'
-const STORAGE_KEY_SIDEBAR_FOLDER_RECENTS = 'opencode-sidebar-folder-recents'
-const STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS = 'opencode-sidebar-show-child-sessions'
-const STORAGE_KEY_PANEL_LAYOUT = 'opencode-panel-layout'
-const STORAGE_KEY_RIGHT_PANEL_WIDTH = 'opencode-right-panel-width'
-const STORAGE_KEY_BOTTOM_PANEL_HEIGHT = 'opencode-bottom-panel-height'
-const STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH = 'sidebar-width'
+const STORAGE_KEY_WAKE_LOCK = 'piui-wake-lock'
+const STORAGE_KEY_SIDEBAR = 'piui-sidebar-expanded'
+const STORAGE_KEY_SIDEBAR_FOLDER_RECENTS = 'piui-sidebar-folder-recents'
+const STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS = 'piui-sidebar-show-child-sessions'
+const STORAGE_KEY_PANEL_LAYOUT = 'piui-panel-layout'
+const STORAGE_KEY_RIGHT_PANEL_WIDTH = 'piui-right-panel-width'
+const STORAGE_KEY_BOTTOM_PANEL_HEIGHT = 'piui-bottom-panel-height'
+const STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH = 'piui-sidebar-width'
 
 interface PersistedPanelTab {
   id: string
@@ -730,7 +730,7 @@ export class LayoutStore {
   setBottomPanelHeight(height: number) {
     this.state.bottomPanelHeight = height
     try {
-      localStorage.setItem('opencode-bottom-panel-height', height.toString())
+      localStorage.setItem('piui-bottom-panel-height', height.toString())
     } catch {
       // ignore
     }

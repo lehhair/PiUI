@@ -20,7 +20,7 @@ export interface UseProjectResult {
   refresh: () => Promise<void>
 }
 
-const STORAGE_KEY = 'selected-project-id'
+const STORAGE_KEY = 'piui-selected-project-id'
 
 export function useProject(): UseProjectResult {
   const { t } = useTranslation(['commands'])

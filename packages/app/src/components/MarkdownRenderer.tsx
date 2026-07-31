@@ -857,7 +857,7 @@ function decodeLocalFileHrefInline(href?: string): string | null {
 }
 
 function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'): string {
-  const themeHead = `<style id="opencode-html-theme">${buildHtmlSandboxThemeCss(theme, 'hidden')}</style>`
+  const themeHead = `<style id="piui-html-theme">${buildHtmlSandboxThemeCss(theme, 'hidden')}</style>`
   const themeCss = JSON.stringify({
     light: buildHtmlSandboxThemeCss('light', 'hidden'),
     dark: buildHtmlSandboxThemeCss('dark', 'hidden'),
@@ -868,15 +868,15 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
   (() => {
     const id = ${JSON.stringify(resizeId)};
     const themeCss = ${themeCss};
-    const measure = () => dispatchEvent(new Event('opencode-html-measure'));
+    const measure = () => dispatchEvent(new Event('piui-html-measure'));
     let scheduledScripts = 0;
     let scriptQueue = Promise.resolve();
     const applyTheme = theme => {
       document.documentElement.style.colorScheme = theme;
       document.documentElement.dataset.theme = theme;
-      const style = document.getElementById('opencode-html-theme');
+      const style = document.getElementById('piui-html-theme');
       if (style) style.textContent = themeCss[theme] || themeCss.light;
-      dispatchEvent(new CustomEvent('opencode-theme-change', { detail: { theme } }));
+      dispatchEvent(new CustomEvent('piui-theme-change', { detail: { theme } }));
       dispatchEvent(new Event('resize'));
       measure();
     };
@@ -997,11 +997,11 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
     };
     addEventListener('message', event => {
       const data = event.data;
-      if (data?.type === 'opencode-html-theme') {
+      if (data?.type === 'piui-html-theme') {
         applyTheme(data.theme);
         return;
       }
-      if (data?.type !== 'opencode-html-stream' || data.id !== id || typeof data.html !== 'string') return;
+      if (data?.type !== 'piui-html-stream' || data.id !== id || typeof data.html !== 'string') return;
       const next = new DOMParser().parseFromString(data.html, 'text/html');
       const scriptCount = data.complete === true ? Number.MAX_SAFE_INTEGER : Math.max(0, Number(data.scriptCount) || 0);
       const descriptors = clean(next, scriptCount);
@@ -1104,7 +1104,7 @@ function MarkdownHtmlArtifact({
       ? Array.from(code.matchAll(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)).length
       : Number.MAX_SAFE_INTEGER
     streamFrameRef.current?.contentWindow?.postMessage(
-      { type: 'opencode-html-stream', id: resizeId, html: code, complete: !isIncomplete, scriptCount },
+      { type: 'piui-html-stream', id: resizeId, html: code, complete: !isIncomplete, scriptCount },
       '*',
     )
   }, [code, isIncomplete, resizeId, usesStreamBridge])
@@ -1114,7 +1114,7 @@ function MarkdownHtmlArtifact({
   }, [sendStreamingHtml])
 
   const sendTheme = useCallback(() => {
-    const message = { type: 'opencode-html-theme', theme }
+    const message = { type: 'piui-html-theme', theme }
     streamFrameRef.current?.contentWindow?.postMessage(message, '*')
     canonicalFrameRef.current?.contentWindow?.postMessage(message, '*')
   }, [theme])
@@ -1152,11 +1152,11 @@ function MarkdownHtmlArtifact({
   useEffect(() => {
     const handleFrameMessage = (event: MessageEvent) => {
       const data = event.data
-      if (data?.type !== 'opencode-html-interaction' && data?.type !== 'opencode-html-resize') return
+      if (data?.type !== 'piui-html-interaction' && data?.type !== 'piui-html-resize') return
       const fromStream = event.source === streamFrameRef.current?.contentWindow && data.id === resizeId
       const fromCanonical = event.source === canonicalFrameRef.current?.contentWindow && data.id === canonicalResizeId
       if (!fromStream && !fromCanonical) return
-      if (data.type === 'opencode-html-interaction') {
+      if (data.type === 'piui-html-interaction') {
         setTouchControlsVisible(true)
         return
       }

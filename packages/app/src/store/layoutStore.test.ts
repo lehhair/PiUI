@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { LayoutStore } from './layoutStore'
 
-const STORAGE_KEY_PANEL_LAYOUT = 'opencode-panel-layout'
+const STORAGE_KEY_PANEL_LAYOUT = 'piui-panel-layout'
 
 describe('LayoutStore panel layout', () => {
   beforeEach(() => {

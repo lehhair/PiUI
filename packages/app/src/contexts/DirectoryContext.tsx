@@ -10,8 +10,8 @@ import { isTauri } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 import { hasUnsavedFileChanges } from '../store/unsavedFileStore'
 
-const STORAGE_KEY_SAVED = 'opencode-saved-directories'
-const STORAGE_KEY_RECENT = 'opencode-recent-projects'
+const STORAGE_KEY_SAVED = 'piui-saved-directories'
+const STORAGE_KEY_RECENT = 'piui-recent-projects'
 
 // 最近使用记录: { [path]: lastUsedAt }
 type RecentProjects = Record<string, number>

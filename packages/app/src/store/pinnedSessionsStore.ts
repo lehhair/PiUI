@@ -16,7 +16,7 @@ export interface PinnedSessionEntry {
 
 // 新：srv:{serverId}:opencode-pinned-sessions（serverStorage）
 // 旧：localStorage 全局 opencode-pinned-sessions（一次性迁到当前 active server）
-const STORAGE_KEY = 'opencode-pinned-sessions'
+const STORAGE_KEY = 'piui-pinned-sessions'
 
 function parseEntries(raw: unknown): PinnedSessionEntry[] {
   if (!Array.isArray(raw)) return []

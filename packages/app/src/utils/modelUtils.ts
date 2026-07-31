@@ -46,10 +46,10 @@ export function findModelByKey(models: readonly AnyModel[], key: string): AnyMod
 // 使用频率存储
 // ============================================
 
-const STORAGE_KEY = 'model-usage-stats'
-const VARIANT_STORAGE_KEY = 'model-variant-prefs'
-const PINNED_STORAGE_KEY = 'model-pinned'
-const SESSION_SELECTION_STORAGE_KEY = 'session-model-selection'
+const STORAGE_KEY = 'piui-model-usage-stats'
+const VARIANT_STORAGE_KEY = 'piui-model-variant-prefs'
+const PINNED_STORAGE_KEY = 'piui-model-pinned'
+const SESSION_SELECTION_STORAGE_KEY = 'piui-session-model-selection'
 
 interface ModelUsageStats {
   [modelKey: string]: {

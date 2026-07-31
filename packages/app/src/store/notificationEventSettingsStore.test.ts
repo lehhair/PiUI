@@ -12,7 +12,7 @@ describe('notificationEventSettingsStore', () => {
     notificationEventSettingsStore.setSystemEnabled('completed', false)
     notificationEventSettingsStore.setSystemEnabled('question', false)
 
-    const persisted = JSON.parse(localStorage.getItem('opencode:notification-event-settings') || 'null')
+    const persisted = JSON.parse(localStorage.getItem('piui:notification-event-settings') || 'null')
     expect(persisted).toEqual({
       events: {
         completed: { systemEnabled: false },

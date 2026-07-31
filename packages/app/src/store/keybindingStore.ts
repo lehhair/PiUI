@@ -65,7 +65,7 @@ export interface ParsedKeybinding {
 
 type Listener = () => void
 
-const STORAGE_KEY = 'opencode-keybindings'
+const STORAGE_KEY = 'piui-keybindings'
 
 /**
  * 默认快捷键配置

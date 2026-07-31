@@ -32,7 +32,7 @@ export interface UpdateSettingsBackup {
 
 type Subscriber = () => void
 
-const STORAGE_KEY = 'opencode:update-check'
+const STORAGE_KEY = 'piui:update-check'
 const CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000
 export const RELEASES_API_URL = 'https://api.github.com/repos/lehhair/OpenCodeUI/releases/latest'
 export const RELEASES_PAGE_URL = 'https://github.com/lehhair/OpenCodeUI/releases/latest'
