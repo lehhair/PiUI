@@ -18,7 +18,6 @@ import {
   abortPiCompaction,
   abortPiRetry,
   clearPiQueue,
-  clonePiSession,
   compactPiSession,
   forkPiSession,
   importPiSession,
@@ -331,16 +330,6 @@ export const SessionTreePanel = memo(function SessionTreePanel({
       })
     },
     [applyReplacement, capabilities.fork, runEntryCommand, sessionId, treeGraph, selectedEntryId, selectedMessage, onNewChat],
-  )
-
-  const handleClone = useCallback(
-    (entryId: string) => {
-      if (!capabilities.sessionClone) return
-      void runEntryCommand(entryId, async () => {
-        applyReplacement(await clonePiSession(sessionId, entryId))
-      })
-    },
-    [applyReplacement, capabilities.sessionClone, runEntryCommand, sessionId],
   )
 
   const handleStartLabel = useCallback((entryId: string, label?: string) => {
@@ -797,16 +786,6 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                         className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
                       >
                         {t('sessionTree.fork')}
-                      </button>
-                    ) : null}
-                    {capabilities.sessionClone ? (
-                      <button
-                        type="button"
-                        disabled={pendingEntryId !== null}
-                        onClick={() => handleClone(selectedEntryId)}
-                        className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
-                      >
-                        {t('sessionTree.clone')}
                       </button>
                     ) : null}
                     {capabilities.sessionNavigate && capabilities.compactionManage && !selectedIsLeaf ? (

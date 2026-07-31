@@ -261,7 +261,7 @@ class PiEventStream {
 
   private handleSessionsUpdated(payload: SessionsUpdatedPayload | undefined): void {
     if (payload?.replaced && payload.sourceSessionId && payload.targetSessionId) {
-      // Runtime replacement (fork/clone/new/import): the worker now owns a
+      // Runtime replacement (fork/new/import): the worker now owns a
       // different session id. Drop the old session's cursors and keyed
       // data; panes re-subscribe and reload under the new id when they
       // follow piui:session-replaced (their connect effect owns ref counts).

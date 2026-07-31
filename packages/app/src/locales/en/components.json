@@ -91,7 +91,6 @@
     "optionalBranchLabel": "Optional branch label…",
     "replaceDefaultInstructions": "Replace default summary instructions",
     "fork": "Fork here",
-    "clone": "Clone here",
     "label": "Edit label",
     "labelPlaceholder": "Branch label",
     "importPath": "Path to a Pi JSONL file",

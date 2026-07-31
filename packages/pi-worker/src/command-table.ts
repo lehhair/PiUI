@@ -43,7 +43,7 @@ export interface CommandContext {
 export type CommandHandler = (ctx: CommandContext, params: JsonObject) => Promise<JsonValue | undefined | void>
 
 const QUEUE_MODES = ["all", "one-at-a-time"] as const
-const REPLACEMENT_OPS = { fork: true, clone: true, newSession: true, switchSession: true, importSession: true }
+const REPLACEMENT_OPS = { fork: true, newSession: true, switchSession: true, importSession: true }
 
 const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   prompt: async (ctx, p) => {
@@ -72,7 +72,6 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     ctx.requireRuntime().switchSession(P.reqString(p, "sessionPath"), P.optString(p, "cwdOverride")),
   fork: async (ctx, p) =>
     ctx.requireRuntime().fork(P.reqString(p, "entryId"), P.optEnum(p, "position", ["before", "at"] as const) ?? "at"),
-  clone: async (ctx, p) => ctx.requireRuntime().clone(P.optString(p, "entryId")),
   importSession: async (ctx, p) =>
     ctx.requireRuntime().importSession(P.reqString(p, "inputPath"), P.optString(p, "cwdOverride")),
   setSessionName: async (ctx, p) => {
@@ -361,7 +360,6 @@ const COMMAND_REGISTRY = [
   registerPiCapability({ name: "newSession", scope: "session", description: "Create a new Pi session from the current runtime", paramsSchema: objectSchema({ parentSession: STRING }), queue: "serialized", replacement: true, handler: command("newSession") }),
   registerPiCapability({ name: "switchSession", scope: "session", description: "Switch the runtime to another Pi session file", paramsSchema: objectSchema({ sessionPath: STRING, cwdOverride: STRING }, ["sessionPath"]), queue: "serialized", replacement: true, handler: command("switchSession") }),
   registerPiCapability({ name: "fork", scope: "session", description: "Fork the current Pi session at an entry", paramsSchema: objectSchema({ entryId: STRING, position: { enum: ["before", "at"] } }, ["entryId"]), queue: "serialized", replacement: true, handler: command("fork") }),
-  registerPiCapability({ name: "clone", scope: "session", description: "Clone the current Pi session", paramsSchema: objectSchema({ entryId: STRING }), queue: "serialized", replacement: true, handler: command("clone") }),
   registerPiCapability({ name: "importSession", scope: "session", description: "Import a Pi session file", paramsSchema: objectSchema({ inputPath: STRING, cwdOverride: STRING }, ["inputPath"]), queue: "serialized", replacement: true, handler: command("importSession") }),
   registerPiCapability({ name: "setSessionName", scope: "session", description: "Set the current Pi session name", paramsSchema: objectSchema({ name: STRING }, ["name"]), queue: "serialized", handler: command("setSessionName") }),
   registerPiCapability({ name: "setModel", scope: "session", description: "Set provider and model for the current Pi session", paramsSchema: objectSchema({ provider: STRING, modelId: STRING }, ["provider", "modelId"]), queue: "serialized", handler: command("setModel") }),

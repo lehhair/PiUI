@@ -489,9 +489,6 @@ export function navigatePiTree(sessionId: string, params: PiNavigateTreeParams, 
   return postPiSessionCommand(sessionId, 'navigateTree', params as unknown as JsonObject, signal)
 }
 
-export function clonePiSession(sessionId: string, entryId?: string, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'clone', entryId ? { entryId } : undefined, signal)
-}
 
 export function importPiSession(sessionId: string, inputPath: string, cwdOverride?: string, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'importSession', { inputPath, cwdOverride }, signal)

@@ -124,7 +124,7 @@ function App() {
   // 全局唯一 SSE 连接。所有 pane 通过 consumer 机制接收自己的 session 事件。
   useGlobalEvents(activeDirectories)
 
-  // Runtime replacement (fork/clone/new/import): panes follow the new session id
+  // Runtime replacement (fork/new/import): panes follow the new session id
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>).detail

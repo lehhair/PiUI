@@ -376,20 +376,6 @@ export async function navigatePiTree(
 }
 
 /**
- * Clone the session at an entry (native clone: new session file, runtime
- * switches to it). Same replacement shape as fork.
- */
-export async function clonePiSession(
-  sessionId: string,
-  entryId?: string,
-  signal?: AbortSignal,
-): Promise<transport.PiForkResult> {
-  const submitted = await transport.clonePiSession(sessionId, entryId, signal)
-  const result = await transport.waitHostCommand(submitted.id, signal)
-  return (result ?? {}) as transport.PiForkResult
-}
-
-/**
  * Import a session file and switch to it. Same replacement shape as fork.
  */
 export async function importPiSession(

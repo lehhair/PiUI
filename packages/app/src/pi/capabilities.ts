@@ -8,7 +8,6 @@ export interface PiCapabilities {
   sessionTree: boolean
   sessionNavigate: boolean
   sessionDelete: boolean
-  sessionClone: boolean
   sessionImport: boolean
   promptSteer: boolean
   promptFollowUp: boolean
@@ -32,7 +31,6 @@ const unavailable: PiCapabilities = {
   sessionTree: false,
   sessionNavigate: false,
   sessionDelete: false,
-  sessionClone: false,
   sessionImport: false,
   promptSteer: false,
   promptFollowUp: false,
@@ -61,7 +59,6 @@ const COMMAND_MAP: Record<keyof PiCapabilities, string | null> = {
   sessionTree: 'tree.get',
   sessionNavigate: 'navigateTree',
   sessionDelete: 'session.delete',
-  sessionClone: 'clone',
   sessionImport: 'importSession',
   promptSteer: 'steer',
   promptFollowUp: 'followUp',
