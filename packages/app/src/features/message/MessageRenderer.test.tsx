@@ -100,17 +100,14 @@ describe('MessageRenderer assistant fork', () => {
     mockCollapseUserMessages = false
   })
 
-  it('passes the explicit fork target id when forking an assistant message', async () => {
+  it('does not offer fork on assistant messages (pi parity: fork is user-message only)', async () => {
     const onFork = vi.fn()
     const item = createAssistantItem('assistant reply')
 
     render(<MessageRenderer item={item} onFork={onFork} forkMessageId="assistant-2" />)
 
-    fireEvent.click(screen.getByRole('button', { name: /fork|分叉/i }))
-
-    await waitFor(() => {
-      expect(onFork).toHaveBeenCalledWith('assistant-1', 'assistant-2')
-    })
+    expect(screen.queryByRole('button', { name: /fork|分叉/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /copy/i })).toBeTruthy()
   })
 
   it('hides fork when the assistant message has no copyable text', () => {
