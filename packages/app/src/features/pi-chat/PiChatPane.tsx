@@ -53,6 +53,9 @@ import {
 
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
+/** fork 第一条消息的纯前端特判：不开 SDK 会话，直接落在首页预填 */
+const HOME_FORK_KEY = 'home'
+
 // ============================================
 // Compact viewport shell for split panes (from ocui ChatPane).
 // Layout/presentation stay fixed; enableCollapsedInputDock is inherited
@@ -217,8 +220,12 @@ export function PiChatPane({
   const lastEditorTextRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!sessionId) {
-      forkSeedForRef.current = null
-      setForkSeedText(undefined)
+      // fork 第一条消息的纯前端特判会落在 home：一次性取走 home 种子
+      if (forkSeedForRef.current !== HOME_FORK_KEY) {
+        forkSeedForRef.current = HOME_FORK_KEY
+        const seed = takeForkText(HOME_FORK_KEY)
+        if (seed) setForkSeedText(seed)
+      }
       return
     }
     if (forkSeedForRef.current === sessionId) return
@@ -299,12 +306,25 @@ export function PiChatPane({
   // Fork at a user message (pi TUI parity: branch BEFORE the message and
   // carry its text into the new session's composer for edit-and-resend).
   // forkMessageId is the merged tail entry id from ChatArea's visibility
-  // model.
+  // model. Forking the FIRST user message is a pure-frontend shortcut:
+  // there is no history to branch, so we just go home with the text
+  // pre-filled instead of leaving an empty in-memory session behind.
   const handleFork = useCallback(
     async (entryId: string, forkMessageId?: string) => {
       if (!sessionId) return
+      const targetId = forkMessageId ?? entryId
+      const firstUser = items.find(item => item.kind === 'user_message')
+      if (firstUser && firstUser.entryId === targetId) {
+        const text = firstUser.blocks
+          .filter((block): block is Extract<typeof block, { type: 'text' }> => block?.type === 'text')
+          .map(block => block.text)
+          .join('\n')
+        stashForkText(HOME_FORK_KEY, text)
+        onNewChatRef.current?.()
+        return
+      }
       try {
-        const result = await forkPiSession(sessionId, forkMessageId ?? entryId, 'before')
+        const result = await forkPiSession(sessionId, targetId, 'before')
         if (result.cancelled || !result.targetSessionId) return
         if (typeof result.selectedText === 'string' && result.selectedText.trim()) {
           stashForkText(result.targetSessionId, result.selectedText)
@@ -317,7 +337,7 @@ export function PiChatPane({
         console.error('Failed to fork session:', error)
       }
     },
-    [sessionId],
+    [sessionId, items],
   )
 
   // Outline index (reuses ChatArea's visible-id tracking + imperative scroll)

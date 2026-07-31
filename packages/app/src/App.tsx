@@ -970,6 +970,7 @@ function App() {
                     inline
                     renderPanelContent={rightPanelOpen || shouldRenderMobileRightPanel}
                     onNavigateSession={handleSelectSession}
+                    onNewChat={handleNewSession}
                   />
                 </section>
               </div>
@@ -1012,6 +1013,7 @@ function App() {
                   directory={focusedDirectory}
                   sessionId={paneLayout.focusedSessionId}
                   onNavigateSession={handleSelectSession}
+                  onNewChat={handleNewSession}
                 />
               </div>
             </>
