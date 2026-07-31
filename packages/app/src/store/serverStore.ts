@@ -21,14 +21,6 @@ async function getUnifiedFetch(): Promise<typeof globalThis.fetch> {
 }
 
 /**
- * 服务器认证信息
- */
-export interface ServerAuth {
-  username: string // 用户名 (默认 opencode)
-  password: string // 密码
-}
-
-/**
  * 服务器配置
  */
 export interface ServerConfig {
@@ -36,7 +28,6 @@ export interface ServerConfig {
   name: string // 显示名称
   url: string // 服务器 URL (不含尾部斜杠)
   isDefault?: boolean // 是否为默认服务器
-  auth?: ServerAuth // 认证信息 (可选)
   token?: string // Bearer token (PiUI 服务器分享链接使用)
 }
 
@@ -320,19 +311,10 @@ class ServerStore {
   }
 
   /**
-   * 获取当前活动服务器的认证信息
+   * 获取当前活动服务器的 Bearer token
    */
-  getActiveAuth(): ServerAuth | null {
-    const server = this.getActiveServer()
-    return server?.auth ?? null
-  }
-
-  /**
-   * 获取指定服务器的认证信息
-   */
-  getServerAuth(serverId: string): ServerAuth | null {
-    const server = this.servers.find(s => s.id === serverId)
-    return server?.auth ?? null
+  getActiveToken(): string | undefined {
+    return this.getActiveServer()?.token
   }
 
   /**
@@ -520,8 +502,6 @@ class ServerStore {
       const headers: Record<string, string> = {}
       if (server.token) {
         headers['Authorization'] = `Bearer ${server.token}`
-      } else if (server.auth?.password) {
-        headers['Authorization'] = makeBasicAuthHeader(server.auth)
       }
 
       const f = await getUnifiedFetch()
@@ -644,13 +624,6 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
           name: item.name,
           url: item.url.replace(/\/+$/, ''),
           isDefault: item.isDefault === true,
-          auth:
-            item.auth &&
-            typeof item.auth === 'object' &&
-            typeof item.auth.username === 'string' &&
-            typeof item.auth.password === 'string'
-              ? { username: item.auth.username, password: item.auth.password }
-              : undefined,
           token: typeof item.token === 'string' && item.token ? item.token : undefined,
         }))
     : []
@@ -679,10 +652,7 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
 
 export function exportServerSettingsBackup(): ServerSettingsBackup {
   return {
-    servers: serverStore.getStoredServers().map(server => ({
-      ...server,
-      auth: server.auth ? { ...server.auth } : undefined,
-    })),
+    servers: serverStore.getStoredServers().map(server => ({ ...server })),
     activeServerId: serverStore.getActiveServerId(),
   }
 }
@@ -715,13 +685,6 @@ export function parseConnectLink(input: string): { url: string; token: string } 
   } catch {
     return null
   }
-}
-
-/**
- * 生成 Basic Auth header 值
- */
-export function makeBasicAuthHeader(auth: ServerAuth): string {
-  return 'Basic ' + btoa(`${auth.username}:${auth.password}`)
 }
 
 function normalizeServerTimestamp(timestamp: unknown): number | null {
