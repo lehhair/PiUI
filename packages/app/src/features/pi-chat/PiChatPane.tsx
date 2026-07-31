@@ -35,6 +35,7 @@ import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
+import { uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -432,8 +433,11 @@ export function PiChatPane({
       // so awaiting it would block the composer until the turn ends. Return
       // immediately; the event stream drives updates, and we kick the first
       // refresh so the user message shows without waiting for the debounce.
+      // 发送失败必须让用户看见——静默丢掉一条消息比报错糟糕得多
       void sendPiUserMessage(sid, text, images.length ? images : undefined, deliverAs).catch(error => {
-        console.error('Failed to send message:', error)
+        uiErrorHandler('send message', error)
+        void refreshPiBranch(sid).catch(() => undefined)
+        void refreshPiSessionState(sid).catch(() => undefined)
       })
       window.setTimeout(() => {
         void refreshPiBranch(sid).catch(() => undefined)
