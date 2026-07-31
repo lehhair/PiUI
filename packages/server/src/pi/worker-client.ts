@@ -23,6 +23,15 @@ interface PendingRequest {
   timer: NodeJS.Timeout
 }
 
+/**
+ * Spawning the SDK worker takes seconds on a loaded machine; tests that
+ * spawn several workers in parallel can widen the budget via env.
+ */
+function defaultHandshakeTimeoutMs(): number {
+  const fromEnv = Number(process.env.PIUI_WORKER_HANDSHAKE_TIMEOUT_MS)
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 15_000
+}
+
 export interface WorkerCatalog {
   command(type: string, params?: JsonObject): Promise<JsonValue | undefined>
   onEvent(listener: (event: WorkerEvent) => void): () => void
@@ -97,7 +106,7 @@ export class WorkerSession {
     })
     const handshakeTimeout = setTimeout(() => {
       this.settleReadyError(Object.assign(new Error("Pi worker handshake timed out"), { code: "WORKER_PROTOCOL_MISMATCH" }))
-    }, this.options.handshakeTimeoutMs ?? 15_000)
+    }, this.options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs())
     handshakeTimeout.unref()
     this.ready.finally(() => clearTimeout(handshakeTimeout)).catch(() => undefined)
 

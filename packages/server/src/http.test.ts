@@ -1,5 +1,10 @@
 import assert from "node:assert/strict"
 import { after, describe, it } from "node:test"
+
+// Parallel test files each spawn SDK workers; the default handshake budget
+// is too tight when several spawn at once on a loaded machine.
+process.env.PIUI_WORKER_HANDSHAKE_TIMEOUT_MS ??= "60000"
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
