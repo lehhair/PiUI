@@ -471,13 +471,12 @@ class ServerStore {
 
   /**
    * 健康检查的 base 解析与数据层一致：浏览器里本地默认服务器走同源，
-   * 由 Vite 代理注入 token；远程服务器或被改写过的本地地址直连。
+   * 由 Vite 代理注入 token；只有运行时被改写过地址才直连。
    */
   private resolveHealthBaseUrl(server: ServerConfig): string {
     if (
       server.id === this.DEFAULT_SERVER_ID &&
       !this.localServerUrlOverride &&
-      server.url === API_BASE_URL &&
       !isTauri() &&
       typeof window !== 'undefined'
     ) {

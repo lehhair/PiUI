@@ -127,6 +127,19 @@ describe('serverStore health check', () => {
     vi.unstubAllGlobals()
   })
 
+  it('checks the local default server same-origin even with a legacy stored url', async () => {
+    localStorage.setItem(
+      'opencode-servers',
+      JSON.stringify([{ id: 'local', name: 'Local', url: '/api', isDefault: true }]),
+    )
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1 }))
+    const { serverStore } = await import('./serverStore')
+
+    await serverStore.checkHealth('local')
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe('/api/v1/host/health')
+  })
+
   it('checks the local default server same-origin through the dev proxy', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1 }))
     const { serverStore } = await import('./serverStore')
