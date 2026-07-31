@@ -5,24 +5,19 @@ import { changeScopeStore } from '../store/changeScopeStore'
 import { layoutStore } from '../store/layoutStore'
 import { FullscreenProvider } from '../contexts'
 
-const { getCurrentProject, getVcsInfo, getVcsDiff, getVcsFileDiff } = vi.hoisted(() => ({
-  getCurrentProject: vi.fn(),
-  getVcsInfo: vi.fn(),
-  getVcsDiff: vi.fn(),
-  getVcsFileDiff: vi.fn(),
+const { getHostGitInfo, getHostGitDiff, getHostGitFileDiff } = vi.hoisted(() => ({
+  getHostGitInfo: vi.fn(),
+  getHostGitDiff: vi.fn(),
+  getHostGitFileDiff: vi.fn(),
 }))
 
-vi.mock('../api/client', () => ({
-  getCurrentProject,
+vi.mock('../pi/transport/index.js', () => ({
+  getHostGitInfo,
+  getHostGitDiff,
+  getHostGitFileDiff,
 }))
 
-vi.mock('../api/vcs', () => ({
-  getVcsInfo,
-  getVcsDiff,
-  getVcsFileDiff,
-}))
-
-vi.mock('../pi/sessionApi', () => ({ resolveWorkspacePath: async (directory?: string) => directory ?? null }))
+vi.mock('../pi/workspaces', () => ({ resolveWorkspacePath: async (directory?: string) => directory ?? null }))
 
 vi.mock('./DiffViewer', () => ({
   DiffViewer: () => <div data-testid="diff-viewer">diff viewer</div>,
@@ -53,46 +48,35 @@ describe('SessionChangesPanel', () => {
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => {
       clearTimeout(id)
     })
-    getCurrentProject.mockResolvedValue({
-      id: 'project-1',
-      worktree: '/repo',
-      vcs: 'git',
-      time: { created: 0, updated: 0 },
-      sandboxes: [],
-    })
-    getVcsInfo.mockResolvedValue({
+    getHostGitInfo.mockResolvedValue({
       branch: 'feature/test',
-      default_branch: 'main',
+      defaultBranch: 'main',
+      root: true,
+      detached: false,
+      unborn: false,
+      ahead: 0,
+      behind: 0,
     })
-    getVcsFileDiff.mockImplementation(async (_mode, file) => ({
+    getHostGitFileDiff.mockImplementation(async (_workspace, file) => ({
       file,
+      status: 'modified',
       additions: 1,
       deletions: 1,
-      patch: `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-old\n+new\n`,
+      binary: false,
+      patch: `diff --git a/${file} b/${file}
+--- a/${file}
++++ b/${file}
+@@ -1 +1 @@
+-old
++new
+`,
     }))
-    getVcsDiff.mockImplementation(async mode => {
-      if (mode === 'branch') {
-        return [
-          {
-            file: 'src/branch.ts',
-            before: 'const branch = 1',
-            after: 'const branch = 2',
-            additions: 1,
-            deletions: 1,
-          },
-        ]
-      }
-
-      return [
-        {
-          file: 'src/git.ts',
-          before: 'const git = 1',
-          after: 'const git = 2',
-          additions: 1,
-          deletions: 1,
-        },
-      ]
-    })
+    getHostGitDiff.mockImplementation(async (_workspace, mode) => ({
+      mode,
+      files: mode === 'branch'
+        ? [{ file: 'src/branch.ts', status: 'modified', additions: 1, deletions: 1, binary: false }]
+        : [{ file: 'src/git.ts', status: 'modified', additions: 1, deletions: 1, binary: false }],
+    }))
   })
 
   afterEach(() => {
@@ -109,7 +93,7 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo', expect.any(AbortSignal))
+    expect(getHostGitDiff).toHaveBeenCalledWith('/repo', 'git', expect.any(AbortSignal))
     expect(screen.getByText('1f')).toBeInTheDocument()
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
@@ -162,15 +146,19 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getVcsDiff).toHaveBeenCalledWith('branch', '/repo', expect.any(AbortSignal))
+    expect(getHostGitDiff).toHaveBeenCalledWith('/repo', 'branch', expect.any(AbortSignal))
     expect(changeScopeStore.getMode('session-1')).toBe('branch')
     expect(screen.getAllByText('branch.ts').length).toBeGreaterThan(0)
   })
 
   it('hides the branch scope for unborn repositories', async () => {
-    getVcsInfo.mockResolvedValue({
+    getHostGitInfo.mockResolvedValue({
       branch: 'master',
       unborn: true,
+      root: true,
+      detached: false,
+      ahead: 0,
+      behind: 0,
     })
     renderSessionChangesPanel()
 
@@ -253,12 +241,7 @@ describe('SessionChangesPanel', () => {
   })
 
   it('does not offer unsupported Git initialization', async () => {
-    getCurrentProject.mockResolvedValueOnce({
-      id: 'global',
-      worktree: '/repo',
-      time: { created: 0, updated: 0 },
-      sandboxes: [],
-    })
+    getHostGitInfo.mockRejectedValueOnce(new Error('not a git repository'))
 
     renderSessionChangesPanel()
 

@@ -1,6 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react'
 
-export type ChangeScopeMode = 'git' | 'branch' | 'staged' | 'unstaged' | 'session' | 'turn'
+import type { GitDiffMode } from '@piui/protocol'
+
+export type ChangeScopeMode = GitDiffMode
 
 type Subscriber = () => void
 
