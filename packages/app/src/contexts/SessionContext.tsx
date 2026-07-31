@@ -21,6 +21,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const searchRef = useRef('')
   const retryTimerRef = useRef<number | null>(null)
   const fetchSessionsRef = useRef<(retryAttempt?: number) => Promise<void>>(() => Promise.resolve())
+  // 本地创建但还没落盘的会话：pi 要等首个条目才写文件，磁盘扫描在这之前
+  // 看不到它们。挂起期内刷新列表时保留，落盘或超时后交给磁盘数据。
+  const pendingRef = useRef(new Map<string, number>())
+  const PENDING_TTL_MS = 60_000
 
   const fetchSessions = useCallback(async (retryAttempt = 0) => {
     const requestId = ++requestIdRef.current
@@ -31,7 +35,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ? await loadPiSessionsForCwd(currentDirectory)
         : await loadPiSessions()
       const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
-      const next = linkPiSessionForks(mapped)
+      const onDisk = new Set(mapped.map(session => session.id))
+      const now = Date.now()
+      for (const [id, since] of pendingRef.current) {
+        if (onDisk.has(id) || now - since > PENDING_TTL_MS) pendingRef.current.delete(id)
+      }
+      const pending = allSessionsRef.current.filter(session => pendingRef.current.has(session.id))
+      const next = linkPiSessionForks([...pending, ...mapped])
       if (requestId !== requestIdRef.current) return
       allSessionsRef.current = next
       activeSessionStore.syncPiSummaries(next.map(session => ({
@@ -83,6 +93,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(() => fetchSessions(), [fetchSessions])
   const loadMore = useCallback(async () => {}, [])
 
+  const registerSession = useCallback((session: UiSession) => {
+    pendingRef.current.set(session.id, Date.now())
+    allSessionsRef.current = [session, ...allSessionsRef.current.filter(item => item.id !== session.id)]
+    setSessions(filterPiSessionList(allSessionsRef.current, searchRef.current))
+  }, [])
+
   const createSession = useCallback(async (title?: string) => {
     const directory = currentDirectory?.trim()
     if (!directory) throw new Error('Choose a project directory before creating a session')
@@ -96,10 +112,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     }
     trackPiSession(opened.sessionId, directory)
-    allSessionsRef.current = [session, ...allSessionsRef.current.filter(item => item.id !== session.id)]
-    setSessions(filterPiSessionList(allSessionsRef.current, search))
+    registerSession(session)
     return session
-  }, [currentDirectory, search])
+  }, [currentDirectory, registerSession])
 
   const deleteSession = useCallback(async (id: string) => {
     const session = allSessionsRef.current.find(item => item.id === id)
@@ -108,6 +123,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     pinnedSessionsStore.unpin(id)
     clearSessionRuntimeState(id)
     paneLayoutStore.clearSession(id)
+    pendingRef.current.delete(id)
     allSessionsRef.current = allSessionsRef.current.filter(item => item.id !== id)
     setSessions(filterPiSessionList(allSessionsRef.current, search))
   }, [search])
@@ -122,8 +138,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refresh,
     loadMore,
     createSession,
+    registerSession,
     deleteSession,
-  }), [sessions, isLoading, search, refresh, loadMore, createSession, deleteSession])
+  }), [sessions, isLoading, search, refresh, loadMore, createSession, registerSession, deleteSession])
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

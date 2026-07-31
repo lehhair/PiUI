@@ -11,6 +11,8 @@ export interface SessionContextValue {
   refresh: () => Promise<void>
   loadMore: () => Promise<void>
   createSession: (title?: string) => Promise<UiSession>
+  /** 本地已创建的会话直接插入列表，不等磁盘扫描和事件流 */
+  registerSession: (session: UiSession) => void
   deleteSession: (id: string) => Promise<void>
 }
 

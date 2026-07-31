@@ -95,7 +95,8 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
         })
       }
     }
-    if (!existsSync(target)) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
+    // 幂等：文件可能从未落盘（新会话首个条目才写文件），缺文件即视为已删
+    if (!existsSync(target)) return
     await fs.unlink(target)
   }
 
