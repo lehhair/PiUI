@@ -14,8 +14,8 @@ import {
   ChevronRightIcon,
   SearchIcon,
 } from './Icons'
-import { getSkills } from '../api/skill'
-import type { Skill } from '../types/api/skill'
+import type { Skill } from '@earendil-works/pi-coding-agent'
+import { getPiSkills } from '../pi/transport/index.js'
 import { apiErrorHandler } from '../utils'
 
 // ============================================
@@ -38,7 +38,7 @@ export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing, se
     try {
       setLoading(true)
       setError(null)
-      const data = await getSkills(sessionId)
+      const data = sessionId ? await getPiSkills(sessionId) : []
       setSkills(data)
     } catch (err) {
       apiErrorHandler('load skills', err)
@@ -126,7 +126,7 @@ export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing, se
         ) : (
           <div className="p-1">
             {filteredSkills.map(skill => (
-              <SkillItem key={skill.name} skill={skill} />
+              <SkillItem key={`${skill.filePath}:${skill.name}`} skill={skill} />
             ))}
           </div>
         )}
@@ -162,9 +162,9 @@ const SkillItem = memo(function SkillItem({ skill }: { skill: Skill }) {
 
       {expanded && (
         <div className="mx-2 mb-2 ml-7 rounded-md border border-border-200/40 bg-bg-100/50 px-3 py-2">
-          <div className="text-[length:var(--fs-sm)] text-text-500 mb-2 font-mono break-all">{skill.location}</div>
+          <div className="text-[length:var(--fs-sm)] text-text-500 mb-2 font-mono break-all">{skill.filePath}</div>
           <div className="bg-bg-200/50 rounded-md p-2 overflow-x-auto">
-            <pre className="text-[length:var(--fs-sm)] text-text-200 font-mono whitespace-pre-wrap break-words">{skill.content}</pre>
+            <pre className="text-[length:var(--fs-sm)] text-text-200 font-mono whitespace-pre-wrap break-words">{JSON.stringify({ baseDir: skill.baseDir, disableModelInvocation: skill.disableModelInvocation, sourceInfo: skill.sourceInfo }, null, 2)}</pre>
           </div>
         </div>
       )}

@@ -18,7 +18,7 @@ import type {
   FileReadResponse,
   FileTextSearchResponse,
 } from '@piui/protocol'
-import type { SessionEntry, SessionInfo, SessionTreeNode } from '@earendil-works/pi-coding-agent'
+import type { SessionEntry, SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, piFetch } from '../httpClient.js'
 
@@ -360,7 +360,7 @@ export function getPiSessionRegistry(sessionId: string, signal?: AbortSignal): P
   return postPiSessionCommand(sessionId, 'registry.get', undefined, signal)
 }
 
-export function getPiSkills(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+export function getPiSkills(sessionId: string, signal?: AbortSignal): Promise<Skill[]> {
   return postPiSessionCommand(sessionId, 'skills.list', undefined, signal)
 }
 
