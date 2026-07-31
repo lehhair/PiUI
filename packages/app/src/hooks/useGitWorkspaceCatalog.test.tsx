@@ -72,7 +72,7 @@ describe('useGitWorkspaceCatalog', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.catalog.get('C:/repo')?.workspaces).toEqual(['C:/repo', 'C:/repo-worktree'])
+      expect(result.current.catalog.get('C:/repo')?.workspaces).toEqual(['C:/repo'])
     })
 
     await act(async () => {
@@ -82,6 +82,6 @@ describe('useGitWorkspaceCatalog', () => {
     })
 
     expect(result.current.catalog.get('C:/repo')?.rootDirectory).toBe('C:/repo')
-    expect(result.current.catalog.get('C:/repo')?.workspaces).toEqual(['C:/repo', 'C:/repo-worktree'])
+    expect(result.current.catalog.get('C:/repo')?.workspaces).toEqual(['C:/repo'])
   })
 })

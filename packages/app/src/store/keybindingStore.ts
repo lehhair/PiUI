@@ -20,7 +20,6 @@ export type KeybindingAction =
   | 'nextSession'
   // Terminal
   | 'toggleTerminal'
-  | 'newTerminal'
   | 'terminal.copySelection'
   | 'terminal.paste'
   // Model
@@ -179,15 +178,6 @@ const DEFAULT_KEYBINDINGS: KeybindingConfig[] = [
     description: 'Show/hide terminal panel',
     defaultKey: 'Alt+`',
     currentKey: 'Alt+`',
-    category: 'terminal',
-    scope: 'global',
-  },
-  {
-    action: 'newTerminal',
-    label: 'New Terminal',
-    description: 'Open new terminal tab',
-    defaultKey: 'Alt+T',
-    currentKey: 'Alt+T',
     category: 'terminal',
     scope: 'global',
   },

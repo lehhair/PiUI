@@ -2,23 +2,16 @@ import { lazy, memo, Suspense, useCallback, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLayoutStore, layoutStore, type PanelTab } from '../store/layoutStore'
 import { PanelContainer } from './PanelContainer'
-import { createPtySession, removePtySession } from '../api/pty'
-import type { TerminalTab } from '../store/layoutStore'
 import { ResizablePanel } from './ui/ResizablePanel'
-import { logger } from '../utils/logger'
-import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
+import { normalizeToForwardSlash } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { usePiCapabilities } from '../pi/capabilities'
 
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({ default: module.SessionChangesPanel })),
 )
 const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ default: module.FileExplorer })))
-const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
-const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
 const ExtensionsPanel = lazy(() => import('./ExtensionsPanel').then(module => ({ default: module.ExtensionsPanel })))
-const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
 const SessionTreePanel = lazy(() =>
   import('./SessionTreePanel').then(module => ({ default: module.SessionTreePanel })),
 )
@@ -50,7 +43,6 @@ export const RightPanel = memo(function RightPanel({
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
-  const ptyEnabled = usePiCapabilities().pty
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
 
   // 追踪面板 resize 状态
@@ -65,37 +57,6 @@ export const RightPanel = memo(function RightPanel({
       window.removeEventListener('panel-resize-end', onEnd)
     }
   }, [])
-
-  // 关闭终端时清理 PTY 会话
-  const handleCloseTerminal = useCallback(
-    async (ptyId: string) => {
-      if (!ptyEnabled) return
-      try {
-        await removePtySession(ptyId, normalizedDirectory)
-      } catch {
-        // ignore cleanup errors
-      }
-    },
-    [normalizedDirectory, ptyEnabled],
-  )
-
-  // 创建新终端
-  const handleNewTerminal = useCallback(async () => {
-    if (!ptyEnabled) return
-    try {
-      logger.log('[RightPanel] Creating PTY session, directory:', normalizedDirectory)
-      const pty = await createPtySession({ cwd: normalizedDirectory }, normalizedDirectory)
-      logger.log('[RightPanel] PTY created:', pty)
-      const tab: TerminalTab = {
-        id: pty.id,
-        title: pty.title || 'Terminal',
-        status: 'connecting',
-      }
-      layoutStore.addTerminalTab(tab, true, 'right')
-    } catch (error) {
-      uiErrorHandler('create terminal', error)
-    }
-  }, [normalizedDirectory, ptyEnabled])
 
   // 渲染内容
   const renderContent = useCallback(
@@ -139,18 +100,6 @@ export const RightPanel = memo(function RightPanel({
             </div>
           ) : null}
 
-          {ptyEnabled && activeTab.type === 'terminal' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <TerminalContent activeTab={activeTab} directory={normalizedDirectory} />
-            </Suspense>
-          ) : null}
-
-          {activeTab.type === 'mcp' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <McpPanel isResizing={isPanelResizing} />
-            </Suspense>
-          ) : null}
-
           {activeTab.type === 'extensions' ? (
             <Suspense fallback={<PanelFallback />}>
               <ExtensionsPanel sessionId={sessionId ?? null} />
@@ -160,12 +109,6 @@ export const RightPanel = memo(function RightPanel({
           {activeTab.type === 'skill' ? (
             <Suspense fallback={<PanelFallback />}>
               <SkillPanel isResizing={isPanelResizing} sessionId={sessionId} />
-            </Suspense>
-          ) : null}
-
-          {activeTab.type === 'worktree' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <WorktreePanel isResizing={isPanelResizing} />
             </Suspense>
           ) : null}
 
@@ -202,7 +145,7 @@ export const RightPanel = memo(function RightPanel({
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, ptyEnabled, t, onNavigateSession],
+    [normalizedDirectory, sessionId, isPanelResizing, t, onNavigateSession],
   )
 
   if (inline) {
@@ -211,9 +154,6 @@ export const RightPanel = memo(function RightPanel({
         {renderPanelContent ? (
           <PanelContainer
             position="right"
-            directory={normalizedDirectory}
-            onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
-            onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
             forceOpen
           >
             {renderContent}
@@ -236,37 +176,10 @@ export const RightPanel = memo(function RightPanel({
     >
       <PanelContainer
         position="right"
-        directory={normalizedDirectory}
-        onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
-        onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
       >
         {renderContent}
       </PanelContainer>
     </ResizablePanel>
-  )
-})
-
-// ============================================
-// Terminal Content - 渲染所有终端实例 (右侧面板)
-// ============================================
-
-interface TerminalContentProps {
-  activeTab: PanelTab
-  directory?: string
-}
-
-const TerminalContent = memo(function TerminalContent({ activeTab, directory }: TerminalContentProps) {
-  const { panelTabs } = useLayoutStore()
-
-  // 获取所有 right 位置的 terminal tabs
-  const terminalTabs = panelTabs.filter(t => t.position === 'right' && t.type === 'terminal')
-
-  return (
-    <>
-      {terminalTabs.map(tab => (
-        <Terminal key={tab.id} ptyId={tab.id} directory={directory} isActive={tab.id === activeTab.id} />
-      ))}
-    </>
   )
 })
 

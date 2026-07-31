@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getCurrentProject, listWorktrees } from '../api'
+import { getCurrentProject } from '../api'
 import { subscribeToEvents } from '../api/events'
 import { serverStore } from '../store/serverStore'
 import { normalizeToForwardSlash } from '../utils'
@@ -102,32 +102,10 @@ export function useGitWorkspaceCatalog(directories: string[]) {
         }
       }
 
-      const rootDirectoryList = Array.from(rootDirectories)
-
-      const workspaceResults = await Promise.allSettled(
-        rootDirectoryList.map(async rootDirectory => ({
-          rootDirectory,
-          worktrees: await listWorktrees(rootDirectory),
-        })),
-      )
-
-      if (!mountedRef.current || version !== versionRef.current) return
-
+      // pi has no worktree list command — each directory is its own workspace
       const rootToWorkspaces = new Map<string, string[]>()
-
-      for (let index = 0; index < workspaceResults.length; index++) {
-        const result = workspaceResults[index]
-        const rootDirectory = rootDirectoryList[index]
-
-        if (result.status !== 'fulfilled') {
-          rootToWorkspaces.set(rootDirectory, previousWorkspacesByRoot.get(rootDirectory) ?? [rootDirectory])
-          continue
-        }
-
-        const { worktrees } = result.value
-        const normalizedWorktrees = Array.from(new Set(worktrees.map(worktree => normalizeToForwardSlash(worktree))))
-        const sandboxes = normalizedWorktrees.filter(worktree => worktree.toLowerCase() !== rootDirectory.toLowerCase())
-        rootToWorkspaces.set(rootDirectory, [rootDirectory, ...sandboxes])
+      for (const rootDirectory of rootDirectories) {
+        rootToWorkspaces.set(rootDirectory, previousWorkspacesByRoot.get(rootDirectory) ?? [rootDirectory])
       }
 
       for (const [directory, rootDirectory] of directoryToRoot) {

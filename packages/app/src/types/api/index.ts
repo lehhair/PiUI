@@ -94,45 +94,9 @@ export type {
 } from './event'
 export { EventTypes } from './event'
 
-// Config types
-export type {
-  Config,
-  LogLevel,
-  ServerConfig,
-  PermissionConfig,
-  PermissionActionConfig,
-  PermissionObjectConfig,
-  PermissionRuleConfig,
-  AgentConfig,
-  ProviderConfig,
-  McpLocalConfig,
-  McpOAuthConfig,
-  McpRemoteConfig,
-  LayoutConfig,
-} from './config'
-
-// MCP types
-export type {
-  MCPStatus,
-  MCPStatusConnected,
-  MCPStatusDisabled,
-  MCPStatusFailed,
-  MCPStatusNeedsAuth,
-  MCPStatusNeedsClientRegistration,
-  MCPResource,
-  MCPStatusResponse,
-  McpServerConfig,
-} from './mcp'
-
 // Skill types
 
-// PTY types
-export type { Pty, PtySize, PtyCreateParams, PtyUpdateParams } from './pty'
-
 // VCS types
-
-// Worktree types
-export type { Worktree, WorktreeCreateInput, WorktreeRemoveInput, WorktreeResetInput } from './worktree'
 
 // Tool types
 export type { ToolIDs, ToolList, ToolListItem } from './tool'

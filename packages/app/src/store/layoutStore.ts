@@ -6,7 +6,7 @@
 export type PanelPosition = 'bottom' | 'right'
 
 // 面板内容类型
-export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'mcp' | 'skill' | 'worktree' | 'extensions'
+export type PanelTabType = 'files' | 'changes' | 'session-tree' | 'session-controls' | 'skill' | 'extensions'
 type PersistedPanelTabType = Exclude<PanelTabType, 'terminal'>
 
 // 统一的面板标签
@@ -40,46 +40,6 @@ export interface PreviewFile {
 
 const MAX_RIGHT_PANEL_WIDTH = 1280
 
-// 兼容旧的 TerminalTab 类型
-export interface TerminalTab {
-  id: string // PTY session ID
-  title: string // 显示标题
-  status: 'connecting' | 'connected' | 'disconnected' | 'exited'
-  shellTitle?: string
-  customTitle?: string
-  buffer?: string
-  scrollY?: number
-  cursor?: number
-  rows?: number
-  cols?: number
-}
-
-function getResolvedTerminalTitle(tab: Pick<PanelTab, 'title' | 'shellTitle' | 'customTitle'>): string {
-  return tab.customTitle ?? tab.title ?? tab.shellTitle ?? 'Terminal'
-}
-
-function buildTerminalPanelTab(
-  tab: TerminalTab,
-  position: PanelPosition,
-  existing?: PanelTab,
-): PanelTab & { type: 'terminal'; ptyId: string } {
-  return {
-    id: tab.id,
-    type: 'terminal',
-    position,
-    ptyId: tab.id,
-    title: existing?.title ?? tab.title,
-    shellTitle: existing?.shellTitle ?? tab.shellTitle ?? tab.title,
-    customTitle: existing?.customTitle ?? tab.customTitle,
-    buffer: existing?.buffer ?? tab.buffer,
-    scrollY: existing?.scrollY ?? tab.scrollY,
-    cursor: existing?.cursor ?? tab.cursor,
-    rows: existing?.rows ?? tab.rows,
-    cols: existing?.cols ?? tab.cols,
-    status: tab.status,
-  }
-}
-
 // 旧的 RightPanelView 类型 - 兼容
 export type RightPanelView = 'files' | 'changes'
 
@@ -107,9 +67,6 @@ interface LayoutState {
   // 屏幕常亮
   wakeLock: boolean
 
-  // 终端交互
-  terminalCopyOnSelect: boolean
-  terminalRightClickPaste: boolean
 }
 
 type Subscriber = () => void
@@ -119,12 +76,9 @@ const STORAGE_KEY_SIDEBAR = 'opencode-sidebar-expanded'
 const STORAGE_KEY_SIDEBAR_FOLDER_RECENTS = 'opencode-sidebar-folder-recents'
 const STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS = 'opencode-sidebar-show-child-sessions'
 const STORAGE_KEY_PANEL_LAYOUT = 'opencode-panel-layout'
-const STORAGE_KEY_TERMINAL_LAYOUT = 'opencode-terminal-layout'
 const STORAGE_KEY_RIGHT_PANEL_WIDTH = 'opencode-right-panel-width'
 const STORAGE_KEY_BOTTOM_PANEL_HEIGHT = 'opencode-bottom-panel-height'
 const STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH = 'sidebar-width'
-const STORAGE_KEY_TERMINAL_COPY_ON_SELECT = 'opencode-terminal-copy-on-select'
-const STORAGE_KEY_TERMINAL_RIGHT_CLICK_PASTE = 'opencode-terminal-right-click-paste'
 
 interface PersistedPanelTab {
   id: string
@@ -158,13 +112,9 @@ interface PersistedTerminalSessionState {
   cols?: number
 }
 
-export interface PersistedTerminalLayoutMap {
-  version: 1
-  directories: Record<string, PersistedTerminalDirectoryLayout>
-}
 
 const PANEL_POSITIONS: PanelPosition[] = ['bottom', 'right']
-const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'session-controls', 'mcp', 'skill', 'worktree']
+const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'session-controls', 'skill']
 
 function isPanelPosition(value: unknown): value is PanelPosition {
   return typeof value === 'string' && PANEL_POSITIONS.includes(value as PanelPosition)
@@ -231,65 +181,6 @@ function sanitizePersistedPanelLayout(raw: unknown): PersistedPanelLayout | null
   }
 }
 
-function sanitizePersistedTerminalLayoutMap(raw: unknown): PersistedTerminalLayoutMap {
-  if (!raw || typeof raw !== 'object') {
-    return { version: 1, directories: {} }
-  }
-
-  const data = raw as Partial<PersistedTerminalLayoutMap>
-  if (data.version !== 1 || !data.directories || typeof data.directories !== 'object') {
-    return { version: 1, directories: {} }
-  }
-
-  const directories: Record<string, PersistedTerminalDirectoryLayout> = {}
-
-  for (const [directory, value] of Object.entries(data.directories)) {
-    if (!directory || !value || typeof value !== 'object') continue
-    const entry = value as Partial<PersistedTerminalDirectoryLayout>
-    const rawOrder = entry.order
-    const rawActiveTabId = entry.activeTabId
-    if (!rawOrder || typeof rawOrder !== 'object' || !rawActiveTabId || typeof rawActiveTabId !== 'object') continue
-
-      const order = {
-        bottom: Array.isArray(rawOrder.bottom)
-          ? rawOrder.bottom.filter((id): id is string => typeof id === 'string' && id.length > 0)
-          : [],
-        right: Array.isArray(rawOrder.right)
-          ? rawOrder.right.filter((id): id is string => typeof id === 'string' && id.length > 0)
-          : [],
-      }
-
-      const sessions: Record<string, PersistedTerminalSessionState> = {}
-      const rawSessions = entry.sessions
-      if (rawSessions && typeof rawSessions === 'object') {
-        for (const [id, session] of Object.entries(rawSessions)) {
-          if (!id || !session || typeof session !== 'object') continue
-          const data = session as Partial<PersistedTerminalSessionState>
-          sessions[id] = {
-            title: typeof data.title === 'string' ? data.title : undefined,
-            shellTitle: typeof data.shellTitle === 'string' ? data.shellTitle : undefined,
-            customTitle: typeof data.customTitle === 'string' ? data.customTitle : undefined,
-            buffer: typeof data.buffer === 'string' ? data.buffer : undefined,
-            scrollY: typeof data.scrollY === 'number' ? data.scrollY : undefined,
-            cursor: typeof data.cursor === 'number' ? data.cursor : undefined,
-            rows: typeof data.rows === 'number' ? data.rows : undefined,
-            cols: typeof data.cols === 'number' ? data.cols : undefined,
-          }
-        }
-      }
-
-      directories[directory] = {
-        order,
-        activeTabId: {
-          bottom: typeof rawActiveTabId.bottom === 'string' ? rawActiveTabId.bottom : null,
-          right: typeof rawActiveTabId.right === 'string' ? rawActiveTabId.right : null,
-        },
-        sessions,
-      }
-    }
-
-  return { version: 1, directories }
-}
 
 export class LayoutStore {
   private state: LayoutState = {
@@ -312,18 +203,16 @@ export class LayoutStore {
     bottomPanelOpen: false,
     bottomPanelHeight: 250,
     wakeLock: false,
-    terminalCopyOnSelect: false,
-    terminalRightClickPaste: false,
   }
   private subscribers = new Set<Subscriber>()
-  private currentTerminalDirectory: string | null = null
 
   private persistPanelLayout() {
     try {
       const persisted: PersistedPanelLayout = {
         version: 1,
         panelTabs: this.state.panelTabs
-          .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } => tab.type !== 'terminal')
+          .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } =>
+            (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type))
           .map(tab => ({
             id: tab.id,
             type: tab.type,
@@ -340,48 +229,6 @@ export class LayoutStore {
     }
   }
 
-  private readTerminalLayoutMap(): PersistedTerminalLayoutMap {
-    try {
-      return sanitizePersistedTerminalLayoutMap(JSON.parse(localStorage.getItem(STORAGE_KEY_TERMINAL_LAYOUT) ?? 'null'))
-    } catch {
-      return { version: 1, directories: {} }
-    }
-  }
-
-  private persistTerminalLayout() {
-    if (!this.currentTerminalDirectory) return
-
-    try {
-      const layoutMap = this.readTerminalLayoutMap()
-      layoutMap.directories[this.currentTerminalDirectory] = {
-        order: {
-          bottom: this.getTabsForPosition('bottom').map(tab => tab.id),
-          right: this.getTabsForPosition('right').map(tab => tab.id),
-        },
-        activeTabId: { ...this.state.activeTabId },
-        sessions: Object.fromEntries(
-          this.state.panelTabs
-            .filter((tab): tab is PanelTab & { type: 'terminal' } => tab.type === 'terminal')
-            .map(tab => [
-              tab.id,
-              {
-                title: tab.title,
-                shellTitle: tab.shellTitle,
-                customTitle: tab.customTitle,
-                buffer: tab.buffer,
-                scrollY: tab.scrollY,
-                cursor: tab.cursor,
-                rows: tab.rows,
-                cols: tab.cols,
-              },
-            ]),
-        ),
-      }
-      localStorage.setItem(STORAGE_KEY_TERMINAL_LAYOUT, JSON.stringify(layoutMap))
-    } catch {
-      // ignore
-    }
-  }
 
   constructor() {
     // 从 localStorage 恢复状态
@@ -405,16 +252,6 @@ export class LayoutStore {
       const savedWakeLock = localStorage.getItem(STORAGE_KEY_WAKE_LOCK)
       if (savedWakeLock !== null) {
         this.state.wakeLock = savedWakeLock === 'true'
-      }
-
-      const savedTerminalCopyOnSelect = localStorage.getItem(STORAGE_KEY_TERMINAL_COPY_ON_SELECT)
-      if (savedTerminalCopyOnSelect !== null) {
-        this.state.terminalCopyOnSelect = savedTerminalCopyOnSelect === 'true'
-      }
-
-      const savedTerminalRightClickPaste = localStorage.getItem(STORAGE_KEY_TERMINAL_RIGHT_CLICK_PASTE)
-      if (savedTerminalRightClickPaste !== null) {
-        this.state.terminalRightClickPaste = savedTerminalRightClickPaste === 'true'
       }
 
       // 右侧面板宽度
@@ -464,7 +301,6 @@ export class LayoutStore {
 
   private notify() {
     this.persistPanelLayout()
-    this.persistTerminalLayout()
     this.subscribers.forEach(fn => fn())
   }
 
@@ -514,28 +350,6 @@ export class LayoutStore {
     this.state.wakeLock = enabled
     try {
       localStorage.setItem(STORAGE_KEY_WAKE_LOCK, String(enabled))
-    } catch {
-      /* ignore */
-    }
-    this.notify()
-  }
-
-  setTerminalCopyOnSelect(enabled: boolean) {
-    if (this.state.terminalCopyOnSelect === enabled) return
-    this.state.terminalCopyOnSelect = enabled
-    try {
-      localStorage.setItem(STORAGE_KEY_TERMINAL_COPY_ON_SELECT, String(enabled))
-    } catch {
-      /* ignore */
-    }
-    this.notify()
-  }
-
-  setTerminalRightClickPaste(enabled: boolean) {
-    if (this.state.terminalRightClickPaste === enabled) return
-    this.state.terminalRightClickPaste = enabled
-    try {
-      localStorage.setItem(STORAGE_KEY_TERMINAL_RIGHT_CLICK_PASTE, String(enabled))
     } catch {
       /* ignore */
     }
@@ -632,20 +446,12 @@ export class LayoutStore {
   }
 
   // 添加 MCP 标签
-  addMcpTab(position: PanelPosition) {
-    return this.addSingletonTab('mcp', position, 'mcp')
-  }
-
   // 添加 Skill 标签
   addSkillTab(position: PanelPosition) {
     return this.addSingletonTab('skill', position, 'skill')
   }
 
   // 添加 Worktree 标签
-  addWorktreeTab(position: PanelPosition) {
-    return this.addSingletonTab('worktree', position, 'worktree')
-  }
-
   // 移除 tab
   removeTab(tabId: string) {
     const index = this.state.panelTabs.findIndex(t => t.id === tabId)
@@ -932,222 +738,6 @@ export class LayoutStore {
   }
 
   // ============================================
-  // 兼容旧 API - Terminal Tabs
-  // ============================================
-
-  setCurrentTerminalDirectory(directory?: string) {
-    this.currentTerminalDirectory = directory || null
-  }
-
-  syncTerminalSessions(directory: string | undefined, sessions: TerminalTab[]) {
-    this.currentTerminalDirectory = directory || null
-
-    const layoutMap = this.readTerminalLayoutMap()
-    const savedLayout = directory ? layoutMap.directories[directory] : undefined
-    const existingTerminalById = new Map(this.state.panelTabs.filter(tab => tab.type === 'terminal').map(tab => [tab.id, tab]))
-    const sessionById = new Map(
-      sessions.map(session => [
-        session.id,
-        buildTerminalPanelTab(
-          {
-            ...session,
-            ...savedLayout?.sessions?.[session.id],
-          },
-          'bottom',
-          existingTerminalById.get(session.id),
-        ),
-      ]),
-    )
-
-    const nonTerminalTabs = this.state.panelTabs.filter(tab => tab.type !== 'terminal')
-    const nonTerminalById = new Map(nonTerminalTabs.map(tab => [tab.id, tab]))
-
-    const orderByPosition: Record<PanelPosition, string[]> = {
-      bottom: savedLayout?.order.bottom ? [...savedLayout.order.bottom] : [],
-      right: savedLayout?.order.right ? [...savedLayout.order.right] : [],
-    }
-
-    for (const position of PANEL_POSITIONS) {
-      const currentIds = nonTerminalTabs.filter(tab => tab.position === position).map(tab => tab.id)
-      for (const id of currentIds) {
-        if (!orderByPosition[position].includes(id)) {
-          orderByPosition[position].push(id)
-        }
-      }
-    }
-
-    const assignedTerminalIds = new Set<string>()
-    const tabsByPosition: Record<PanelPosition, PanelTab[]> = {
-      bottom: [],
-      right: [],
-    }
-
-    for (const position of PANEL_POSITIONS) {
-      for (const id of orderByPosition[position]) {
-        const nonTerminalTab = nonTerminalById.get(id)
-        if (nonTerminalTab && nonTerminalTab.position === position) {
-          tabsByPosition[position].push(nonTerminalTab)
-          continue
-        }
-
-        const terminalTab = sessionById.get(id)
-        if (terminalTab && !assignedTerminalIds.has(id)) {
-          tabsByPosition[position].push({ ...terminalTab, position })
-          assignedTerminalIds.add(id)
-        }
-      }
-    }
-
-    for (const session of sessions) {
-      if (assignedTerminalIds.has(session.id)) continue
-      tabsByPosition.bottom.push(
-        buildTerminalPanelTab(
-          {
-            ...session,
-            ...savedLayout?.sessions?.[session.id],
-          },
-          'bottom',
-          existingTerminalById.get(session.id),
-        ),
-      )
-    }
-
-    this.state.panelTabs = [...tabsByPosition.right, ...tabsByPosition.bottom]
-
-    for (const position of PANEL_POSITIONS) {
-      const currentActiveId = this.state.activeTabId[position]
-      const hasCurrentActive = currentActiveId
-        ? this.state.panelTabs.some(tab => tab.id === currentActiveId && tab.position === position)
-        : false
-
-      if (hasCurrentActive) {
-        continue
-      }
-
-      const savedActiveId = savedLayout?.activeTabId[position]
-      const hasSavedActive = savedActiveId
-        ? this.state.panelTabs.some(tab => tab.id === savedActiveId && tab.position === position)
-        : false
-
-      this.state.activeTabId[position] = hasSavedActive
-        ? (savedActiveId ?? null)
-        : (this.getTabsForPosition(position)[0]?.id ?? null)
-    }
-
-    this.notify()
-  }
-
-  addTerminalTab(tab: TerminalTab, openPanel = true, position: PanelPosition = 'bottom') {
-    const existing = this.state.panelTabs.find(t => t.id === tab.id && t.position === position)
-    if (existing) {
-      existing.shellTitle = existing.shellTitle ?? tab.shellTitle ?? tab.title
-      if (!existing.customTitle) {
-        existing.title = tab.title
-      }
-      existing.status = tab.status
-      existing.ptyId = tab.id
-      this.state.activeTabId[position] = tab.id
-      if (openPanel) {
-        this.setPanelOpen(position, true)
-      }
-      this.notify()
-      return
-    }
-
-    this.addTab(
-      buildTerminalPanelTab(tab, position),
-      openPanel,
-    )
-  }
-
-  removeTerminalTab(id: string) {
-    this.removeTab(id)
-  }
-
-  setActiveTerminal(id: string) {
-    this.setActiveTab('bottom', id)
-  }
-
-  updateTerminalTab(id: string, updates: Partial<Omit<TerminalTab, 'id'>>) {
-    this.updateTab(id, updates)
-  }
-
-  updateTerminalShellTitle(id: string, shellTitle: string, manualMode: boolean) {
-    const tab = this.state.panelTabs.find(item => item.id === id && item.type === 'terminal')
-    if (!tab) return
-    tab.shellTitle = shellTitle
-    if (!manualMode) {
-      tab.title = shellTitle
-    }
-    this.notify()
-  }
-
-  updateTerminalCustomTitle(id: string, customTitle: string) {
-    const tab = this.state.panelTabs.find(item => item.id === id && item.type === 'terminal')
-    if (!tab) return
-    tab.customTitle = customTitle
-    tab.title = customTitle
-    this.notify()
-  }
-
-  updateTerminalSnapshot(id: string, snapshot: Pick<PanelTab, 'buffer' | 'scrollY' | 'cursor' | 'rows' | 'cols'>) {
-    const tab = this.state.panelTabs.find(item => item.id === id && item.type === 'terminal')
-    if (!tab) return
-    if (
-      tab.buffer === snapshot.buffer &&
-      tab.scrollY === snapshot.scrollY &&
-      tab.cursor === snapshot.cursor &&
-      tab.rows === snapshot.rows &&
-      tab.cols === snapshot.cols
-    ) {
-      return
-    }
-    tab.buffer = snapshot.buffer
-    tab.scrollY = snapshot.scrollY
-    tab.cursor = snapshot.cursor
-    tab.rows = snapshot.rows
-    tab.cols = snapshot.cols
-    this.notify()
-  }
-
-  syncTerminalTitleMode(manualMode: boolean) {
-    let changed = false
-    for (const tab of this.state.panelTabs) {
-      if (tab.type !== 'terminal') continue
-      const nextTitle = manualMode ? getResolvedTerminalTitle(tab) : tab.shellTitle ?? tab.title ?? 'Terminal'
-      if (tab.title !== nextTitle) {
-        tab.title = nextTitle
-        changed = true
-      }
-    }
-    if (changed) {
-      this.notify()
-    }
-  }
-
-  reorderTerminalTabs(draggedId: string, targetId: string) {
-    this.reorderTabs('bottom', draggedId, targetId)
-  }
-
-  getTerminalTabs(position: PanelPosition = 'bottom'): TerminalTab[] {
-    return this.getTabsForPosition(position)
-      .filter(t => t.type === 'terminal')
-      .map(t => ({
-        id: t.id,
-        title: t.title ?? 'Terminal',
-        status: t.status ?? 'connecting',
-      }))
-  }
-
-  // 获取当前活动的终端 ID
-  get activeTerminalId(): string | null {
-    const activeTab = this.getActiveTab('bottom')
-    if (activeTab?.type === 'terminal') {
-      return activeTab.id
-    }
-    return null
-  }
-
   getState() {
     return this.state
   }
@@ -1163,7 +753,6 @@ export interface LayoutBackup {
   rightPanelWidth: number
   bottomPanelHeight: number
   panelLayout: PersistedPanelLayout
-  terminalLayout: PersistedTerminalLayoutMap
   sidebarWidth: number | null
 }
 
@@ -1171,7 +760,8 @@ function buildPersistedPanelLayout(state: LayoutState): PersistedPanelLayout {
   return {
     version: 1,
     panelTabs: state.panelTabs
-      .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } => tab.type !== 'terminal')
+      .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } =>
+        (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type))
       .map(tab => ({
         id: tab.id,
         type: tab.type,
@@ -1188,15 +778,6 @@ export function exportLayoutBackup(): LayoutBackup {
   const state = layoutStore.getState()
   const rawSidebarWidth = localStorage.getItem(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH)
   const sidebarWidth = rawSidebarWidth !== null ? Number.parseInt(rawSidebarWidth, 10) : null
-  let terminalLayout: PersistedTerminalLayoutMap
-
-  try {
-    terminalLayout = sanitizePersistedTerminalLayoutMap(
-      JSON.parse(localStorage.getItem(STORAGE_KEY_TERMINAL_LAYOUT) ?? 'null'),
-    )
-  } catch {
-    terminalLayout = { version: 1, directories: {} }
-  }
 
   return {
     sidebarExpanded: state.sidebarExpanded,
@@ -1206,7 +787,6 @@ export function exportLayoutBackup(): LayoutBackup {
     rightPanelWidth: state.rightPanelWidth,
     bottomPanelHeight: state.bottomPanelHeight,
     panelLayout: buildPersistedPanelLayout(state),
-    terminalLayout,
     sidebarWidth: Number.isFinite(sidebarWidth) ? sidebarWidth : null,
   }
 }
@@ -1215,7 +795,6 @@ export function importLayoutBackup(raw: unknown): void {
   const parsed = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
   const panelLayout =
     sanitizePersistedPanelLayout(parsed?.panelLayout) ?? buildPersistedPanelLayout(layoutStore.getState())
-  const terminalLayout = sanitizePersistedTerminalLayoutMap(parsed?.terminalLayout)
   const rightPanelWidth =
     typeof parsed?.rightPanelWidth === 'number'
       ? Math.min(Math.max(Math.round(parsed.rightPanelWidth), 160), MAX_RIGHT_PANEL_WIDTH)
@@ -1236,7 +815,6 @@ export function importLayoutBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_RIGHT_PANEL_WIDTH, String(rightPanelWidth))
   localStorage.setItem(STORAGE_KEY_BOTTOM_PANEL_HEIGHT, String(bottomPanelHeight))
   localStorage.setItem(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(panelLayout))
-  localStorage.setItem(STORAGE_KEY_TERMINAL_LAYOUT, JSON.stringify(terminalLayout))
 
   if (sidebarWidth !== null) {
     localStorage.setItem(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH, String(sidebarWidth))
@@ -1255,8 +833,6 @@ import { useSyncExternalStore } from 'react'
 interface LayoutSnapshot extends LayoutState {
   // 派生属性 - 兼容旧组件
   rightPanelView: RightPanelView
-  terminalTabs: TerminalTab[]
-  activeTerminalId: string | null
 }
 
 let cachedSnapshot: LayoutSnapshot | null = null
@@ -1268,8 +844,6 @@ function getSnapshot(): LayoutSnapshot {
       ...state,
       // 派生属性
       rightPanelView: layoutStore.rightPanelView,
-      terminalTabs: layoutStore.getTerminalTabs(),
-      activeTerminalId: layoutStore.activeTerminalId,
     }
   }
   return cachedSnapshot

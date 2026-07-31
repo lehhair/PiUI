@@ -23,7 +23,6 @@ const ACTION_TRANSLATION_KEYS: Record<KeybindingAction, { label: string; descrip
   previousSession: { label: 'previousSession', description: 'previousSessionDesc' },
   nextSession: { label: 'nextSession', description: 'nextSessionDesc' },
   toggleTerminal: { label: 'toggleTerminal', description: 'toggleTerminalDesc' },
-  newTerminal: { label: 'newTerminal', description: 'newTerminalDesc' },
   'terminal.copySelection': { label: 'terminalCopySelection', description: 'terminalCopySelectionDesc' },
   'terminal.paste': { label: 'terminalPaste', description: 'terminalPasteDesc' },
   selectModel: { label: 'selectModel', description: 'selectModelDesc' },
