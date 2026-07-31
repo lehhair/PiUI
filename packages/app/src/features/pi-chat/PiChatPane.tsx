@@ -33,12 +33,19 @@ import {
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
+import { trackPiSession } from '../../pi/piSessionIndex'
 import { usePiBranchData, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
-import { getPreferredModelKey, recordModelUsage, setPreferredModelKey } from '../../utils/modelUtils'
+import {
+  getModelVariantPref,
+  getPreferredModelKey,
+  recordModelUsage,
+  saveModelVariantPref,
+  setPreferredModelKey,
+} from '../../utils/modelUtils'
 
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
@@ -213,14 +220,29 @@ export function PiChatPane({
     const map = currentModelObj.thinkingLevelMap as Record<string, string | null> | undefined
     return PI_THINKING_LEVELS.filter(level => !map || map[level] !== null)
   }, [currentModelObj])
-  const thinkingLevel = typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined
+  // On home there is no runtime state; the selector shows the persisted
+  // variant preference for the home model, applied once the session exists.
+  const [homeVariant, setHomeVariant] = useState<string | undefined>(() =>
+    homeModelKey ? getModelVariantPref(homeModelKey) : undefined,
+  )
+  useEffect(() => {
+    if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
+  }, [sessionId, homeModelKey])
+  const thinkingLevel =
+    (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ??
+    (sessionId ? undefined : homeVariant)
 
   const handleVariantChange = useCallback(
     (variant: string | undefined) => {
-      if (!sessionId || !variant) return
+      if (!variant) return
+      if (!sessionId) {
+        setHomeVariant(variant)
+        if (homeModelKey) saveModelVariantPref(homeModelKey, variant)
+        return
+      }
       void setPiThinkingLevel(sessionId, variant).catch(() => undefined)
     },
-    [sessionId],
+    [sessionId, homeModelKey],
   )
 
   const handleModelChange = useCallback(
@@ -353,13 +375,22 @@ export function PiChatPane({
         const opened = await openPiSession(directory)
         if (!opened.sessionId) return false
         targetSessionId = opened.sessionId
+        trackPiSession(targetSessionId, opened.cwd ?? directory)
         piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
+        // 首页没有常驻 socket，attach 时的 sessions.updated 没人收，
+        //  sidebar 列表靠这里补一次刷新
+        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
         // Apply the composer's preferred model to the fresh session
         const preferred = getPreferredModelKey()
         const preferredModel = preferred ? models.find(m => `${m.provider}:${m.id}` === preferred) : undefined
         if (preferredModel) {
           void setPiModel(targetSessionId, preferredModel.provider, preferredModel.id).catch(() => undefined)
+        }
+        // Apply the composer's thinking-level preference the same way
+        const preferredVariant = preferred ? getModelVariantPref(preferred) : undefined
+        if (preferredVariant) {
+          void setPiThinkingLevel(targetSessionId, preferredVariant).catch(() => undefined)
         }
       }
       const sid = targetSessionId
