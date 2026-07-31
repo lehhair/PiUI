@@ -3,23 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFileExplorer } from './useFileExplorer'
 import { changeScopeStore } from '../store/changeScopeStore'
 
-const { listDirectory, getFileContent, getFileStatus, getVcsDiff, invalidateWorkspaceFileCaches, saveFile, resolveWorkspacePath } = vi.hoisted(() => ({
+const { listDirectory, getFileContent, getFileStatus, getHostGitDiff, invalidateWorkspaceFileCaches, saveFile, resolveWorkspacePath } = vi.hoisted(() => ({
   listDirectory: vi.fn(),
   getFileContent: vi.fn(),
   getFileStatus: vi.fn(),
-  getVcsDiff: vi.fn(),
+  getHostGitDiff: vi.fn(),
   invalidateWorkspaceFileCaches: vi.fn(),
   saveFile: vi.fn(),
   resolveWorkspacePath: vi.fn(async (directory?: string) => directory ?? null),
 }))
 
 vi.mock('../pi/workspaces', () => ({ resolveWorkspacePath }))
+vi.mock('../pi/transport/index.js', () => ({ getHostGitDiff }))
 
 vi.mock('../api', () => ({
   listDirectory,
   getFileContent,
   getFileStatus,
-  getVcsDiff,
   invalidateWorkspaceFileCaches,
   saveFile,
 }))
@@ -36,15 +36,10 @@ describe('useFileExplorer change scope', () => {
     ])
     getFileContent.mockResolvedValue({ type: 'text', content: 'test' })
     getFileStatus.mockResolvedValue([])
-    getVcsDiff.mockImplementation(async mode => [
-      {
-        file: mode === 'branch' ? 'src/branch.ts' : 'src/git.ts',
-        before: '',
-        after: 'const changed = 1',
-        additions: 1,
-        deletions: 0,
-      },
-    ])
+    getHostGitDiff.mockImplementation(async (_workspace, mode) => ({
+      mode,
+      files: [{ file: mode === 'branch' ? 'src/branch.ts' : 'src/git.ts', status: 'added', additions: 1, deletions: 0, binary: false }],
+    }))
   })
 
   it('updates file statuses when the shared change mode changes', async () => {
@@ -54,7 +49,7 @@ describe('useFileExplorer change scope', () => {
       expect(result.current.fileStatus.get('src/git.ts')?.status).toBe('added')
     })
 
-    expect(getVcsDiff).toHaveBeenCalledWith('git', '/repo')
+    expect(getHostGitDiff).toHaveBeenCalledWith('/repo', 'git')
 
     act(() => {
       changeScopeStore.setMode('session-1', 'branch')
@@ -65,7 +60,7 @@ describe('useFileExplorer change scope', () => {
     })
 
     expect(result.current.fileStatus.get('src/git.ts')).toBeUndefined()
-    expect(getVcsDiff).toHaveBeenCalledWith('branch', '/repo')
+    expect(getHostGitDiff).toHaveBeenCalledWith('/repo', 'branch')
   })
 
   it('restores expanded folders per directory when switching projects', async () => {
