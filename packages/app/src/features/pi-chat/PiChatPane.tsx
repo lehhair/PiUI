@@ -229,8 +229,7 @@ export function PiChatPane({
     if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
   }, [sessionId, homeModelKey])
   const thinkingLevel =
-    (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ??
-    (sessionId ? undefined : homeVariant)
+    (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ?? homeVariant
 
   const handleVariantChange = useCallback(
     (variant: string | undefined) => {
@@ -381,17 +380,19 @@ export function PiChatPane({
         // 首页没有常驻 socket，attach 时的 sessions.updated 没人收，
         //  sidebar 列表靠这里补一次刷新
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
-        // Apply the composer's preferred model to the fresh session
+        // Apply the composer's preferred model and thinking level BEFORE the
+        // first prompt — afterwards they'd queue behind the active turn and
+        // the first turn would run with defaults.
         const preferred = getPreferredModelKey()
         const preferredModel = preferred ? models.find(m => `${m.provider}:${m.id}` === preferred) : undefined
         if (preferredModel) {
-          void setPiModel(targetSessionId, preferredModel.provider, preferredModel.id).catch(() => undefined)
+          await setPiModel(targetSessionId, preferredModel.provider, preferredModel.id).catch(() => undefined)
         }
-        // Apply the composer's thinking-level preference the same way
         const preferredVariant = preferred ? getModelVariantPref(preferred) : undefined
         if (preferredVariant) {
-          void setPiThinkingLevel(targetSessionId, preferredVariant).catch(() => undefined)
+          await setPiThinkingLevel(targetSessionId, preferredVariant).catch(() => undefined)
         }
+        void refreshPiSessionState(targetSessionId).catch(() => undefined)
       }
       const sid = targetSessionId
 

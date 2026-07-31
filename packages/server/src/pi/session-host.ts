@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
+import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
 import { join } from "node:path"
@@ -54,6 +55,7 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
 export class SessionHost {
   private readonly attached = new Map<string, AttachedSession>()
   private readonly activity = new Map<string, SessionActivityStatus>()
+  private readonly materialized = new Set<string>()
   readonly executor: SessionExecutor
 
   constructor(
@@ -84,6 +86,11 @@ export class SessionHost {
 
   private attach(session: AttachedSession): void {
     this.attached.set(session.sessionId, session)
+    // A session file that already exists is visible to the disk-scanning
+    // session list; only fresh sessions need the materialized broadcast.
+    if (session.sessionFile && existsSync(session.sessionFile)) {
+      this.materialized.add(session.sessionId)
+    }
     session.worker.onEvent(event => this.routeSessionEvent(session, event))
     session.worker.onCrash(() => {
       this.executor.markRuntimeCrashed(session.sessionId)
@@ -299,6 +306,15 @@ export class SessionHost {
     }
     if (event.channel === "session.head") {
       this.hub.publish({ kind: "session", id: session.sessionId }, "session.head", event.head)
+      if (!this.materialized.has(session.sessionId)) {
+        this.materialized.add(session.sessionId)
+        // First persisted entry: the session file now exists on disk and the
+        // catalog's session.list can finally see it — tell list subscribers.
+        this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
+          sessionId: session.sessionId,
+          materialized: true,
+        })
+      }
       return
     }
     if (event.channel === "extension.ui") {
