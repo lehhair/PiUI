@@ -3,7 +3,6 @@ import type {
   JsonValue,
   HealthResponse,
   PiRegistrySnapshot,
-  HostRegistrySnapshot,
   CommandRecord,
   GitDiffMode,
   GitDiffResponse,
@@ -18,7 +17,7 @@ import type {
   FileReadResponse,
   FileTextSearchResponse,
 } from '@piui/protocol'
-import type { SessionEntry, SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
+import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, piFetch } from '../httpClient.js'
 
@@ -65,12 +64,6 @@ export type PiSetThinkingLevelParams = {
   level: string
 }
 
-export type PiEntriesGetParams = {
-  cursor?: string
-  limit?: number
-  maxBytes?: number
-}
-
 export type PiBranchGetParams = {
   cursor?: string
   limit?: number
@@ -87,12 +80,6 @@ export type PiSessionOpenParams = {
 }
 
 // Command result types
-export type PiEntriesPage = {
-  items: SessionEntry[]
-  cursor?: string
-  hasMore: boolean
-}
-
 export type PiSessionListResult = SessionInfo[]
 
 // Transport layer - raw API calls
@@ -102,10 +89,6 @@ export async function fetchHostHealth(signal?: AbortSignal): Promise<HealthRespo
 
 export async function fetchPiRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {
   return readJson<PiRegistrySnapshot>(`${getApiBase()}/api/v1/pi/registry`, { signal })
-}
-
-export async function fetchHostRegistry(signal?: AbortSignal): Promise<HostRegistrySnapshot> {
-  return readJson<HostRegistrySnapshot>(`${getApiBase()}/api/v1/host/registry`, { signal })
 }
 
 export async function postPiGlobalCommand<T = JsonValue | undefined>(
@@ -342,10 +325,6 @@ export function listPiModels(signal?: AbortSignal): Promise<JsonValue> {
 // State commands
 export function getPiSessionState(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'state.get', undefined, signal)
-}
-
-export function getPiEntriesPage(sessionId: string, params: PiEntriesGetParams, signal?: AbortSignal): Promise<PiEntriesPage> {
-  return postPiSessionCommand(sessionId, 'entries.get', params, signal)
 }
 
 export function getPiBranchPage(sessionId: string, params: PiBranchGetParams, signal?: AbortSignal): Promise<PiBranchPage> {

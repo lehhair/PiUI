@@ -68,8 +68,6 @@ export type {
   ExtensionDescriptor,
   PiCapability,
   PiRegistrySnapshot,
-  HostCapability,
-  HostRegistrySnapshot,
 } from '@piui/protocol'
 
 // Protocol primitives
