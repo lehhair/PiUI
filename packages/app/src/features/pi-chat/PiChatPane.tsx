@@ -35,7 +35,7 @@ import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
-import { stashForkText, takeForkText } from '../../pi/pendingForkText'
+import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
 import { uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
@@ -213,32 +213,41 @@ export function PiChatPane({
   }, [sessionId, sessionUnavailable])
 
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
-  // 用 ref 防重：StrictMode 挂载会跑两遍 effect，take 是一次性的，
-  // 第二遍会拿到 undefined 把第一遍的结果冲掉
+  // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
+  // 所以既要在 sessionId 变化时尝试，也要订阅 stash 通知补漏；
+  // 只有真正拿到种子才标记已应用，拿不到就等通知
   const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
-  const forkSeedForRef = useRef<string | null>(null)
+  const forkSeedAppliedForRef = useRef<string | null>(null)
+  const forkSeedHomeAppliedRef = useRef(false)
   const lastEditorTextRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!sessionId) {
       // fork 第一条消息的纯前端特判会落在 home：一次性取走 home 种子
-      if (forkSeedForRef.current !== HOME_FORK_KEY) {
-        forkSeedForRef.current = HOME_FORK_KEY
+      if (!forkSeedHomeAppliedRef.current) {
         const seed = takeForkText(HOME_FORK_KEY)
-        if (seed) setForkSeedText(seed)
+        if (seed) {
+          forkSeedHomeAppliedRef.current = true
+          setForkSeedText(seed)
+        }
       }
       return
     }
-    if (forkSeedForRef.current === sessionId) return
-    forkSeedForRef.current = sessionId
-    const seed = takeForkText(sessionId)
-    setForkSeedText(seed)
-    if (seed) {
+    const applySeed = (sid: string) => {
+      if (forkSeedAppliedForRef.current === sid) return
+      const seed = takeForkText(sid)
+      if (!seed) return
+      forkSeedAppliedForRef.current = sid
+      setForkSeedText(seed)
       // 让扩展编辑器状态和种子一致：worker 端新会话的 editorText 是空，
       // 同步 effect 会把种子抹掉；同时推到 worker，刷新后也能恢复
-      extensionUiStore.editorCommand(sessionId, { kind: 'set', text: seed })
+      extensionUiStore.editorCommand(sid, { kind: 'set', text: seed })
       lastEditorTextRef.current = seed
-      void setPiExtensionEditorState(sessionId, seed).catch(() => undefined)
+      void setPiExtensionEditorState(sid, seed).catch(() => undefined)
     }
+    applySeed(sessionId)
+    return subscribeForkSeed(sid => {
+      if (sid === sessionId) applySeed(sid)
+    })
   }, [sessionId])
 
   const isStreaming = Boolean(state?.isStreaming)

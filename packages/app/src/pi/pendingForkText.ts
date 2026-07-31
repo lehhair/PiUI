@@ -7,6 +7,8 @@
  */
 const KEY_PREFIX = 'piui-fork-seed:'
 
+const listeners = new Set<(sessionId: string) => void>()
+
 function storage(): Storage | null {
   try {
     return typeof window !== 'undefined' ? window.sessionStorage : null
@@ -22,6 +24,7 @@ export function stashForkText(sessionId: string, text: string): void {
   } catch {
     /* 存储不可用时静默降级为不带回 */
   }
+  for (const listener of listeners) listener(sessionId)
 }
 
 export function takeForkText(sessionId: string): string | undefined {
@@ -31,3 +34,13 @@ export function takeForkText(sessionId: string): string | undefined {
   if (text !== null) store.removeItem(KEY_PREFIX + sessionId)
   return text ?? undefined
 }
+
+/**
+ * stash 通知：fork 的 replacement 事件比重写的 HTTP 结果先到时，
+ * 导航可能发生在 stash 之前，靠这个订阅补上。
+ */
+export function subscribeForkSeed(listener: (sessionId: string) => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
