@@ -4,21 +4,18 @@ import {
   exportNotificationEventSettingsBackup,
   exportNotificationPreferencesBackup,
   exportServerSettingsBackup,
-  exportServiceSettingsBackup,
   exportThemeBackup,
   exportUpdateSettingsBackup,
   importLayoutBackup,
   importNotificationEventSettingsBackup,
   importNotificationPreferencesBackup,
   importServerSettingsBackup,
-  importServiceSettingsBackup,
   importThemeBackup,
   importUpdateSettingsBackup,
   type LayoutBackup,
   type NotificationEventSettingsBackup,
   type NotificationPreferencesBackup,
   type ServerSettingsBackup,
-  type ServiceSettingsBackup,
   type ThemeBackup,
   type UpdateSettingsBackup,
 } from '../store'
@@ -31,7 +28,7 @@ import {
 } from './perServerStorage'
 
 const BACKUP_KIND = 'settings-backup'
-const BACKUP_SCHEMA_VERSION = 2
+const BACKUP_SCHEMA_VERSION = 3
 
 export interface NotificationBackup {
   browserNotificationsEnabled: boolean
@@ -44,7 +41,6 @@ export interface SettingsBackupModules {
   layout: LayoutBackup
   servers: ServerSettingsBackup
   perServerStorage: PerServerStorageBackup
-  service: ServiceSettingsBackup
   keybindings: KeybindingBackup
   notifications: NotificationBackup
   sound: SoundBackup
@@ -101,7 +97,6 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
     'layout',
     'servers',
     'perServerStorage',
-    'service',
     'keybindings',
     'notifications',
     'sound',
@@ -140,7 +135,6 @@ export async function exportSettingsBackup(): Promise<{ fileName: string; data: 
       layout: exportLayoutBackup(),
       servers: exportServerSettingsBackup(),
       perServerStorage: exportPerServerStorageBackup(),
-      service: exportServiceSettingsBackup(),
       keybindings: exportKeybindingBackup(),
       notifications: exportNotificationBackup(),
       sound: await exportSoundBackup(),
@@ -170,7 +164,6 @@ export async function importSettingsBackup(file: File): Promise<void> {
   importLayoutBackup(backup.modules.layout)
   importServerSettingsBackup(backup.modules.servers)
   importPerServerStorageBackup(backup.modules.perServerStorage)
-  importServiceSettingsBackup(backup.modules.service)
   importKeybindingBackup(backup.modules.keybindings)
   importNotificationBackup(backup.modules.notifications)
   await importSoundBackup(backup.modules.sound)

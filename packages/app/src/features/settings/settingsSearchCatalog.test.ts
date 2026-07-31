@@ -30,7 +30,7 @@ describe('settings search catalog', () => {
       'appearance.display',
       'notifications.testNotification',
       'notifications.inAppAlerts',
-      'service.serviceStatus',
+      'tabs.config',
     ].every(key => keys.has(key))).toBe(true)
   })
 

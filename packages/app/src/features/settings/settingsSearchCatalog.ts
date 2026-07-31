@@ -132,14 +132,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     labelKey: `notifications.${label}`,
     fallbackKey: 'notifications.soundSettings',
   })),
-  ...definitions('service', [
-    'service.localService',
-    'service.binaryPath',
-    'service.autoStart',
-    'service.serviceStatus',
-    'service.envVars',
-  ]),
-  ...definitions('config', ['config.sourceTitle']),
+  ...definitions('config', ['tabs.config']),
   ...definitions('keybindings', ['keybindings.title']),
   ...[
     'openSettings',

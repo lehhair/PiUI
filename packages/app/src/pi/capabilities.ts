@@ -75,7 +75,7 @@ const COMMAND_MAP: Record<keyof PiCapabilities, string | null> = {
   sessionArchive: null,
   mcp: null,
   worktree: null,
-  config: null,
+  config: 'settings.get',
 }
 
 let cachedRegistry: unknown = undefined
