@@ -208,9 +208,11 @@ export function PiChatPane({
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
+  const sessionUnavailableRef = useRef(false)
   // 会话不存在（已删除/文件丢失）：branch 加载失败且无数据，
   // 不能永远停在 loading
   const sessionUnavailable = Boolean(sessionId && !branch && branchError)
+  sessionUnavailableRef.current = sessionUnavailable
 
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
@@ -362,7 +364,8 @@ export function PiChatPane({
   const editorSyncTimerRef = useRef<number | null>(null)
   const handleTextChange = useCallback(
     (text: string) => {
-      if (!sessionId) return
+      // 会话已不可用时别再往服务端同步编辑器状态（每敲一个字一个 404）
+      if (!sessionId || sessionUnavailableRef.current) return
       if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
       editorSyncTimerRef.current = window.setTimeout(() => {
         editorSyncTimerRef.current = null
