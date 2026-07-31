@@ -27,7 +27,7 @@ export async function openHostWorkspace(rootPath: string, displayName?: string, 
   return data.workspace
 }
 
-const workspaceResolutionPromises = new Map<string, Promise<string>>()
+const workspaceResolutionPromises = new Map<string, Promise<string | null>>()
 let defaultWorkspacePromise: Promise<string | null> | null = null
 
 async function ensureDefaultWorkspacePath(): Promise<string | null> {
