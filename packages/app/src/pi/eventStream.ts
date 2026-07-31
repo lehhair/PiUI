@@ -9,7 +9,7 @@ import {
 } from '@piui/protocol'
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
-import { getApiBase } from './httpClient.js'
+import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { piBranchStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
@@ -153,7 +153,7 @@ class PiEventStream {
 
   private openSocket(): void {
     const url = new URL(wsEventsUrl())
-    const token = (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
+    const token = getPiAuthToken()
     if (token) url.searchParams.set('token', token)
 
     const ws = new WebSocket(url)

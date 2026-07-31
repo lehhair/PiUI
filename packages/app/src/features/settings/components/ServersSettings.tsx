@@ -15,6 +15,7 @@ import { useServerStore, useRouter } from '../../../hooks'
 import { clearSessionRuntimeState } from '../../../utils/sessionLifecycle'
 import { settingsFieldClass, SettingsSection } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
+import { parseConnectLink } from '../../../store/serverStore'
 
 const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/
 /** 显示名长度上限，避免列表项把右侧操作按钮挤穿 */
@@ -337,7 +338,7 @@ function AddServerForm({
   onAdd,
   onCancel,
 }: {
-  onAdd: (name: string, url: string, username?: string, password?: string) => void
+  onAdd: (name: string, url: string, username?: string, password?: string, token?: string) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
@@ -357,6 +358,11 @@ function AddServerForm({
     }
     if (!url.trim()) {
       setError(t('servers.urlRequired'))
+      return
+    }
+    const connectLink = parseConnectLink(url)
+    if (connectLink) {
+      onAdd(trimmedName, connectLink.url, undefined, undefined, connectLink.token)
       return
     }
     try {
@@ -586,9 +592,9 @@ export function ServersSettings() {
 
         {addingServer && (
           <AddServerForm
-            onAdd={(n, u, user, pass) => {
+            onAdd={(n, u, user, pass, token) => {
               const auth = pass ? { username: user || 'opencode', password: pass } : undefined
-              const s = addServer({ name: n, url: u, auth })
+              const s = addServer({ name: n, url: u, auth, token })
               setAddingServer(false)
               void checkHealth(s.id)
             }}

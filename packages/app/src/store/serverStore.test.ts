@@ -127,8 +127,17 @@ describe('serverStore health check', () => {
     vi.unstubAllGlobals()
   })
 
+  it('checks the local default server same-origin through the dev proxy', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1 }))
+    const { serverStore } = await import('./serverStore')
+
+    await serverStore.checkHealth('local')
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe('/api/v1/host/health')
+  })
+
   it('marks a valid PiUI health response as online', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, protocolV2: { piSdkVersion: '0.81.1' } }))
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }))
     const { serverStore } = await import('./serverStore')
 
     const health = await serverStore.checkHealth('local')
@@ -175,7 +184,7 @@ describe('serverStore health check', () => {
     const staleResponse = createDeferred<Response>()
     vi.mocked(fetch)
       .mockImplementationOnce(() => staleResponse.promise)
-      .mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, protocolV2: { piSdkVersion: '0.81.1' } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }))
 
     const { serverStore } = await import('./serverStore')
 
@@ -195,5 +204,24 @@ describe('serverStore health check', () => {
 
     expect(staleHealth.status).toBe('error')
     expect(serverStore.getHealth('local')?.status).toBe('online')
+  })
+})
+
+describe('parseConnectLink', () => {
+  it('parses a share link into url and token', async () => {
+    const { parseConnectLink } = await import('./serverStore')
+
+    expect(parseConnectLink('piui://connect?url=http%3A%2F%2F192.168.1.5%3A8787&token=abc123')).toEqual({
+      url: 'http://192.168.1.5:8787',
+      token: 'abc123',
+    })
+  })
+
+  it('rejects non-share input and incomplete links', async () => {
+    const { parseConnectLink } = await import('./serverStore')
+
+    expect(parseConnectLink('http://192.168.1.5:8787')).toBeNull()
+    expect(parseConnectLink('piui://connect?url=http%3A%2F%2F192.168.1.5%3A8787')).toBeNull()
+    expect(parseConnectLink('piui://connect?token=abc')).toBeNull()
   })
 })
