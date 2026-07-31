@@ -10,7 +10,7 @@ import type {
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from "@piui/protocol"
 import { isJsonObject, requireJsonValue } from "@piui/protocol"
 import { getLoadedSdk } from "../sdk-host.js"
-import { configuredSessionDir, resolveUserPath } from "./catalog.js"
+import { configuredSessionDir, normalizeCwd, resolveUserPath } from "./catalog.js"
 import { ExtensionUiBridge } from "./extension-ui-bridge.js"
 import {
   entriesPageFromEntries,
@@ -223,6 +223,7 @@ export class RealPiSession implements SessionRuntime {
     options: RealPiSessionOpenOptions = {},
   ): Promise<RealPiSession> {
     const { SessionManager, createAgentSessionRuntime, getAgentDir } = getLoadedSdk().sdk
+    cwd = normalizeCwd(cwd)
     if (sessionFile && !existsSync(sessionFile)) {
       throw Object.assign(new Error("Pi session file no longer exists"), { code: "SESSION_NOT_FOUND" })
     }

@@ -9,11 +9,20 @@ import { getLoadedSdk } from "../sdk-host.js"
 import type { CatalogProvider } from "../runtime.js"
 import type { PackagesGateway } from "../command-table.js"
 
+/**
+ * Windows callers hand us backslash paths, but pi encodes the cwd into the
+ * session folder name with forward slashes only — a backslash cwd makes pi
+ * try to mkdir a nested folder and fail. Normalize once at the boundary.
+ */
+export function normalizeCwd(cwd: string): string {
+  return cwd.replace(/\\/g, "/")
+}
+
 export function settingsForWorkspace(cwd: string, agentDir?: string) {
   const { SettingsManager, ProjectTrustStore, getAgentDir, hasTrustRequiringProjectResources } = getLoadedSdk().sdk
   const dir = agentDir ?? getAgentDir()
   const store = new ProjectTrustStore(dir)
-  const manager = SettingsManager.create(cwd, dir, { projectTrusted: false })
+  const manager = SettingsManager.create(normalizeCwd(cwd), dir, { projectTrusted: false })
   const required = hasTrustRequiringProjectResources(cwd)
   const decision = store.get(cwd)
   const defaultDecision = manager.getDefaultProjectTrust()
@@ -35,7 +44,7 @@ export function configuredSessionDir(cwd: string, agentDir?: string): string | u
   const dir = agentDir ?? getAgentDir()
   const envSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR?.trim()
   if (envSessionDir) return resolveUserPath(envSessionDir)
-  return SettingsManager.create(cwd, dir, { projectTrusted: false }).getSessionDir()
+  return SettingsManager.create(normalizeCwd(cwd), dir, { projectTrusted: false }).getSessionDir()
 }
 
 export function resolveUserPath(input: string): string {
@@ -65,7 +74,8 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async listSessions(cwd: string): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
-    return requireJsonValue(await SessionManager.list(cwd, configuredSessionDir(cwd, this.dir())), "SESSION_LIST_NOT_JSON")
+    const normalized = normalizeCwd(cwd)
+    return requireJsonValue(await SessionManager.list(normalized, configuredSessionDir(normalized, this.dir())), "SESSION_LIST_NOT_JSON")
   }
 
   async listAllSessions(): Promise<JsonValue> {
