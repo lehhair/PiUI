@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   PanelRightIcon,
@@ -136,7 +136,7 @@ export function Header({
   const { t } = useTranslation('chat')
   const currentSessionTitle = usePiSessionTitle(sessionId)
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
-  const { refresh } = useSessionContext()
+  const { refresh, sessions } = useSessionContext()
   const { presentation, interaction } = useChatViewport()
   const capabilities = usePiCapabilities()
 
@@ -144,15 +144,23 @@ export function Header({
   const [editTitle, setEditTitle] = useState('')
   const titleInputRef = useRef<HTMLInputElement>(null)
 
-  const sessionTitle = currentSessionTitle || t('header.newChat')
+  // 与侧边栏统一消费同一份列表：新会话落盘前 piSessionInfoStore 的
+  // 全局桶不会有它，标题不能卡在 "New chat"
+  const listedTitle = useMemo(() => {
+    if (!sessionId) return null
+    const listed = sessions.find(session => session.id === sessionId)
+    return listed?.title?.trim() || listed?.firstMessage?.trim() || null
+  }, [sessionId, sessions])
+  const sessionTitle = currentSessionTitle || listedTitle || t('header.newChat')
   const isCompact = presentation.isCompact
 
   useEffect(() => {
-    document.title = currentSessionTitle ? `${currentSessionTitle} - Pi` : 'Pi'
+    const docTitle = currentSessionTitle || listedTitle
+    document.title = docTitle ? `${docTitle} - Pi` : 'Pi'
     return () => {
       document.title = 'Pi'
     }
-  }, [currentSessionTitle])
+  }, [currentSessionTitle, listedTitle])
 
   useEffect(() => {
     setIsEditingTitle(false)
