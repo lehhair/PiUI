@@ -9,14 +9,12 @@ import {
   KeyboardIcon,
   CloseIcon,
   BellIcon,
-  PlugIcon,
   MessageSquareIcon,
   LayersIcon,
   QuestionIcon,
   CogIcon,
 } from '../../components/Icons'
 import { useIsMobile } from '../../hooks'
-import { isTauri } from '../../utils/tauri'
 import { KeybindingsSection } from './KeybindingsSection'
 import { AgentSettings } from './components/AgentSettings'
 import { AppearanceSettings } from './components/AppearanceSettings'
@@ -24,7 +22,6 @@ import { AboutSettings } from './components/AboutSettings'
 import { ChatSettings } from './components/ChatSettings'
 import { ModelsSettings } from './components/ModelsSettings'
 import { NotificationSettings } from './components/NotificationSettings'
-import { ServiceSettings } from './components/ServiceSettings'
 import { ServersSettings } from './components/ServersSettings'
 import { WorkspaceSettings } from './components/WorkspaceSettings'
 import { PiManagementSettings } from './components/PiManagementSettings'
@@ -42,7 +39,6 @@ export type SettingsTab =
   | 'chat'
   | 'models'
   | 'notifications'
-  | 'service'
   | 'config'
   | 'servers'
   | 'keybindings'
@@ -67,7 +63,6 @@ const TAB_ICONS: Record<SettingsTab, React.ReactNode> = {
   appearance: <SunIcon size={15} />,
   workspace: <LayersIcon size={15} />,
   notifications: <BellIcon size={15} />,
-  service: <PlugIcon size={15} />,
   config: <CogIcon size={15} />,
   keybindings: <KeyboardIcon size={15} />,
   about: <QuestionIcon size={15} />,
@@ -81,7 +76,6 @@ const TAB_IDS: SettingsTab[] = [
   'workspace',
   'appearance',
   'notifications',
-  'service',
   'config',
   'keybindings',
   'about',
@@ -95,7 +89,6 @@ const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
   appearance: 'tabs.appearance',
   workspace: 'tabs.workspace',
   notifications: 'tabs.notifications',
-  service: 'tabs.service',
   config: 'tabs.config',
   keybindings: 'tabs.shortcuts',
   about: 'tabs.about',
@@ -103,7 +96,7 @@ const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 
 const GROUP_DEFS: { labelKey: string; tabs: SettingsTab[] }[] = [
   { labelKey: 'groups.core', tabs: ['servers', 'models', 'agent', 'chat', 'workspace', 'appearance', 'notifications'] },
-  { labelKey: 'groups.advanced', tabs: ['service', 'config', 'keybindings', 'about'] },
+  { labelKey: 'groups.advanced', tabs: ['config', 'keybindings', 'about'] },
 ]
 
 // ============================================
@@ -122,8 +115,6 @@ function TabContent({ tab }: { tab: SettingsTab }) {
       return <ModelsSettings />
     case 'notifications':
       return <NotificationSettings />
-    case 'service':
-      return <ServiceSettings />
     case 'config':
       return <PiManagementSettings />
     case 'servers':
@@ -147,7 +138,6 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
   const { t } = useTranslation(['settings', 'commands'])
   const isMobile = useIsMobile()
   const capabilities = usePiCapabilities()
-  const isTauriDesktop = isTauri() && !isMobile
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightFrameRef = useRef<number | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -158,8 +148,8 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
   const [tab, setTab] = useState<SettingsTab>(normalizeTab(initialTab))
 
   const visibleTabIds = useMemo(
-    () => TAB_IDS.filter(id => (isTauriDesktop || id !== 'service') && (capabilities.config || id !== 'config')),
-    [capabilities.config, isTauriDesktop],
+    () => TAB_IDS.filter(id => capabilities.config || id !== 'config'),
+    [capabilities.config],
   )
 
   const visibleTabs = useMemo(

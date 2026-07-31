@@ -24,7 +24,7 @@ describe('settingsBackup', () => {
       modules: Record<string, unknown>
     }
 
-    expect(backup.schemaVersion).toBe(2)
+    expect(backup.schemaVersion).toBe(3)
     expect((backup.modules.theme as { presetId: string }).presetId).toBe('claude')
     expect((backup.modules.layout as { rightPanelWidth: number }).rightPanelWidth).toBe(512)
     expect((backup.modules.notifications as { browserNotificationsEnabled: boolean }).browserNotificationsEnabled).toBe(

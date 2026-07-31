@@ -11,7 +11,6 @@ import { BottomPanel } from './components/BottomPanel'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
 import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from './hooks'
 import { useViewportHeight } from './hooks/useViewportHeight'
-import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 import { useWakeLock } from './hooks/useWakeLock'
 import type { KeybindingHandlers } from './hooks/useKeybindings'
 import { keybindingStore } from './store/keybindingStore'
@@ -47,9 +46,6 @@ const SettingsDialog = lazy(() =>
 )
 const CommandPalette = lazy(() =>
   import('./components/CommandPalette').then(module => ({ default: module.CommandPalette })),
-)
-const CloseServiceDialog = lazy(() =>
-  import('./components/CloseServiceDialog').then(module => ({ default: module.CloseServiceDialog })),
 )
 
 const MOBILE_PAGER_SCROLL_END_MS = 120
@@ -850,7 +846,6 @@ function App() {
     handleToggleFocusedPaneFullscreen,
   ])
 
-  const { showCloseDialog, handleCloseDialogConfirm, handleCloseDialogCancel } = useCloseServiceDialog()
 
   return (
     <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">
@@ -1021,14 +1016,6 @@ function App() {
             isOpen={commandPaletteOpen}
             onClose={() => setCommandPaletteOpen(false)}
             commands={commands}
-          />
-        </Suspense>
-
-        <Suspense fallback={null}>
-          <CloseServiceDialog
-            isOpen={showCloseDialog}
-            onConfirm={handleCloseDialogConfirm}
-            onCancel={handleCloseDialogCancel}
           />
         </Suspense>
       </ChatViewportProvider>
