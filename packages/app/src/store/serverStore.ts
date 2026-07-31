@@ -37,6 +37,7 @@ export interface ServerConfig {
   url: string // 服务器 URL (不含尾部斜杠)
   isDefault?: boolean // 是否为默认服务器
   auth?: ServerAuth // 认证信息 (可选)
+  token?: string // Bearer token (PiUI 服务器分享链接使用)
 }
 
 /**
@@ -469,6 +470,23 @@ class ServerStore {
   // ============================================
 
   /**
+   * 健康检查的 base 解析与数据层一致：浏览器里本地默认服务器走同源，
+   * 由 Vite 代理注入 token；远程服务器或被改写过的本地地址直连。
+   */
+  private resolveHealthBaseUrl(server: ServerConfig): string {
+    if (
+      server.id === this.DEFAULT_SERVER_ID &&
+      !this.localServerUrlOverride &&
+      server.url === API_BASE_URL &&
+      !isTauri() &&
+      typeof window !== 'undefined'
+    ) {
+      return ''
+    }
+    return server.url
+  }
+
+  /**
    * 检查服务器健康状态
    */
   async checkHealth(serverId: string): Promise<ServerHealth> {
@@ -479,7 +497,7 @@ class ServerStore {
     const server = this.withRuntimeServerUrl(storedServer)
     const checkSeq = (this.healthCheckSeqMap.get(serverId) ?? 0) + 1
     this.healthCheckSeqMap.set(serverId, checkSeq)
-    const healthUrl = `${server.url}/api/v1/health`
+    const healthUrl = `${this.resolveHealthBaseUrl(server)}/api/v1/host/health`
 
     const commitHealth = (health: ServerHealth) => {
       if (this.healthCheckSeqMap.get(serverId) === checkSeq) {
@@ -499,7 +517,9 @@ class ServerStore {
 
     try {
       const headers: Record<string, string> = {}
-      if (server.auth?.password) {
+      if (server.token) {
+        headers['Authorization'] = `Bearer ${server.token}`
+      } else if (server.auth?.password) {
         headers['Authorization'] = makeBasicAuthHeader(server.auth)
       }
 
@@ -558,9 +578,7 @@ class ServerStore {
           status: 'online',
           latency,
           lastCheck: Date.now(),
-          version: isRecord(data.protocolV2) && typeof data.protocolV2.piSdkVersion === 'string'
-            ? data.protocolV2.piSdkVersion
-            : undefined,
+          version: typeof data.piSdkVersion === 'string' ? data.piSdkVersion : undefined,
           details,
         }
         return commitHealth(health)
@@ -632,6 +650,7 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
             typeof item.auth.password === 'string'
               ? { username: item.auth.username, password: item.auth.password }
               : undefined,
+          token: typeof item.token === 'string' && item.token ? item.token : undefined,
         }))
     : []
 
@@ -676,6 +695,24 @@ export function importServerSettingsBackup(raw: unknown): void {
   } else {
     localStorage.removeItem(ACTIVE_SERVER_KEY)
     sessionStorage.removeItem(ACTIVE_SERVER_KEY)
+  }
+}
+
+/**
+ * 解析分享链接 `piui://connect?url=...&token=...`，不是分享链接时返回 null。
+ */
+export function parseConnectLink(input: string): { url: string; token: string } | null {
+  const trimmed = input.trim()
+  if (!trimmed.toLowerCase().startsWith('piui://connect')) return null
+  try {
+    const parsed = new URL(trimmed)
+    const url = parsed.searchParams.get('url')
+    const token = parsed.searchParams.get('token')
+    if (!url || !token) return null
+    new URL(url)
+    return { url: url.replace(/\/+$/, ''), token }
+  } catch {
+    return null
   }
 }
 

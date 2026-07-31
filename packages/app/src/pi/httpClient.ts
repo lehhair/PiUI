@@ -23,6 +23,11 @@ export function getApiBase(): string {
 
 function piHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init)
+  const active = serverStore.getActiveServer()
+  if (active?.token) {
+    headers.set('authorization', `Bearer ${active.token}`)
+    return headers
+  }
   const gatewayAuth = serverStore.getActiveAuth()
   if (gatewayAuth?.password) {
     headers.set('authorization', makeBasicAuthHeader(gatewayAuth))
@@ -34,6 +39,8 @@ function piHeaders(init?: HeadersInit): Headers {
 }
 
 export function getPiAuthToken(): string | undefined {
+  const activeToken = serverStore.getActiveServer()?.token
+  if (activeToken) return activeToken
   if (serverStore.getActiveAuth()?.password) return undefined
   return (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
 }
