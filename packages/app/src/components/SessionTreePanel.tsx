@@ -52,6 +52,7 @@ interface SessionTreePanelProps {
   sessionId: string
   mode?: 'tree' | 'controls'
   onNavigateSession?: (session: { id: string; directory?: string }) => void
+  onNewChat?: () => void
 }
 
 // Typed views over the runtime state JsonObject (state.get). Shapes are
@@ -90,6 +91,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   sessionId,
   mode = 'tree',
   onNavigateSession,
+  onNewChat,
 }: SessionTreePanelProps) {
   const { t } = useTranslation('components')
   const capabilities = usePiCapabilities()
@@ -303,6 +305,22 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const handleFork = useCallback(
     (entryId: string) => {
       if (!capabilities.fork) return
+      // fork 第一条用户消息 = 没有历史可分，纯前端开新会话预填，不留孤儿
+      const firstUserNode = treeGraph.nodes.find(node => node.data.type === 'message' && node.data.role === 'user')
+      if (firstUserNode && firstUserNode.id === entryId && entryId === selectedEntryId && selectedMessage) {
+        const content = (selectedMessage as { content?: unknown }).content
+        const text = Array.isArray(content)
+          ? content
+              .filter((block): block is { type: 'text'; text: string } =>
+                Boolean(block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' && typeof (block as { text?: unknown }).text === 'string'),
+              )
+              .map(block => block.text)
+              .join('\n')
+          : ''
+        stashForkText('home', text)
+        onNewChat?.()
+        return
+      }
       void runEntryCommand(entryId, async () => {
         // pi TUI parity：fork 从该用户消息之前分叉，消息文本带回输入框改写重发
         const result = await forkPiSession(sessionId, entryId, 'before')
@@ -312,7 +330,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         applyReplacement(result)
       })
     },
-    [applyReplacement, capabilities.fork, runEntryCommand, sessionId],
+    [applyReplacement, capabilities.fork, runEntryCommand, sessionId, treeGraph, selectedEntryId, selectedMessage, onNewChat],
   )
 
   const handleClone = useCallback(

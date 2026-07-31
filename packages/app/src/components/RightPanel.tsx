@@ -31,6 +31,7 @@ interface RightPanelProps {
   inline?: boolean
   renderPanelContent?: boolean
   onNavigateSession?: (session: { id: string; directory?: string }) => void
+  onNewChat?: () => void
 }
 
 export const RightPanel = memo(function RightPanel({
@@ -39,6 +40,7 @@ export const RightPanel = memo(function RightPanel({
   inline = false,
   renderPanelContent = true,
   onNavigateSession,
+  onNewChat,
 }: RightPanelProps) {
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
@@ -118,6 +120,7 @@ export const RightPanel = memo(function RightPanel({
                 <SessionTreePanel
                   sessionId={sessionId}
                   onNavigateSession={onNavigateSession}
+                  onNewChat={onNewChat}
                 />
               </Suspense>
             ) : (
@@ -134,6 +137,7 @@ export const RightPanel = memo(function RightPanel({
                   sessionId={sessionId}
                   mode="controls"
                   onNavigateSession={onNavigateSession}
+                  onNewChat={onNewChat}
                 />
               </Suspense>
             ) : (
