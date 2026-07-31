@@ -200,7 +200,7 @@ export function SessionList({
           // Grouped View
           <>
             {hasUnavailablePinned && (
-              <div className="space-y-0.5 mt-1">
+              <div className={`${isEditMode ? 'space-y-0' : 'space-y-0.5'} mt-1`}>
                 {unavailablePinnedEntries.map(entry => (
                   <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} />
                 ))}
@@ -215,7 +215,7 @@ export function SessionList({
                   <h3 className="px-3 mb-1.5 mt-2 text-[length:var(--fs-xxs)] font-bold text-text-400/60 uppercase tracking-widest select-none">
                     {t(`sessions.groups.${group}`)}
                   </h3>
-                  <div className="space-y-0.5">
+                  <div className={isEditMode ? 'space-y-0' : 'space-y-0.5'}>
                     {groupSessions.map((session, index) => {
                       const isChecked = selectedSessionIds?.has(session.id) ?? false
                       const prevChecked =
@@ -272,7 +272,7 @@ export function SessionList({
           </>
         ) : (
           // Flat View：可用置顶前缀 → 不可用置顶 → 分隔线 → 其余
-          <div className="space-y-0.5 mt-1">
+          <div className={`${isEditMode ? 'space-y-0' : 'space-y-0.5'} mt-1`}>
             {lastAvailablePinnedIndex < 0 && hasUnavailablePinned && (
               <>
                 {unavailablePinnedEntries.map(entry => (
