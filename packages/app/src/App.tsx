@@ -193,17 +193,27 @@ function App() {
         trackPiSession(sessionId, directory)
         navigatePaneToSession(paneId, sessionId, directory)
       }
+      const attachById = () => {
+        // 列表里还没有的会话（刚克隆/刚 fork，磁盘扫描没跟上）：
+        // 按 id 直连，ensureAttached 会在服务端认领或从磁盘恢复。
+        // 绝不能没有 sessionFile 就 open——那会开一个全新的空会话
+        piEventStream.connect(session.id)
+        void loadPiSessionData(session.id).catch(() => undefined)
+        enterSession(session.id)
+      }
+      if (!listed?.path) {
+        attachById()
+        return
+      }
       setOpeningSessionId(session.id)
-      void openPiSession(directory, listed?.path)
+      void openPiSession(directory, listed.path)
         .then(opened => {
           piEventStream.connect(opened.sessionId)
           enterSession(opened.sessionId)
         })
         .catch(error => {
           if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') {
-            piEventStream.connect(session.id)
-            void loadPiSessionData(session.id).catch(() => undefined)
-            enterSession(session.id)
+            attachById()
             return
           }
           uiErrorHandler('open Pi session', error)
