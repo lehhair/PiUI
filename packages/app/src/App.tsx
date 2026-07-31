@@ -32,9 +32,7 @@ import {
 } from './features/chat/chatViewport'
 import { uiErrorHandler, isSameDirectory, collectActiveDirectories } from './utils'
 import { initNotificationSound } from './utils/notificationSoundBridge'
-import { createPtySession } from './api/pty'
 import { usePiCapabilities } from './pi/capabilities'
-import type { TerminalTab } from './store/layoutStore'
 import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
@@ -569,21 +567,6 @@ function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const capabilities = usePiCapabilities()
 
-  const handleNewTerminal = useCallback(async () => {
-    if (!capabilities.pty) return
-    try {
-      const pty = await createPtySession({ cwd: focusedDirectory }, focusedDirectory)
-      const tab: TerminalTab = {
-        id: pty.id,
-        title: pty.title || t('components:terminal.terminal'),
-        status: 'connecting',
-      }
-      layoutStore.addTerminalTab(tab, true)
-    } catch (error) {
-      uiErrorHandler('create terminal', error)
-    }
-  }, [capabilities.pty, focusedDirectory, t])
-
   const keybindingHandlers = useMemo<KeybindingHandlers>(
     () => ({
       openSettings,
@@ -600,9 +583,8 @@ function App() {
       previousSession: () => focusedController?.previousSession(),
       nextSession: () => focusedController?.nextSession(),
       toggleTerminal: () => {
-        if (capabilities.pty) layoutStore.toggleBottomPanel()
+        layoutStore.toggleBottomPanel()
       },
-      newTerminal: capabilities.pty ? handleNewTerminal : undefined,
       selectModel: () => focusedController?.openModelSelector(),
       toggleAgent: () => focusedController?.toggleAgent(),
       cancelMessage: () => focusedController?.cancelMessage(),
@@ -651,8 +633,6 @@ function App() {
       focusedController,
       handleToggleSidebar,
       handleToggleRightPanel,
-      handleNewTerminal,
-      capabilities.pty,
       capabilities.sessionArchive,
       paneLayout.focusedPaneId,
       paneLayout.isSplit,
@@ -752,21 +732,14 @@ function App() {
         shortcut: getShortcut('nextSession'),
         action: () => focusedController?.nextSession(),
       },
-      ...(capabilities.pty ? [{
+      {
         id: 'toggleTerminal',
         label: t('commands:toggleTerminal'),
         description: t('commands:toggleTerminalDesc'),
         category: t('commands:categories.terminal'),
         shortcut: getShortcut('toggleTerminal'),
         action: () => layoutStore.toggleBottomPanel(),
-      }, {
-        id: 'newTerminal',
-        label: t('commands:newTerminal'),
-        description: t('commands:newTerminalDesc'),
-        category: t('commands:categories.terminal'),
-        shortcut: getShortcut('newTerminal'),
-        action: handleNewTerminal,
-      }] : []),
+      },
       {
         id: 'selectModel',
         label: t('commands:selectModel'),
@@ -871,7 +844,6 @@ function App() {
     handleToggleSidebar,
     handleToggleRightPanel,
     focusedController,
-    handleNewTerminal,
     paneLayout.focusedPaneId,
     paneLayout.isSplit,
     splitPaneEnabled,

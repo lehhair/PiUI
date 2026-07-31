@@ -10,20 +10,14 @@ import {
   CloseIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  TerminalIcon,
   FolderIcon,
   GitCommitIcon,
-  PlugIcon,
   TeachIcon,
-  GitWorktreeIcon,
   GitBranchIcon,
   PuzzleIcon,
   SettingsIcon,
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
-import { updatePtySession } from '../api/pty'
-import { useTheme } from '../hooks'
-import { uiErrorHandler } from '../utils'
 import { getInternalDragSnapshot, startInternalDrag, subscribeInternalDrag, subscribeInternalDrop } from '../lib/internalDragCore'
 import { useDragEdgeAutoScroll } from '../hooks/useDragEdgeAutoScroll'
 import { IconButton } from './ui/IconButton'
@@ -36,30 +30,21 @@ import { usePiCapabilities } from '../pi/capabilities'
 interface PanelContainerProps {
   position: PanelPosition
   children: (activeTab: PanelTab | null) => React.ReactNode
-  directory?: string
-  onNewTerminal?: () => void // 仅 bottom 面板需要
-  onCloseTerminal?: (ptyId: string) => void // Terminal 关闭回调
   forceOpen?: boolean
 }
 
 // Tab 图标映射
 const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
-  terminal: <TerminalIcon size={12} />,
   files: <FolderIcon size={12} />,
   changes: <GitCommitIcon size={12} />,
   'session-tree': <GitBranchIcon size={12} />,
   'session-controls': <SettingsIcon size={12} />,
-  mcp: <PlugIcon size={12} />,
   skill: <TeachIcon size={12} />,
-  worktree: <GitWorktreeIcon size={12} />,
   extensions: <PuzzleIcon size={12} />,
 }
 
 // Tab 显示名称
 function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string): string {
-  if (tab.type === 'terminal') {
-    return tab.title ?? t('terminal.terminal')
-  }
   switch (tab.type) {
     case 'files': {
       if (tab.title) return tab.title
@@ -77,12 +62,8 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
       return t('panelContainer.sessionTree')
     case 'session-controls':
       return t('panelContainer.sessionControls')
-    case 'mcp':
-      return t('panelContainer.mcp')
     case 'skill':
       return t('panelContainer.skills')
-    case 'worktree':
-      return t('panelContainer.worktrees')
     case 'extensions':
       return t('panelContainer.extensions')
     default:
@@ -97,22 +78,15 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
 export const PanelContainer = memo(function PanelContainer({
   position,
   children,
-  directory,
-  onNewTerminal,
-  onCloseTerminal,
   forceOpen = false,
 }: PanelContainerProps) {
   const { t } = useTranslation(['components', 'common'])
-  const { manualTerminalTitles } = useTheme()
   const capabilities = usePiCapabilities()
   const layout = useLayoutStore()
 
   const isOpen = forceOpen || (position === 'bottom' ? layout.bottomPanelOpen : layout.rightPanelOpen)
   const tabs = layout.panelTabs.filter(tab => {
     if (tab.position !== position) return false
-    if (tab.type === 'terminal') return capabilities.pty
-    if (tab.type === 'mcp') return capabilities.mcp
-    if (tab.type === 'worktree') return capabilities.worktree
     if (tab.type === 'session-tree') return capabilities.sessionTree
     if (tab.type === 'session-controls') return capabilities.sessionTree
     return true
@@ -127,10 +101,6 @@ export const PanelContainer = memo(function PanelContainer({
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
-  const [editingTabId, setEditingTabId] = useState<string | null>(null)
-  const [editingValue, setEditingValue] = useState('')
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  const renamePendingRef = useRef(false)
 
   // Tabs 容器 ref（用于水平滚动）
   const tabsContainerRef = useRef<HTMLDivElement>(null)
@@ -184,23 +154,6 @@ export const PanelContainer = memo(function PanelContainer({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [contextMenu])
 
-  useEffect(() => {
-    if (!editingTabId) return
-    if (!manualTerminalTitles) {
-      setEditingTabId(null)
-      return
-    }
-    if (!tabs.some(tab => tab.id === editingTabId && tab.type === 'terminal')) {
-      setEditingTabId(null)
-    }
-  }, [editingTabId, manualTerminalTitles, tabs])
-
-  useEffect(() => {
-    if (!editingTabId) return
-    renameInputRef.current?.focus()
-    renameInputRef.current?.select()
-  }, [editingTabId])
-
   // 折叠面板
   const handleCollapse = useCallback(() => {
     if (position === 'bottom') {
@@ -219,17 +172,10 @@ export const PanelContainer = memo(function PanelContainer({
   )
 
   // 关闭 tab
-  const handleCloseTab = useCallback(
-    (tabId: string, tab: PanelTab, e: React.MouseEvent) => {
-      e.stopPropagation()
-      // Terminal 需要先清理 PTY session
-      if (tab.type === 'terminal' && onCloseTerminal) {
-        onCloseTerminal(tabId)
-      }
-      layoutStore.removeTab(tabId)
-    },
-    [onCloseTerminal],
-  )
+  const handleCloseTab = useCallback((tabId: string, _tab: PanelTab, e: React.MouseEvent) => {
+    e.stopPropagation()
+    layoutStore.removeTab(tabId)
+  }, [])
 
   // 右键菜单
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
@@ -246,46 +192,6 @@ export const PanelContainer = memo(function PanelContainer({
     layoutStore.moveTab(contextMenu.tabId, targetPosition)
     setContextMenu(null)
   }, [contextMenu, position, tabs])
-
-  const startRename = useCallback(
-    (tab: PanelTab) => {
-      if (tab.type !== 'terminal' || !manualTerminalTitles) return
-      setContextMenu(null)
-      setEditingTabId(tab.id)
-      setEditingValue(tab.customTitle ?? tab.title ?? '')
-      layoutStore.setActiveTab(position, tab.id)
-    },
-    [manualTerminalTitles, position],
-  )
-
-  const cancelRename = useCallback(() => {
-    renamePendingRef.current = false
-    setEditingTabId(null)
-    setEditingValue('')
-  }, [])
-
-  const submitRename = useCallback(
-    async (tab: PanelTab) => {
-      if (tab.type !== 'terminal' || renamePendingRef.current) return
-
-      const nextTitle = editingValue.trim()
-      if (!nextTitle || nextTitle === (tab.customTitle ?? tab.title ?? '')) {
-        cancelRename()
-        return
-      }
-
-      renamePendingRef.current = true
-      try {
-        await updatePtySession(tab.id, { title: nextTitle }, directory)
-        layoutStore.updateTerminalCustomTitle(tab.id, nextTitle)
-      } catch (error) {
-        uiErrorHandler('rename terminal', error)
-      } finally {
-        cancelRename()
-      }
-    },
-    [cancelRename, directory, editingValue],
-  )
 
   const contextTab = contextMenu ? tabs.find(tab => tab.id === contextMenu.tabId) ?? null : null
 
@@ -346,15 +252,15 @@ export const PanelContainer = memo(function PanelContainer({
               onClick={() => handleSelectTab(tab.id)}
               onClose={e => handleCloseTab(tab.id, tab, e)}
               onContextMenu={e => handleContextMenu(e, tab.id)}
-              onDoubleClick={() => startRename(tab)}
+              onDoubleClick={() => undefined}
               position={position}
-              canRename={manualTerminalTitles && tab.type === 'terminal'}
-              isEditing={editingTabId === tab.id}
-              editingValue={editingValue}
-              editInputRef={renameInputRef}
-              onEditingValueChange={setEditingValue}
-              onEditSubmit={() => void submitRename(tab)}
-              onEditCancel={cancelRename}
+              canRename={false}
+              isEditing={false}
+              editingValue=""
+              editInputRef={{ current: null }}
+              onEditingValueChange={() => undefined}
+              onEditSubmit={() => undefined}
+              onEditCancel={() => undefined}
             />
           ))}
 
@@ -416,14 +322,6 @@ export const PanelContainer = memo(function PanelContainer({
             className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg p-1 min-w-[160px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            {manualTerminalTitles && contextTab?.type === 'terminal' && (
-              <button
-                onClick={() => startRename(contextTab)}
-                className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                {t('panelContainer.renameTerminal')}
-              </button>
-            )}
             {contextTab?.type !== 'session-tree' && contextTab?.type !== 'session-controls' && (
               <button
                 onClick={handleMoveToOtherPanel}
@@ -448,20 +346,6 @@ export const PanelContainer = memo(function PanelContainer({
               right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined,
             }}
           >
-            {capabilities.pty && (
-              <button
-                onClick={() => {
-                  onNewTerminal?.()
-                  setAddMenuPos(null)
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                <span className="opacity-60 shrink-0">
-                  <TerminalIcon size={12} />
-                </span>
-                {t('terminal.terminal')}
-              </button>
-            )}
             <button
               onClick={() => {
                 layoutStore.addFilesTab(position)
@@ -514,20 +398,6 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.sessionControls')}
               </button>
             )}
-            {capabilities.mcp && (
-              <button
-                onClick={() => {
-                  layoutStore.addMcpTab(position)
-                  setAddMenuPos(null)
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                <span className="opacity-60 shrink-0">
-                  <PlugIcon size={12} />
-                </span>
-                {t('panelContainer.mcpServers')}
-              </button>
-            )}
             <button
               onClick={() => {
                 layoutStore.addSkillTab(position)
@@ -540,20 +410,6 @@ export const PanelContainer = memo(function PanelContainer({
               </span>
               {t('panelContainer.skills')}
             </button>
-            {capabilities.worktree && (
-              <button
-                onClick={() => {
-                  layoutStore.addWorktreeTab(position)
-                  setAddMenuPos(null)
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                <span className="opacity-60 shrink-0">
-                  <GitWorktreeIcon size={12} />
-                </span>
-                {t('panelContainer.worktrees')}
-              </button>
-            )}
           </div>,
           document.body,
         )}
@@ -605,16 +461,6 @@ const PanelTabButton = memo(function PanelTabButton({
   onEditCancel,
 }: PanelTabButtonProps) {
   const { t } = useTranslation(['components', 'common'])
-  // Terminal 状态颜色
-  const statusColor =
-    tab.type === 'terminal' && tab.status
-      ? {
-          connecting: 'bg-warning-100',
-          connected: 'bg-success-100',
-          disconnected: 'bg-text-500',
-          exited: 'bg-danger-100',
-        }[tab.status]
-      : null
 
   const handlePointerDragStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -640,8 +486,8 @@ const PanelTabButton = memo(function PanelTabButton({
     <div
       data-tab-id={tab.id}
       data-panel-tab-id={tab.id}
-      title={tab.type === 'terminal' ? label : undefined}
-      aria-label={tab.type === 'terminal' ? label : undefined}
+      title={label}
+      aria-label={label}
       onPointerDown={handlePointerDragStart}
       onMouseDown={handleMiddleClose}
       onClick={onClick}
@@ -661,7 +507,6 @@ const PanelTabButton = memo(function PanelTabButton({
       `}
     >
       {/* Status indicator for terminals */}
-      {statusColor && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor}`} />}
 
       {/* Icon */}
       <span className="opacity-60 shrink-0">{TAB_ICONS[tab.type]}</span>

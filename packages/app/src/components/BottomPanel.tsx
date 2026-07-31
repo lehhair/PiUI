@@ -1,25 +1,17 @@
-import { lazy, memo, Suspense, useCallback, useState, useEffect, useRef } from 'react'
+import { lazy, memo, Suspense, useCallback, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TerminalIcon } from './Icons'
 import { PanelContainer } from './PanelContainer'
-import { layoutStore, useLayoutStore, type TerminalTab, type PanelTab } from '../store/layoutStore'
-import { createPtySession, removePtySession, listPtySessions } from '../api/pty'
+import { layoutStore, useLayoutStore, type PanelTab } from '../store/layoutStore'
 import { useCurrentSessionId } from '../store'
 import { ResizablePanel } from './ui/ResizablePanel'
-import { logger } from '../utils/logger'
-import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { usePiCapabilities } from '../pi/capabilities'
 
-const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({ default: module.SessionChangesPanel })),
 )
 const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ default: module.FileExplorer })))
-const McpPanel = lazy(() => import('./McpPanel').then(module => ({ default: module.McpPanel })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
 const ExtensionsPanel = lazy(() => import('./ExtensionsPanel').then(module => ({ default: module.ExtensionsPanel })))
-const WorktreePanel = lazy(() => import('./WorktreePanel').then(module => ({ default: module.WorktreePanel })))
 
 interface BottomPanelProps {
   directory?: string
@@ -39,15 +31,6 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useCurrentSessionId()
   const { interaction, layout } = useChatViewport()
-  const ptyEnabled = usePiCapabilities().pty
-
-  const [isRestoring, setIsRestoring] = useState(false)
-  const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
-
-  useEffect(() => {
-    if (!ptyEnabled) return
-    layoutStore.setCurrentTerminalDirectory(normalizedDirectory)
-  }, [normalizedDirectory, ptyEnabled])
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -62,104 +45,13 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
     }
   }, [])
 
-  // 目录变化时（包括全局模式），重新拉取该目录的 PTY 会话
-  const prevDirectoryRef = useRef<string | undefined>(undefined)
-  const hasRestoredDirectoryRef = useRef(false)
-  const restoreRequestIdRef = useRef(0)
-  useEffect(() => {
-    if (!ptyEnabled) {
-      restoreRequestIdRef.current += 1
-      setIsRestoring(false)
-      return
-    }
-    // 目录没变就不重复拉取
-    if (hasRestoredDirectoryRef.current && prevDirectoryRef.current === normalizedDirectory) return
-    hasRestoredDirectoryRef.current = true
-    prevDirectoryRef.current = normalizedDirectory
-
-    const restoreSessions = async (requestId: number) => {
-      try {
-        setIsRestoring(true)
-
-        // 拉取新目录下的 PTY 会话
-        const sessions = await listPtySessions(normalizedDirectory)
-        if (restoreRequestIdRef.current !== requestId) return
-        logger.log('[BottomPanel] PTY sessions for', normalizedDirectory, ':', sessions)
-
-        layoutStore.syncTerminalSessions(
-          normalizedDirectory,
-          sessions.map(pty => ({
-            id: pty.id,
-            title: pty.title || 'Terminal',
-            status: pty.status === 'running' ? 'connecting' : 'exited',
-          })),
-        )
-      } catch (error) {
-        uiErrorHandler('restore terminal sessions', error)
-      } finally {
-        if (restoreRequestIdRef.current === requestId) {
-          setIsRestoring(false)
-        }
-      }
-    }
-
-    void restoreSessions(++restoreRequestIdRef.current)
-  }, [normalizedDirectory, ptyEnabled])
-
-  // 创建新终端
-  const handleNewTerminal = useCallback(async () => {
-    if (!ptyEnabled) return
-    try {
-      logger.log('[BottomPanel] Creating PTY session, directory:', normalizedDirectory)
-      const pty = await createPtySession({ cwd: normalizedDirectory }, normalizedDirectory)
-      logger.log('[BottomPanel] PTY created:', pty)
-      const tab: TerminalTab = {
-        id: pty.id,
-        title: pty.title || 'Terminal',
-        status: 'connecting',
-      }
-      layoutStore.addTerminalTab(tab)
-    } catch (error) {
-      uiErrorHandler('create terminal', error)
-    }
-  }, [normalizedDirectory, ptyEnabled])
-
-  // 关闭终端
-  const handleCloseTerminal = useCallback(
-    async (ptyId: string) => {
-      if (!ptyEnabled) return
-      try {
-        await removePtySession(ptyId, normalizedDirectory)
-      } catch {
-        // ignore - may already be closed
-      }
-    },
-    [normalizedDirectory, ptyEnabled],
-  )
-
   // 渲染内容
   const renderContent = useCallback(
     (activeTab: PanelTab | null) => {
-      if (isRestoring) {
-        return (
-          <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-base)] gap-2">
-            <TerminalIcon size={24} className="opacity-30 animate-pulse" />
-            <span>{t('terminal.restoringSessions')}</span>
-          </div>
-        )
-      }
-
       if (!activeTab) {
         return (
           <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-base)] gap-2">
-            <TerminalIcon size={24} className="opacity-30" />
             <span>{t('common:noContent')}</span>
-            <button
-              onClick={handleNewTerminal}
-              className="px-3 py-1.5 text-[length:var(--fs-sm)] bg-bg-200/50 hover:bg-bg-200 text-text-200 rounded-md transition-colors"
-            >
-              {t('terminal.createTerminal')}
-            </button>
           </div>
         )
       }
@@ -195,21 +87,9 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
             </div>
           ) : null}
 
-          {ptyEnabled && activeTab.type === 'terminal' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <TerminalContent activeTab={activeTab} directory={directory} />
-            </Suspense>
-          ) : null}
-
           {activeTab.type === 'extensions' ? (
             <Suspense fallback={<PanelFallback />}>
               <ExtensionsPanel sessionId={sessionId} />
-            </Suspense>
-          ) : null}
-
-          {activeTab.type === 'mcp' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <McpPanel isResizing={isPanelResizing} />
             </Suspense>
           ) : null}
 
@@ -218,16 +98,10 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
               <SkillPanel isResizing={isPanelResizing} sessionId={sessionId} />
             </Suspense>
           ) : null}
-
-          {activeTab.type === 'worktree' ? (
-            <Suspense fallback={<PanelFallback />}>
-              <WorktreePanel isResizing={isPanelResizing} />
-            </Suspense>
-          ) : null}
         </>
       )
     },
-    [isRestoring, handleNewTerminal, directory, sessionId, isPanelResizing, ptyEnabled, t],
+    [directory, sessionId, isPanelResizing, t],
   )
 
   return (
@@ -243,37 +117,10 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
     >
       <PanelContainer
         position="bottom"
-        directory={normalizedDirectory}
-        onNewTerminal={ptyEnabled ? handleNewTerminal : undefined}
-        onCloseTerminal={ptyEnabled ? handleCloseTerminal : undefined}
       >
         {renderContent}
       </PanelContainer>
     </ResizablePanel>
-  )
-})
-
-// ============================================
-// Terminal Content - 渲染所有终端实例
-// ============================================
-
-interface TerminalContentProps {
-  activeTab: PanelTab
-  directory?: string
-}
-
-const TerminalContent = memo(function TerminalContent({ activeTab, directory }: TerminalContentProps) {
-  const { panelTabs } = useLayoutStore()
-
-  // 获取所有 bottom 位置的 terminal tabs
-  const terminalTabs = panelTabs.filter(t => t.position === 'bottom' && t.type === 'terminal')
-
-  return (
-    <>
-      {terminalTabs.map(tab => (
-        <Terminal key={tab.id} ptyId={tab.id} directory={directory} isActive={tab.id === activeTab.id} />
-      ))}
-    </>
   )
 })
 

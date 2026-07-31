@@ -9,7 +9,7 @@ import {
   type CodeBlockThemeInfo,
 } from '../../../lib/codeBlockThemes'
 import { highlightHtmlInWorker } from '../../../lib/shikiWorkerClient'
-import { fieldClass } from './configEditorControls'
+const fieldClass = 'h-8 w-full rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-100'
 import { SegmentedControl, SettingRow, SettingsSection } from './SettingsUI'
 
 const PREVIEW_CODE = `// greet user by name
