@@ -12,6 +12,7 @@ import {
 import { IconButton } from './ui/IconButton'
 import { SegmentedControl, SettingField, SettingRow, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
 import { usePiCapabilities } from '../pi/capabilities'
+import { stashForkText } from '../pi/pendingForkText'
 import {
   abortPiBranchSummary,
   abortPiCompaction,
@@ -303,7 +304,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     (entryId: string) => {
       if (!capabilities.fork) return
       void runEntryCommand(entryId, async () => {
-        applyReplacement(await forkPiSession(sessionId, entryId, 'at'))
+        // pi TUI parity：fork 从该用户消息之前分叉，消息文本带回输入框改写重发
+        const result = await forkPiSession(sessionId, entryId, 'before')
+        if (!result.cancelled && result.targetSessionId && typeof result.selectedText === 'string' && result.selectedText.trim()) {
+          stashForkText(result.targetSessionId, result.selectedText)
+        }
+        applyReplacement(result)
       })
     },
     [applyReplacement, capabilities.fork, runEntryCommand, sessionId],
@@ -765,7 +771,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                     >
                       {t('sessionTree.label')}
                     </button>
-                    {capabilities.fork ? (
+                    {capabilities.fork && selectedRole === 'user' ? (
                       <button
                         type="button"
                         disabled={pendingEntryId !== null}

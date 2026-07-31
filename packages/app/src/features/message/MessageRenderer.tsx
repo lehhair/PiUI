@@ -309,8 +309,6 @@ export const MessageRenderer = memo(function MessageRenderer({
         turnDuration={turnDuration}
         isTurnLatestAssistant={isTurnLatestAssistant}
         processContentScope={processContentScope}
-        onFork={onFork}
-        forkMessageId={forkMessageId}
       />
     )
   }
@@ -624,15 +622,12 @@ const AssistantMessageView = memo(function AssistantMessageView({
   turnDuration,
   isTurnLatestAssistant = true,
   processContentScope = 'all',
-  onFork,
-  forkMessageId,
 }: {
   item: PiAssistantMessageItem
   allowStreamingLayoutAnimation?: boolean
   turnDuration?: number
   isTurnLatestAssistant?: boolean
   processContentScope?: ProcessContentScope
-  onFork?: (entryId: string, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
 }) {
   const { t } = useTranslation('message')
@@ -785,7 +780,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
       {showMessageActions && hasCopyableText && (
         <div className={actionBarClass}>
-          <ForkActionButton entryId={item.entryId} onFork={onFork} forkMessageId={forkMessageId} />
           <CopyButton text={fullText} position="static" />
         </div>
       )}

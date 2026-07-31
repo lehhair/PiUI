@@ -35,6 +35,7 @@ import type { PiImageInput } from '../../pi/transport/index.js'
 import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
+import { stashForkText, takeForkText } from '../../pi/pendingForkText'
 import { uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
@@ -193,6 +194,12 @@ export function PiChatPane({
     return () => piEventStream.disconnect(sessionId)
   }, [sessionId])
 
+  // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框
+  const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    setForkSeedText(sessionId ? takeForkText(sessionId) : undefined)
+  }, [sessionId])
+
   const { models, isLoading: modelsLoading } = usePiModels()
   useEffect(() => {
     void loadPiModels().catch(() => undefined)
@@ -267,15 +274,19 @@ export function PiChatPane({
     [sessionId],
   )
 
-  // Fork at a message (native fork: runtime switches to the new session
-  // file; the pane follows it). forkMessageId is the merged tail entry id
-  // from ChatArea's visibility model.
+  // Fork at a user message (pi TUI parity: branch BEFORE the message and
+  // carry its text into the new session's composer for edit-and-resend).
+  // forkMessageId is the merged tail entry id from ChatArea's visibility
+  // model.
   const handleFork = useCallback(
     async (entryId: string, forkMessageId?: string) => {
       if (!sessionId) return
       try {
-        const result = await forkPiSession(sessionId, forkMessageId ?? entryId, 'at')
+        const result = await forkPiSession(sessionId, forkMessageId ?? entryId, 'before')
         if (result.cancelled || !result.targetSessionId) return
+        if (typeof result.selectedText === 'string' && result.selectedText.trim()) {
+          stashForkText(result.targetSessionId, result.selectedText)
+        }
         const directory = result.targetCwd ?? currentDirectoryRef.current
         if (directory) {
           onEnterSessionRef.current?.(result.targetSessionId, directory)
@@ -754,6 +765,7 @@ export function PiChatPane({
             variants={thinkingLevels}
             selectedVariant={thinkingLevel}
             onVariantChange={handleVariantChange}
+            revertedText={forkSeedText}
           />
         </div>
       </div>
