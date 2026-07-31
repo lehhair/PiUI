@@ -16,3 +16,18 @@ export type HealthResponse = {
   service: "piui-server"
   piSdkVersion: string
 }
+
+/**
+ * Share info for letting another client reach this server. Only served to
+ * authenticated callers: anyone who can read it already holds the token.
+ */
+export type ShareInfo = {
+  /** Base URL other clients should use. */
+  url: string
+  /** Bearer token they must present. */
+  token: string
+  /** piui://connect link carrying both, pasteable in the add-server form. */
+  link: string
+  /** True when the server is reachable beyond this machine. */
+  lan: boolean
+}

@@ -1,4 +1,4 @@
-import { LOCAL_SERVER_ID, makeBasicAuthHeader, serverStore } from '../store/serverStore'
+import { LOCAL_SERVER_ID, serverStore } from '../store/serverStore'
 
 const DEFAULT_BASE = 'http://127.0.0.1:8787'
 const rawFetch = globalThis.fetch.bind(globalThis)
@@ -23,14 +23,9 @@ export function getApiBase(): string {
 
 function piHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init)
-  const active = serverStore.getActiveServer()
-  if (active?.token) {
-    headers.set('authorization', `Bearer ${active.token}`)
-    return headers
-  }
-  const gatewayAuth = serverStore.getActiveAuth()
-  if (gatewayAuth?.password) {
-    headers.set('authorization', makeBasicAuthHeader(gatewayAuth))
+  const activeToken = serverStore.getActiveToken()
+  if (activeToken) {
+    headers.set('authorization', `Bearer ${activeToken}`)
     return headers
   }
   const token = (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
@@ -39,9 +34,8 @@ function piHeaders(init?: HeadersInit): Headers {
 }
 
 export function getPiAuthToken(): string | undefined {
-  const activeToken = serverStore.getActiveServer()?.token
+  const activeToken = serverStore.getActiveToken()
   if (activeToken) return activeToken
-  if (serverStore.getActiveAuth()?.password) return undefined
   return (import.meta as ImportMeta & { env?: { VITE_PIUI_TOKEN?: string } }).env?.VITE_PIUI_TOKEN
 }
 

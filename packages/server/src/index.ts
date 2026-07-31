@@ -1,8 +1,7 @@
 import { DEFAULT_HTTP_BASE, PROTOCOL_VERSION } from "@piui/protocol"
 import { getDriverMode } from "@piui/pi-worker"
-import { networkInterfaces } from "node:os"
 import { authTokenPath, resolveAuthToken } from "./host/auth-token.ts"
-import { createAppServer } from "./http.ts"
+import { createAppServer, firstLanAddress } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
 
@@ -15,7 +14,7 @@ const SHUTDOWN_TIMEOUT_MS = Number.isFinite(requestedShutdownTimeout) && request
 const driver = getDriverMode()
 
 const authToken = resolveAuthToken()
-const app = createAppServer({ authToken })
+const app = createAppServer({ authToken, share: { host: HOST, port: PORT } })
 const eventServer = attachEventWebSocket(app.server, {
   eventHub: app.eventHub,
   authToken,
@@ -54,15 +53,6 @@ app.server.listen(PORT, HOST, () => {
     console.info(`[piui-server] LAN sharing enabled, share link:\n  ${shareUrl}`)
   }
 })
-
-function firstLanAddress(): string | undefined {
-  for (const infos of Object.values(networkInterfaces())) {
-    for (const info of infos ?? []) {
-      if (info.family === "IPv4" && !info.internal) return info.address
-    }
-  }
-  return undefined
-}
 
 let shuttingDown = false
 function shutdown(signal: NodeJS.Signals): void {

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { networkInterfaces } from "node:os"
 import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_VERSION,
@@ -6,6 +7,7 @@ import {
   problemFromError,
   type HealthResponse,
   type JsonObject,
+  type ShareInfo,
 } from "@piui/protocol"
 import { EventHub } from "./event-hub.ts"
 import { RuntimeSupervisor } from "./pi/supervisor.ts"
@@ -69,6 +71,15 @@ function invalidRequest(message: string): Error {
   return Object.assign(new Error(message), { code: "INVALID_REQUEST" })
 }
 
+export function firstLanAddress(): string | undefined {
+  for (const infos of Object.values(networkInterfaces())) {
+    for (const info of infos ?? []) {
+      if (info.family === "IPv4" && !info.internal) return info.address
+    }
+  }
+  return undefined
+}
+
 function commandParams(body: JsonObject): JsonObject | undefined {
   if (body.params && typeof body.params === "object" && !Array.isArray(body.params)) {
     return body.params as JsonObject
@@ -86,6 +97,8 @@ export interface CreateAppServerOptions {
   sessionHost?: SessionHost
   eventHub?: EventHub
   authToken?: string | null
+  /** Bind address, used to build the share link other clients connect with. */
+  share?: { host: string; port: number }
 }
 
 export interface AppServer {
@@ -134,6 +147,19 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
           service: "piui-server",
           piSdkVersion: PI_PARITY_SDK_VERSION,
         }
+        return sendJson(res, 200, body)
+      }
+
+      if (method === "GET" && p === "/api/v1/host/share") {
+        if (!options.share || !authToken) {
+          return sendProblem(res, 501, Object.assign(new Error("sharing is unavailable"), { code: "CAPABILITY_DISABLED" }))
+        }
+        const shareHost = options.share.host
+        const lan = shareHost !== "127.0.0.1" && shareHost !== "::1" && shareHost !== "localhost"
+        const urlHost = shareHost === "0.0.0.0" || shareHost === "::" ? (firstLanAddress() ?? shareHost) : shareHost
+        const url = `http://${urlHost}:${options.share.port}`
+        const link = `piui://connect?url=${encodeURIComponent(url)}&token=${encodeURIComponent(authToken)}`
+        const body: ShareInfo = { url, token: authToken, link, lan }
         return sendJson(res, 200, body)
       }
 

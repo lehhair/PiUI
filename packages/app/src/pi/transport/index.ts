@@ -2,6 +2,7 @@ import type {
   JsonObject,
   JsonValue,
   HealthResponse,
+  ShareInfo,
   PiRegistrySnapshot,
   CommandRecord,
   GitDiffMode,
@@ -85,6 +86,10 @@ export type PiSessionListResult = SessionInfo[]
 // Transport layer - raw API calls
 export async function fetchHostHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return readJson<HealthResponse>(`${getApiBase()}/api/v1/host/health`, { signal })
+}
+
+export async function fetchHostShare(signal?: AbortSignal): Promise<ShareInfo> {
+  return readJson<ShareInfo>(`${getApiBase()}/api/v1/host/share`, { signal })
 }
 
 export async function fetchPiRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {

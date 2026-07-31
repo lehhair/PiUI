@@ -10,12 +10,17 @@ import {
   KeyIcon,
   PencilIcon,
   RetryIcon,
+  ShareIcon,
+  CopyIcon,
+  CheckIcon,
 } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { clearSessionRuntimeState } from '../../../utils/sessionLifecycle'
 import { settingsFieldClass, SettingsSection } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { parseConnectLink } from '../../../store/serverStore'
+import { fetchHostShare } from '../../../pi/transport'
+import type { ShareInfo } from '@piui/protocol'
 
 const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/
 /** 显示名长度上限，避免列表项把右侧操作按钮挤穿 */
@@ -28,6 +33,15 @@ function isHttpsIpUrl(url: string): boolean {
     return parsed.protocol === 'https:' && (IPV4_PATTERN.test(hostname) || hostname.includes(':'))
   } catch {
     return false
+  }
+}
+
+/** 从分享链接的 URL 推导一个默认显示名。 */
+function hostNameOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
   }
 }
 
@@ -49,12 +63,13 @@ function ServerItem({
   isActive: boolean
   onSelect: () => void
   onDelete: () => void
-  onEdit: (updates: { name: string; url: string; username?: string; password?: string }) => void
+  onEdit: (updates: { name: string; url: string; token?: string }) => void
   onCheckHealth: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showShare, setShowShare] = useState(false)
 
   const statusIcon = () => {
     if (!health || health.status === 'checking') return <SpinnerIcon size={12} className="animate-spin text-text-400" />
@@ -123,11 +138,25 @@ function ServerItem({
               <span className="truncate min-w-0" title={server.url}>
                 {server.url}
               </span>
-              {server.auth?.password && <KeyIcon size={10} className="shrink-0 text-text-400" />}
+              {server.token && <KeyIcon size={10} className="shrink-0 text-text-400" />}
             </div>
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-0.5">
+          {(server.isDefault || server.token) && (
+            <button
+              type="button"
+              className="p-1.5 rounded-md text-text-400 hover:text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+              onClick={e => {
+                e.stopPropagation()
+                setShowShare(v => !v)
+              }}
+              title={t('servers.share')}
+              aria-label={t('servers.share')}
+            >
+              <ShareIcon size={13} />
+            </button>
+          )}
           <button
             type="button"
             className="p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/70 transition-colors"
@@ -171,6 +200,8 @@ function ServerItem({
         </div>
       </div>
 
+      {showShare && <SharePanel server={server} />}
+
       <ConfirmDialog
         isOpen={confirmDelete}
         onClose={() => setConfirmDelete(false)}
@@ -189,6 +220,87 @@ function ServerItem({
 }
 
 // ============================================
+// Share Panel (local server)
+// ============================================
+
+function SharePanel({ server }: { server: ServerConfig }) {
+  const { t } = useTranslation(['settings', 'common'])
+  const [share, setShare] = useState<ShareInfo | null>(null)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    if (server.isDefault) {
+      // 本地服务器向服务端要分享信息，它能分辨 loopback 与 LAN 绑定
+      fetchHostShare()
+        .then(info => {
+          if (!cancelled) setShare(info)
+        })
+        .catch(err => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        })
+    } else if (server.token) {
+      // 远程服务器的链接在客户端本地拼出来即可
+      const url = server.url.replace(/\/+$/, '')
+      setShare({
+        url,
+        token: server.token,
+        link: `piui://connect?url=${encodeURIComponent(url)}&token=${encodeURIComponent(server.token)}`,
+        lan: true,
+      })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [server])
+
+  const copyLink = async () => {
+    if (!share) return
+    try {
+      await navigator.clipboard.writeText(share.link)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // 剪贴板不可用时用户还可以手动选中复制
+    }
+  }
+
+  return (
+    <div className="mt-1.5 p-3 rounded-lg border border-border-200 bg-bg-100 space-y-2">
+      <div className="text-[length:var(--fs-xs)] font-medium text-text-300">{t('servers.shareTitle')}</div>
+      {error && <p className="text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
+      {!share && !error && <p className="text-[length:var(--fs-xs)] text-text-400">{t('servers.checking')}</p>}
+      {share && (
+        <>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              readOnly
+              value={share.link}
+              onFocus={e => e.target.select()}
+              className={`${settingsFieldClass} font-mono flex-1`}
+            />
+            <button
+              type="button"
+              onClick={() => void copyLink()}
+              className="shrink-0 p-2 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/70 transition-colors"
+              title={copied ? t('servers.shareCopied') : t('servers.shareCopy')}
+              aria-label={copied ? t('servers.shareCopied') : t('servers.shareCopy')}
+            >
+              {copied ? <CheckIcon size={13} className="text-success-100" /> : <CopyIcon size={13} />}
+            </button>
+          </div>
+          <p className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">
+            {share.lan ? t('servers.shareLanHint') : t('servers.shareLoopbackHint')}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================
 // Edit Server Form (inline)
 // ============================================
 
@@ -198,15 +310,14 @@ function EditServerForm({
   onCancel,
 }: {
   server: ServerConfig
-  onSave: (updates: { name: string; url: string; username?: string; password?: string }) => void
+  onSave: (updates: { name: string; url: string; token?: string }) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState(server.name)
   const [url, setUrl] = useState(server.url)
-  const [username, setUsername] = useState(server.auth?.username || '')
-  const [password, setPassword] = useState(server.auth?.password || '')
-  const [showAuth, setShowAuth] = useState(!!server.auth?.password)
+  const [token, setToken] = useState(server.token || '')
+  const [showAuth, setShowAuth] = useState(!!server.token)
   const [error, setError] = useState('')
   const showHttpsIpWarning = isHttpsIpUrl(url)
 
@@ -230,8 +341,7 @@ function EditServerForm({
     onSave({
       name: trimmedName,
       url: url.trim(),
-      username: password.trim() ? username.trim() || 'opencode' : undefined,
-      password: password.trim() || undefined,
+      token: token.trim() || undefined,
     })
   }
 
@@ -281,34 +391,19 @@ function EditServerForm({
       </button>
 
       {showAuth && (
-        <>
-          <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.username')}</label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => {
-                setUsername(e.target.value)
-                setError('')
-              }}
-              placeholder={t('servers.usernamePlaceholder')}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.password')}</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => {
-                setPassword(e.target.value)
-                setError('')
-              }}
-              placeholder={t('servers.passwordPlaceholder')}
-              className={inputCls}
-            />
-          </div>
-        </>
+        <div>
+          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
+          <input
+            type="password"
+            value={token}
+            onChange={e => {
+              setToken(e.target.value)
+              setError('')
+            }}
+            placeholder={t('servers.tokenPlaceholder')}
+            className={`${inputCls} font-mono`}
+          />
+        </div>
       )}
 
       {showHttpsIpWarning && (
@@ -338,20 +433,21 @@ function AddServerForm({
   onAdd,
   onCancel,
 }: {
-  onAdd: (name: string, url: string, username?: string, password?: string, token?: string) => void
+  onAdd: (name: string, url: string, token?: string) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const [token, setToken] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const trimmedName = name.trim().slice(0, SERVER_NAME_MAX_LENGTH)
+    const connectLink = parseConnectLink(url)
+    const trimmedName =
+      name.trim().slice(0, SERVER_NAME_MAX_LENGTH) || (connectLink ? hostNameOf(connectLink.url) : '')
     if (!trimmedName) {
       setError(t('servers.nameRequired'))
       return
@@ -360,9 +456,8 @@ function AddServerForm({
       setError(t('servers.urlRequired'))
       return
     }
-    const connectLink = parseConnectLink(url)
     if (connectLink) {
-      onAdd(trimmedName, connectLink.url, undefined, undefined, connectLink.token)
+      onAdd(trimmedName, connectLink.url, connectLink.token)
       return
     }
     try {
@@ -372,23 +467,9 @@ function AddServerForm({
       return
     }
 
-    onAdd(
-      trimmedName,
-      url.trim(),
-      password.trim() ? username.trim() || 'opencode' : undefined,
-      password.trim() || undefined,
-    )
+    onAdd(trimmedName, url.trim(), token.trim() || undefined)
   }
 
-  const isCrossOrigin = (() => {
-    if (!url.trim()) return false
-    try {
-      const serverUrl = new URL(url)
-      return serverUrl.origin !== window.location.origin
-    } catch {
-      return false
-    }
-  })()
   const showHttpsIpWarning = isHttpsIpUrl(url)
 
   const inputCls = settingsFieldClass
@@ -422,6 +503,7 @@ function AddServerForm({
           placeholder={t('servers.urlPlaceholder')}
           className={`${inputCls} font-mono`}
         />
+        <p className="mt-1 text-[length:var(--fs-xxs)] text-text-400 leading-relaxed">{t('servers.urlShareHint')}</p>
       </div>
 
       <button
@@ -436,45 +518,18 @@ function AddServerForm({
       {showAuth && (
         <>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.username')}</label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => {
-                setUsername(e.target.value)
-                setError('')
-              }}
-              placeholder={t('servers.usernamePlaceholder')}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.password')}</label>
+            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
             <input
               type="password"
-              value={password}
+              value={token}
               onChange={e => {
-                setPassword(e.target.value)
+                setToken(e.target.value)
                 setError('')
               }}
-              placeholder={t('servers.passwordPlaceholder')}
-              className={inputCls}
+              placeholder={t('servers.tokenPlaceholder')}
+              className={`${inputCls} font-mono`}
             />
           </div>
-
-          {isCrossOrigin && password.trim() && (
-            <div className="text-[length:var(--fs-xs)] text-warning-100 bg-warning-bg border border-warning-100/20 rounded-md px-2.5 py-2 leading-relaxed">
-              {t('servers.crossOriginWarning')}{' '}
-              <a
-                href="https://github.com/anomalyco/opencode/issues/10047"
-                target="_blank"
-                rel="noopener"
-                className="underline hover:no-underline"
-              >
-                #10047
-              </a>
-            </div>
-          )}
 
           <div className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
         </>
@@ -580,10 +635,7 @@ export function ServersSettings() {
             onSelect={() => handleSelectServer(s.id)}
             onDelete={() => removeServer(s.id)}
             onEdit={updates => {
-              const auth = updates.password
-                ? { username: updates.username || 'opencode', password: updates.password }
-                : undefined
-              updateServer(s.id, { name: updates.name, url: updates.url, auth })
+              updateServer(s.id, { name: updates.name, url: updates.url, token: updates.token })
               void checkHealth(s.id)
             }}
             onCheckHealth={() => void checkHealth(s.id)}
@@ -592,9 +644,8 @@ export function ServersSettings() {
 
         {addingServer && (
           <AddServerForm
-            onAdd={(n, u, user, pass, token) => {
-              const auth = pass ? { username: user || 'opencode', password: pass } : undefined
-              const s = addServer({ name: n, url: u, auth, token })
+            onAdd={(n, u, token) => {
+              const s = addServer({ name: n, url: u, token })
               setAddingServer(false)
               void checkHealth(s.id)
             }}
