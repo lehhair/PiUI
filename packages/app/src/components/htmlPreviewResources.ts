@@ -1,5 +1,5 @@
-import { getFileContent } from '../api/file'
-import type { FileContent } from '../api/types'
+import { getFileContent } from '../pi/files'
+import type { FileReadResponse } from '@piui/protocol'
 import { buildDataUrl, buildTextDataUrl, decodeBase64Text, isBinaryContent } from '../utils/mimeUtils'
 
 const ABSOLUTE_RESOURCE_PATTERN = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i
@@ -76,11 +76,11 @@ function fallbackMimeType(path: string): string {
   return (extension && types[extension]) || 'application/octet-stream'
 }
 
-function fileContentToText(content: FileContent): string {
+function fileContentToText(content: FileReadResponse): string {
   return isBinaryContent(content.encoding) ? decodeBase64Text(content.content) : content.content
 }
 
-function fileContentToDataUrl(content: FileContent, path: string): string {
+function fileContentToDataUrl(content: FileReadResponse, path: string): string {
   const mimeType = content.mimeType || fallbackMimeType(path)
   return isBinaryContent(content.encoding)
     ? buildDataUrl(mimeType, content.content)
@@ -113,7 +113,7 @@ function isPotentiallyAllowedPath(path: string, kind: ResourceKind): boolean {
   ].includes(extension)
 }
 
-function isAllowedResource(content: FileContent, path: string, kind: ResourceKind): boolean {
+function isAllowedResource(content: FileReadResponse, path: string, kind: ResourceKind): boolean {
   const mimeType = (content.mimeType || fallbackMimeType(path)).split(';', 1)[0].toLowerCase()
   const extension = path.split('.').pop()?.toLowerCase() ?? ''
   if (kind === 'script') {
@@ -132,7 +132,7 @@ async function replaceCssUrls(
   css: string,
   cssPath: string,
   directory: string | undefined,
-  load: (path: string, kind: ResourceKind) => Promise<FileContent | null>,
+  load: (path: string, kind: ResourceKind) => Promise<FileReadResponse | null>,
 ): Promise<string> {
   const pattern = /url\(\s*(?:(['"])(.*?)\1|([^)]*?))\s*\)/gi
   const matches = Array.from(css.matchAll(pattern))
@@ -162,7 +162,7 @@ async function replaceSrcset(
   srcset: string,
   htmlPath: string,
   directory: string | undefined,
-  load: (path: string, kind: ResourceKind) => Promise<FileContent | null>,
+  load: (path: string, kind: ResourceKind) => Promise<FileReadResponse | null>,
 ): Promise<string> {
   const candidates = srcset.split(',')
   return (
@@ -187,7 +187,7 @@ export async function resolveHtmlPreviewResources(
   directory?: string,
 ): Promise<string> {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
-  const requests = new Map<string, Promise<FileContent | null>>()
+  const requests = new Map<string, Promise<FileReadResponse | null>>()
   const loadRaw = (path: string) => {
     const cached = requests.get(path)
     if (cached) return cached

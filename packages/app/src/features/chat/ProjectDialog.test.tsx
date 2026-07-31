@@ -1,18 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectDialog } from './ProjectDialog'
-import { listDirectory } from '../../api'
+import { listDirectory } from '../../pi/files'
 
 vi.mock('../../components/ui/Dialog', () => ({
   Dialog: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) =>
     isOpen ? <div>{children}</div> : null,
 }))
 
-vi.mock('../../api', () => ({
+vi.mock('../../pi/files', () => ({
+  toAbsoluteEntryPath: (root: string, p: string) => `${root.replace(/\/+$/, '')}/${p.replace(/^\/+/, '')}`,
   listDirectory: vi.fn().mockResolvedValue([
-    { name: '.config', type: 'directory', absolute: '/workspace/project/.config' },
-    { name: 'src', type: 'directory', absolute: '/workspace/project/src' },
-    { name: 'docs', type: 'directory', absolute: '/workspace/project/docs' },
+    { name: '.config', type: 'directory', path: '.config' },
+    { name: 'src', type: 'directory', path: 'src' },
+    { name: 'docs', type: 'directory', path: 'docs' },
   ]),
 }))
 

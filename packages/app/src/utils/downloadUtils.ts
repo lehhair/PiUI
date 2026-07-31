@@ -4,7 +4,7 @@
 // 浏览器环境使用 <a download>，Tauri 环境使用原生保存对话框
 // ============================================
 
-import type { FileContent } from '../api/types'
+import type { FileReadResponse } from '@piui/protocol'
 import { isBinaryContent } from './mimeUtils'
 import { isTauri } from './tauri'
 
@@ -63,13 +63,13 @@ async function tauriSaveFile(data: Uint8Array, fileName: string): Promise<void> 
 }
 
 /**
- * 从 FileContent 下载文件
+ * 从 FileReadResponse 下载文件
  * - 二进制文件：从 base64 解码后下载
  * - 文本文件：直接以 UTF-8 编码下载
  * - Tauri 环境：弹出原生保存对话框
  * - 浏览器环境：使用 <a download> 触发下载
  */
-export function downloadFileContent(content: FileContent, fileName: string): void {
+export function downloadFileContent(content: FileReadResponse, fileName: string): void {
   // 统一转为 Uint8Array
   const data = isBinaryContent(content.encoding)
     ? base64ToBytes(content.content)

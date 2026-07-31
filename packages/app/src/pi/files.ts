@@ -1,31 +1,32 @@
-// ============================================
-// File Search API Functions
-// Pi-native workspace file APIs
-// ============================================
-
-import type { FileNode, FileContent, FileStatusItem, SymbolInfo, TextSearchMatch } from './types'
+import type {
+  FileNodeDto,
+  FileReadResponse,
+  GitFileStatus,
+  GitStatusItem,
+  WorkspaceTextSearchMatch,
+} from '@piui/protocol'
 import {
   createHostFileEntry,
   deleteHostFileEntry,
+  getHostGitStatus,
   listHostFiles,
-  readHostFile,
   moveHostFileEntry,
+  readHostFile,
   searchHostFilesByName,
   searchHostFilesText,
   writeHostFile,
-  getHostGitStatus,
-} from '../pi/transport/index.js'
-import { resolveWorkspacePath } from '../pi/workspaces'
+} from './transport/index.js'
+import { resolveWorkspacePath } from './workspaces'
 
-const ROOT_DIRECTORY_CACHE_TTL_MS = 10_000
+/**
+ * Workspace file client over native host commands (files and git).
+ * Returns protocol types directly — no view-model mapping.
+ */
 
-const rootDirectoryCache = new Map<string, { data: FileNode[]; expiresAt: number }>()
-const rootDirectoryInflight = new Map<string, Promise<FileNode[]>>()
+const ROOT_DIRECTORY_CACHE_TTL_MS = 1500
+const rootDirectoryCache = new Map<string, { data: FileNodeDto[]; expiresAt: number }>()
+const rootDirectoryInflight = new Map<string, Promise<FileNodeDto[]>>()
 const rootDirectoryGeneration = new Map<string, number>()
-
-function isRootDirectoryPath(path: string): boolean {
-  return path === '' || path === '.' || path === './'
-}
 
 function getRootDirectoryCacheKey(directory?: string): string {
   return directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''
@@ -37,13 +38,8 @@ async function requireWorkspacePath(directory?: string): Promise<string> {
   return workspacePath
 }
 
-function mapPiType(t: string): FileNode['type'] {
-  if (t === 'directory') return 'directory'
-  if (t === 'file' || t === 'symlink' || t === 'other') return 'file'
-  return 'file'
-}
-
-function toAbsoluteEntryPath(workspaceDir: string | undefined, entryPath: string): string {
+/** Join a workspace-relative entry path to the workspace root for display. */
+export function toAbsoluteEntryPath(workspaceDir: string | undefined, entryPath: string): string {
   const entry = entryPath.replace(/\\/g, '/')
   if (/^[a-zA-Z]:\//.test(entry) || entry.startsWith('/')) return entry
   if (!workspaceDir || (!/^[a-zA-Z]:[\\/]/.test(workspaceDir) && !workspaceDir.startsWith('/'))) return entry
@@ -51,11 +47,14 @@ function toAbsoluteEntryPath(workspaceDir: string | undefined, entryPath: string
   return `${root || '/'}${root ? '/' : ''}${entry.replace(/^\/+/, '')}`
 }
 
-/** Normalize explorer path to workspace-relative for Pi file API. */
+function isRootDirectoryPath(path: string): boolean {
+  return !path || path === '.' || path === '/'
+}
+
+/** Normalize explorer path to workspace-relative for the file commands. */
 function toPiRelativePath(path: string, directory?: string): string {
   if (!path || isRootDirectoryPath(path)) return ''
   const p = path.replace(/\\/g, '/')
-  // virtual labels
   if (p === 'piui' || p.startsWith('piui/')) return ''
 
   const root = directory?.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -65,17 +64,14 @@ function toPiRelativePath(path: string, directory?: string): string {
     const lr = caseInsensitive ? root.toLowerCase() : root
     if (lp === lr || lp === `${lr}/`) return ''
     if (lp.startsWith(`${lr}/`)) return p.slice(root.length + 1)
-    // absolute path that is not under workspace root → list root instead of 403
     if (/^[a-zA-Z]:/.test(p) || p.startsWith('/')) return ''
   }
 
-  // bare absolute without directory
   if (/^[a-zA-Z]:/.test(p) || (p.startsWith('/') && p.length > 1 && !directory)) return ''
   return p.replace(/^\//, '')
 }
 
-async function fetchDirectory(path: string, directory?: string): Promise<FileNode[]> {
-  // Prefer absolute directory as workspace; fall back to current path if it is absolute
+async function fetchDirectory(path: string, directory?: string): Promise<FileNodeDto[]> {
   const workspaceDir =
     directory && (/^[a-zA-Z]:/.test(directory) || directory.startsWith('/'))
       ? directory
@@ -84,27 +80,16 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
         : directory
   const workspacePath = await requireWorkspacePath(workspaceDir)
   const rel = toPiRelativePath(path, workspaceDir)
-  const entries: Awaited<ReturnType<typeof listHostFiles>>['entries'] = []
+  const entries: FileNodeDto[] = []
   let cursor: string | undefined
   do {
     const page = await listHostFiles(workspacePath, { path: rel, limit: 2000, cursor })
     entries.push(...page.entries)
     cursor = page.nextCursor
   } while (cursor && entries.length < 20_000)
-  return entries
-    .filter(e => !e.restricted)
-    .map(e => ({
-      name: e.name,
-      path: e.path,
-      absolute: toAbsoluteEntryPath(workspaceDir, e.path),
-      type: mapPiType(e.type),
-      ignored: false,
-    })) as FileNode[]
+  return entries.filter(e => !e.restricted)
 }
 
-/**
- * 搜索文件或目录
- */
 export async function searchFiles(
   query: string,
   options: {
@@ -122,10 +107,7 @@ export async function searchFiles(
   return result.paths
 }
 
-/**
- * 列出目录内容
- */
-export async function listDirectory(path: string, directory?: string): Promise<FileNode[]> {
+export async function listDirectory(path: string, directory?: string): Promise<FileNodeDto[]> {
   if (!isRootDirectoryPath(path)) {
     return fetchDirectory(path, directory)
   }
@@ -162,25 +144,13 @@ export async function prefetchRootDirectory(directory?: string): Promise<void> {
   await listDirectory('.', directory)
 }
 
-/**
- * 读取文件内容
- */
-export async function getFileContent(path: string, directory?: string): Promise<FileContent> {
+export async function getFileContent(path: string, directory?: string): Promise<FileReadResponse> {
   const workspacePath = await requireWorkspacePath(directory)
   const rel = toPiRelativePath(path, directory)
-  const file = await readHostFile(workspacePath, rel)
-  const result: FileContent = {
-    type: file.type ?? (file.encoding === 'base64' ? 'binary' : 'text'),
-    content: file.content,
-    encoding: file.encoding,
-  }
-  if (file.mimeType !== undefined) result.mimeType = file.mimeType
-  if (file.etag !== undefined) result.etag = file.etag
-  if (file.size !== undefined) result.size = file.size
-  return result
+  return readHostFile(workspacePath, rel)
 }
 
-export async function saveFile(path: string, content: FileContent, directory?: string): Promise<FileContent> {
+export async function saveFile(path: string, content: Pick<FileReadResponse, 'content'> & Partial<FileReadResponse>, directory?: string): Promise<FileReadResponse> {
   const workspacePath = await requireWorkspacePath(directory)
   const relative = toPiRelativePath(path, directory)
   const saved = await writeHostFile(
@@ -190,14 +160,7 @@ export async function saveFile(path: string, content: FileContent, directory?: s
     { ifMatch: content.etag, encoding: content.encoding === 'base64' ? 'base64' : 'utf-8' },
   )
   invalidateWorkspaceFileCaches(directory)
-  return {
-    type: saved.type,
-    content: saved.content,
-    encoding: saved.encoding,
-    mimeType: saved.mimeType,
-    etag: saved.etag,
-    size: saved.size,
-  }
+  return saved
 }
 
 export async function createFile(path: string, directory?: string, content = ''): Promise<void> {
@@ -227,22 +190,16 @@ export async function deleteEntry(path: string, directory?: string, recursive = 
   invalidateWorkspaceFileCaches(directory)
 }
 
-/**
- * 获取文件 git 状态
- */
-export async function getFileStatus(directory?: string): Promise<FileStatusItem[]> {
+export async function getFileStatus(directory?: string): Promise<GitStatusItem[]> {
   const workspacePath = await requireWorkspacePath(directory)
   const status = await getHostGitStatus(workspacePath)
-  return status.items.map(item => ({
-    path: item.path,
-    status: item.status === 'added' || item.status === 'untracked' || item.status === 'copied'
-      ? 'added'
-      : item.status === 'deleted'
-        ? 'deleted'
-        : 'modified',
-    added: 0,
-    removed: 0,
-  }))
+  return status.items
+}
+
+export function simplifyGitStatus(status: GitFileStatus): 'added' | 'modified' | 'deleted' {
+  if (status === 'added' || status === 'untracked' || status === 'copied') return 'added'
+  if (status === 'deleted') return 'deleted'
+  return 'modified'
 }
 
 export function invalidateWorkspaceFileCaches(directory?: string): void {
@@ -252,28 +209,13 @@ export function invalidateWorkspaceFileCaches(directory?: string): void {
   rootDirectoryGeneration.set(key, (rootDirectoryGeneration.get(key) ?? 0) + 1)
 }
 
-/**
- * 搜索代码符号
- */
-export async function searchSymbols(query: string, directory?: string): Promise<SymbolInfo[]> {
-  void query
-  void directory
-  throw new Error('PiUI symbol search is not supported yet')
-}
-
-/**
- * 搜索文件正文内容
- */
-export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<TextSearchMatch[]> {
+export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<WorkspaceTextSearchMatch[]> {
   const workspacePath = await requireWorkspacePath(directory)
   return signal
     ? (await searchHostFilesText(workspacePath, pattern, 50, signal)).matches
     : (await searchHostFilesText(workspacePath, pattern)).matches
 }
 
-/**
- * 搜索目录（便捷方法）
- */
 export async function searchDirectories(query: string, baseDirectory?: string, limit: number = 50): Promise<string[]> {
   return searchFiles(query, {
     directory: baseDirectory,

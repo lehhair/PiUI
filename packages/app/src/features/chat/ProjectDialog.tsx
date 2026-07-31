@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, ArrowUpIcon, SpinnerIcon, PlusIcon } from '../../components/Icons'
-import { listDirectory } from '../../api'
+import { listDirectory, toAbsoluteEntryPath } from '../../pi/files'
 import { fileErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
@@ -145,8 +145,8 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '' }: P
             .sort((a, b) => a.name.localeCompare(b.name))
             .map(n => ({
               name: n.name,
-              path: normalizePath(n.absolute),
-              type: n.type,
+              path: normalizePath(toAbsoluteEntryPath(currentDir, n.path)),
+              type: 'directory' as const,
             }))
 
           setItems(fileItems)

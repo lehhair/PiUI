@@ -16,12 +16,15 @@ const { listDirectory, getFileContent, getFileStatus, getHostGitDiff, invalidate
 vi.mock('../pi/workspaces', () => ({ resolveWorkspacePath }))
 vi.mock('../pi/transport/index.js', () => ({ getHostGitDiff }))
 
-vi.mock('../api', () => ({
+vi.mock('../pi/files', () => ({
   listDirectory,
   getFileContent,
   getFileStatus,
   invalidateWorkspaceFileCaches,
   saveFile,
+  simplifyGitStatus: (status: string) =>
+    status === 'added' || status === 'untracked' || status === 'copied' ? 'added' : status === 'deleted' ? 'deleted' : 'modified',
+  toAbsoluteEntryPath: (root: string | undefined, p: string) => (root ? `${root}/${p}` : p),
 }))
 
 describe('useFileExplorer change scope', () => {
@@ -30,9 +33,9 @@ describe('useFileExplorer change scope', () => {
     vi.clearAllMocks()
 
     listDirectory.mockResolvedValue([
-      { name: 'src', path: 'src', absolute: '/repo/src', type: 'directory', ignored: false },
-      { name: 'session.ts', path: 'src/session.ts', absolute: '/repo/src/session.ts', type: 'file', ignored: false },
-      { name: 'turn.ts', path: 'src/turn.ts', absolute: '/repo/src/turn.ts', type: 'file', ignored: false },
+      { name: 'src', path: 'src', type: 'directory' },
+      { name: 'session.ts', path: 'src/session.ts', type: 'file' },
+      { name: 'turn.ts', path: 'src/turn.ts', type: 'file' },
     ])
     getFileContent.mockResolvedValue({ type: 'text', content: 'test' })
     getFileStatus.mockResolvedValue([])
@@ -66,7 +69,7 @@ describe('useFileExplorer change scope', () => {
   it('restores expanded folders per directory when switching projects', async () => {
     listDirectory.mockImplementation(async (parentPath: string, directory: string) => {
       if (parentPath === '') {
-        return [{ name: 'src', path: 'src', absolute: `${directory}/src`, type: 'directory', ignored: false }]
+        return [{ name: 'src', path: 'src', type: 'directory' }]
       }
 
       if (parentPath === 'src') {
@@ -74,9 +77,7 @@ describe('useFileExplorer change scope', () => {
           {
             name: directory === '/repo-a' ? 'a.ts' : 'b.ts',
             path: `src/${directory === '/repo-a' ? 'a.ts' : 'b.ts'}`,
-            absolute: `${directory}/src/${directory === '/repo-a' ? 'a.ts' : 'b.ts'}`,
             type: 'file',
-            ignored: false,
           },
         ]
       }
@@ -120,7 +121,7 @@ describe('useFileExplorer change scope', () => {
   })
 
   it('ignores stale child loads after switching directories', async () => {
-    let resolveRepoAChildren: (nodes: Array<{ name: string; path: string; absolute: string; type: 'file'; ignored: boolean }>) => void
+    let resolveRepoAChildren: (nodes: Array<{ name: string; path: string; type: 'file' }>) => void
 
     listDirectory.mockImplementation((parentPath: string, directory: string) => {
       if (parentPath === '') {
@@ -135,7 +136,7 @@ describe('useFileExplorer change scope', () => {
 
       if (parentPath === 'src' && directory === '/repo-b') {
         return Promise.resolve([
-          { name: 'b.ts', path: 'src/b.ts', absolute: '/repo-b/src/b.ts', type: 'file', ignored: false },
+          { name: 'b.ts', path: 'src/b.ts', type: 'file' },
         ])
       }
 
@@ -171,7 +172,7 @@ describe('useFileExplorer change scope', () => {
 
     await act(async () => {
       resolveRepoAChildren!([
-        { name: 'a.ts', path: 'src/a.ts', absolute: '/repo-a/src/a.ts', type: 'file', ignored: false },
+        { name: 'a.ts', path: 'src/a.ts', type: 'file' },
       ])
     })
 
