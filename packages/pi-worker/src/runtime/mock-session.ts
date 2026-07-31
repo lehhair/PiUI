@@ -621,13 +621,6 @@ export class MockPiSession implements SessionRuntime {
     }
   }
 
-  async clone(entryId?: string): Promise<JsonObject> {
-    const target = entryId ?? this.leafId
-    if (!target) throw Object.assign(new Error("mock session has no entry to clone"), { code: "INVALID_REQUEST" })
-    const result = await this.fork(target)
-    return { ...result, operation: "clone" }
-  }
-
   async importSession(inputPath: string): Promise<JsonObject> {
     const sourceSessionId = this.getSessionId()
     if (!existsSync(inputPath)) throw Object.assign(new Error("import file not found"), { code: "NOT_FOUND" })

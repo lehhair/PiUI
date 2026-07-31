@@ -52,7 +52,7 @@ export type WorkerHostCall =
       type: "extensionReplacement.reserve"
       reservationId: string
       sourceSessionId: string
-      operation: "new" | "fork" | "clone" | "switch" | "import"
+      operation: "new" | "fork" | "switch" | "import"
       targetSessionFile?: string
     }
   | {

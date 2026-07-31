@@ -809,13 +809,6 @@ export class RealPiSession implements SessionRuntime {
     }
   }
 
-  async clone(entryId?: string): Promise<JsonObject> {
-    const target = entryId ?? this.runtime.session.sessionManager.getLeafId() ?? ""
-    if (!target) throw Object.assign(new Error("Pi session has no entry to clone"), { code: "INVALID_REQUEST" })
-    const result = await this.fork(target, "at")
-    return { ...result, operation: "clone" }
-  }
-
   async importSession(inputPath: string, cwdOverride?: string): Promise<JsonObject> {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()

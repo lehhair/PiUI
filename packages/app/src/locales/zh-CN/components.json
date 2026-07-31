@@ -91,7 +91,6 @@
     "optionalBranchLabel": "分支标签（可选）…",
     "replaceDefaultInstructions": "替换默认总结要求",
     "fork": "从这里 Fork",
-    "clone": "克隆到这里",
     "label": "编辑标签",
     "labelPlaceholder": "分支标签",
     "importPath": "Pi JSONL 文件路径",

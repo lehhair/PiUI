@@ -39,7 +39,6 @@ export interface SessionRuntime {
   newSession(parentSession?: string): Promise<JsonObject>
   switchSession(sessionPath: string, cwdOverride?: string): Promise<JsonObject>
   fork(entryId: string, position: "before" | "at"): Promise<JsonObject>
-  clone(entryId?: string): Promise<JsonObject>
   importSession(inputPath: string, cwdOverride?: string): Promise<JsonObject>
   setSessionName(name: string): Promise<void>
 
