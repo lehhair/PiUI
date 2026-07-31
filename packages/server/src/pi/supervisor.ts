@@ -34,6 +34,7 @@ export class RuntimeSupervisor {
   private readonly standbySize: number
   private readonly active = new Set<WorkerSession>()
   private readonly opening = new Set<WorkerHost>()
+  private readonly runtimeLeases = new Map<WorkerSession, SessionLease>()
   private readonly pendingOpens = new Set<Promise<WorkerSession>>()
   private disposed = false
 
@@ -121,6 +122,7 @@ export class RuntimeSupervisor {
         throw new Error("Runtime supervisor is disposed")
       }
       const release = once(() => lease?.release())
+      if (lease) this.runtimeLeases.set(runtime, lease)
       const reservations = new Map<string, SessionReplacementReservation>()
       runtime.setHostCallHandler(async (call: WorkerHostCall) => {
         if (call.type === "extensionReplacement.reserve") {
@@ -161,6 +163,7 @@ export class RuntimeSupervisor {
       })
       runtime.onClose(() => {
         this.active.delete(runtime)
+        this.runtimeLeases.delete(runtime)
         for (const reservation of reservations.values()) reservation.rollback()
         reservations.clear()
         release()
@@ -177,6 +180,18 @@ export class RuntimeSupervisor {
       }
       throw error
     }
+  }
+
+  /**
+   * Swap a runtime's lease to the session it switched to (fork/clone/
+   * newSession/switchSession/importSession). Without this the source
+   * session's lease ports stay held forever and the source can never be
+   * attached again (SESSION_BUSY).
+   */
+  async replaceRuntimeLease(runtime: WorkerSession, sessionFile?: string, sessionId?: string): Promise<void> {
+    const lease = this.runtimeLeases.get(runtime)
+    if (!lease) return
+    await lease.replace(sessionFile, sessionId)
   }
 
   async dispose(): Promise<void> {

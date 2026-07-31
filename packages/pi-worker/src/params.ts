@@ -11,6 +11,12 @@ export function reqString(params: JsonObject, key: string): string {
   return value
 }
 
+export function reqStringAllowEmpty(params: JsonObject, key: string): string {
+  const value = params[key]
+  if (typeof value !== "string") throw invalid(`params.${key} must be a string`)
+  return value
+}
+
 export function optString(params: JsonObject, key: string): string | undefined {
   const value = params[key]
   if (value === undefined || value === null) return undefined

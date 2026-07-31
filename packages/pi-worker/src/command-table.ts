@@ -160,7 +160,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     }
   },
   setExtensionEditorState: async (ctx, p) => {
-    await ctx.requireRuntime().setExtensionEditorState(P.reqString(p, "text"))
+    await ctx.requireRuntime().setExtensionEditorState(P.reqStringAllowEmpty(p, "text"))
   },
 
   "state.get": async (ctx) => ctx.requireRuntime().getState(),

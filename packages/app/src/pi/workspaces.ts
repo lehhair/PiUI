@@ -61,6 +61,10 @@ export async function resolveWorkspacePath(directory?: string): Promise<string |
         .then(workspace => workspace.path)
         .catch(error => {
           workspaceResolutionPromises.delete(key)
+          // Saved directory no longer exists on disk — treat as absent
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'WORKSPACE_NOT_FOUND') {
+            return null
+          }
           throw error
         })
       workspaceResolutionPromises.set(key, pending)
