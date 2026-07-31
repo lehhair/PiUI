@@ -37,7 +37,7 @@ export function getPreviewCategory(mimeType?: string): PreviewCategory | null {
 }
 
 /**
- * 判断一个 FileContent 是否为二进制内容
+ * 判断一个 FileReadResponse 是否为二进制内容
  */
 export function isBinaryContent(encoding?: string): boolean {
   return encoding === 'base64'

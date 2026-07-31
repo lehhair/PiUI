@@ -65,21 +65,6 @@ export type {
   QuestionAnswer,
 } from './permission'
 
-// File types
-export type {
-  FileNode,
-  FileNodeType,
-  FileContent,
-  FileDiff,
-  FileStatusItem,
-  FilePatch,
-  PatchHunk,
-  Symbol,
-  SymbolLocation,
-  SymbolRange,
-  TextSearchMatch,
-} from './file'
-
 // Project types
 export type { Project, ProjectIcon, ProjectCommands, ProjectUpdateParams, PathResponse } from './project'
 

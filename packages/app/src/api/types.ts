@@ -15,7 +15,6 @@ export type {
   QuestionAnswer,
 } from '../types/api/permission'
 export type { Agent as ApiAgent, AgentPermission as ApiAgentPermission } from '../types/api/agent'
-export type { Symbol as SymbolInfo } from '../types/api/file'
 
 import type { Attachment } from '../types/ui'
 

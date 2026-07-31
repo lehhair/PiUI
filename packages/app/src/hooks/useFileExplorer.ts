@@ -5,18 +5,35 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { invalidateWorkspaceFileCaches, listDirectory, getFileContent, getFileStatus, saveFile } from '../api'
+import {
+  getFileContent,
+  getFileStatus,
+  invalidateWorkspaceFileCaches,
+  listDirectory,
+  saveFile,
+  simplifyGitStatus,
+  toAbsoluteEntryPath,
+} from '../pi/files'
 import { getHostGitDiff } from '../pi/transport/index.js'
-import type { GitDiffItem } from '@piui/protocol'
-import type { FileNode, FileContent, FileStatusItem } from '../api/types'
+import type { FileNodeDto, FileReadResponse } from '@piui/protocol'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { resolveWorkspacePath } from '../pi/workspaces'
 
-export interface FileTreeNode extends FileNode {
+export interface FileTreeNode extends FileNodeDto {
+  /** workspace root + relative path, for drag/context actions */
+  absolute: string
   children?: FileTreeNode[]
   isLoading?: boolean
   isLoaded?: boolean
+}
+
+/** Explorer file status derived from native git.status / git.diff items. */
+export interface ExplorerFileStatus {
+  path: string
+  status: 'added' | 'modified' | 'deleted'
+  added?: number
+  removed?: number
 }
 
 export interface UseFileExplorerOptions {
@@ -40,15 +57,15 @@ export interface UseFileExplorerResult {
   collapsePath: (path: string) => void
 
   // 文件预览
-  previewContent: FileContent | null
+  previewContent: FileReadResponse | null
   previewLoading: boolean
   previewError: string | null
   loadPreview: (path: string) => Promise<void>
   clearPreview: () => void
-  savePreview: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileContent>
+  savePreview: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileReadResponse>
 
   // 文件状态
-  fileStatus: Map<string, FileStatusItem>
+  fileStatus: Map<string, ExplorerFileStatus>
 
   // 操作
   refresh: () => Promise<void>
@@ -85,15 +102,15 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const expandedPathsByDirectoryRef = useRef<Map<string, Set<string>>>(new Map())
 
   // 预览状态
-  const [previewContent, setPreviewContent] = useState<FileContent | null>(null)
+  const [previewContent, setPreviewContent] = useState<FileReadResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const previewCacheRef = useRef<Map<string, FileContent>>(new Map())
+  const previewCacheRef = useRef<Map<string, FileReadResponse>>(new Map())
   const previewLoadIdRef = useRef(0)
   const previewPathRef = useRef<string | null>(null)
 
   // 文件状态（git）
-  const [fileStatus, setFileStatus] = useState<Map<string, FileStatusItem>>(new Map())
+  const [fileStatus, setFileStatus] = useState<Map<string, ExplorerFileStatus>>(new Map())
 
   // 用于防止过时请求
   const loadIdRef = useRef(0)
@@ -124,7 +141,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
 
       // 排序：目录在前，文件在后，按名称排序
       const sorted = sortNodes(nodes)
-      setTree(sorted.map(n => ({ ...n, children: n.type === 'directory' ? undefined : undefined })))
+      setTree(sorted.map(n => ({ ...n, absolute: toAbsoluteEntryPath(directory, n.path) })))
     } catch (e) {
       if (loadId === loadIdRef.current) {
         setError(e instanceof Error ? e.message : t('fileExplorer.failedToLoadFiles'))
@@ -143,7 +160,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     }
 
     const loadId = ++statusLoadIdRef.current
-    const statusMap = new Map<string, FileStatusItem>()
+    const statusMap = new Map<string, ExplorerFileStatus>()
 
     try {
       if (!sessionId) {
@@ -153,7 +170,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
         status.forEach(item => {
           const normalized = normalizePath(item.path)
           if (normalized.startsWith('../')) return
-          statusMap.set(normalized, { ...item, path: normalized })
+          statusMap.set(normalized, { path: normalized, status: simplifyGitStatus(item.status) })
         })
       } else {
         const workspacePath = await resolveWorkspacePath(directory)
@@ -169,7 +186,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
             path: normalized,
             added: diff.additions,
             removed: diff.deletions,
-            status: getFileStatusFromDiff(diff),
+            status: simplifyGitStatus(diff.status),
           })
         })
       }
@@ -210,7 +227,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
         setTree(prev =>
           updateTreeNode(prev, parentPath, node => ({
             ...node,
-            children: sorted.map(n => ({ ...n })),
+            children: sorted.map(n => ({ ...n, absolute: toAbsoluteEntryPath(directory, n.path) })),
             isLoading: false,
             isLoaded: true,
           })),
@@ -479,7 +496,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
 // Helper Functions
 // ============================================
 
-function sortNodes(nodes: FileNode[]): FileNode[] {
+function sortNodes(nodes: FileNodeDto[]): FileNodeDto[] {
   return [...nodes].sort((a, b) => {
     // 目录在前
     if (a.type !== b.type) {
@@ -552,17 +569,8 @@ function normalizePath(p: string): string {
 }
 
 // Helper: 从 diff 推断文件状态（优先 status 字段，回退统计推断，最后 before/after 推断）
-function getFileStatusFromDiff(diff: GitDiffItem): 'added' | 'modified' | 'deleted' {
-  if (diff.status === 'added' || diff.status === 'untracked' || diff.status === 'copied') return 'added'
-  if (diff.status === 'deleted') return 'deleted'
-  if (diff.status) return 'modified'
-  if (diff.deletions === 0 && diff.additions > 0) return 'added'
-  if (diff.additions === 0 && diff.deletions > 0) return 'deleted'
-  return 'modified'
-}
-
 // Helper: 计算目录的累积状态（基于子文件状态）
-function computeDirectoryStatus(statusMap: Map<string, FileStatusItem>): void {
+function computeDirectoryStatus(statusMap: Map<string, ExplorerFileStatus>): void {
   // 收集所有需要设置状态的目录路径
   const dirStatuses = new Map<string, 'added' | 'modified' | 'deleted'>()
 

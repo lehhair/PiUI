@@ -14,7 +14,6 @@ export { fromFilePart, fromAgentPart } from '../features/attachment'
 
 // Re-export from sub-modules
 export * from './permission'
-export * from './file'
 export * from './events'
 export * from './config'
 export * from './mcp'

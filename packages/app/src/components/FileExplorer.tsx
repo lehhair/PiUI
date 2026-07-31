@@ -44,8 +44,8 @@ import {
   type PreviewCategory,
 } from '../utils/mimeUtils'
 import { downloadFileContent } from '../utils/downloadUtils'
-import { createDirectory, createFile, deleteEntry, moveEntry, searchText, searchFiles } from '../api/file'
-import type { FileContent, TextSearchMatch } from '../api/types'
+import { createDirectory, createFile, deleteEntry, moveEntry, searchText, searchFiles } from '../pi/files'
+import type { FileReadResponse, WorkspaceTextSearchMatch } from '@piui/protocol'
 import { startInternalDrag } from '../lib/internalDragCore'
 import { toAbsolutePath } from '../features/mention'
 import { getDesktopPlatform, isTauri, isTauriMobile } from '../utils/tauri'
@@ -123,7 +123,7 @@ function byteOffsetToCodeUnitIndex(text: string, byteOffset: number): number {
   return Math.min(index, text.length)
 }
 
-function getSearchMatchRanges(match: TextSearchMatch): TargetLineRange[] {
+function getSearchMatchRanges(match: WorkspaceTextSearchMatch): TargetLineRange[] {
   return match.submatches
     .map(submatch => ({
       from: byteOffsetToCodeUnitIndex(match.lines.text, submatch.start),
@@ -157,7 +157,7 @@ export const FileExplorer = memo(function FileExplorer({
   const fileContextMenuRef = useRef<HTMLDivElement>(null)
   const searchRequestIdRef = useRef(0)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<TextSearchMatch[]>([])
+  const [searchResults, setSearchResults] = useState<WorkspaceTextSearchMatch[]>([])
   const [fileResults, setFileResults] = useState<string[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [fileContextMenu, setFileContextMenu] = useState<{
@@ -419,7 +419,7 @@ export const FileExplorer = memo(function FileExplorer({
   }, [directory, trimmedSearchQuery, t])
 
   const handleSearchResultClick = useCallback(
-    (match: TextSearchMatch) => {
+    (match: WorkspaceTextSearchMatch) => {
       const path = match.path.text
       const name = path.split(/[/\\]/).pop() || path
       layoutStore.openFilePreview(
@@ -685,11 +685,11 @@ export const FileExplorer = memo(function FileExplorer({
 })
 
 interface TextSearchResultsProps {
-  results: TextSearchMatch[]
+  results: WorkspaceTextSearchMatch[]
   fileResults: string[]
   isLoading: boolean
   error: string | null
-  onSelect: (match: TextSearchMatch) => void
+  onSelect: (match: WorkspaceTextSearchMatch) => void
   onSelectFile: (path: string) => void
   onContextMenuFile?: (event: React.MouseEvent, path: string, absolute?: string) => void
   directory?: string
@@ -902,12 +902,11 @@ const FileTreeItem = memo(function FileTreeItem({
         type="button"
         onPointerDown={handlePointerDragStart}
         onClick={() => onClick(node)}
-        onContextMenu={event => onContextMenu?.(event, node.path, node.absolute, node.type)}
+        onContextMenu={event => onContextMenu?.(event, node.path, node.absolute, node.type === 'directory' ? 'directory' : 'file')}
         className={`
           w-full flex items-center gap-1 px-2 py-0.5 text-left cursor-default
           select-none hover:bg-bg-200/50 transition-colors text-[length:var(--fs-sm)]
           text-text-300
-          ${node.ignored ? 'opacity-50' : ''}
         `}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
@@ -974,7 +973,7 @@ interface FilePreviewProps {
   targetLine?: number
   targetKey?: string
   targetRanges?: readonly TargetLineRange[]
-  content: FileContent | null
+  content: FileReadResponse | null
   isLoading: boolean
   error: string | null
   onClose: () => void
@@ -983,7 +982,7 @@ interface FilePreviewProps {
   onReorderPreview: (draggedPath: string, targetPath: string) => void
   isResizing?: boolean
   directory?: string
-  onSave: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileContent>
+  onSave: (path: string, text: string, etag?: string, force?: boolean) => Promise<FileReadResponse>
   onReload: (path: string) => Promise<void>
   editorId: string
 }

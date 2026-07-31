@@ -3,7 +3,7 @@ import { resolveHtmlPreviewResources, resolveHtmlResourcePath } from './htmlPrev
 
 const getFileContent = vi.hoisted(() => vi.fn())
 
-vi.mock('../api/file', () => ({ getFileContent }))
+vi.mock('../pi/files', () => ({ getFileContent }))
 
 describe('htmlPreviewResources', () => {
   beforeEach(() => {
