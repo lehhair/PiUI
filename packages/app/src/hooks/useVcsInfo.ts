@@ -4,20 +4,21 @@
 // ============================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getVcsInfo } from '../api/vcs'
-import type { VcsInfo } from '../types/api/vcs'
+import type { GitInfoResponse } from '@piui/protocol'
+import { getHostGitInfo } from '../pi/transport/index.js'
+import { resolveWorkspacePath } from '../pi/workspaces'
 
 const POLL_INTERVAL = 15000 // 15s 轮询
 
 export interface UseVcsInfoResult {
-  vcsInfo: VcsInfo | null
+  vcsInfo: GitInfoResponse | null
   isLoading: boolean
   error: string | null
   refresh: () => void
 }
 
 export function useVcsInfo(directory?: string): UseVcsInfoResult {
-  const [vcsInfo, setVcsInfo] = useState<VcsInfo | null>(null)
+  const [vcsInfo, setVcsInfo] = useState<GitInfoResponse | null>(null)
   const [isLoading, setIsLoading] = useState(Boolean(directory))
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
@@ -37,7 +38,8 @@ export function useVcsInfo(directory?: string): UseVcsInfoResult {
 
     setIsLoading(true)
     try {
-      const info = await getVcsInfo(directory)
+      const workspacePath = await resolveWorkspacePath(directory)
+      const info = workspacePath ? await getHostGitInfo(workspacePath) : null
       if (mountedRef.current && requestId === requestIdRef.current) {
         setVcsInfo(info)
         setError(null)

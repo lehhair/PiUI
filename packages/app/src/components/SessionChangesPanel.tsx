@@ -7,14 +7,16 @@
 import { memo, useState, useEffect, useCallback, useRef, useMemo, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { RetryIcon, ChevronRightIcon, MaximizeIcon, ClockIcon, GitBranchIcon, GitDiffIcon, LayersIcon } from './Icons'
+import { RetryIcon, ChevronRightIcon, MaximizeIcon, GitBranchIcon, GitDiffIcon } from './Icons'
 import { getMaterialIconUrl } from '../utils/materialIcons'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { ViewModeSwitch } from './FullscreenViewer'
-import { getCurrentProject } from '../api/client'
-import { getVcsDiff, getVcsFileDiff, getVcsInfo } from '../api/vcs'
+import { getHostGitDiff, getHostGitFileDiff, getHostGitInfo } from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
-import type { ApiProject, FileDiff, VcsDiffMode, VcsInfo } from '../api/types'
+import type { GitDiffItem, GitInfoResponse } from '@piui/protocol'
+
+/** List row: git.diff item, optionally enriched with the lazy git.fileDiff patch. */
+type ChangeDiff = GitDiffItem & { patch?: string }
 import { detectLanguage } from '../utils/languageUtils'
 import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
 import { sessionErrorHandler } from '../utils'
@@ -33,14 +35,12 @@ const MIN_PREVIEW_HEIGHT = 120
 type ChangeMode = ChangeScopeMode
 
 function getDefaultChangeMode(options: ChangeMode[]) {
-  if (options.includes('turn')) return 'turn'
   if (options.includes('git')) return 'git'
   if (options.includes('branch')) return 'branch'
-  if (options.includes('session')) return 'session'
-  return options[0] ?? 'session'
+  return options[0] ?? 'git'
 }
 
-function reconcileDiffPreviewState(diffs: FileDiff[], openFiles: string[], activeFile: string | null) {
+function reconcileDiffPreviewState(diffs: ChangeDiff[], openFiles: string[], activeFile: string | null) {
   const availableFiles = new Set(diffs.map(diff => diff.file))
   const nextOpenFiles = openFiles.filter(file => availableFiles.has(file))
 
@@ -85,17 +85,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     minSecondaryHeight: MIN_PREVIEW_HEIGHT,
   })
 
-  const [project, setProject] = useState<ApiProject | null>(null)
-  const [vcsInfo, setVcsInfo] = useState<VcsInfo | null>(null)
+  const [vcsInfo, setVcsInfo] = useState<GitInfoResponse | null>(null)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
-  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
-  const [gitDiffs, setGitDiffs] = useState<FileDiff[]>([])
-  const [branchDiffs, setBranchDiffs] = useState<FileDiff[]>([])
-  const [stagedDiffs, setStagedDiffs] = useState<FileDiff[]>([])
-  const [unstagedDiffs, setUnstagedDiffs] = useState<FileDiff[]>([])
-  const [sessionDiffs, setSessionDiffs] = useState<FileDiff[]>([])
-  const [turnDiffs, setTurnDiffs] = useState<FileDiff[]>([])
+  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, staged: false, unstaged: false })
+  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, staged: false, unstaged: false })
+  const [gitDiffs, setGitDiffs] = useState<ChangeDiff[]>([])
+  const [branchDiffs, setBranchDiffs] = useState<ChangeDiff[]>([])
+  const [stagedDiffs, setStagedDiffs] = useState<ChangeDiff[]>([])
+  const [unstagedDiffs, setUnstagedDiffs] = useState<ChangeDiff[]>([])
   const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('unified')
   const [listMode, setListMode] = useState<'flat' | 'tree'>('tree')
@@ -124,7 +121,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   }, [directory])
 
   const projectRequestIdRef = useRef(0)
-  const diffRequestIdRef = useRef({ git: 0, branch: 0, staged: 0, unstaged: 0, session: 0, turn: 0 })
+  const diffRequestIdRef = useRef({ git: 0, branch: 0, staged: 0, unstaged: 0 })
   const diffAbortRef = useRef<Partial<Record<ChangeMode, AbortController>>>({})
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openDiffFilesRef = useRef<string[]>([])
@@ -144,13 +141,13 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   )
   const changeOptions = useMemo<ChangeMode[]>(() => {
     const options: ChangeMode[] = []
-    if (project?.vcs) options.push('git')
-    if (project?.vcs && vcsInfo?.branch && !vcsInfo?.unborn) {
+    if (vcsInfo) options.push('git')
+    if (vcsInfo?.branch && !vcsInfo?.unborn) {
       options.push('branch')
     }
-    if (project?.vcs) options.push('staged', 'unstaged')
+    if (vcsInfo) options.push('staged', 'unstaged')
     return options
-  }, [project?.vcs, vcsInfo?.branch])
+  }, [vcsInfo])
   const preferredChangeMode = useMemo(() => getDefaultChangeMode(changeOptions), [changeOptions])
   const changeModeMeta = useMemo(
     () => ({
@@ -161,7 +158,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       },
       branch: {
         label: t('sessionChanges.branchScope'),
-        description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.default_branch ?? 'main' }),
+        description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.defaultBranch ?? 'main' }),
         icon: <GitBranchIcon size={12} />,
       },
       staged: {
@@ -174,18 +171,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         description: 'Working tree changes not staged in the Git index',
         icon: <GitDiffIcon size={12} />,
       },
-      session: {
-        label: t('sessionChanges.sessionScope'),
-        description: t('sessionChanges.sessionScopeHint'),
-        icon: <LayersIcon size={12} />,
-      },
-      turn: {
-        label: t('sessionChanges.turnScope'),
-        description: t('sessionChanges.turnScopeHint'),
-        icon: <ClockIcon size={12} />,
-      },
     }),
-    [t, vcsInfo?.default_branch],
+    [t, vcsInfo?.defaultBranch],
   )
   const diffs = useMemo(
     () =>
@@ -195,12 +182,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
           ? branchDiffs
           : changeMode === 'staged'
             ? stagedDiffs
-            : changeMode === 'unstaged'
-              ? unstagedDiffs
-          : changeMode === 'session'
-            ? sessionDiffs
-            : turnDiffs,
-    [branchDiffs, changeMode, gitDiffs, sessionDiffs, stagedDiffs, turnDiffs, unstagedDiffs],
+            : unstagedDiffs,
+    [branchDiffs, changeMode, gitDiffs, stagedDiffs, unstagedDiffs],
   )
   const loading = projectLoading || loadingModes[changeMode]
 
@@ -346,7 +329,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     [changeOptions, focusChangeMenuOption, focusRelativeToChangeTrigger],
   )
 
-  const loadProjectState = useCallback(async () => {
+  const loadVcsState = useCallback(async (): Promise<GitInfoResponse | null> => {
     if (!sessionId) return null
 
     const requestId = ++projectRequestIdRef.current
@@ -354,21 +337,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     setError(null)
 
     try {
-      const nextProject = await getCurrentProject(directory)
+      const workspacePath = await resolveWorkspacePath(directory)
+      const nextVcsInfo = workspacePath ? await getHostGitInfo(workspacePath).catch(() => null) : null
       if (requestId !== projectRequestIdRef.current) return null
-      setProject(nextProject)
-      if (nextProject.vcs) {
-        const nextVcsInfo = await getVcsInfo(directory).catch(() => null)
-        if (requestId !== projectRequestIdRef.current) return null
-        setVcsInfo(nextVcsInfo)
-      } else {
-        setVcsInfo(null)
-      }
-      return nextProject
+      setVcsInfo(nextVcsInfo)
+      return nextVcsInfo
     } catch (err) {
       if (requestId !== projectRequestIdRef.current) return null
-      sessionErrorHandler('load current project', err)
-      setProject(null)
+      sessionErrorHandler('load vcs info', err)
       setVcsInfo(null)
       setError(t('sessionChanges.failedToLoad'))
       return null
@@ -380,10 +356,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   }, [directory, sessionId, t])
 
   const loadDiffMode = useCallback(
-    async (mode: ChangeMode, options?: { force?: boolean; project?: ApiProject | null }) => {
-      const currentProject = options?.project ?? project
-      if (!sessionId || !currentProject?.vcs) return
-      if (mode !== 'git' && mode !== 'branch' && mode !== 'staged' && mode !== 'unstaged') return
+    async (mode: ChangeMode, options?: { force?: boolean; vcs?: GitInfoResponse | null }) => {
+      const currentVcs = options?.vcs ?? vcsInfo
+      if (!sessionId || !currentVcs) return
       if (!options?.force && loadedModes[mode]) return
 
       const requestId = ++diffRequestIdRef.current[mode]
@@ -394,7 +369,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       setError(null)
 
       try {
-        const data: FileDiff[] = await getVcsDiff(mode as VcsDiffMode, directory, controller.signal)
+        const workspacePath = await resolveWorkspacePath(directory)
+        if (!workspacePath) throw new Error('No PiUI workspace is available')
+        const data = (await getHostGitDiff(workspacePath, mode, controller.signal)).files
 
         if (requestId !== diffRequestIdRef.current[mode]) return
 
@@ -404,12 +381,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
           setBranchDiffs(data)
         } else if (mode === 'staged') {
           setStagedDiffs(data)
-        } else if (mode === 'unstaged') {
-          setUnstagedDiffs(data)
-        } else if (mode === 'session') {
-          setSessionDiffs(data)
         } else {
-          setTurnDiffs(data)
+          setUnstagedDiffs(data)
         }
 
         setLoadedModes(prev => ({ ...prev, [mode]: true }))
@@ -424,7 +397,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         if (diffAbortRef.current[mode] === controller) delete diffAbortRef.current[mode]
       }
     },
-    [directory, loadedModes, project, sessionId, t],
+    [directory, loadedModes, vcsInfo, sessionId, t],
   )
 
   useEffect(() => {
@@ -433,19 +406,14 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       branch: diffRequestIdRef.current.branch + 1,
       staged: diffRequestIdRef.current.staged + 1,
       unstaged: diffRequestIdRef.current.unstaged + 1,
-      session: diffRequestIdRef.current.session + 1,
-      turn: diffRequestIdRef.current.turn + 1,
     }
-    setProject(null)
     setVcsInfo(null)
     setGitDiffs([])
     setBranchDiffs([])
     setStagedDiffs([])
     setUnstagedDiffs([])
-    setSessionDiffs([])
-    setTurnDiffs([])
-    setLoadedModes({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
-    setLoadingModes({ git: false, branch: false, staged: false, unstaged: false, session: false, turn: false })
+    setLoadedModes({ git: false, branch: false, staged: false, unstaged: false })
+    setLoadingModes({ git: false, branch: false, staged: false, unstaged: false })
     setError(null)
     setOpenDiffFiles([])
     setSelectedFile(null)
@@ -456,8 +424,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     diffAbortRef.current = {}
     resetSplitHeight()
 
-    void loadProjectState()
-  }, [directory, sessionId, loadProjectState, resetSplitHeight])
+    void loadVcsState()
+  }, [directory, sessionId, loadVcsState, resetSplitHeight])
 
   useEffect(() => {
     if (changeOptions.length === 0) return
@@ -466,10 +434,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   }, [changeMode, changeOptions, preferredChangeMode, setChangeMode])
 
   useEffect(() => {
-    if (!project?.vcs) return
+    if (!vcsInfo) return
     if (!changeOptions.includes(changeMode)) return
     void loadDiffMode(changeMode)
-  }, [changeMode, changeOptions, loadDiffMode, project?.vcs])
+  }, [changeMode, changeOptions, loadDiffMode, vcsInfo])
 
   useEffect(() => {
     setExpandedDirs(collectExpandedDirPaths(buildChangesTree(diffs)))
@@ -487,10 +455,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   // 刷新
   const handleRefresh = useCallback(async () => {
-    const nextProject = await loadProjectState()
-    if (!nextProject?.vcs) return
-    await loadDiffMode(changeMode, { force: true, project: nextProject })
-  }, [changeMode, loadDiffMode, loadProjectState])
+    const nextVcs = await loadVcsState()
+    if (!nextVcs) return
+    await loadDiffMode(changeMode, { force: true, vcs: nextVcs })
+  }, [changeMode, loadDiffMode, loadVcsState])
 
   // 自动刷新：session idle / 窗口聚焦 / SSE 重连
   useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId)
@@ -613,15 +581,18 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   // 获取选中的 diff 数据
   const selectedDiff = selectedFile ? diffs.find(d => d.file === selectedFile) : null
   useEffect(() => {
-    if (!selectedFile || selectedDiff?.patch !== undefined || selectedDiff?.binary ||
-      (selectedDiff?.before !== undefined && selectedDiff.after !== undefined)) return
-    if (changeMode !== 'git' && changeMode !== 'branch' && changeMode !== 'staged' && changeMode !== 'unstaged') return
+    if (!selectedFile || selectedDiff?.patch !== undefined || selectedDiff?.binary) return
     const controller = new AbortController()
     const listRequestId = diffRequestIdRef.current[changeMode]
-    void getVcsFileDiff(changeMode, selectedFile, directory, controller.signal)
+    void (async () => {
+      const workspacePath = await resolveWorkspacePath(directory)
+      if (!workspacePath) throw new Error('No PiUI workspace is available')
+      return getHostGitFileDiff(workspacePath, selectedFile, changeMode, controller.signal)
+    })()
       .then(loaded => {
+        if (!loaded) return
         if (controller.signal.aborted || diffRequestIdRef.current[changeMode] !== listRequestId) return
-        const apply = (items: FileDiff[]) => items.map(item => item.file === loaded.file ? { ...item, ...loaded } : item)
+        const apply = (items: ChangeDiff[]) => items.map(item => item.file === loaded.file ? { ...item, ...loaded } : item)
         if (changeMode === 'git') setGitDiffs(apply)
         else if (changeMode === 'branch') setBranchDiffs(apply)
         else if (changeMode === 'staged') setStagedDiffs(apply)
@@ -631,12 +602,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         if (!controller.signal.aborted) sessionErrorHandler('load file diff', error)
       })
     return () => controller.abort()
-  }, [changeMode, directory, selectedDiff?.before, selectedDiff?.after, selectedDiff?.binary, selectedDiff?.patch, selectedFile])
+  }, [changeMode, directory, selectedDiff?.binary, selectedDiff?.patch, selectedFile])
   const previewDiffs = useMemo(
     () =>
       openDiffFiles
         .map(file => diffs.find(diff => diff.file === file))
-        .filter((diff): diff is FileDiff => Boolean(diff)),
+        .filter((diff): diff is ChangeDiff => Boolean(diff)),
     [diffs, openDiffFiles],
   )
   const mountedPreviewDiffs = useMemo(
@@ -645,15 +616,15 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   )
   const showPreview = !loading && selectedDiff !== null && !(error && diffs.length === 0)
 
-  if (projectLoading && !project) {
+  if (projectLoading && !vcsInfo) {
     return <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{t('sessionChanges.loadingChanges')}</div>
   }
 
-  if (!project && error) {
+  if (!vcsInfo && error) {
     return <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{error}</div>
   }
 
-  if (!project?.vcs) {
+  if (!vcsInfo) {
     return (
       <div className="h-full flex items-center justify-center p-4">
         <div className="max-w-xs text-center space-y-1">
@@ -681,9 +652,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       ? t('sessionChanges.noGitChanges')
       : changeMode === 'branch'
         ? t('sessionChanges.noBranchChanges')
-        : changeMode === 'session'
-          ? t('sessionChanges.noChanges')
-          : t('sessionChanges.noTurnChanges')
+        : t('sessionChanges.noGitChanges')
 
   const activeChangeModeMeta = changeModeMeta[changeMode]
   const compactFileCountLabel = t('sessionChanges.fileCountCompact', { count: diffs.length })
@@ -1002,8 +971,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 // ============================================
 
 interface DiffPreviewPanelProps {
-  diff: FileDiff
-  previewDiffs: FileDiff[]
+  diff: ChangeDiff
+  previewDiffs: ChangeDiff[]
   viewMode: ViewMode
   isResizing: boolean
   onActivatePreview: (file: string) => void
@@ -1027,9 +996,8 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
   const { before, after } = useMemo(() => {
     if (diff.binary) return { before: '', after: 'Binary file changed' }
     if (diff.patch) return extractContentFromUnifiedDiff(diff.patch)
-    if (diff.before !== undefined && diff.after !== undefined) return { before: diff.before, after: diff.after }
     return { before: '', after: '' }
-  }, [diff.binary, diff.patch, diff.before, diff.after])
+  }, [diff.binary, diff.patch])
   const diffViewerData = useDiffViewerData(before, after, language, isResizing)
   const { t } = useTranslation(['components', 'common'])
   const [fullscreenViewMode, setFullscreenViewMode] = useState<ViewMode>(viewMode)
@@ -1124,17 +1092,12 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
 
 type FileStatus = 'added' | 'modified' | 'deleted'
 
-function getFileStatus(diff: FileDiff): FileStatus {
+function getFileStatus(diff: ChangeDiff): FileStatus {
   if (diff.status === 'added' || diff.status === 'untracked' || diff.status === 'copied') return 'added'
   if (diff.status === 'deleted') return 'deleted'
   if (diff.status) return 'modified'
   if (diff.deletions === 0 && diff.additions > 0) return 'added'
   if (diff.additions === 0 && diff.deletions > 0) return 'deleted'
-  // 旧版 before/after 兼容
-  if (diff.before !== undefined && diff.after !== undefined) {
-    if (!diff.before.trim()) return 'added'
-    if (!diff.after.trim()) return 'deleted'
-  }
   return 'modified'
 }
 
@@ -1152,7 +1115,7 @@ interface ChangesTreeNode {
   name: string
   path: string
   type: 'file' | 'directory'
-  diff?: FileDiff
+  diff?: ChangeDiff
   children: ChangesTreeNode[]
   additions: number
   deletions: number
@@ -1160,9 +1123,9 @@ interface ChangesTreeNode {
 }
 
 /**
- * 将扁平的 FileDiff[] 转换为树形结构
+ * 将扁平的 ChangeDiff[] 转换为树形结构
  */
-function buildChangesTree(diffs: FileDiff[]): ChangesTreeNode[] {
+function buildChangesTree(diffs: ChangeDiff[]): ChangesTreeNode[] {
   const root: ChangesTreeNode[] = []
 
   for (const diff of diffs) {

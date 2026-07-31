@@ -5,8 +5,10 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { invalidateWorkspaceFileCaches, listDirectory, getFileContent, getFileStatus, getVcsDiff, saveFile } from '../api'
-import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
+import { invalidateWorkspaceFileCaches, listDirectory, getFileContent, getFileStatus, saveFile } from '../api'
+import { getHostGitDiff } from '../pi/transport/index.js'
+import type { GitDiffItem } from '@piui/protocol'
+import type { FileNode, FileContent, FileStatusItem } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { resolveWorkspacePath } from '../pi/workspaces'
@@ -154,7 +156,10 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
           statusMap.set(normalized, { ...item, path: normalized })
         })
       } else {
-        const diffs = await getVcsDiff(changeMode === 'branch' ? 'branch' : 'git', directory)
+        const workspacePath = await resolveWorkspacePath(directory)
+        const diffs = workspacePath
+          ? (await getHostGitDiff(workspacePath, changeMode === 'branch' ? 'branch' : 'git')).files
+          : []
 
         if (loadId !== statusLoadIdRef.current) return
 
@@ -547,17 +552,12 @@ function normalizePath(p: string): string {
 }
 
 // Helper: 从 diff 推断文件状态（优先 status 字段，回退统计推断，最后 before/after 推断）
-function getFileStatusFromDiff(diff: FileDiff): 'added' | 'modified' | 'deleted' {
+function getFileStatusFromDiff(diff: GitDiffItem): 'added' | 'modified' | 'deleted' {
   if (diff.status === 'added' || diff.status === 'untracked' || diff.status === 'copied') return 'added'
   if (diff.status === 'deleted') return 'deleted'
   if (diff.status) return 'modified'
   if (diff.deletions === 0 && diff.additions > 0) return 'added'
   if (diff.additions === 0 && diff.deletions > 0) return 'deleted'
-  // 旧版 before/after 兼容
-  if (diff.before !== undefined && diff.after !== undefined) {
-    if (!diff.before.trim()) return 'added'
-    if (!diff.after.trim()) return 'deleted'
-  }
   return 'modified'
 }
 

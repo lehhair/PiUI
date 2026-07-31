@@ -145,7 +145,6 @@ export type {
 export type { Pty, PtySize, PtyCreateParams, PtyUpdateParams } from './pty'
 
 // VCS types
-export type { VcsInfo, VcsDiffMode } from './vcs'
 
 // Worktree types
 export type { Worktree, WorktreeCreateInput, WorktreeRemoveInput, WorktreeResetInput } from './worktree'
