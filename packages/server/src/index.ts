@@ -61,11 +61,16 @@ function shutdown(signal: NodeJS.Signals): void {
   console.info(`[piui-server] received ${signal}, shutting down`)
   void shutdownAppServer(app.server, eventServer, {
     timeoutMs: SHUTDOWN_TIMEOUT_MS,
-    onTimeout: () => console.error(
-      `[piui-server] shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; closing active HTTP connections`,
-    ),
+    onTimeout: () => {
+      console.error(
+        `[piui-server] shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; closing active HTTP connections`,
+      )
+      // forceExit follows shortly; release workers first so the fork children
+      // don't outlive the server as orphans.
+      void app.dispose().catch(() => undefined)
+    },
   })
-    .then(() => app.dispose())
+    .finally(() => app.dispose())
     .catch(error => {
       console.error("[piui-server] shutdown failed", error)
       process.exitCode = 1
