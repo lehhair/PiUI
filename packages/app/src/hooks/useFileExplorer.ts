@@ -19,6 +19,8 @@ import type { FileNodeDto, FileReadResponse } from '@piui/protocol'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { resolveWorkspacePath } from '../pi/workspaces'
+import { piEventStream } from '../pi/eventStream.js'
+import { useServerStore } from './useServerStore'
 
 export interface FileTreeNode extends FileNodeDto {
   /** workspace root + relative path, for drag/context actions */
@@ -78,6 +80,7 @@ export interface UseFileExplorerResult {
 export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileExplorerResult {
   const { directory, autoLoad = true, sessionId, consumerId = 'file-explorer' } = options
   const { t } = useTranslation(['components'])
+  const { activeServer } = useServerStore()
   const changeMode = useSessionChangeScope(sessionId ?? null)
   const directoryRef = useRef(directory)
   directoryRef.current = directory
@@ -93,6 +96,21 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     }
     return () => { cancelled = true }
   }, [directory])
+
+  useEffect(() => {
+    if (!directory) return
+    let cancelled = false
+    let workspacePath: string | null = null
+    void resolveWorkspacePath(directory).then(resolved => {
+      if (cancelled || !resolved) return
+      workspacePath = resolved
+      piEventStream.connectWorkspace(resolved)
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (workspacePath) piEventStream.disconnectWorkspace(workspacePath)
+    }
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, directory])
 
   // 文件树状态
   const [tree, setTree] = useState<FileTreeNode[]>([])
