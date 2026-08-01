@@ -16,6 +16,7 @@ const MAX_RESULTS = 200
 const MAX_VISIT = 50_000
 const MAX_TEXT_FILE_BYTES = 1024 * 1024
 const MAX_TEXT_TOTAL_BYTES = 32 * 1024 * 1024
+const MAX_QUERY_BYTES = 64 * 1024
 
 export async function searchFilesByName(
   ws: WorkspaceRecord,
@@ -24,6 +25,7 @@ export async function searchFilesByName(
 ): Promise<FileNameSearchResponse> {
   const started = performance.now()
   const needle = query.trim().toLocaleLowerCase()
+  assertQuerySize(needle)
   const limit = boundedLimit(opts.limit)
   const paths: string[] = []
   let visited = 0
@@ -62,7 +64,9 @@ export async function searchWorkspaceText(
 ): Promise<FileTextSearchResponse> {
   const started = performance.now()
   const needle = pattern.trim()
+  assertQuerySize(needle)
   const limit = boundedLimit(opts.limit)
+  const matcher = needle ? new RegExp(escapeRegExp(needle), "giu") : undefined
   const matches: WorkspaceTextSearchMatch[] = []
   let visited = 0
   let scannedFiles = 0
@@ -120,7 +124,7 @@ export async function searchWorkspaceText(
       }
       scannedFiles++
       scannedBytes += buffer.length
-      collectTextMatches(buffer.toString("utf8"), entry.relative, needle, matches, limit)
+       collectTextMatches(buffer.toString("utf8"), entry.relative, matcher!, matches, limit)
       if (matches.length >= limit) {
         limitReason = "results"
         return false
@@ -184,11 +188,10 @@ async function walkWorkspace(
 function collectTextMatches(
   content: string,
   relativePath: string,
-  needle: string,
+  matcher: RegExp,
   results: WorkspaceTextSearchMatch[],
   limit: number,
 ): void {
-  const matcher = new RegExp(escapeRegExp(needle), "giu")
   let charOffset = 0
   let byteOffset = 0
   let lineNumber = 1
@@ -227,6 +230,12 @@ function collectTextMatches(
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function assertQuerySize(query: string): void {
+  if (Buffer.byteLength(query, "utf8") > MAX_QUERY_BYTES) {
+    throw Object.assign(new Error(`query must be at most ${MAX_QUERY_BYTES} bytes`), { code: "INVALID_REQUEST" })
+  }
 }
 
 function boundedLimit(value: number | undefined): number {
