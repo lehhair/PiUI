@@ -46,6 +46,7 @@ import { useSessionContext } from '../../contexts/useSessionContext'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { notificationStore } from '../../store/notificationStore'
+import { useServerStore } from '../../hooks/useServerStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import {
   getModelVariantPref,
@@ -223,6 +224,7 @@ export function PiChatPane({
   onNewChatRef.current = onNewChat
   const { currentDirectory, addDirectory } = useDirectory()
   const { registerSession } = useSessionContext()
+  const { activeServer } = useServerStore()
   const registerSessionRef = useRef(registerSession)
   registerSessionRef.current = registerSession
   const currentDirectoryRef = useRef(currentDirectory)
@@ -248,16 +250,12 @@ export function PiChatPane({
   useEffect(() => {
     // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
     if (!sessionId || sessionUnavailable) return
-    // App may have pre-subscribed before navigating here (attach-by-id);
-    // don't stack a second refcount or the socket never closes.
-    if (!piEventStream.isSubscribed(sessionId)) {
-      piEventStream.connect(sessionId)
-    }
+    piEventStream.connect(sessionId)
     if (!piBranchStore.getData(sessionId)) {
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
     return () => piEventStream.disconnect(sessionId)
-  }, [sessionId, sessionUnavailable])
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionUnavailable])
 
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
@@ -678,7 +676,6 @@ export function PiChatPane({
           updatedAt: Date.now(),
           path: opened.sessionFile ?? undefined,
         })
-        piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
         // 刷新其他列表消费者（文件夹分组等）；挂起合并保证新会话不被冲掉
         window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
@@ -755,7 +752,6 @@ export function PiChatPane({
         const opened = await openPiSession(directory)
         if (!opened.sessionId) return false
         targetSessionId = opened.sessionId
-        piEventStream.connect(targetSessionId)
         onEnterSessionRef.current?.(targetSessionId, directory)
       }
       const sid = targetSessionId
