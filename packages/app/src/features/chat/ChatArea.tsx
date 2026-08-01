@@ -676,7 +676,8 @@ export const ChatArea = memo(
       const loadMore = useCallback(() => {
         capturePrepend()
         setIsLoadingMore(true); loadingMoreRef.current = true
-        Promise.resolve(onLoadMoreRef.current?.())
+        Promise.resolve()
+          .then(() => onLoadMoreRef.current?.())
           .catch(() => {})
           .finally(() => {
             setIsLoadingMore(false); loadingMoreRef.current = false
