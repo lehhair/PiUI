@@ -1,8 +1,0 @@
-export { Header } from './Header'
-export { ChatArea } from './ChatArea'
-export type { ChatAreaHandle } from './ChatArea'
-export { InputBox } from './InputBox'
-export { PermissionDialog } from './PermissionDialog'
-export { QuestionDialog } from './QuestionDialog'
-export { Sidebar } from './Sidebar'
-export { EmptyState } from './EmptyState'
