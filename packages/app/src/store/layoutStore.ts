@@ -80,6 +80,31 @@ const STORAGE_KEY_RIGHT_PANEL_WIDTH = 'piui-right-panel-width'
 const STORAGE_KEY_BOTTOM_PANEL_HEIGHT = 'piui-bottom-panel-height'
 const STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH = 'piui-sidebar-width'
 
+// 隐私模式 / 禁用存储下 localStorage 访问会抛 SecurityError，统一静默兜底。
+function storageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 配额不足或存储不可用，忽略
+  }
+}
+
+function storageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 存储不可用，忽略
+  }
+}
+
 interface PersistedPanelTab {
   id: string
   type: PersistedPanelTabType
@@ -223,7 +248,7 @@ export class LayoutStore {
         rightPanelOpen: this.state.rightPanelOpen,
         bottomPanelOpen: this.state.bottomPanelOpen,
       }
-      localStorage.setItem(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(persisted))
+      storageSet(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(persisted))
     } catch {
       // ignore
     }
@@ -234,28 +259,28 @@ export class LayoutStore {
     // 从 localStorage 恢复状态
     try {
       // 侧边栏
-      const savedSidebar = localStorage.getItem(STORAGE_KEY_SIDEBAR)
+      const savedSidebar = storageGet(STORAGE_KEY_SIDEBAR)
       if (savedSidebar !== null) {
         this.state.sidebarExpanded = savedSidebar !== 'false'
       }
 
-      const savedFolderRecents = localStorage.getItem(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS)
+      const savedFolderRecents = storageGet(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS)
       if (savedFolderRecents !== null) {
         this.state.sidebarFolderRecents = savedFolderRecents === 'true'
       }
 
-      const savedShowChildSessions = localStorage.getItem(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS)
+      const savedShowChildSessions = storageGet(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS)
       if (savedShowChildSessions !== null) {
         this.state.sidebarShowChildSessions = savedShowChildSessions === 'true'
       }
 
-      const savedWakeLock = localStorage.getItem(STORAGE_KEY_WAKE_LOCK)
+      const savedWakeLock = storageGet(STORAGE_KEY_WAKE_LOCK)
       if (savedWakeLock !== null) {
         this.state.wakeLock = savedWakeLock === 'true'
       }
 
       // 右侧面板宽度
-      const savedWidth = localStorage.getItem(STORAGE_KEY_RIGHT_PANEL_WIDTH)
+      const savedWidth = storageGet(STORAGE_KEY_RIGHT_PANEL_WIDTH)
       if (savedWidth) {
         const width = parseInt(savedWidth)
         if (!isNaN(width) && width >= 160 && width <= MAX_RIGHT_PANEL_WIDTH) {
@@ -264,7 +289,7 @@ export class LayoutStore {
       }
 
       // 底部面板高度
-      const savedBottomHeight = localStorage.getItem(STORAGE_KEY_BOTTOM_PANEL_HEIGHT)
+      const savedBottomHeight = storageGet(STORAGE_KEY_BOTTOM_PANEL_HEIGHT)
       if (savedBottomHeight) {
         const height = parseInt(savedBottomHeight)
         if (!isNaN(height) && height >= 100 && height <= 500) {
@@ -272,7 +297,7 @@ export class LayoutStore {
         }
       }
 
-      const savedPanelLayout = localStorage.getItem(STORAGE_KEY_PANEL_LAYOUT)
+      const savedPanelLayout = storageGet(STORAGE_KEY_PANEL_LAYOUT)
       if (savedPanelLayout) {
         const restored = sanitizePersistedPanelLayout(JSON.parse(savedPanelLayout))
         if (restored) {
@@ -316,7 +341,7 @@ export class LayoutStore {
     if (this.state.sidebarExpanded === expanded) return
     this.state.sidebarExpanded = expanded
     try {
-      localStorage.setItem(STORAGE_KEY_SIDEBAR, String(expanded))
+      storageSet(STORAGE_KEY_SIDEBAR, String(expanded))
     } catch {
       // ignore
     }
@@ -327,7 +352,7 @@ export class LayoutStore {
     if (this.state.sidebarFolderRecents === enabled) return
     this.state.sidebarFolderRecents = enabled
     try {
-      localStorage.setItem(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS, String(enabled))
+      storageSet(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS, String(enabled))
     } catch {
       // ignore
     }
@@ -338,7 +363,7 @@ export class LayoutStore {
     if (this.state.sidebarShowChildSessions === enabled) return
     this.state.sidebarShowChildSessions = enabled
     try {
-      localStorage.setItem(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS, String(enabled))
+      storageSet(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS, String(enabled))
     } catch {
       /* ignore */
     }
@@ -349,7 +374,7 @@ export class LayoutStore {
     if (this.state.wakeLock === enabled) return
     this.state.wakeLock = enabled
     try {
-      localStorage.setItem(STORAGE_KEY_WAKE_LOCK, String(enabled))
+      storageSet(STORAGE_KEY_WAKE_LOCK, String(enabled))
     } catch {
       /* ignore */
     }
@@ -597,7 +622,7 @@ export class LayoutStore {
   setRightPanelWidth(width: number) {
     this.state.rightPanelWidth = Math.min(Math.max(width, 160), MAX_RIGHT_PANEL_WIDTH)
     try {
-      localStorage.setItem(STORAGE_KEY_RIGHT_PANEL_WIDTH, this.state.rightPanelWidth.toString())
+      storageSet(STORAGE_KEY_RIGHT_PANEL_WIDTH, this.state.rightPanelWidth.toString())
     } catch {
       // ignore
     }
@@ -730,7 +755,7 @@ export class LayoutStore {
   setBottomPanelHeight(height: number) {
     this.state.bottomPanelHeight = height
     try {
-      localStorage.setItem('piui-bottom-panel-height', height.toString())
+      storageSet('piui-bottom-panel-height', height.toString())
     } catch {
       // ignore
     }
@@ -776,7 +801,7 @@ function buildPersistedPanelLayout(state: LayoutState): PersistedPanelLayout {
 
 export function exportLayoutBackup(): LayoutBackup {
   const state = layoutStore.getState()
-  const rawSidebarWidth = localStorage.getItem(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH)
+  const rawSidebarWidth = storageGet(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH)
   const sidebarWidth = rawSidebarWidth !== null ? Number.parseInt(rawSidebarWidth, 10) : null
 
   return {
@@ -808,18 +833,18 @@ export function importLayoutBackup(raw: unknown): void {
       ? Math.round(parsed.sidebarWidth)
       : null
 
-  localStorage.setItem(STORAGE_KEY_SIDEBAR, String(parsed?.sidebarExpanded === true))
-  localStorage.setItem(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS, String(parsed?.sidebarFolderRecents === true))
-  localStorage.setItem(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS, String(parsed?.sidebarShowChildSessions === true))
-  localStorage.setItem(STORAGE_KEY_WAKE_LOCK, String(parsed?.wakeLock === true))
-  localStorage.setItem(STORAGE_KEY_RIGHT_PANEL_WIDTH, String(rightPanelWidth))
-  localStorage.setItem(STORAGE_KEY_BOTTOM_PANEL_HEIGHT, String(bottomPanelHeight))
-  localStorage.setItem(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(panelLayout))
+  storageSet(STORAGE_KEY_SIDEBAR, String(parsed?.sidebarExpanded === true))
+  storageSet(STORAGE_KEY_SIDEBAR_FOLDER_RECENTS, String(parsed?.sidebarFolderRecents === true))
+  storageSet(STORAGE_KEY_SIDEBAR_SHOW_CHILD_SESSIONS, String(parsed?.sidebarShowChildSessions === true))
+  storageSet(STORAGE_KEY_WAKE_LOCK, String(parsed?.wakeLock === true))
+  storageSet(STORAGE_KEY_RIGHT_PANEL_WIDTH, String(rightPanelWidth))
+  storageSet(STORAGE_KEY_BOTTOM_PANEL_HEIGHT, String(bottomPanelHeight))
+  storageSet(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(panelLayout))
 
   if (sidebarWidth !== null) {
-    localStorage.setItem(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH, String(sidebarWidth))
+    storageSet(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH, String(sidebarWidth))
   } else {
-    localStorage.removeItem(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH)
+    storageRemove(STORAGE_KEY_VIEWPORT_SIDEBAR_WIDTH)
   }
 }
 
