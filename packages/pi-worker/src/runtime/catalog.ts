@@ -26,6 +26,9 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
   const required = hasTrustRequiringProjectResources(cwd)
   const decision = store.get(cwd)
   const defaultDecision = manager.getDefaultProjectTrust()
+  const trusted = !required
+    || decision === true
+    || (decision === null && defaultDecision === "always")
   return {
     manager,
     trust: {
@@ -39,12 +42,17 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
   }
 }
 
-export function configuredSessionDir(cwd: string, agentDir?: string): string | undefined {
+export function configuredSessionDir(cwd: string, agentDir?: string): string {
   const { SettingsManager, getAgentDir } = getLoadedSdk().sdk
   const dir = agentDir ?? getAgentDir()
   const envSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR?.trim()
   if (envSessionDir) return resolveUserPath(envSessionDir)
-  return SettingsManager.create(normalizeCwd(cwd), dir, { projectTrusted: false }).getSessionDir()
+  const fromSettings = SettingsManager.create(normalizeCwd(cwd), dir, { projectTrusted: false }).getSessionDir()
+  if (fromSettings) return fromSettings
+  // SDK 未配置自定义 session 目录时 fallback 到其默认位置
+  // (~/.pi/agent/sessions/<encoded-cwd>/)，保证 deleteSession 的围栏始终有真实根可查。
+  const safePath = `--${path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`
+  return path.join(path.resolve(dir), "sessions", safePath)
 }
 
 export function resolveUserPath(input: string): string {
@@ -85,15 +93,12 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {
     const target = resolveUserPath(sessionFile)
-    const sessionDir = configuredSessionDir(cwd, this.dir())
-    if (sessionDir) {
-      const root = path.resolve(sessionDir)
-      const resolved = path.resolve(target)
-      if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-        throw Object.assign(new Error("session file is outside the Pi session directory"), {
-          code: "PATH_OUTSIDE_WORKSPACE",
-        })
-      }
+    const root = path.resolve(configuredSessionDir(cwd, this.dir()))
+    const resolved = path.resolve(target)
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw Object.assign(new Error("session file is outside the Pi session directory"), {
+        code: "PATH_OUTSIDE_WORKSPACE",
+      })
     }
     // 幂等：文件可能从未落盘（新会话首个条目才写文件），缺文件即视为已删
     if (!existsSync(target)) return
