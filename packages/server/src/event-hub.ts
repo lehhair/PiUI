@@ -12,6 +12,7 @@ import {
 } from "@piui/protocol"
 
 type Listener = (event: EventEnvelope) => void
+const MAX_STREAMS = 4096
 
 interface StreamState {
   stream: EventStreamRef
@@ -92,7 +93,17 @@ export class EventHub {
   private getOrCreate(stream: EventStreamRef): StreamState {
     const key = eventStreamKey(stream)
     const existing = this.streams.get(key)
-    if (existing) return existing
+    if (existing) {
+      // Keep active streams recent so arbitrary client stream ids cannot pin
+      // every historical stream in the process forever.
+      this.streams.delete(key)
+      this.streams.set(key, existing)
+      return existing
+    }
+    if (this.streams.size >= MAX_STREAMS) {
+      const oldest = this.streams.keys().next().value
+      if (typeof oldest === "string") this.streams.delete(oldest)
+    }
     const state: StreamState = { stream, epoch: randomUUID(), sequence: 0, history: [] }
     this.streams.set(key, state)
     return state
