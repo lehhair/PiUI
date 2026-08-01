@@ -627,6 +627,27 @@ export function PiChatPane({
   }, [extensionState])
 
   const editorSyncTimerRef = useRef<number | null>(null)
+  const refreshTimerRefs = useRef(new Set<number>())
+  const scheduleDelayedRefresh = useCallback((sid: string) => {
+    const timer = window.setTimeout(() => {
+      refreshTimerRefs.current.delete(timer)
+      void refreshPiBranch(sid).catch(() => undefined)
+      void refreshPiSessionState(sid).catch(() => undefined)
+    }, 120)
+    refreshTimerRefs.current.add(timer)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (editorSyncTimerRef.current !== null) {
+        window.clearTimeout(editorSyncTimerRef.current)
+        editorSyncTimerRef.current = null
+      }
+      for (const timer of refreshTimerRefs.current) window.clearTimeout(timer)
+      refreshTimerRefs.current.clear()
+    }
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId])
+
   const handleTextChange = useCallback(
     (text: string) => {
       // 会话已不可用时别再往服务端同步编辑器状态（每敲一个字一个 404）
@@ -639,12 +660,6 @@ export function PiChatPane({
     },
     [sessionId],
   )
-  useEffect(() => {
-    return () => {
-      if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
-    }
-  }, [])
-
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
       // Native image blocks from data-url attachments (pi only accepts
@@ -700,10 +715,7 @@ export function PiChatPane({
         void executePiBash(sid, text.slice(1)).catch(error => {
           console.error('Failed to run bash command:', error)
         })
-        window.setTimeout(() => {
-          void refreshPiBranch(sid).catch(() => undefined)
-          void refreshPiSessionState(sid).catch(() => undefined)
-        }, 120)
+        scheduleDelayedRefresh(sid)
         return true
       }
 
@@ -719,13 +731,10 @@ export function PiChatPane({
         void refreshPiBranch(sid).catch(() => undefined)
         void refreshPiSessionState(sid).catch(() => undefined)
       })
-      window.setTimeout(() => {
-        void refreshPiBranch(sid).catch(() => undefined)
-        void refreshPiSessionState(sid).catch(() => undefined)
-      }, 120)
+      scheduleDelayedRefresh(sid)
       return true
     },
-    [sessionId, isStreaming, models],
+    [sessionId, isStreaming, models, scheduleDelayedRefresh],
   )
 
   // Slash command dispatch, mirroring pi TUI: frontend built-ins are handled
@@ -796,13 +805,10 @@ export function PiChatPane({
       }).catch(error => {
         console.error('Failed to execute command:', error)
       })
-      window.setTimeout(() => {
-        void refreshPiBranch(sid).catch(() => undefined)
-        void refreshPiSessionState(sid).catch(() => undefined)
-      }, 120)
+      scheduleDelayedRefresh(sid)
       return true
     },
-    [sessionId, isStreaming],
+    [sessionId, isStreaming, scheduleDelayedRefresh],
   )
 
   // Image attachment capability from the current model's native input
