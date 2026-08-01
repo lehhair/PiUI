@@ -1,6 +1,7 @@
 import {
   PROTOCOL_VERSION,
   eventStreamKey,
+  parseEventStreamKey,
   type EventCursor,
   type EventCursorMap,
   type EventEnvelope,
@@ -100,7 +101,7 @@ class PiEventStream {
     const count = this.refCounts.get(sessionId) ?? 0
     if (count <= 1) {
       this.refCounts.delete(sessionId)
-      this.cursors.delete(sessionId)
+      this.cursors.delete(eventStreamKey({ kind: 'session', id: sessionId }))
       this.clearRefreshTimers(sessionId)
     } else {
       this.refCounts.set(sessionId, count - 1)
@@ -212,13 +213,20 @@ class PiEventStream {
   private sendSubscribe(): void {
     const streams: EventStreamRef[] = [{ kind: 'server', id: 'server' }]
     const cursors: EventCursorMap = {}
+    const serverCursor = this.cursors.get('server')
+    if (serverCursor) cursors.server = serverCursor
     for (const sessionId of this.refCounts.keys()) {
-      streams.push({ kind: 'session', id: sessionId })
-      const cursor = this.cursors.get(sessionId) ?? piBranchStore.getData(sessionId)?.checkpoint?.position
-      if (cursor) cursors[eventStreamKey({ kind: 'session', id: sessionId })] = cursor
+      const stream = { kind: 'session' as const, id: sessionId }
+      streams.push(stream)
+      const key = eventStreamKey(stream)
+      const cursor = this.cursors.get(key)
+      if (cursor) cursors[key] = cursor
     }
     for (const providerId of getTrackedManagementProviders()) {
-      streams.push({ kind: 'provider', id: providerId })
+      const stream = { kind: 'provider' as const, id: providerId }
+      streams.push(stream)
+      const cursor = this.cursors.get(eventStreamKey(stream))
+      if (cursor) cursors[eventStreamKey(stream)] = cursor
     }
     this.send({ type: 'subscribe', protocolVersion: PROTOCOL_VERSION, streams, cursors })
   }
@@ -242,8 +250,7 @@ class PiEventStream {
     }
     if ('channel' in message && message.channel === 'control' && message.type === 'resync_required') {
       for (const key of Object.keys(message.streams)) {
-        const match = /^session:(.+)$/.exec(key)
-        if (match) this.handleResync(decodeURIComponent(match[1]))
+        this.handleResync(key)
       }
       return
     }
@@ -251,7 +258,7 @@ class PiEventStream {
 
   private handleEvent(envelope: EventEnvelope): void {
     const sessionId = envelope.stream.kind === 'session' ? envelope.stream.id : null
-    if (sessionId) this.cursors.set(sessionId, envelope.cursor)
+    this.cursors.set(eventStreamKey(envelope.stream), envelope.cursor)
     switch (envelope.channel) {
       case 'pi.event':
         if (sessionId) this.handlePiEvent(sessionId, envelope.payload as unknown as PiEventPayload)
@@ -296,7 +303,7 @@ class PiEventStream {
       // different session id. Drop the old session's cursors and keyed
       // data; panes re-subscribe and reload under the new id when they
       // follow piui:session-replaced (their connect effect owns ref counts).
-      this.cursors.delete(payload.sourceSessionId)
+      this.cursors.delete(eventStreamKey({ kind: 'session', id: payload.sourceSessionId }))
       this.branchRefreshTimers.delete(payload.sourceSessionId)
       this.stateRefreshTimers.delete(payload.sourceSessionId)
       piBranchStore.clear(payload.sourceSessionId)
@@ -402,9 +409,18 @@ class PiEventStream {
     piBranchStore.setData(sessionId, { ...data, checkpoint: { ...data.checkpoint, liveMessage } })
   }
 
-  private handleResync(sessionId: string): void {
-    this.cursors.delete(sessionId)
-    void loadPiSessionData(sessionId).catch(() => undefined)
+  private handleResync(key: string): void {
+    const stream = parseEventStreamKey(key)
+    if (!stream) return
+    this.cursors.delete(key)
+    if (stream.kind === 'session') {
+      void loadPiSessionData(stream.id).catch(() => undefined)
+    } else if (stream.kind === 'server') {
+      void loadPiSessions().catch(() => undefined)
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+    } else if (stream.kind === 'provider') {
+      receiveProviderAuthUpdated()
+    }
   }
 
   private scheduleBranchRefresh(sessionId: string): void {
