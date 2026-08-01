@@ -202,6 +202,11 @@ async function moveWorkspaceEntryLocked(
   const target = resolveWorkspacePath(ws.canonicalRoot, to)
   if (!source.exists || source.relative === "") throw new PathSafetyError("INVALID_REQUEST", "source does not exist")
   if (target.relative === "") throw new PathSafetyError("INVALID_REQUEST", "cannot replace workspace root")
+  if (source.relative === target.relative) {
+    // No-op move; rename would clobber the target it was already renamed from.
+    const moved = await lstat(source.absolute)
+    return { path: source.relative, type: moved.isDirectory() ? "directory" : "file" }
+  }
   const latestSource = resolveWorkspacePath(ws.canonicalRoot, from)
   if (latestSource.absolute !== source.absolute) throw new PathSafetyError("SYMLINK_ESCAPE", "source changed during move")
   const targetParent = path.posix.dirname(target.relative)
