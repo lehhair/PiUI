@@ -62,13 +62,27 @@ async function readBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): P
   return body as JsonObject
 }
 
-function parseUrl(req: IncomingMessage): URL {
+function parseUrl(req: IncomingMessage): URL | null {
   const host = req.headers.host ?? "127.0.0.1"
-  return new URL(req.url ?? "/", `http://${host}`)
+  try {
+    return new URL(req.url ?? "/", `http://${host}`)
+  } catch {
+    // Malformed Host header (e.g. invalid port) or invalid URL -> 400.
+    return null
+  }
 }
 
 function invalidRequest(message: string): Error {
   return Object.assign(new Error(message), { code: "INVALID_REQUEST" })
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    // Malformed percent-encoding -> treat as an invalid request.
+    throw invalidRequest(`malformed percent-encoding in path segment`)
+  }
 }
 
 export function firstLanAddress(): string | undefined {
@@ -121,6 +135,9 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const server = createServer(async (req, res) => {
     try {
       const url = parseUrl(req)
+      if (!url) {
+        return sendProblem(res, 400, Object.assign(new Error("malformed request URL"), { code: "INVALID_REQUEST" }))
+      }
       const method = req.method ?? "GET"
       const p = url.pathname
 
@@ -174,7 +191,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       const piCommandMatch = p.match(/^\/api\/v1\/pi\/commands\/([^/]+)$/)
       if (piCommandMatch && method === "POST") {
         const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
-        const name = decodeURIComponent(piCommandMatch[1]!)
+        const name = safeDecode(piCommandMatch[1]!)
         const data = await sessions.executeGlobalCommand(name, commandParams(body))
         return sendJson(res, 200, { data: data ?? null })
       }
@@ -182,8 +199,8 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       const piSessionCommandMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)\/commands\/([^/]+)$/)
       if (piSessionCommandMatch && method === "POST") {
         const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
-        const sessionId = decodeURIComponent(piSessionCommandMatch[1]!)
-        const name = decodeURIComponent(piSessionCommandMatch[2]!)
+        const sessionId = safeDecode(piSessionCommandMatch[1]!)
+        const name = safeDecode(piSessionCommandMatch[2]!)
         const id = typeof body.id === "string" && body.id ? body.id : undefined
         const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id)
         if (isSubmittedCommand(result)) {
@@ -195,12 +212,12 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 
       const commandMatch = p.match(/^\/api\/v1\/host\/commands\/([^/]+)$/)
       if (commandMatch && method === "GET") {
-        const data = await host.execute("commands.get", { id: decodeURIComponent(commandMatch[1]!) })
+        const data = await host.execute("commands.get", { id: safeDecode(commandMatch[1]!) })
         return sendJson(res, 200, data ?? null)
       }
       if (commandMatch && method === "POST") {
         const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
-        const data = await host.execute(decodeURIComponent(commandMatch[1]!), commandParams(body) ?? {})
+        const data = await host.execute(safeDecode(commandMatch[1]!), commandParams(body) ?? {})
         return sendJson(res, 200, { data: data ?? null })
       }
 
@@ -225,7 +242,9 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 }
 
 function statusForError(error: unknown): number {
-  if (error instanceof PathSafetyError) return 403
+  if (error instanceof PathSafetyError) {
+    return error.code === "INVALID_REQUEST" ? 400 : 403
+  }
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL"
   switch (code) {
     case "INVALID_REQUEST":
