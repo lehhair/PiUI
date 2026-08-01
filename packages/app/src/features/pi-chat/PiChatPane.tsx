@@ -248,7 +248,11 @@ export function PiChatPane({
   useEffect(() => {
     // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
     if (!sessionId || sessionUnavailable) return
-    piEventStream.connect(sessionId)
+    // App may have pre-subscribed before navigating here (attach-by-id);
+    // don't stack a second refcount or the socket never closes.
+    if (!piEventStream.isSubscribed(sessionId)) {
+      piEventStream.connect(sessionId)
+    }
     if (!piBranchStore.getData(sessionId)) {
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
