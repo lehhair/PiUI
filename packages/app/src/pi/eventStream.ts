@@ -96,6 +96,7 @@ class PiEventStream {
     if (count <= 1) {
       this.refCounts.delete(sessionId)
       this.cursors.delete(sessionId)
+      this.clearRefreshTimers(sessionId)
     } else {
       this.refCounts.set(sessionId, count - 1)
       return
@@ -128,9 +129,23 @@ class PiEventStream {
 
   /** Drop everything (server switch etc.). */
   disconnectAll(): void {
+    for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(sessionId)
     this.refCounts.clear()
     this.cursors.clear()
     this.closeSocket()
+  }
+
+  private clearRefreshTimers(sessionId: string): void {
+    const branchTimer = this.branchRefreshTimers.get(sessionId)
+    if (branchTimer) {
+      clearTimeout(branchTimer)
+      this.branchRefreshTimers.delete(sessionId)
+    }
+    const stateTimer = this.stateRefreshTimers.get(sessionId)
+    if (stateTimer) {
+      clearTimeout(stateTimer)
+      this.stateRefreshTimers.delete(sessionId)
+    }
   }
 
   private ensureSocket(): void {
@@ -165,7 +180,13 @@ class PiEventStream {
         this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
       }, PING_INTERVAL_MS)
     }
-    ws.onmessage = e => this.handleRaw(String(e.data))
+    ws.onmessage = e => {
+      // A stale socket may still deliver buffered frames after closeSocket()
+      // swapped this.ws (server switch). Ignore messages from any socket that
+      // is no longer the active one, mirroring the onclose identity check.
+      if (this.ws !== ws) return
+      this.handleRaw(String(e.data))
+    }
     ws.onclose = () => {
       this.clearPing()
       if (this.ws === ws) this.ws = null
