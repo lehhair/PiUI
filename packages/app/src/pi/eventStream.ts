@@ -82,11 +82,6 @@ class PiEventStream {
   private branchRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-  /** True when a stream is currently subscribed (refCount > 0). */
-  isSubscribed(sessionId: string): boolean {
-    return (this.refCounts.get(sessionId) ?? 0) > 0
-  }
-
   /** Subscribe a session stream (reference counted). */
   connect(sessionId: string): void {
     this.refCounts.set(sessionId, (this.refCounts.get(sessionId) ?? 0) + 1)
