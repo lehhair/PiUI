@@ -11,6 +11,7 @@ import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
 import { activeSessionStore } from "../store/activeSessionStore"
+import { PROTOCOL_VERSION } from "@piui/protocol"
 
 export interface PiBackendBootstrapResult {
   available: boolean
@@ -29,14 +30,16 @@ export async function initializePiBackend(): Promise<PiBackendBootstrapResult> {
 }
 
 async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   setPiBackendState({ ...getPiBackendState(), status: "booting", error: undefined })
   try {
     const native = await refreshPiNativeStatus(AbortSignal.timeout(2000))
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) return { available: false }
     const driver = native.registry?.driver
     if (native.status !== "online" && native.status !== "degraded") {
       throw new Error(native.error ?? "PiUI backend unavailable")
     }
-    if (native.health?.service !== "piui-server" || native.health.protocolVersion !== 1) {
+    if (native.health?.service !== "piui-server" || native.health.protocolVersion !== PROTOCOL_VERSION) {
       throw new Error("unexpected backend")
     }
 
@@ -53,6 +56,7 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
     }
     return { available: true, driver }
   } catch (error) {
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) return { available: false }
     const message = error instanceof Error ? error.message : String(error)
     setPiBackendState({
       status: /\b(401|403)\b/.test(message) ? "unauthorized" : "offline",
