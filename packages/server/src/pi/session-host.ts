@@ -54,14 +54,23 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
 
 /** Path comparison that ignores slash direction and case on Windows. */
 function arePathsEqual(a: string, b: string): boolean {
-  const normalize = (value: string) => resolve(value).replace(/\\/g, "/").toLowerCase()
+  const normalize = (value: string) => {
+    const normalized = resolve(value).replace(/\\/g, "/")
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized
+  }
   return normalize(a) === normalize(b)
+}
+
+function sessionFileKey(sessionFile: string): string {
+  const normalized = resolve(sessionFile).replace(/\\/g, "/")
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized
 }
 
 export class SessionHost {
   private readonly attached = new Map<string, AttachedSession>()
   private readonly activity = new Map<string, SessionActivityStatus>()
   private readonly materialized = new Set<string>()
+  private readonly openFlights = new Map<string, Promise<JsonObject>>()
   readonly executor: SessionExecutor
 
   constructor(
@@ -73,6 +82,20 @@ export class SessionHost {
   }
 
   async openSession(cwd: string, sessionFile?: string): Promise<JsonObject> {
+    if (!sessionFile) return this.openSessionOnce(cwd, sessionFile)
+    const key = sessionFileKey(sessionFile)
+    const inFlight = this.openFlights.get(key)
+    if (inFlight) return inFlight
+    const flight = this.openSessionOnce(cwd, sessionFile)
+    this.openFlights.set(key, flight)
+    try {
+      return await flight
+    } finally {
+      if (this.openFlights.get(key) === flight) this.openFlights.delete(key)
+    }
+  }
+
+  private async openSessionOnce(cwd: string, sessionFile?: string): Promise<JsonObject> {
     // Idempotent attach: reopening an already-attached session file reuses
     // its runtime instead of spawning a second worker that would lose the
     // session lease (SESSION_BUSY 409).
