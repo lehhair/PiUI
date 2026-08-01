@@ -24,6 +24,7 @@ import {
   refreshPiSessionState,
   loadPiModels,
   loadPiSessionData,
+  navigatePiTree,
   openPiSession,
   sendPiPrompt,
   sendPiUserMessage,
@@ -32,11 +33,12 @@ import {
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import type { PiImageInput } from '../../pi/transport/index.js'
-import { piBranchStore } from '../../pi/state/index.js'
+import { piBranchStore, piSessionStateStore } from '../../pi/state/index.js'
+import { buildRedoCheckpoints } from '../../pi/redoCheckpoints'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
-import { clearSessionEditorDraft, configureSessionEditorDraftSync, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
+import { clearSessionEditorDraft, configureSessionEditorDraftSync, setSessionEditorDraft, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
 import { uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
@@ -56,6 +58,45 @@ const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 
 
 /** fork 第一条消息的纯前端特判：不开 SDK 会话，直接落在首页预填 */
 const HOME_FORK_KEY = 'home'
+const REDO_PLAN_STORAGE_PREFIX = 'piui-redo-plan:'
+
+interface RedoPlan {
+  epoch: string
+  undoLeafId: string | null
+  checkpoints: string[]
+  restored: number
+}
+
+function readRedoPlan(sessionId: string): RedoPlan | null {
+  try {
+    const raw = window.sessionStorage.getItem(`${REDO_PLAN_STORAGE_PREFIX}${sessionId}`)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<RedoPlan>
+    if (typeof value.epoch !== 'string' || !value.epoch) return null
+    if (!Array.isArray(value.checkpoints) || value.checkpoints.some(item => typeof item !== 'string')) return null
+    const restored = value.restored
+    if (typeof restored !== 'number' || !Number.isInteger(restored) || restored < 0 || restored >= value.checkpoints.length) return null
+    if (value.undoLeafId !== null && typeof value.undoLeafId !== 'string') return null
+    return {
+      epoch: value.epoch,
+      undoLeafId: value.undoLeafId ?? null,
+      checkpoints: value.checkpoints,
+      restored,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeRedoPlan(sessionId: string, plan: RedoPlan | null): void {
+  try {
+    const key = `${REDO_PLAN_STORAGE_PREFIX}${sessionId}`
+    if (plan) window.sessionStorage.setItem(key, JSON.stringify(plan))
+    else window.sessionStorage.removeItem(key)
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
 
 // ============================================
 // Compact viewport shell for split panes (from ocui ChatPane).
@@ -357,6 +398,148 @@ export function PiChatPane({
     },
     [sessionId, items],
   )
+
+  // ============================================
+  // Undo / Redo (pi TUI parity: tree navigation IS the undo).
+  // Undo at a user message = navigateTree to it (branch is cut right
+  // before that message, its text goes back to the editor). The cut
+  // entries stay in the tree as children of the undo point — that is
+  // what makes redo possible.
+  //
+  // Rigor notes:
+  // - The undo point can have MULTIPLE child branches (earlier forks,
+  //   or a new send after the undo). Redo must follow the branch the
+  //   cut entries actually came from, so we capture their entry ids at
+  //   undo time instead of guessing a child at redo time.
+  // - Single redo restores ONE user turn at a time (navigate to that
+  //   turn's tail entry on the original branch); Redo All jumps to the
+  //   original branch tip. pi has no redo command — restoring the
+  //   branch via navigateTree is the symmetric operation.
+  // - canRedo tracks "the leaf is still on the undo path". Sending a
+  //   new message or navigating elsewhere moves the leaf off it and the
+  //   redo pointer lapses; navigating back to the undo point revives it
+  //   (the cut branch is still a child there).
+  // ============================================
+  const head = (state?.head ?? null) as { epoch?: string; leafId?: string } | null
+  const headLeafId = head?.leafId ?? null
+  const [revertState, setRevertState] = useState<RedoPlan | null>(null)
+  const redoRestoreAttemptedRef = useRef<string | null>(null)
+
+  const updateRevertState = useCallback((plan: RedoPlan | null) => {
+    setRevertState(plan)
+    if (sessionId) writeRedoPlan(sessionId, plan)
+  }, [sessionId])
+
+  // Reset the redo pointer whenever the session changes
+  useEffect(() => {
+    setRevertState(null)
+    redoRestoreAttemptedRef.current = null
+  }, [sessionId])
+
+  // A page refresh drops React state but not the native tree. Rehydrate the
+  // frontend-only redo plan after this session's runtime head is available.
+  useEffect(() => {
+    if (!sessionId || !state || !state.head || typeof state.head !== 'object' || Array.isArray(state.head)) return
+    if (redoRestoreAttemptedRef.current === sessionId) return
+    redoRestoreAttemptedRef.current = sessionId
+    const plan = readRedoPlan(sessionId)
+    if (!plan) return
+    const positions = new Set<string | null>([
+      plan.undoLeafId,
+      ...plan.checkpoints.slice(0, plan.restored),
+    ])
+    if (plan.epoch === head?.epoch && positions.has(headLeafId)) setRevertState(plan)
+    else writeRedoPlan(sessionId, null)
+  }, [sessionId, state, headLeafId])
+
+  // Positions the leaf may legitimately sit at while the plan is alive:
+  // the undo point plus the already-restored checkpoints.
+  const revertPositions = useMemo(() => {
+    if (!revertState) return null
+    return new Set<string | null>([
+      revertState.undoLeafId,
+      ...revertState.checkpoints.slice(0, revertState.restored),
+    ])
+  }, [revertState])
+
+  // Leaf left the undo path (new send / tree navigation) -> the plan lapses
+  useEffect(() => {
+    if (!revertState || !revertPositions) return
+    if (!state || !state.head || typeof state.head !== 'object' || Array.isArray(state.head)) return
+    if (revertPositions.has(headLeafId)) return
+    updateRevertState(null)
+  }, [headLeafId, revertState, revertPositions, state, updateRevertState])
+
+  const handleUndo = useCallback(
+    async (entryId: string) => {
+      if (!sessionId || isStreaming) return
+      const undoIndex = items.findIndex(item => item.entryId === entryId)
+      if (undoIndex === -1) return
+      // 逐回合的 redo 落点：沿被裁掉的原分支，每个用户回合的尾部条目
+      const checkpoints = buildRedoCheckpoints(items.slice(undoIndex))
+      try {
+        const result = await navigatePiTree(sessionId, { entryId })
+        if (result.cancelled || result.aborted) return
+        if (result.editorText == null) clearSessionEditorDraft(sessionId)
+        else setSessionEditorDraft(sessionId, result.editorText)
+        if (checkpoints.length === 0) {
+          updateRevertState(null)
+          return
+        }
+        // 撤销点的真实 leafId 从刷新后的 runtime state 拿，不从 timeline 猜
+        await refreshPiSessionState(sessionId).catch(() => undefined)
+        const undoHead = (piSessionStateStore.getState(sessionId)?.head ?? null) as { epoch?: string; leafId?: string } | null
+        if (!undoHead?.epoch) {
+          updateRevertState(null)
+          return
+        }
+        updateRevertState({ epoch: undoHead.epoch, undoLeafId: undoHead.leafId ?? null, checkpoints, restored: 0 })
+      } catch (error) {
+        console.error('Failed to undo message:', error)
+      }
+    },
+    [sessionId, isStreaming, items, updateRevertState],
+  )
+
+  const handleRedoStep = useCallback(async () => {
+    if (!sessionId || !revertState || isStreaming) return
+    const target = revertState.checkpoints[revertState.restored]
+    if (!target) return
+    try {
+      const result = await navigatePiTree(sessionId, { entryId: target })
+      if (result.cancelled || result.aborted) return
+      clearSessionEditorDraft(sessionId)
+      const restored = revertState.restored + 1
+      if (restored >= revertState.checkpoints.length) updateRevertState(null)
+      else updateRevertState({ ...revertState, restored })
+    } catch (error) {
+      console.error('Failed to redo message:', error)
+    }
+  }, [sessionId, revertState, isStreaming, updateRevertState])
+
+  const handleRedoAll = useCallback(async () => {
+    if (!sessionId || !revertState || isStreaming) return
+    const target = revertState.checkpoints[revertState.checkpoints.length - 1]
+    if (!target) return
+    try {
+      const result = await navigatePiTree(sessionId, { entryId: target })
+      if (result.cancelled || result.aborted) return
+      clearSessionEditorDraft(sessionId)
+      updateRevertState(null)
+    } catch (error) {
+      console.error('Failed to redo all:', error)
+    }
+  }, [sessionId, revertState, isStreaming, updateRevertState])
+
+  const canUndo = Boolean(sessionId && !isStreaming && items.some(item => item.kind === 'user_message'))
+  const canRedo = Boolean(
+    sessionId &&
+    !isStreaming &&
+    revertState &&
+    revertState.restored < revertState.checkpoints.length &&
+    revertPositions?.has(headLeafId),
+  )
+  const revertSteps = revertState ? revertState.checkpoints.length - revertState.restored : 0
 
   // Outline index (reuses ChatArea's visible-id tracking + imperative scroll)
   const chatAreaRef = useRef<ChatAreaHandle>(null)
@@ -791,6 +974,8 @@ export function PiChatPane({
             onVisibleMessageIdsChange={handleVisibleIdsChange}
             onAtBottomChange={setIsAtBottom}
             onFork={handleFork}
+            onUndo={canUndo ? handleUndo : undefined}
+            canUndo={canUndo}
           />
         )}
       </div>
@@ -828,6 +1013,10 @@ export function PiChatPane({
             selectedVariant={thinkingLevel}
             onVariantChange={handleVariantChange}
             revertedText={editorDraft?.text ?? forkSeedText}
+            canRedo={canRedo}
+            revertSteps={revertSteps}
+            onRedo={() => void handleRedoStep()}
+            onRedoAll={() => void handleRedoAll()}
           />
         </div>
       </div>
