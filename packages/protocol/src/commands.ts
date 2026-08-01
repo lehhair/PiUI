@@ -10,7 +10,6 @@ export const CORE_COMMAND_TYPES = [
   "newSession",
   "switchSession",
   "fork",
-  "clone",
   "importSession",
   "setSessionName",
   "setModel",
@@ -86,10 +85,6 @@ export type SwitchSessionParams = {
 export type ForkParams = {
   entryId: string
   position: "before" | "at"
-}
-
-export type CloneParams = {
-  entryId?: string
 }
 
 export type ImportSessionParams = {
@@ -198,7 +193,6 @@ export type CoreCommandParams = {
   newSession: NewSessionParams
   switchSession: SwitchSessionParams
   fork: ForkParams
-  clone: CloneParams
   importSession: ImportSessionParams
   setSessionName: SetSessionNameParams
   setModel: SetModelParams
