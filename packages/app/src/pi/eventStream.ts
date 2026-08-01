@@ -76,6 +76,7 @@ class PiEventStream {
 
   private ws: WebSocket | null = null
   private refCounts = new Map<string, number>()
+  private workspaceRefCounts = new Map<string, number>()
   private cursors = new Map<string, EventCursor>()
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -102,11 +103,28 @@ class PiEventStream {
       this.refCounts.set(sessionId, count - 1)
       return
     }
-    if (this.refCounts.size === 0 && getTrackedManagementProviders().length === 0) {
+    if (!this.hasSubscriptions()) {
       this.closeSocket()
     } else if (this.ws?.readyState === WebSocket.OPEN) {
       this.sendSubscribe()
     }
+  }
+
+  connectWorkspace(workspacePath: string): void {
+    const count = (this.workspaceRefCounts.get(workspacePath) ?? 0) + 1
+    this.workspaceRefCounts.set(workspacePath, count)
+    if (count === 1) {
+      this.ensureSocket()
+      if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+    }
+  }
+
+  disconnectWorkspace(workspacePath: string): void {
+    const count = this.workspaceRefCounts.get(workspacePath) ?? 0
+    if (count <= 1) this.workspaceRefCounts.delete(workspacePath)
+    else this.workspaceRefCounts.set(workspacePath, count - 1)
+    if (!this.hasSubscriptions()) this.closeSocket()
+    else if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
   }
 
   private managementWatched = false
@@ -122,7 +140,7 @@ class PiEventStream {
       if (getTrackedManagementProviders().length > 0) {
         this.ensureSocket()
         if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
-      } else if (this.refCounts.size === 0) {
+      } else if (!this.hasSubscriptions()) {
         this.closeSocket()
       }
     })
@@ -132,6 +150,7 @@ class PiEventStream {
   disconnectAll(): void {
     for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(sessionId)
     this.refCounts.clear()
+    this.workspaceRefCounts.clear()
     this.cursors.clear()
     this.closeSocket()
   }
@@ -192,7 +211,7 @@ class PiEventStream {
       if (this.ws !== ws) return
       this.clearPing()
       this.ws = null
-      if (this.refCounts.size > 0 || getTrackedManagementProviders().length > 0) {
+      if (this.hasSubscriptions()) {
         if (this.reconnectTimer) return
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null
@@ -212,6 +231,13 @@ class PiEventStream {
     if (serverCursor) cursors.server = serverCursor
     for (const sessionId of this.refCounts.keys()) {
       const stream = { kind: 'session' as const, id: sessionId }
+      streams.push(stream)
+      const key = eventStreamKey(stream)
+      const cursor = this.cursors.get(key)
+      if (cursor) cursors[key] = cursor
+    }
+    for (const workspacePath of this.workspaceRefCounts.keys()) {
+      const stream = { kind: 'workspace' as const, id: workspacePath }
       streams.push(stream)
       const key = eventStreamKey(stream)
       const cursor = this.cursors.get(key)
@@ -285,6 +311,12 @@ class PiEventStream {
         receiveResourceRevision(payload?.workspacePath ?? undefined, String(envelope.cursor.sequence))
         break
       }
+      case 'workspace.files':
+        window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', { detail: envelope.payload }))
+        break
+      case 'workspace.git':
+        window.dispatchEvent(new CustomEvent('piui:workspace-git-updated', { detail: envelope.payload }))
+        break
     }
   }
 
@@ -419,6 +451,13 @@ class PiEventStream {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     } else if (stream.kind === 'provider') {
       receiveProviderAuthUpdated()
+    } else if (stream.kind === 'workspace') {
+      window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', {
+        detail: { workspacePath: stream.id, changes: [], rescan: true },
+      }))
+      window.dispatchEvent(new CustomEvent('piui:workspace-git-updated', {
+        detail: { workspacePath: stream.id },
+      }))
     }
   }
 
@@ -445,6 +484,10 @@ class PiEventStream {
       clearInterval(this.pingTimer)
       this.pingTimer = null
     }
+  }
+
+  private hasSubscriptions(): boolean {
+    return this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || getTrackedManagementProviders().length > 0
   }
 }
 
