@@ -21,6 +21,7 @@ interface PendingRequest {
   resolve: (data: JsonValue | undefined) => void
   reject: (error: Error) => void
   timer: NodeJS.Timeout
+  removeAbort?: () => void
 }
 
 /**
@@ -34,7 +35,7 @@ function defaultHandshakeTimeoutMs(): number {
 }
 
 export interface WorkerCatalog {
-  command(type: string, params?: JsonObject): Promise<JsonValue | undefined>
+  command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined>
   onEvent(listener: (event: WorkerEvent) => void): () => void
   onCrash(listener: (error: Error) => void): () => void
   dispose(): Promise<void>
@@ -92,7 +93,7 @@ export class WorkerSession {
   static createCatalog(workerEntry: URL, options?: WorkerClientOptions): WorkerCatalog {
     const session = new WorkerSession(workerEntry, options)
     return {
-      command: (type, params) => session.request({ type, params }),
+      command: (type, params, signal) => session.request({ type, params }, signal),
       onEvent: listener => session.onEvent(listener),
       onCrash: listener => session.onCrash(listener),
       dispose: () => session.dispose(),
@@ -151,6 +152,7 @@ export class WorkerSession {
       if (!pending) return
       this.pending.delete(message.id)
       clearTimeout(pending.timer)
+      pending.removeAbort?.()
       if (message.ok) pending.resolve(message.data)
       else pending.reject(problemToError(message.error))
       return
@@ -219,6 +221,7 @@ export class WorkerSession {
     this.settleReadyError(this.exitError)
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
+      pending.removeAbort?.()
       pending.reject(Object.assign(new Error("Pi worker crashed before confirming the command result"), {
         code: "WORKER_RESULT_UNKNOWN",
       }))
@@ -288,27 +291,47 @@ export class WorkerSession {
     return this.cwd ?? ""
   }
 
-  async command(type: string, params?: JsonObject): Promise<JsonValue | undefined> {
-    return this.request({ type, params })
+  async command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
+    return this.request({ type, params }, signal)
   }
 
-  private request(command: { type: string; params?: JsonObject }): Promise<JsonValue | undefined> {
+  private request(command: { type: string; params?: JsonObject }, signal?: AbortSignal): Promise<JsonValue | undefined> {
     if (this.exitHandled) return Promise.reject(this.exitError ?? new Error("Pi worker is not available"))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
+        return
+      }
       const timer = setTimeout(() => {
+        const pending = this.pending.get(id)
         this.pending.delete(id)
+        pending?.removeAbort?.()
         reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
           code: "WORKER_RESULT_UNKNOWN",
         }))
       }, this.options.requestTimeoutMs ?? 10 * 60_000)
       timer.unref()
-      this.pending.set(id, { resolve, reject, timer })
+      let pending: PendingRequest
+      const onAbort = () => {
+        if (this.pending.get(id) !== pending) return
+        this.pending.delete(id)
+        clearTimeout(timer)
+        pending.removeAbort?.()
+        reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
+      }
+      pending = { resolve, reject, timer }
+      if (signal) {
+        signal.addEventListener("abort", onAbort, { once: true })
+        pending.removeAbort = () => signal.removeEventListener("abort", onAbort)
+      }
+      this.pending.set(id, pending)
       void this.ready.then(helloMessage => {
-        if (this.exitHandled) {
-          this.pending.delete(id)
+        if (this.exitHandled || !this.pending.has(id) || signal?.aborted) {
+          if (this.pending.get(id) === pending) this.pending.delete(id)
           clearTimeout(timer)
-          reject(this.exitError ?? new Error("Pi worker is not available"))
+          pending.removeAbort?.()
+          if (this.exitHandled) reject(this.exitError ?? new Error("Pi worker is not available"))
           return
         }
         this.child.send({
@@ -321,11 +344,14 @@ export class WorkerSession {
           if (!error) return
           this.pending.delete(id)
           clearTimeout(timer)
+          pending.removeAbort?.()
           reject(error)
         })
       }).catch(error => {
+        if (this.pending.get(id) !== pending) return
         this.pending.delete(id)
         clearTimeout(timer)
+        pending.removeAbort?.()
         reject(error)
       })
     })

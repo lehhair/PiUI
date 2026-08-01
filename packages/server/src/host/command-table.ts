@@ -37,6 +37,7 @@ export type HostCommandContext = {
   store: WorkspaceStore
   watcher: WorkspaceWatcher
   sessions: SessionHost
+  signal?: AbortSignal
 }
 
 export class HostRuntime {
@@ -53,10 +54,10 @@ export class HostRuntime {
     }
   }
 
-  async execute(name: string, params: JsonObject = {}): Promise<JsonValue | undefined> {
+  async execute(name: string, params: JsonObject = {}, options: { signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
     const registered = HOST_CAPABILITIES.find(item => item.capability.name === name)
     if (!registered) throw Object.assign(new Error(`unknown host command: ${name}`), { code: "UNKNOWN_COMMAND" })
-    return registered.handler(this.ctx, params)
+    return registered.handler({ ...this.ctx, signal: options.signal }, params)
   }
 }
 
@@ -294,6 +295,7 @@ export const HOST_CAPABILITIES = [
     handler: (ctx, params) => searchFilesByName(workspace(ctx, params), reqString(params, "query"), {
       type: fileSearchType(params),
       limit: optLimit(params, "limit", 100, 1000),
+      signal: ctx.signal,
     }) as Promise<JsonValue>,
   }),
   registerHostCapability({
@@ -304,6 +306,7 @@ export const HOST_CAPABILITIES = [
     idempotent: true,
     handler: (ctx, params) => searchWorkspaceText(workspace(ctx, params), reqString(params, "query"), {
       limit: optLimit(params, "limit", 100, 1000),
+      signal: ctx.signal,
     }) as Promise<JsonValue>,
   }),
   registerHostCapability({
@@ -312,7 +315,7 @@ export const HOST_CAPABILITIES = [
     description: "Read Git repository information for a workspace",
     paramsSchema: objectSchema(WORKSPACE_PATH, ["workspacePath"]),
     idempotent: true,
-    handler: (ctx, params) => getGitInfo(workspace(ctx, params).canonicalRoot) as Promise<JsonValue>,
+    handler: (ctx, params) => getGitInfo(workspace(ctx, params).canonicalRoot, ctx.signal) as Promise<JsonValue>,
   }),
   registerHostCapability({
     name: "git.status",
@@ -320,7 +323,7 @@ export const HOST_CAPABILITIES = [
     description: "Read Git working tree status for a workspace",
     paramsSchema: objectSchema(WORKSPACE_PATH, ["workspacePath"]),
     idempotent: true,
-    handler: (ctx, params) => getGitStatus(workspace(ctx, params).canonicalRoot) as Promise<JsonValue>,
+    handler: (ctx, params) => getGitStatus(workspace(ctx, params).canonicalRoot, ctx.signal) as Promise<JsonValue>,
   }),
   registerHostCapability({
     name: "git.diff",
@@ -328,7 +331,7 @@ export const HOST_CAPABILITIES = [
     description: "Read Git diff summary for a workspace",
     paramsSchema: objectSchema({ ...WORKSPACE_PATH, mode: GIT_MODE }, ["workspacePath"]),
     idempotent: true,
-    handler: (ctx, params) => getGitDiff(workspace(ctx, params).canonicalRoot, gitMode(params)) as Promise<JsonValue>,
+    handler: (ctx, params) => getGitDiff(workspace(ctx, params).canonicalRoot, gitMode(params), ctx.signal) as Promise<JsonValue>,
   }),
   registerHostCapability({
     name: "git.fileDiff",
@@ -336,6 +339,6 @@ export const HOST_CAPABILITIES = [
     description: "Read Git patch for one changed file",
     paramsSchema: objectSchema({ ...WORKSPACE_PATH, ...RELATIVE_PATH, mode: GIT_MODE }, ["workspacePath", "path"]),
     idempotent: true,
-    handler: (ctx, params) => getGitFileDiff(workspace(ctx, params).canonicalRoot, gitMode(params), reqString(params, "path")) as Promise<JsonValue>,
+    handler: (ctx, params) => getGitFileDiff(workspace(ctx, params).canonicalRoot, gitMode(params), reqString(params, "path"), ctx.signal) as Promise<JsonValue>,
   }),
 ]

@@ -195,13 +195,15 @@ export class SessionHost {
     return session
   }
 
-  async sessionQuery(sessionId: string, type: string, params?: JsonObject): Promise<JsonValue | undefined> {
-    const session = await this.ensureAttached(sessionId)
-    const capability = this.getSessionCapability(type)
-    if (capability?.queue !== "immediate") {
-      throw Object.assign(new Error(`${type} is not a query command`), { code: "INVALID_REQUEST" })
-    }
-    return session.worker.command(type, params)
+  async sessionQuery(sessionId: string, type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
+    return withAbort((async () => {
+      const session = await this.ensureAttached(sessionId)
+      const capability = this.getSessionCapability(type)
+      if (capability?.queue !== "immediate") {
+        throw Object.assign(new Error(`${type} is not a query command`), { code: "INVALID_REQUEST" })
+      }
+      return session.worker.command(type, params, signal)
+    })(), signal)
   }
 
   /**
@@ -258,8 +260,8 @@ export class SessionHost {
     }
   }
 
-  async piRegistry(): Promise<PiRegistrySnapshot> {
-    const data = await this.catalogCommand("registry.describe", undefined, { retry: true, idempotent: true }) as PiRegistrySnapshot | undefined
+  async piRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {
+    const data = await this.catalogCommand("registry.describe", undefined, { retry: true, idempotent: true, signal }) as PiRegistrySnapshot | undefined
     if (!data || typeof data !== "object") {
       throw Object.assign(new Error("Pi registry is unavailable"), { code: "REGISTRY_UNAVAILABLE" })
     }
@@ -270,12 +272,12 @@ export class SessionHost {
     }
   }
 
-  async executeGlobalCommand(type: string, params?: JsonObject): Promise<JsonValue | undefined> {
+  async executeGlobalCommand(type: string, params?: JsonObject, options: { signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
     if (type === "session.open") {
       const cwd = typeof params?.cwd === "string" ? params.cwd : undefined
       if (!cwd) throw Object.assign(new Error("params.cwd must be a non-empty string"), { code: "INVALID_REQUEST" })
       const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
-      return this.openSession(cwd, sessionFile)
+      return withAbort(this.openSession(cwd, sessionFile), options.signal)
     }
     if (type === "session.attached") return this.listAttachedIds()
     if (type === "session.delete") {
@@ -291,16 +293,16 @@ export class SessionHost {
       }
     }
     const idempotent = type === "registry.describe" || getCommandCapability(type)?.idempotent === true
-    return this.catalogCommand(type, params, { retry: idempotent, idempotent })
+    return this.catalogCommand(type, params, { retry: idempotent, idempotent, signal: options.signal })
   }
 
-  executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string): JsonValue | SubmittedCommand | Promise<JsonValue | SubmittedCommand | undefined> {
+  executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string, options: { signal?: AbortSignal } = {}): JsonValue | SubmittedCommand | Promise<JsonValue | SubmittedCommand | undefined> {
     if (type === "session.close") {
-      return this.closeSession(sessionId).then(() => ({ ok: true }))
+      return withAbort(this.closeSession(sessionId), options.signal).then(() => ({ ok: true }))
     }
     const capability = this.getSessionCapability(type)
     if (!capability) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
-    if (capability.queue === "immediate") return this.sessionQuery(sessionId, type, params)
+    if (capability.queue === "immediate") return this.sessionQuery(sessionId, type, params, options.signal)
     return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
 
@@ -321,7 +323,7 @@ export class SessionHost {
     return this.executor.get(commandId)
   }
 
-  async catalogCommand(type: string, params?: JsonObject, options?: { retry?: boolean; idempotent?: boolean }): Promise<JsonValue | undefined> {
+  async catalogCommand(type: string, params?: JsonObject, options?: { retry?: boolean; idempotent?: boolean; signal?: AbortSignal }): Promise<JsonValue | undefined> {
     return this.supervisor.catalogCommand(type, params, options)
   }
 
@@ -468,4 +470,38 @@ function parseHeaderCwd(line: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function withAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const cleanup = () => signal.removeEventListener("abort", onAbort)
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(abortError())
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+    operation.then(
+      value => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(value)
+      },
+      error => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      },
+    )
+  })
+}
+
+function abortError(): Error {
+  return Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" })
 }
