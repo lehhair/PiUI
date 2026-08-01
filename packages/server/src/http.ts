@@ -221,6 +221,11 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendJson(res, 200, { data: data ?? null })
       }
 
+      const allowedMethods = allowedMethodsForPath(p)
+      if (allowedMethods) {
+        res.setHeader("allow", allowedMethods)
+        return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
+      }
       return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
     } catch (error) {
       const status = statusForError(error)
@@ -239,6 +244,15 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       await new Promise<void>(resolve => server.close(() => resolve()))
     },
   }
+}
+
+function allowedMethodsForPath(pathname: string): string | undefined {
+  if (pathname === "/api/v1/host/health" || pathname === "/api/v1/host/share" ||
+    pathname === "/api/v1/host/registry" || pathname === "/api/v1/pi/registry") return "GET"
+  if (/^\/api\/v1\/pi\/commands\/[^/]+$/.test(pathname) ||
+    /^\/api\/v1\/pi\/sessions\/[^/]+\/commands\/[^/]+$/.test(pathname)) return "POST"
+  if (/^\/api\/v1\/host\/commands\/[^/]+$/.test(pathname)) return "GET, POST"
+  return undefined
 }
 
 function statusForError(error: unknown): number {
@@ -267,6 +281,12 @@ function statusForError(error: unknown): number {
       return 413
     case "GIT_TIMEOUT":
       return 504
+    case "HOST_CALL_TIMEOUT":
+      return 504
+    case "REGISTRY_UNAVAILABLE":
+      return 503
+    case "METHOD_NOT_ALLOWED":
+      return 405
     case "SESSION_BUSY":
     case "COMMAND_ALREADY_ACCEPTED":
     case "FILE_CONFLICT":
