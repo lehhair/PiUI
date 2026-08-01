@@ -24,27 +24,34 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-headers": "content-type,authorization,if-match",
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown) {
+function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
+  if (res.destroyed || res.writableEnded) return false
   const data = JSON.stringify(body)
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(data),
-    ...CORS_HEADERS,
-  })
-  res.end(data)
+  try {
+    res.writeHead(status, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": Buffer.byteLength(data),
+      ...CORS_HEADERS,
+    })
+    res.end(data)
+    return true
+  } catch {
+    return false
+  }
 }
 
-function sendProblem(res: ServerResponse, status: number, error: unknown) {
+function sendProblem(res: ServerResponse, status: number, error: unknown): boolean {
   const p = error && typeof error === "object" && "code" in error && "message" in error
     ? { code: String((error as { code: unknown }).code), message: String((error as { message: unknown }).message) }
     : problemFromError(error)
-  sendJson(res, status, problem(p.code as Parameters<typeof problem>[0], p.message))
+  return sendJson(res, status, problem(p.code as Parameters<typeof problem>[0], p.message))
 }
 
-async function readBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): Promise<JsonObject> {
+async function readBody(req: IncomingMessage, signal?: AbortSignal, maxBytes = MAX_JSON_BODY_BYTES): Promise<JsonObject> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of req as AsyncIterable<Buffer>) {
+    throwIfAborted(signal)
     size += chunk.length
     if (size > maxBytes) throw Object.assign(new Error("request body too large"), { code: "INVALID_REQUEST" })
     chunks.push(chunk)
@@ -60,6 +67,37 @@ async function readBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): P
     throw Object.assign(new Error("json body must be an object"), { code: "INVALID_REQUEST" })
   }
   return body as JsonObject
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  throw Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" })
+}
+
+function requestScope(req: IncomingMessage, res: ServerResponse): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController()
+  let responseFinished = false
+  const abort = () => controller.abort()
+  const abortIncompleteRequest = () => {
+    if (!req.complete) controller.abort()
+  }
+  const abortIncompleteResponse = () => {
+    if (!responseFinished && !res.writableFinished) controller.abort()
+  }
+  const markFinished = () => { responseFinished = true }
+  req.once("aborted", abort)
+  req.once("close", abortIncompleteRequest)
+  res.once("finish", markFinished)
+  res.once("close", abortIncompleteResponse)
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      req.removeListener("aborted", abort)
+      req.removeListener("close", abortIncompleteRequest)
+      res.removeListener("finish", markFinished)
+      res.removeListener("close", abortIncompleteResponse)
+    },
+  }
 }
 
 function parseUrl(req: IncomingMessage): URL | null {
@@ -133,6 +171,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
 
   const server = createServer(async (req, res) => {
+    const scope = requestScope(req, res)
     try {
       const url = parseUrl(req)
       if (!url) {
@@ -185,24 +224,24 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
 
       if (method === "GET" && p === "/api/v1/pi/registry") {
-        return sendJson(res, 200, await sessions.piRegistry())
+        return sendJson(res, 200, await sessions.piRegistry(scope.signal))
       }
 
       const piCommandMatch = p.match(/^\/api\/v1\/pi\/commands\/([^/]+)$/)
       if (piCommandMatch && method === "POST") {
-        const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
+        const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
         const name = safeDecode(piCommandMatch[1]!)
-        const data = await sessions.executeGlobalCommand(name, commandParams(body))
+        const data = await sessions.executeGlobalCommand(name, commandParams(body), { signal: scope.signal })
         return sendJson(res, 200, { data: data ?? null })
       }
 
       const piSessionCommandMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)\/commands\/([^/]+)$/)
       if (piSessionCommandMatch && method === "POST") {
-        const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
+        const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
         const sessionId = safeDecode(piSessionCommandMatch[1]!)
         const name = safeDecode(piSessionCommandMatch[2]!)
         const id = typeof body.id === "string" && body.id ? body.id : undefined
-        const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id)
+        const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id, { signal: scope.signal })
         if (isSubmittedCommand(result)) {
           void result.promise.catch(() => undefined)
           return sendJson(res, 202, { command: result.record })
@@ -212,12 +251,12 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 
       const commandMatch = p.match(/^\/api\/v1\/host\/commands\/([^/]+)$/)
       if (commandMatch && method === "GET") {
-        const data = await host.execute("commands.get", { id: safeDecode(commandMatch[1]!) })
+        const data = await host.execute("commands.get", { id: safeDecode(commandMatch[1]!) }, { signal: scope.signal })
         return sendJson(res, 200, data ?? null)
       }
       if (commandMatch && method === "POST") {
-        const body = await readBody(req, MAX_JSON_BODY_BYTES * 24)
-        const data = await host.execute(safeDecode(commandMatch[1]!), commandParams(body) ?? {})
+        const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
+        const data = await host.execute(safeDecode(commandMatch[1]!), commandParams(body) ?? {}, { signal: scope.signal })
         return sendJson(res, 200, { data: data ?? null })
       }
 
@@ -228,8 +267,11 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
       return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
     } catch (error) {
+      if (scope.signal.aborted || res.destroyed || res.writableEnded) return
       const status = statusForError(error)
       return sendProblem(res, status, error)
+    } finally {
+      scope.cleanup()
     }
   })
 

@@ -67,11 +67,11 @@ export class RuntimeSupervisor {
     return host
   }
 
-  async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean; idempotent?: boolean } = {}): Promise<JsonValue | undefined> {
+  async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean; idempotent?: boolean; signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
     if (this.disposed) throw new Error("Runtime supervisor is disposed")
     const catalog = this.catalog ?? (this.catalog = this.createCatalog())
     try {
-      return await catalog.command(type, params)
+      return await catalog.command(type, params, options.signal)
     } catch (error) {
       const code = errorCode(error)
       if (code !== "WORKER_RESULT_UNKNOWN") throw error
