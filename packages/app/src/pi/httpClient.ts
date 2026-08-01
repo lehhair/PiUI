@@ -1,4 +1,5 @@
 import { LOCAL_SERVER_ID, serverStore } from '../store/serverStore'
+import { PROTOCOL_VERSION } from '@piui/protocol'
 
 const DEFAULT_BASE = 'http://127.0.0.1:8787'
 const rawFetch = globalThis.fetch.bind(globalThis)
@@ -48,7 +49,7 @@ export async function isPiServerUp(): Promise<boolean> {
     const res = await piFetch(`${getApiBase()}/api/v1/host/health`, { signal: AbortSignal.timeout(1500) })
     if (!res.ok) return false
     const body = (await res.json()) as { service?: string; protocolVersion?: number }
-    return body.service === 'piui-server' && body.protocolVersion === 1
+    return body.service === 'piui-server' && body.protocolVersion === PROTOCOL_VERSION
   } catch {
     return false
   }

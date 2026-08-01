@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { HealthResponse, PiRegistrySnapshot } from '@piui/protocol'
+import { PROTOCOL_VERSION, type HealthResponse, type PiRegistrySnapshot } from '@piui/protocol'
 import { fetchHostHealth, fetchPiRegistry } from './transport/index.js'
 
 const CORE_PI_COMMANDS = [
@@ -80,7 +80,7 @@ export function piNativeStatusForTest(registry: Partial<import('@piui/protocol')
     status: registry ? 'online' : 'offline',
     registry: registry
       ? {
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           revision: 1,
           sdkVersion: 'test',
           driver: 'mock',

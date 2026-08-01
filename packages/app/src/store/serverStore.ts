@@ -4,6 +4,7 @@
 
 import { API_BASE_URL } from '../constants'
 import { isTauri } from '../utils/tauri'
+import { PROTOCOL_VERSION } from '@piui/protocol'
 
 // Tauri plugin-http fetch 缓存（避免重复 dynamic import）
 let _tauriFetch: typeof globalThis.fetch | null = null
@@ -138,6 +139,7 @@ class ServerStore {
 
   // server 切换监听器（用于触发 SSE 重连等副作用，避免循环依赖）
   private serverChangeListeners: Set<(newServerId: string, reason: ServerChangeReason) => void> = new Set()
+  private serverChangeGeneration = 0
 
   // 快照缓存 (用于 useSyncExternalStore)
   private _serversSnapshot: ServerConfig[] = []
@@ -232,9 +234,14 @@ class ServerStore {
   }
 
   private notifyServerChange(serverId: string, reason: ServerChangeReason): void {
+    this.serverChangeGeneration += 1
     this.serverChangeListeners.forEach(fn => {
       fn(serverId, reason)
     })
+  }
+
+  getActiveServerGeneration(): number {
+    return this.serverChangeGeneration
   }
 
   private notify(): void {
@@ -553,7 +560,7 @@ class ServerStore {
           return commitHealth(health)
         }
 
-        if (!isRecord(data) || data.ok !== true || data.service !== 'piui-server' || data.protocolVersion !== 1) {
+        if (!isRecord(data) || data.ok !== true || data.service !== 'piui-server' || data.protocolVersion !== PROTOCOL_VERSION) {
           const health: ServerHealth = {
             status: 'error',
             latency,
