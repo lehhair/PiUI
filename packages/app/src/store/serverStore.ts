@@ -372,8 +372,10 @@ class ServerStore {
     if (index === -1) return false
 
     const server = this.servers[index]
-    const endpointChanged = updates.url !== undefined && updates.url.replace(/\/+$/, '') !== server.url ||
-      updates.token !== undefined && updates.token !== server.token
+    const endpointChanged =
+      (updates.url !== undefined && updates.url.replace(/\/+$/, '') !== server.url) ||
+      (updates.url !== undefined && id === this.DEFAULT_SERVER_ID && this.localServerUrlOverride !== null) ||
+      (updates.token !== undefined && updates.token !== server.token)
     this.servers[index] = {
       ...server,
       ...updates,
