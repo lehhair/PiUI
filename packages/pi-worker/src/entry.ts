@@ -282,8 +282,14 @@ async function disposeAndExit(): Promise<void> {
   clearInterval(heartbeatTimer)
   unsubscribeProviderAuth()
   providerAuth.dispose()
-  await closeRuntime()
-  process.exit(0)
+  let exitCode = 0
+  try {
+    await closeRuntime()
+  } catch (error) {
+    console.error(`[piui-worker] dispose failed: ${error instanceof Error ? error.message : String(error)}`)
+    exitCode = 1
+  }
+  process.exit(exitCode)
 }
 
 const unsubscribeProviderAuth = providerAuth.onEvent(event => send({
@@ -364,6 +370,8 @@ process.on("disconnect", () => {
     pending.reject(new Error("PiUI host disconnected"))
   }
   pendingHostCalls.clear()
+  unsubscribeProviderAuth()
+  providerAuth.dispose()
   void closeRuntime().finally(() => process.exit(0))
 })
 
