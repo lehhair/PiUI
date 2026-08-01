@@ -429,7 +429,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                   void runRuntimeCommand('compact', () => compactPiSession(
                     sessionId,
                     compactInstructions.trim() || undefined,
-                  ))
+                  ).then(() => undefined))
                 }}
               >
                 <input
