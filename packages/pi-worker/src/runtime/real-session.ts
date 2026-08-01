@@ -1,4 +1,5 @@
 import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs"
+import { realpath } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 import type {
@@ -233,6 +234,7 @@ export class RealPiSession implements SessionRuntime {
     }
     const agentDir = options.agentDir ?? getAgentDir()
     const sessionDir = configuredSessionDir(cwd, agentDir)
+    if (sessionFile && !options.createSessionManager) await assertSessionFileInside(sessionDir, sessionFile)
     const sessionManager = (options.createSessionManager?.(cwd, sessionFile) ??
       (sessionFile
         ? sessionDir ? SessionManager.open(sessionFile, sessionDir) : SessionManager.open(sessionFile)
@@ -1100,4 +1102,14 @@ function toJsonObject(value: unknown): JsonObject {
 function pathKey(value: string): string {
   const resolved = path.resolve(value)
   return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+async function assertSessionFileInside(rootPath: string, sessionFile: string): Promise<void> {
+  const root = await realpath(path.resolve(rootPath))
+  const target = await realpath(path.resolve(sessionFile))
+  const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+  const targetKey = process.platform === "win32" ? target.toLowerCase() : target
+  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
+    throw Object.assign(new Error("Pi session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+  }
 }
