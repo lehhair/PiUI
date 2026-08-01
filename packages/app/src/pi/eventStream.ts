@@ -14,6 +14,7 @@ import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { piBranchStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
+import { notifyReconnected, notifySessionIdle } from '../hooks/useGlobalEvents'
 import {
   getTrackedManagementProviders,
   receivePackageProgress,
@@ -195,7 +196,9 @@ class PiEventStream {
     this.ws = ws
 
     ws.onopen = () => {
+      if (this.ws !== ws) return
       this.sendSubscribe()
+      notifyReconnected()
       this.pingTimer = setInterval(() => {
         this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
       }, PING_INTERVAL_MS)
@@ -408,6 +411,7 @@ class PiEventStream {
       case 'agent_settled':
         this.scheduleBranchRefresh(sessionId)
         this.scheduleStateRefresh(sessionId)
+        notifySessionIdle(sessionId)
         break
       case 'agent_start':
       case 'turn_start':
