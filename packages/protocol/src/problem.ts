@@ -1,44 +1,57 @@
-export type ErrorCode =
-  | "PROTOCOL_VERSION_MISMATCH"
-  | "WORKER_PROTOCOL_MISMATCH"
-  | "PI_SDK_VERSION_MISMATCH"
-  | "CAPABILITY_DISABLED"
-  | "INVALID_REQUEST"
-  | "UNKNOWN_COMMAND"
-  | "UNAUTHORIZED"
-  | "FORBIDDEN"
-  | "WORKSPACE_NOT_FOUND"
-  | "PATH_OUTSIDE_WORKSPACE"
-  | "SYMLINK_ESCAPE"
-  | "FILE_TOO_LARGE"
-  | "FILE_CONFLICT"
-  | "GIT_TIMEOUT"
-  | "GIT_OUTPUT_LIMIT"
-  | "GIT_BASE_NOT_FOUND"
-  | "GIT_FAILED"
-  | "STALE_REVISION"
-  | "STALE_CURSOR"
-  | "SESSION_NOT_FOUND"
-  | "SESSION_BUSY"
-  | "SESSION_CONFLICT"
-  | "SESSION_RUNTIME_CRASHED"
-  | "SESSION_IDENTITY_MISMATCH"
-  | "RUNTIME_NOT_OPEN"
-  | "RUNTIME_REPLACED"
-  | "WORKER_RESULT_UNKNOWN"
-  | "DRIVER_UNAVAILABLE"
-  | "MODEL_NOT_AVAILABLE"
-  | "PROJECT_TRUST_REQUIRED"
-  | "EXTENSION_UI_TUI_ONLY"
-  | "EXTENSION_UI_LIMIT"
-  | "EXTENSION_UI_CANCELLED"
-  | "RESPONSE_CONFLICT"
-  | "AUTH_REQUIRED"
-  | "COMMAND_ALREADY_ACCEPTED"
-  | "METHOD_NOT_ALLOWED"
-  | "RESYNC_REQUIRED"
-  | "NOT_FOUND"
-  | "INTERNAL"
+export const ERROR_CODES = [
+  "PROTOCOL_VERSION_MISMATCH",
+  "WORKER_PROTOCOL_MISMATCH",
+  "PI_SDK_VERSION_MISMATCH",
+  "CAPABILITY_DISABLED",
+  "INVALID_REQUEST",
+  "UNKNOWN_COMMAND",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "WORKSPACE_NOT_FOUND",
+  "PATH_OUTSIDE_WORKSPACE",
+  "SYMLINK_ESCAPE",
+  "FILE_TOO_LARGE",
+  "FILE_CONFLICT",
+  "GIT_TIMEOUT",
+  "GIT_OUTPUT_LIMIT",
+  "GIT_BASE_NOT_FOUND",
+  "GIT_FAILED",
+  "REQUEST_ABORTED",
+  "HOST_CALL_TIMEOUT",
+  "NATIVE_DATA_NOT_JSON",
+  "SESSION_LIST_NOT_JSON",
+  "MODEL_LIST_NOT_JSON",
+  "REGISTRY_UNAVAILABLE",
+  "STALE_REVISION",
+  "STALE_CURSOR",
+  "SESSION_NOT_FOUND",
+  "SESSION_BUSY",
+  "SESSION_CONFLICT",
+  "SESSION_RUNTIME_CRASHED",
+  "SESSION_IDENTITY_MISMATCH",
+  "RUNTIME_NOT_OPEN",
+  "RUNTIME_REPLACED",
+  "WORKER_RESULT_UNKNOWN",
+  "DRIVER_UNAVAILABLE",
+  "MODEL_NOT_AVAILABLE",
+  "PROJECT_TRUST_REQUIRED",
+  "EXTENSION_UI_TUI_ONLY",
+  "EXTENSION_UI_LIMIT",
+  "EXTENSION_UI_CANCELLED",
+  "RESPONSE_CONFLICT",
+  "AUTH_REQUIRED",
+  "COMMAND_ALREADY_ACCEPTED",
+  "METHOD_NOT_ALLOWED",
+  "RESYNC_REQUIRED",
+  "NOT_FOUND",
+  "INTERNAL",
+] as const
+
+export type ErrorCode = typeof ERROR_CODES[number]
+
+export function isErrorCode(value: unknown): value is ErrorCode {
+  return typeof value === "string" && (ERROR_CODES as readonly string[]).includes(value)
+}
 
 export type Problem = {
   code: ErrorCode
@@ -63,9 +76,8 @@ export function problem(
 }
 
 export function problemFromError(error: unknown, fallbackCode: ErrorCode = "INTERNAL"): Problem {
-  const code = error && typeof error === "object" && "code" in error
-    ? String(error.code) as ErrorCode
-    : fallbackCode
+  const candidate = error && typeof error === "object" && "code" in error ? error.code : undefined
+  const code = isErrorCode(candidate) ? candidate : fallbackCode
   return {
     code,
     message: error instanceof Error ? error.message : String(error),
