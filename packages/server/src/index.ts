@@ -59,13 +59,13 @@ function shutdown(signal: NodeJS.Signals): void {
   if (shuttingDown) return
   shuttingDown = true
   console.info(`[piui-server] received ${signal}, shutting down`)
-  void app.supervisor.dispose()
-    .then(() => shutdownAppServer(app.server, eventServer, {
-      timeoutMs: SHUTDOWN_TIMEOUT_MS,
-      onTimeout: () => console.error(
-        `[piui-server] shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; closing active HTTP connections`,
-      ),
-    }))
+  void shutdownAppServer(app.server, eventServer, {
+    timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    onTimeout: () => console.error(
+      `[piui-server] shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; closing active HTTP connections`,
+    ),
+  })
+    .then(() => app.dispose())
     .catch(error => {
       console.error("[piui-server] shutdown failed", error)
       process.exitCode = 1
