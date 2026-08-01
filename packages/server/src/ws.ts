@@ -45,6 +45,10 @@ export function attachEventWebSocket(server: HttpServer, options: EventWebSocket
   })
 
   wss.on("connection", (ws: WebSocket) => {
+    // Without an error listener, ws emits 'error' synchronously on receiver
+    // errors (oversized frames, bad UTF-8, invalid opcodes) and Node throws,
+    // crashing the whole process. Swallow per-socket errors; close handles the rest.
+    ws.on("error", () => undefined)
     attachConnection(ws, eventHub, options.onSubscribe)
   })
 
