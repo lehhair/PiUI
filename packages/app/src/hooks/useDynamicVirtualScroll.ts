@@ -165,7 +165,10 @@ export function useDynamicVirtualScroll({
     const current = sourceHeights[index] || getEstimatedHeight(index)
     const next = h
     if (Math.abs(current - next) > 0.5) {
-      const nextHeights = new Float32Array(sourceHeights)
+      // lineCount can grow after mount (async diff loads, expanding folds);
+      // grow the buffer so measured rows beyond the old length aren't dropped.
+      const nextHeights = new Float32Array(Math.max(sourceHeights.length, index + 1))
+      nextHeights.set(sourceHeights)
       nextHeights[index] = next
       pendingHeightsRef.current = nextHeights
       if (!pendingMeasureRef.current) {
