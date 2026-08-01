@@ -17,6 +17,7 @@ import type {
   FileOperationResponse,
   FileReadResponse,
   FileTextSearchResponse,
+  ImageInput,
 } from '@piui/protocol'
 import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
@@ -43,17 +44,17 @@ export type PiPromptParams = {
   text: string
   expandPromptTemplates?: boolean
   streamingBehavior?: 'steer' | 'followUp'
-  images?: string[]
+  images?: ImageInput[]
 }
 
 export type PiSteerParams = {
   text: string
-  images?: string[]
+  images?: ImageInput[]
 }
 
 export type PiFollowUpParams = {
   text: string
-  images?: string[]
+  images?: ImageInput[]
 }
 
 export type PiSetModelParams = {
@@ -422,11 +423,7 @@ export function appendPiCustomEntry(sessionId: string, customType: string, data:
   return postPiSessionCommand(sessionId, 'appendCustomEntry', { customType, data: data === undefined ? null : data }, signal)
 }
 
-export type PiImageInput = {
-  type: 'image'
-  data: string
-  mimeType: string
-}
+export type PiImageInput = ImageInput
 
 export function sendPiUserMessage(
   sessionId: string,
