@@ -14,6 +14,8 @@ import { requestHasAllowedOrigin, requestHasValidToken, timingSafeTokenEquals } 
 import { resolveAuthToken } from "./host/auth-token.ts"
 
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024
+// Client frames are tiny (ping/subscribe); cap to avoid buffering huge frames.
+const MAX_MESSAGE_BYTES = 1024 * 1024
 
 export interface EventWebSocketOptions {
   eventHub: EventHub
@@ -23,7 +25,7 @@ export interface EventWebSocketOptions {
 }
 
 export function attachEventWebSocket(server: HttpServer, options: EventWebSocketOptions) {
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES })
   const eventHub = options.eventHub
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
 
