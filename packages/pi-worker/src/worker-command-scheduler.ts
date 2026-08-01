@@ -13,13 +13,13 @@ const QUERY_COMMANDS = new Set([
   "registry.get",
 ])
 
-function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand | undefined): boolean {
+function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand | undefined, promptActive: boolean): boolean {
   const text = command.params?.text
   // sendUserMessage is semantically a prompt (SDK runs prompt(streamingBehavior)
   // under the hood) — query, queue, and abort commands must not block behind
   // it for the whole turn, or streaming state reads and aborts would only
   // land after the turn ends.
-  const activeIsPrompt = active?.type === "prompt" || active?.type === "sendUserMessage"
+  const activeIsPrompt = promptActive || active?.type === "prompt" || active?.type === "sendUserMessage"
   switch (command.type) {
     case "prompt":
       return activeIsPrompt && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
@@ -56,8 +56,21 @@ export function createWorkerCommandScheduler<T>(
 ): (command: SchedulerCommand) => Promise<T> {
   let queue: Promise<void> = Promise.resolve()
   let active: SchedulerCommand | undefined
+  // Concurrent commands bypass the serial queue but must still keep the
+  // "a prompt is running" guard true for their whole lifetime, otherwise a
+  // subsequent plain prompt could overlap a concurrent one after the serial
+  // prompt finishes.
+  let concurrentPrompts = 0
   return command => {
-    if (canRunConcurrently(command, active)) return execute(command)
+    const isPrompt = command.type === "prompt" || command.type === "sendUserMessage"
+    if (canRunConcurrently(command, active, concurrentPrompts > 0)) {
+      if (isPrompt) concurrentPrompts++
+      const result = execute(command)
+      if (isPrompt) {
+        void result.then(() => { concurrentPrompts-- }, () => { concurrentPrompts-- })
+      }
+      return result
+    }
     const result = queue.then(async () => {
       active = command
       try {
