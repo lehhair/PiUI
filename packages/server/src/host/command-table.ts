@@ -91,6 +91,14 @@ function reqString(params: JsonObject, key: string): string {
   return value
 }
 
+function reqStringAllowEmpty(params: JsonObject, key: string): string {
+  const value = params[key]
+  if (typeof value !== "string") {
+    throw Object.assign(new Error(`params.${key} must be a string`), { code: "INVALID_REQUEST" })
+  }
+  return value
+}
+
 function optString(params: JsonObject, key: string): string | undefined {
   const value = params[key]
   if (value === undefined || value === null) return undefined
@@ -141,6 +149,18 @@ function fileSearchType(params: JsonObject): "file" | "directory" | undefined {
   const value = optString(params, "type")
   if (value === undefined || value === "file" || value === "directory") return value
   throw Object.assign(new Error("params.type must be file or directory"), { code: "INVALID_REQUEST" })
+}
+
+function fileType(params: JsonObject): "file" | "directory" {
+  const value = optString(params, "type")
+  if (value === "file" || value === "directory") return value
+  throw Object.assign(new Error("params.type must be file or directory"), { code: "INVALID_REQUEST" })
+}
+
+function fileEncoding(params: JsonObject): "utf-8" | "base64" | undefined {
+  const value = optString(params, "encoding")
+  if (value === undefined || value === "utf-8" || value === "base64") return value
+  throw Object.assign(new Error("params.encoding must be utf-8 or base64"), { code: "INVALID_REQUEST" })
 }
 
 export const HOST_CAPABILITIES = [
@@ -223,22 +243,22 @@ export const HOST_CAPABILITIES = [
     queue: "serialized",
     mutatesWorkspace: true,
     emits: ["workspace.files", "workspace.git"],
-    handler: (ctx, params) => writeFileContent(workspace(ctx, params), reqString(params, "path"), reqString(params, "content"), {
+    handler: (ctx, params) => writeFileContent(workspace(ctx, params), reqString(params, "path"), reqStringAllowEmpty(params, "content"), {
       ifMatch: optString(params, "ifMatch"),
-      encoding: optString(params, "encoding") === "base64" ? "base64" : "utf-8",
+      encoding: fileEncoding(params) ?? "utf-8",
     }) as Promise<JsonValue>,
   }),
   registerHostCapability({
     name: "files.create",
     domain: "files",
     description: "Create a workspace file or directory",
-    paramsSchema: objectSchema({ ...WORKSPACE_PATH, ...RELATIVE_PATH, type: { enum: ["file", "directory"] }, content: STRING, encoding: { enum: ["utf-8", "base64"] }, overwrite: BOOLEAN }, ["workspacePath", "path"]),
+    paramsSchema: objectSchema({ ...WORKSPACE_PATH, ...RELATIVE_PATH, type: { enum: ["file", "directory"] }, content: STRING, encoding: { enum: ["utf-8", "base64"] }, overwrite: BOOLEAN }, ["workspacePath", "path", "type"]),
     queue: "serialized",
     mutatesWorkspace: true,
     emits: ["workspace.files", "workspace.git"],
-    handler: (ctx, params) => createWorkspaceEntry(workspace(ctx, params), reqString(params, "path"), params.type === "directory" ? "directory" : "file", {
+    handler: (ctx, params) => createWorkspaceEntry(workspace(ctx, params), reqString(params, "path"), fileType(params), {
       content: optString(params, "content"),
-      encoding: optString(params, "encoding") === "base64" ? "base64" : "utf-8",
+      encoding: fileEncoding(params) ?? "utf-8",
       overwrite: optBoolean(params, "overwrite") === true,
     }) as Promise<JsonValue>,
   }),
