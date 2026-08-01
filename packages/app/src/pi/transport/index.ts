@@ -553,6 +553,12 @@ export async function waitHostCommand(commandId: string, signal?: AbortSignal, t
         code: record.command.error?.code,
       })
     }
+    if (status === 'cancelled' || status === 'unknown_after_crash') {
+      throw Object.assign(new Error(record.command.error?.message ?? `Command ${status}`), {
+        code: record.command.error?.code ?? 'SESSION_RUNTIME_CRASHED',
+        retryable: record.command.error?.retryable,
+      })
+    }
     if (Date.now() > deadline) throw new Error('Command timed out')
     await new Promise(resolve => setTimeout(resolve, 200))
   }
