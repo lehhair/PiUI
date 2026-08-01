@@ -249,6 +249,10 @@ class PiEventStream {
       }
       return
     }
+    if ('channel' in message && message.channel === 'control' && message.type === 'problem') {
+      this.closeSocket()
+      window.dispatchEvent(new CustomEvent('piui:event-stream-error', { detail: message.problem }))
+    }
   }
 
   private handleEvent(envelope: EventEnvelope): void {

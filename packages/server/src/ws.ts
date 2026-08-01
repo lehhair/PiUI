@@ -87,10 +87,18 @@ function attachConnection(ws: WebSocket, eventHub: EventHub, onSubscribe?: (send
     try {
       const message = JSON.parse(String(raw)) as EventClientMessage
       if (message.type === "ping") {
+        if (message.protocolVersion !== PROTOCOL_VERSION) {
+          rejectProtocol(ws)
+          return
+        }
         send(ws, { type: "pong", protocolVersion: PROTOCOL_VERSION, t: Date.now() })
         return
       }
-      if (message.type !== "subscribe" || message.protocolVersion !== PROTOCOL_VERSION) return
+      if (message.type !== "subscribe") return
+      if (message.protocolVersion !== PROTOCOL_VERSION) {
+        rejectProtocol(ws)
+        return
+      }
       if (!Array.isArray(message.streams) || message.streams.length > 256) return
 
       subscribed.clear()
@@ -135,4 +143,16 @@ function send(ws: WebSocket, message: EventServerMessage): void {
     return
   }
   ws.send(JSON.stringify(message))
+}
+
+function rejectProtocol(ws: WebSocket): void {
+  send(ws, {
+    channel: "control",
+    type: "problem",
+    problem: {
+      code: "PROTOCOL_VERSION_MISMATCH",
+      message: "event protocol version mismatch",
+    },
+  })
+  ws.close(1002, "protocol version mismatch")
 }
