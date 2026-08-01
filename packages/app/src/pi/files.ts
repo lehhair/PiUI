@@ -16,6 +16,7 @@ import {
   searchHostFilesText,
   writeHostFile,
 } from './transport/index.js'
+import { serverStore } from '../store/serverStore'
 import { resolveWorkspacePath } from './workspaces'
 
 /**
@@ -29,7 +30,7 @@ const rootDirectoryInflight = new Map<string, Promise<FileNodeDto[]>>()
 const rootDirectoryGeneration = new Map<string, number>()
 
 function getRootDirectoryCacheKey(directory?: string): string {
-  return directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''
+  return `${serverStore.getActiveServerId()}:${directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''}`
 }
 
 async function requireWorkspacePath(directory?: string): Promise<string> {

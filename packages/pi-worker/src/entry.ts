@@ -342,6 +342,16 @@ process.on("message", (value: unknown) => {
     })
     return
   }
+  if (!request.command || typeof request.command.type !== "string") {
+    send({
+      kind: "response",
+      id: request.id,
+      generation: workerGeneration,
+      ok: false,
+      error: { code: "INVALID_REQUEST", message: "malformed worker request" },
+    })
+    return
+  }
   if (request.command.type === "dispose") {
     send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
     setImmediate(() => void disposeAndExit())
