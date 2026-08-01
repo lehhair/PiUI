@@ -30,7 +30,14 @@ export function attachEventWebSocket(server: HttpServer, options: EventWebSocket
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1")
+    let url: URL
+    try {
+      url = new URL(req.url ?? "/", "http://127.0.0.1")
+    } catch {
+      socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+      socket.destroy()
+      return
+    }
     const wsToken = url.searchParams.get("token")
     const hasToken = requestHasValidToken(req, authToken) ||
       (authToken !== null && wsToken !== null && timingSafeTokenEquals(wsToken, authToken))
