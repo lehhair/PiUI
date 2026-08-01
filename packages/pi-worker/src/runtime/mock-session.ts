@@ -143,7 +143,9 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
   async deleteSession(_cwd: string, sessionFile: string): Promise<void> {
     const root = path.resolve(sessionsDir())
     const resolved = path.resolve(sessionFile)
-    if (!resolved.startsWith(root + path.sep)) {
+    const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+    const resolvedKey = process.platform === "win32" ? resolved.toLowerCase() : resolved
+    if (!resolvedKey.startsWith(rootKey + path.sep)) {
       throw Object.assign(new Error("session file is outside the mock session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
     }
     if (!existsSync(resolved)) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
