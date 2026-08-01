@@ -269,7 +269,12 @@ function describeRegistry(): PiRegistrySnapshot {
   }
 }
 
-const schedule = createWorkerCommandScheduler(execute)
+const schedule = createWorkerCommandScheduler(async command => {
+  if (command.sessionId && runtime && runtime.getSessionId() !== command.sessionId) {
+    throw Object.assign(new Error("Pi runtime no longer owns the requested session"), { code: "RUNTIME_REPLACED" })
+  }
+  return execute(command)
+})
 
 function toJsonObject(value: unknown): JsonObject {
   const json = JSON.parse(JSON.stringify(value)) as unknown
@@ -358,7 +363,7 @@ process.on("message", (value: unknown) => {
     setImmediate(() => void disposeAndExit())
     return
   }
-  void schedule(request.command).then(
+  void schedule({ ...request.command, sessionId: request.sessionId }).then(
     data => {
       send({ kind: "response", id: request.id, generation: workerGeneration, ok: true, data: toResponseData(data) })
     },

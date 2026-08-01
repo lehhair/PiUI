@@ -3,6 +3,7 @@ import type { JsonObject } from "@piui/protocol"
 export interface SchedulerCommand {
   type: string
   params?: JsonObject
+  sessionId?: string
 }
 
 const QUERY_COMMANDS = new Set([
