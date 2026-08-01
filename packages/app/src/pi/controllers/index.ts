@@ -159,10 +159,10 @@ export async function sendPiPrompt(
  * Compact the session context (native /compact). Serialized — submit, then
  * wait for completion so callers can resolve pending UI.
  */
-export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<void> {
+export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<JsonValue> {
   try {
     const submitted = await transport.compactPi(sessionId, customInstructions, signal)
-    await transport.waitHostCommand(submitted.id, signal)
+    return await transport.waitHostCommand(submitted.id, signal)
   } catch (error) {
     console.error('Failed to compact session:', error)
     throw error
@@ -298,7 +298,7 @@ export async function abortPiOperation(sessionId: string, signal?: AbortSignal):
  */
 export async function setPiModel(sessionId: string, provider: string, modelId: string, signal?: AbortSignal): Promise<void> {
   try {
-    await transport.setPiModel(sessionId, { provider, modelId }, signal)
+    await submitAndWait(() => transport.setPiModel(sessionId, { provider, modelId }, signal), signal)
   } catch (error) {
     console.error('Failed to set model:', error)
     throw error
@@ -310,7 +310,7 @@ export async function setPiModel(sessionId: string, provider: string, modelId: s
  */
 export async function setPiThinkingLevel(sessionId: string, level: string, signal?: AbortSignal): Promise<void> {
   try {
-    await transport.setPiThinkingLevel(sessionId, { level }, signal)
+    await submitAndWait(() => transport.setPiThinkingLevel(sessionId, { level }, signal), signal)
   } catch (error) {
     console.error('Failed to set thinking level:', error)
     throw error

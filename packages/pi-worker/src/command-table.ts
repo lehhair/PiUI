@@ -4,6 +4,7 @@ import * as P from "./params.js"
 
 export interface ProviderAuthGateway {
   listProviders(): Promise<JsonValue>
+  listModels(): Promise<JsonValue>
   start(providerId: string, authType: "api_key" | "oauth"): Promise<JsonValue>
   respond(flowId: string, promptId: string, value: string): void
   cancel(flowId: string): void
@@ -186,7 +187,10 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   "session.delete": async (ctx, p) => {
     await ctx.catalog.deleteSession(P.reqString(p, "cwd"), P.reqString(p, "sessionFile"))
   },
-  "models.list": async (ctx) => ctx.catalog.listModels(),
+  // Model visibility and provider credentials must come from the same
+  // runtime. The catalog creates a fresh credential-blind runtime, which
+  // loses temporary keys set through the provider auth UI after a refresh.
+  "models.list": async (ctx) => ctx.auth.listModels(),
   "settings.get": async (ctx, p) => ctx.catalog.getSettings(P.reqString(p, "cwd")),
   "settings.patch": async (ctx, p) =>
     ctx.catalog.patchSettings(P.reqString(p, "cwd"), P.optObject(p, "patch") ?? {}),

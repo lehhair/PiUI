@@ -45,6 +45,7 @@ import { useDirectory } from '../../contexts/useDirectory'
 import { useSessionContext } from '../../contexts/useSessionContext'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
+import { notificationStore } from '../../store/notificationStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import {
   getModelVariantPref,
@@ -311,15 +312,17 @@ export function PiChatPane({
   // session) fall back to the composer's persisted preferred model.
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
   const [homeModelKey, setHomeModelKey] = useState<string | null>(() => getPreferredModelKey())
+  const [pendingModelKey, setPendingModelKey] = useState<string | null>(null)
   const selectedModelKey =
-    currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : homeModelKey
+    pendingModelKey ?? (currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : homeModelKey)
 
   // Thinking level: variants filtered by the current model's support map,
   // current value from runtime state — the native home for this control.
   const currentModelObj = useMemo(
-    () => models.find(m => m.provider === currentModel?.provider && m.id === currentModel?.id)
+    () => models.find(m => `${m.provider}:${m.id}` === pendingModelKey)
+      ?? models.find(m => m.provider === currentModel?.provider && m.id === currentModel?.id)
       ?? (homeModelKey ? models.find(m => `${m.provider}:${m.id}` === homeModelKey) : undefined),
-    [models, currentModel?.provider, currentModel?.id, homeModelKey],
+    [models, pendingModelKey, currentModel?.provider, currentModel?.id, homeModelKey],
   )
   const thinkingLevels = useMemo(() => {
     if (!currentModelObj?.reasoning) return ['off']
@@ -331,11 +334,16 @@ export function PiChatPane({
   const [homeVariant, setHomeVariant] = useState<string | undefined>(() =>
     homeModelKey ? getModelVariantPref(homeModelKey) : undefined,
   )
+  const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    setPendingModelKey(null)
+    setPendingThinkingLevel(undefined)
+  }, [sessionId])
   useEffect(() => {
     if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
   }, [sessionId, homeModelKey])
   const thinkingLevel =
-    (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ?? homeVariant
+    pendingThinkingLevel ?? (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ?? homeVariant
 
   const handleVariantChange = useCallback(
     (variant: string | undefined) => {
@@ -345,7 +353,14 @@ export function PiChatPane({
         if (homeModelKey) saveModelVariantPref(homeModelKey, variant)
         return
       }
-      void setPiThinkingLevel(sessionId, variant).catch(() => undefined)
+      setPendingThinkingLevel(variant)
+      void setPiThinkingLevel(sessionId, variant)
+        .then(() => refreshPiSessionState(sessionId))
+        .then(() => setPendingThinkingLevel(current => current === variant ? undefined : current))
+        .catch(error => {
+          setPendingThinkingLevel(current => current === variant ? undefined : current)
+          uiErrorHandler('set thinking level', error)
+        })
     },
     [sessionId, homeModelKey],
   )
@@ -357,7 +372,15 @@ export function PiChatPane({
       setHomeModelKey(key)
       setPreferredModelKey(key)
       if (!sessionId) return
-      void setPiModel(sessionId, model.provider, model.id).catch(() => undefined)
+      setPendingModelKey(key)
+      setPendingThinkingLevel(undefined)
+      void setPiModel(sessionId, model.provider, model.id)
+        .then(() => refreshPiSessionState(sessionId))
+        .then(() => setPendingModelKey(current => current === key ? null : current))
+        .catch(error => {
+          setPendingModelKey(current => current === key ? null : current)
+          uiErrorHandler('set model', error)
+        })
     },
     [sessionId],
   )
@@ -734,9 +757,37 @@ export function PiChatPane({
       const sid = targetSessionId
 
       if (command === 'compact') {
-        void compactPiSession(sid, args || undefined).catch(error => {
-          console.error('Failed to compact session:', error)
-        })
+        void compactPiSession(sid, args || undefined)
+          .then(async result => {
+            const details = result && typeof result === 'object' && !Array.isArray(result)
+              ? result as Record<string, unknown>
+              : {}
+            const skipped = details.status === 'skipped'
+            const message = typeof details.message === 'string'
+              ? details.message
+              : skipped ? 'Nothing to compact' : 'Context compacted'
+            notificationStore.push(
+              'completed',
+              skipped ? 'Compact skipped' : 'Compact completed',
+              message,
+              sid,
+              currentDirectoryRef.current,
+            )
+            await Promise.all([
+              refreshPiBranch(sid),
+              refreshPiSessionState(sid),
+            ])
+          })
+          .catch(error => {
+            console.error('Failed to compact session:', error)
+            notificationStore.push(
+              'error',
+              'Compact failed',
+              error instanceof Error ? error.message : String(error),
+              sid,
+              currentDirectoryRef.current,
+            )
+          })
         return true
       }
 

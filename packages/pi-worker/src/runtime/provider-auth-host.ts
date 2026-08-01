@@ -28,6 +28,7 @@ export class ProviderAuthHost {
   private readonly listeners = new Set<(event: ProviderAuthEvent) => void>()
   private readonly flows = new Map<string, AuthFlow>()
   private readonly prompts = new Map<string, PendingPrompt>()
+  private readonly runtimeApiKeys = new Map<string, string>()
   private runtimePromise?: Promise<ModelRuntime>
 
   constructor(private readonly createRuntime?: () => Promise<ModelRuntime>) {}
@@ -57,6 +58,10 @@ export class ProviderAuthHost {
       configured: runtime.hasConfiguredAuth(provider.id),
       status: runtime.getProviderAuthStatus(provider.id),
     })))
+  }
+
+  async listModels(): Promise<JsonValue> {
+    return safeJson(await (await this.runtime()).getAvailable()) as JsonValue
   }
 
   async start(providerId: string, authType: "api_key" | "oauth"): Promise<JsonValue> {
@@ -138,10 +143,13 @@ export class ProviderAuthHost {
   }
 
   async setRuntimeApiKey(providerId: string, apiKey: string): Promise<void> {
-    await (await this.runtime()).setRuntimeApiKey(providerId, apiKey)
+    const runtime = await this.runtime()
+    this.runtimeApiKeys.set(providerId, apiKey)
+    await runtime.setRuntimeApiKey(providerId, apiKey)
   }
 
   async removeRuntimeApiKey(providerId: string): Promise<void> {
+    this.runtimeApiKeys.delete(providerId)
     await (await this.runtime()).removeRuntimeApiKey(providerId)
   }
 
@@ -161,12 +169,18 @@ export class ProviderAuthHost {
   dispose(): void {
     for (const flowId of this.flows.keys()) this.cancel(flowId)
     this.listeners.clear()
+    this.runtimeApiKeys.clear()
   }
 
   private async runtime(): Promise<ModelRuntime> {
     if (!this.runtimePromise) {
       const factory = this.createRuntime ?? (() => getLoadedSdk().sdk.ModelRuntime.create())
-      this.runtimePromise = factory().catch(error => {
+      this.runtimePromise = factory().then(async runtime => {
+        for (const [providerId, apiKey] of this.runtimeApiKeys) {
+          await runtime.setRuntimeApiKey(providerId, apiKey)
+        }
+        return runtime
+      }).catch(error => {
         this.runtimePromise = undefined
         throw error
       })

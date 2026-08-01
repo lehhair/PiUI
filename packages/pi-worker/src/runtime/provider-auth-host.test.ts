@@ -5,6 +5,16 @@ import type { ProviderAuthEvent } from "./provider-auth-host.js"
 import { ProviderAuthHost } from "./provider-auth-host.ts"
 
 describe("ProviderAuthHost", () => {
+  it("lists models from the credential-aware runtime", async () => {
+    const model = { id: "fixture-model", provider: "fixture" }
+    const runtime = {
+      getAvailable: async () => [model],
+    } as unknown as ModelRuntime
+
+    const models = await new ProviderAuthHost(async () => runtime).listModels()
+    assert.deepEqual(models, [model])
+  })
+
   it("keeps native model fields including maxTokens during inspection", async () => {
     const model = {
       id: "fixture-model",
@@ -61,6 +71,24 @@ describe("ProviderAuthHost", () => {
     const second = await host.refresh() as { errors: Record<string, { message: string }> }
     assert.equal(second.errors.fixture.message, "refresh failed 2")
     assert.equal(creates, 2)
+  })
+
+  it("reapplies temporary API keys when the runtime is replaced", async () => {
+    const applied: string[] = []
+    let creates = 0
+    const host = new ProviderAuthHost(async () => {
+      creates += 1
+      return {
+        setRuntimeApiKey: async (providerId: string, apiKey: string) => applied.push(`${creates}:${providerId}:${apiKey}`),
+        getAvailable: async () => [],
+      } as unknown as ModelRuntime
+    })
+
+    await host.setRuntimeApiKey("opencode", "public")
+    host.resetRuntime()
+    await host.listModels()
+
+    assert.deepEqual(applied, ["1:opencode:public", "2:opencode:public"])
   })
 
   it("bridges secret prompts without exposing the submitted value in events", async () => {

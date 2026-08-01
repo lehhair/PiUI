@@ -176,6 +176,10 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
     ? await RealPiSession.open(cwd, sessionFile, { hostActions })
     : await MockPiSession.open(cwd, sessionFile)
   runtime = opened
+  // Provider auth may have initialized a standalone runtime before the
+  // session opened. Rebind it to the session runtime; temporary API keys are
+  // retained by ProviderAuthHost and reapplied there.
+  providerAuth.resetRuntime()
   subscribeRuntimeEvents(opened)
   if (opened instanceof RealPiSession) await opened.initializeExtensions()
   await setRuntimeRegistryBaseline(opened)
