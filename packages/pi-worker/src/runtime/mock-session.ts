@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, promises as fs } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { realpath } from "node:fs/promises"
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from "../runtime.js"
@@ -248,6 +249,13 @@ export class MockPiSession implements SessionRuntime {
     if (sessionFile) {
       if (!existsSync(sessionFile)) {
         throw Object.assign(new Error("mock session file no longer exists"), { code: "SESSION_NOT_FOUND" })
+      }
+      const root = await realpath(sessionsDir())
+      const target = await realpath(path.resolve(sessionFile))
+      const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+      const targetKey = process.platform === "win32" ? target.toLowerCase() : target
+      if (!targetKey.startsWith(rootKey + path.sep)) {
+        throw Object.assign(new Error("mock session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
       }
       const { header, entries } = store.open(sessionFile)
       return new MockPiSession(sessionFile, cwd, header, entries)
