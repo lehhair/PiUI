@@ -95,9 +95,12 @@ function attachConnection(ws: WebSocket, eventHub: EventHub, onSubscribe?: (send
 
       subscribed.clear()
       const resync: Extract<EventServerMessage, { type: "resync_required" }>["streams"] = {}
+      const seenStreams = new Set<string>()
       for (const stream of message.streams) {
         if (!stream.id || !isEventStreamKind(stream.kind)) continue
         const key = eventStreamKey(stream)
+        if (seenStreams.has(key)) continue
+        seenStreams.add(key)
         subscribed.add(key)
         const cursor = message.cursors?.[key as keyof typeof message.cursors]
         const replay = eventHub.replaySince(stream, cursor)
