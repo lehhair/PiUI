@@ -320,6 +320,15 @@ class PiEventStream {
       case 'workspace.git':
         window.dispatchEvent(new CustomEvent('piui:workspace-git-updated', { detail: envelope.payload }))
         break
+      case 'registry.updated': {
+        const payload = envelope.payload as { sessionId?: string } | undefined
+        if (sessionId || payload?.sessionId) {
+          window.dispatchEvent(new CustomEvent('piui:registry-updated', {
+            detail: { sessionId: sessionId ?? payload?.sessionId },
+          }))
+        }
+        break
+      }
     }
   }
 
