@@ -4,6 +4,8 @@ import type { JsonObject, JsonValue } from "@piui/protocol"
 import { requireJsonValue } from "@piui/protocol"
 import { getLoadedSdk } from "../sdk-host.js"
 
+const AUTH_FLOW_TIMEOUT_MS = 5 * 60_000
+
 export type ProviderAuthEvent =
   | { type: "prompt"; flowId: string; promptId: string; providerId: string; prompt: JsonObject }
   | { type: "notification"; flowId: string; providerId: string; event: JsonValue }
@@ -22,6 +24,7 @@ interface AuthFlow {
   providerId: string
   controller: AbortController
   promptIds: Set<string>
+  timer?: NodeJS.Timeout
 }
 
 export class ProviderAuthHost {
@@ -76,6 +79,13 @@ export class ProviderAuthHost {
     const flowId = randomUUID()
     const flow: AuthFlow = { providerId, controller: new AbortController(), promptIds: new Set() }
     this.flows.set(flowId, flow)
+    flow.timer = setTimeout(() => {
+      // The SDK login never settled (network hang, no prompt). Abort it so
+      // the flow and its prompts are released instead of leaking forever.
+      flow.controller.abort()
+      this.finish(flowId, { type: "failed", flowId, providerId, message: "provider auth timed out" })
+    }, AUTH_FLOW_TIMEOUT_MS)
+    flow.timer.unref?.()
     void runtime.login(providerId, authType, {
       signal: flow.controller.signal,
       prompt: prompt => this.prompt(flowId, providerId, prompt),
@@ -103,6 +113,7 @@ export class ProviderAuthHost {
   cancel(flowId: string): void {
     const flow = this.flows.get(flowId)
     if (!flow) return
+    if (flow.timer) clearTimeout(flow.timer)
     flow.controller.abort()
     for (const promptId of flow.promptIds) {
       const prompt = this.prompts.get(promptId)
@@ -228,11 +239,16 @@ export class ProviderAuthHost {
   private finish(flowId: string, event: ProviderAuthEvent): void {
     const flow = this.flows.get(flowId)
     if (!flow) return
+    if (flow.timer) clearTimeout(flow.timer)
+    // Settle any still-pending prompts so awaiting callers (SDK login) don't
+    // hang forever when the flow completes on its own.
     for (const promptId of flow.promptIds) {
       const prompt = this.prompts.get(promptId)
       this.prompts.delete(promptId)
       prompt?.removeAbort?.()
+      prompt?.reject(Object.assign(new Error("provider auth flow ended"), { code: "EXTENSION_UI_CANCELLED" }))
     }
+    flow.promptIds.clear()
     this.flows.delete(flowId)
     this.emit(event)
   }
