@@ -26,6 +26,8 @@ export interface FileTreeNode extends FileNodeDto {
   children?: FileTreeNode[]
   isLoading?: boolean
   isLoaded?: boolean
+  /** last child load attempt failed; skip in auto-expand effect to avoid a retry loop */
+  loadFailed?: boolean
 }
 
 /** Explorer file status derived from native git.status / git.diff items. */
@@ -215,6 +217,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
         updateTreeNode(prev, parentPath, node => ({
           ...node,
           isLoading: true,
+          loadFailed: false,
         })),
       )
 
@@ -230,6 +233,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
             children: sorted.map(n => ({ ...n, absolute: toAbsoluteEntryPath(directory, n.path) })),
             isLoading: false,
             isLoaded: true,
+            loadFailed: false,
           })),
         )
       } catch {
@@ -240,6 +244,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
             ...node,
             isLoading: false,
             isLoaded: false,
+            loadFailed: true,
           })),
         )
       }
@@ -545,7 +550,7 @@ function collectPendingExpandedDirectoryPaths(tree: FileTreeNode[], expandedPath
       if (node.type !== 'directory') continue
 
       if (expandedPaths.has(node.path)) {
-        if (!node.isLoaded && !node.isLoading) {
+        if (!node.isLoaded && !node.isLoading && !node.loadFailed) {
           pending.push(node.path)
           continue
         }
