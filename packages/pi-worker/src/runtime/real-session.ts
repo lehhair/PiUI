@@ -85,7 +85,11 @@ function extensionBindings(
           runtime.switchSession(sessionPath, options)),
       reload,
     },
-    abortHandler: () => { void runtime.session.abort() },
+    abortHandler: () => {
+      void runtime.session.abort().catch(error => {
+        console.error(`[piui-worker] session abort failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    },
     shutdownHandler: () => hostActions
       ? hostActions.requestShutdown(runtime.session.sessionManager.getSessionId())
       : unsupportedExtensionHostAction("shutdown"),
@@ -288,6 +292,9 @@ export class RealPiSession implements SessionRuntime {
       this.emitActivityIfChanged()
       if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
         queueMicrotask(() => {
+          // dispose() nulls sessionUnsub before tearing down the runtime; skip
+          // the deferred bookkeeping if we were disposed in between.
+          if (this.sessionUnsub === null) return
           this.clearPersistedLiveMessage()
           this.emitHeadIfChanged()
           this.emitActivityIfChanged()
