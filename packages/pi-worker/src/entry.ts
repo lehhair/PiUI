@@ -181,8 +181,16 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
   // retained by ProviderAuthHost and reapplied there.
   providerAuth.resetRuntime()
   subscribeRuntimeEvents(opened)
-  if (opened instanceof RealPiSession) await opened.initializeExtensions()
-  await setRuntimeRegistryBaseline(opened)
+  try {
+    if (opened instanceof RealPiSession) await opened.initializeExtensions()
+    await setRuntimeRegistryBaseline(opened)
+  } catch (error) {
+    runtimeUnsubs.splice(0).forEach(unsub => unsub())
+    runtime = undefined
+    runtimeRegistryDigest = undefined
+    await opened.dispose()
+    throw error
+  }
   return {
     sessionId: opened.getSessionId(),
     sessionFile: opened.getSessionFile() ?? null,
