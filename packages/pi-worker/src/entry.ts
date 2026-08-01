@@ -386,9 +386,18 @@ process.on("disconnect", () => {
     pending.reject(new Error("PiUI host disconnected"))
   }
   pendingHostCalls.clear()
-  unsubscribeProviderAuth()
-  providerAuth.dispose()
-  void closeRuntime().finally(() => process.exit(0))
+  void (async () => {
+    let exitCode = 0
+    try {
+      unsubscribeProviderAuth()
+      providerAuth.dispose()
+      await closeRuntime()
+    } catch (error) {
+      console.error(`[piui-worker] disconnect cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+      exitCode = 1
+    }
+    process.exit(exitCode)
+  })()
 })
 
 const loaded = await loadPiSdk({
