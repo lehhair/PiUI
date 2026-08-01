@@ -58,6 +58,12 @@ export function optPositiveInteger(params: JsonObject, key: string): number | un
   return value
 }
 
+export function reqNonNegativeInteger(params: JsonObject, key: string): number {
+  const value = reqNumber(params, key)
+  if (!Number.isInteger(value) || value < 0) throw invalid(`params.${key} must be an integer >= 0`)
+  return value
+}
+
 export function optStringArray(params: JsonObject, key: string): string[] | undefined {
   const value = params[key]
   if (value === undefined || value === null) return undefined

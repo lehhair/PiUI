@@ -169,19 +169,19 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     ctx.requireRuntime().getEntriesPage(
       P.optString(p, "cursor"),
       P.optPositiveInteger(p, "limit") ?? 200,
-      P.optNumber(p, "maxBytes") ?? 4 * 1024 * 1024,
+      P.optPositiveInteger(p, "maxBytes") ?? 4 * 1024 * 1024,
     ),
   "branch.get": async (ctx, p) =>
     ctx.requireRuntime().getBranchPage(
       P.optString(p, "cursor"),
       P.optPositiveInteger(p, "limit") ?? 200,
-      P.optNumber(p, "maxBytes") ?? 4 * 1024 * 1024,
+      P.optPositiveInteger(p, "maxBytes") ?? 4 * 1024 * 1024,
     ),
   "tree.get": async (ctx) => ctx.requireRuntime().getTree(),
   "registry.get": async (ctx) => ctx.requireRuntime().getRegistry(),
   "skills.list": async (ctx) => ctx.requireRuntime().listSkills(),
   "attachment.get": async (ctx, p) =>
-    ctx.requireRuntime().getAttachment(P.reqString(p, "entryId"), P.reqNumber(p, "blockIndex")),
+    ctx.requireRuntime().getAttachment(P.reqString(p, "entryId"), P.reqNonNegativeInteger(p, "blockIndex")),
 
   "session.list": async (ctx, p) => ctx.catalog.listSessions(P.reqString(p, "cwd")),
   "session.listAll": async (ctx) => ctx.catalog.listAllSessions(),
