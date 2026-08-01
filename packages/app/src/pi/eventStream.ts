@@ -193,10 +193,15 @@ class PiEventStream {
       this.handleRaw(String(e.data))
     }
     ws.onclose = () => {
+      if (this.ws !== ws) return
       this.clearPing()
-      if (this.ws === ws) this.ws = null
+      this.ws = null
       if (this.refCounts.size > 0 || getTrackedManagementProviders().length > 0) {
-        this.reconnectTimer = setTimeout(() => this.openSocket(), RECONNECT_DELAY_MS)
+        if (this.reconnectTimer) return
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null
+          if (!this.ws) this.openSocket()
+        }, RECONNECT_DELAY_MS)
       }
     }
     ws.onerror = () => {
