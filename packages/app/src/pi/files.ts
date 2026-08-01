@@ -210,6 +210,15 @@ export function invalidateWorkspaceFileCaches(directory?: string): void {
   rootDirectoryGeneration.set(key, (rootDirectoryGeneration.get(key) ?? 0) + 1)
 }
 
+export function clearAllWorkspaceFileCaches(): void {
+  const keys = new Set([...rootDirectoryCache.keys(), ...rootDirectoryInflight.keys(), ...rootDirectoryGeneration.keys()])
+  for (const key of keys) {
+    rootDirectoryGeneration.set(key, (rootDirectoryGeneration.get(key) ?? 0) + 1)
+  }
+  rootDirectoryCache.clear()
+  rootDirectoryInflight.clear()
+}
+
 export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<WorkspaceTextSearchMatch[]> {
   const workspacePath = await requireWorkspacePath(directory)
   return signal

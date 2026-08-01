@@ -6,9 +6,11 @@ import { piBranchStore, piModelsStore, piSessionStateStore } from "./state/index
 import { piSessionInfoStore } from "./piSessionInfoStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { resetWorkspaceResolutionCache } from "./workspaces"
+import { clearAllWorkspaceFileCaches } from "./files"
 import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
+import { activeSessionStore } from "../store/activeSessionStore"
 
 export interface PiBackendBootstrapResult {
   available: boolean
@@ -76,7 +78,9 @@ export function installPiBackendServerSwitch(): void {
     piModelsStore.clear()
     piSessionInfoStore.clear()
     extensionUiStore.reset()
+    activeSessionStore.reset()
     resetWorkspaceResolutionCache()
+    clearAllWorkspaceFileCaches()
     resetManagementEvents()
     setPiBackendState({ status: "booting" })
     piEventStream.disconnectAll()
