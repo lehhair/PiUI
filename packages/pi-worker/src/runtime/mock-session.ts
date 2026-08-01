@@ -815,6 +815,8 @@ export class MockPiSession implements SessionRuntime {
   async setExtensionEditorState(): Promise<void> {}
 
   async dispose(): Promise<void> {
+    this.streaming = false
+    this.compacting = false
     this.clearTimers()
     this.piEventListeners.clear()
     this.headListeners.clear()
