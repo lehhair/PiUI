@@ -54,7 +54,7 @@ interface ServerClockCalibration {
 }
 
 type Listener = () => void
-export type ServerChangeReason = 'server-switch' | 'local-runtime-url'
+export type ServerChangeReason = 'server-switch' | 'local-runtime-url' | 'server-config-updated'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -365,6 +365,8 @@ class ServerStore {
     if (index === -1) return false
 
     const server = this.servers[index]
+    const endpointChanged = updates.url !== undefined && updates.url.replace(/\/+$/, '') !== server.url ||
+      updates.token !== undefined && updates.token !== server.token
     this.servers[index] = {
       ...server,
       ...updates,
@@ -376,6 +378,9 @@ class ServerStore {
     }
     this.saveToStorage()
     this.notify()
+    if (id === this.getActiveServerId() && endpointChanged) {
+      this.notifyServerChange(id, 'server-config-updated')
+    }
     return true
   }
 
@@ -400,6 +405,7 @@ class ServerStore {
     // 不能删除默认服务器
     const server = this.servers.find(s => s.id === id)
     if (!server || server.isDefault) return false
+    const wasActive = this.activeServerId === id
 
     this.servers = this.servers.filter(s => s.id !== id)
     this.healthMap.delete(id)
@@ -413,6 +419,9 @@ class ServerStore {
 
     this.saveToStorage()
     this.notify()
+    if (wasActive) {
+      this.notifyServerChange(this.activeServerId ?? this.DEFAULT_SERVER_ID, 'server-switch')
+    }
     return true
   }
 

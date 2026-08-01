@@ -388,6 +388,16 @@ class ActiveSessionStore {
     this.notify()
   }
 
+  reset() {
+    this.state = { statusMap: {}, initialized: false }
+    this.sessionMeta.clear()
+    this.pendingRequests.clear()
+    this.deferredIdleSessions.clear()
+    this.cachedBusySessions = []
+    this.cachedBusyCount = 0
+    this.notify()
+  }
+
   // ============================================
   // Session 元信息管理
   // ============================================
