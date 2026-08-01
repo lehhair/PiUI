@@ -34,7 +34,15 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load() }, 0)
-    return () => window.clearTimeout(timer)
+    const onRegistryUpdated = (event: Event) => {
+      const updatedSessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
+      if (updatedSessionId === sessionId) void load()
+    }
+    window.addEventListener('piui:registry-updated', onRegistryUpdated)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('piui:registry-updated', onRegistryUpdated)
+    }
   }, [load, resourceRevision])
 
   const run = async (key: string, action: () => Promise<void>) => {
