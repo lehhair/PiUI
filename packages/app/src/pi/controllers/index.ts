@@ -4,6 +4,7 @@ import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
+import { serverStore } from '../../store/serverStore'
 
 /**
  * Load a session's native slash commands (extension commands, prompt
@@ -26,7 +27,9 @@ export async function loadPiSessionTools(sessionId: string, signal?: AbortSignal
  * Load all Pi sessions globally.
  */
 export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   const sessions = await transport.listAllPiSessions(signal)
+  if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
   piSessionInfoStore.replaceAll(sessions)
   return sessions
 }
@@ -35,7 +38,9 @@ export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[
  * Load Pi sessions for specific working directory.
  */
 export async function loadPiSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<SessionInfo[]> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   const sessions = await transport.listPiSessions({ cwd }, signal)
+  if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
   piSessionInfoStore.replaceForCwd(cwd, sessions)
   return sessions
 }
@@ -67,6 +72,7 @@ export async function openPiSession(cwd: string, sessionFile?: string, signal?: 
  * Load session data (state + branch) for active session.
  */
 export async function loadPiSessionData(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   try {
     // Load both in parallel
     const [state, branch] = await Promise.all([
@@ -74,9 +80,11 @@ export async function loadPiSessionData(sessionId: string, signal?: AbortSignal)
       transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
     ])
 
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) return
     piSessionStateStore.setState(sessionId, state as JsonObject)
     piBranchStore.setData(sessionId, branch)
   } catch (error) {
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) return
     console.error('Failed to load session data:', error)
     piSessionStateStore.setError(sessionId, error as Error)
     piBranchStore.setError(sessionId, error as Error)
@@ -99,6 +107,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
   if (!currentBranch.hasMore || !currentBranch.beforeCursor) {
     return // No more data
   }
+  const serverGeneration = serverStore.getActiveServerGeneration()
 
   try {
     const olderPage = await transport.getPiBranchPage(
@@ -106,6 +115,8 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
       { cursor: currentBranch.beforeCursor, limit: 200 },
       signal,
     )
+
+    if (serverStore.getActiveServerGeneration() !== serverGeneration || piBranchStore.getData(sessionId) !== currentBranch) return
 
     // Prepend older items; keep latest head/hasMore/cursor from the new page
     piBranchStore.setData(sessionId, {
@@ -124,7 +135,9 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
  * Used by the event stream when head revision changes.
  */
 export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   const latest = await transport.getPiBranchPage(sessionId, { limit: 200 }, signal)
+  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
   piBranchStore.setData(sessionId, mergeLatestBranchPage(piBranchStore.getData(sessionId), latest))
 }
 
@@ -133,7 +146,9 @@ export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): 
  * Used by the event stream when state-only events arrive.
  */
 export async function refreshPiSessionState(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   const state = await transport.getPiSessionState(sessionId, signal)
+  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
   piSessionStateStore.setState(sessionId, state as JsonObject)
 }
 
@@ -444,13 +459,16 @@ export async function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at
  * Load available models from the Pi model runtime into the models store.
  */
 export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
   piModelsStore.setLoading(true)
   try {
     const result = await transport.listPiModels(signal)
     const models = (Array.isArray(result) ? result : []) as unknown as Model<any>[]
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) return models
     piModelsStore.setModels(models)
     return models
   } catch (error) {
+    if (serverStore.getActiveServerGeneration() !== serverGeneration) throw error
     piModelsStore.setError(error as Error)
     throw error
   }
