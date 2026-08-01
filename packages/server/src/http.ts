@@ -284,6 +284,8 @@ function statusForError(error: unknown): number {
     case "HOST_CALL_TIMEOUT":
       return 504
     case "REGISTRY_UNAVAILABLE":
+    case "DRIVER_UNAVAILABLE":
+    case "WORKER_RESULT_UNKNOWN":
       return 503
     case "METHOD_NOT_ALLOWED":
       return 405
@@ -291,6 +293,8 @@ function statusForError(error: unknown): number {
     case "COMMAND_ALREADY_ACCEPTED":
     case "FILE_CONFLICT":
     case "SESSION_CONFLICT":
+    case "SESSION_IDENTITY_MISMATCH":
+    case "RUNTIME_REPLACED":
     case "STALE_REVISION":
       return 409
     case "CAPABILITY_DISABLED":
