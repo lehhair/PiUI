@@ -50,6 +50,14 @@ export function optNumber(params: JsonObject, key: string): number | undefined {
   return value
 }
 
+/** Optional positive integer (>= 1); matches schemas declaring minimum: 1. */
+export function optPositiveInteger(params: JsonObject, key: string): number | undefined {
+  const value = optNumber(params, key)
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || value < 1) throw invalid(`params.${key} must be an integer >= 1`)
+  return value
+}
+
 export function optStringArray(params: JsonObject, key: string): string[] | undefined {
   const value = params[key]
   if (value === undefined || value === null) return undefined

@@ -95,7 +95,11 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     const target = resolveUserPath(sessionFile)
     const root = path.resolve(configuredSessionDir(cwd, this.dir()))
     const resolved = path.resolve(target)
-    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    // Windows paths compare case-insensitively; a legal path differing only
+    // in case must not be rejected (fails closed, but still a false 403).
+    const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+    const resolvedKey = process.platform === "win32" ? resolved.toLowerCase() : resolved
+    if (resolvedKey !== rootKey && !resolvedKey.startsWith(rootKey + path.sep)) {
       throw Object.assign(new Error("session file is outside the Pi session directory"), {
         code: "PATH_OUTSIDE_WORKSPACE",
       })

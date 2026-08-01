@@ -167,13 +167,13 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   "entries.get": async (ctx, p) =>
     ctx.requireRuntime().getEntriesPage(
       P.optString(p, "cursor"),
-      P.optNumber(p, "limit") ?? 200,
+      P.optPositiveInteger(p, "limit") ?? 200,
       P.optNumber(p, "maxBytes") ?? 4 * 1024 * 1024,
     ),
   "branch.get": async (ctx, p) =>
     ctx.requireRuntime().getBranchPage(
       P.optString(p, "cursor"),
-      P.optNumber(p, "limit") ?? 200,
+      P.optPositiveInteger(p, "limit") ?? 200,
       P.optNumber(p, "maxBytes") ?? 4 * 1024 * 1024,
     ),
   "tree.get": async (ctx) => ctx.requireRuntime().getTree(),
