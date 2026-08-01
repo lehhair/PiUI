@@ -209,6 +209,32 @@ export type ThemeBackup = ThemeState
 // Storage Keys
 // ============================================
 
+// 隐私模式 / 禁用存储下 localStorage 访问会抛 SecurityError，
+// 统一静默兜底避免整个 store 初始化崩溃。
+function storageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 配额不足或存储不可用，忽略
+  }
+}
+
+function storageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 存储不可用，忽略
+  }
+}
+
 const STORAGE_KEY_PRESET = 'piui-theme-preset'
 const STORAGE_KEY_COLOR_MODE = 'piui-theme-mode'
 const STORAGE_KEY_CUSTOM_CSS = 'piui-theme-custom-css'
@@ -277,21 +303,21 @@ class ThemeStore {
   private listeners = new Set<() => void>()
 
   constructor() {
-    const savedPreset = localStorage.getItem(STORAGE_KEY_PRESET) || DEFAULT_THEME_ID
+    const savedPreset = storageGet(STORAGE_KEY_PRESET) || DEFAULT_THEME_ID
     const normalizedPreset = getThemePreset(savedPreset) ? savedPreset : DEFAULT_THEME_ID
-    const savedMode = (localStorage.getItem(STORAGE_KEY_COLOR_MODE) as ColorMode) || 'system'
-    const savedCSS = localStorage.getItem(STORAGE_KEY_CUSTOM_CSS) || ''
-    const customCSSSnippets = parseCustomCSSSnippets(localStorage.getItem(STORAGE_KEY_CUSTOM_CSS_SNIPPETS))
-    const savedActiveCustomCSSSnippetId = localStorage.getItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
+    const savedMode = (storageGet(STORAGE_KEY_COLOR_MODE) as ColorMode) || 'system'
+    const savedCSS = storageGet(STORAGE_KEY_CUSTOM_CSS) || ''
+    const customCSSSnippets = parseCustomCSSSnippets(storageGet(STORAGE_KEY_CUSTOM_CSS_SNIPPETS))
+    const savedActiveCustomCSSSnippetId = storageGet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
     const activeCustomCSSSnippetId = customCSSSnippets.some(item => item.id === savedActiveCustomCSSSnippetId)
       ? savedActiveCustomCSSSnippetId
       : null
-    const savedCollapse = localStorage.getItem(STORAGE_KEY_COLLAPSE_USER_MESSAGES)
+    const savedCollapse = storageGet(STORAGE_KEY_COLLAPSE_USER_MESSAGES)
     const collapseUserMessages = savedCollapse === null ? true : savedCollapse === 'true'
-    const savedRenderUserMarkdown = localStorage.getItem(STORAGE_KEY_RENDER_USER_MARKDOWN)
+    const savedRenderUserMarkdown = storageGet(STORAGE_KEY_RENDER_USER_MARKDOWN)
     const renderUserMarkdown =
       savedRenderUserMarkdown === null ? DEFAULT_RENDER_USER_MARKDOWN : savedRenderUserMarkdown === 'true'
-    const savedReasoningDisplay = localStorage.getItem(STORAGE_KEY_REASONING_DISPLAY_MODE)
+    const savedReasoningDisplay = storageGet(STORAGE_KEY_REASONING_DISPLAY_MODE)
     const reasoningDisplayMode: ReasoningDisplayMode =
       savedReasoningDisplay === 'italic' || savedReasoningDisplay === 'markdown'
         ? savedReasoningDisplay
@@ -299,95 +325,95 @@ class ThemeStore {
 
     let stepFinishDisplay = DEFAULT_STEP_FINISH_DISPLAY
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_STEP_FINISH_DISPLAY)
+      const saved = storageGet(STORAGE_KEY_STEP_FINISH_DISPLAY)
       if (saved) stepFinishDisplay = { ...DEFAULT_STEP_FINISH_DISPLAY, ...JSON.parse(saved) }
     } catch {
       /* ignore */
     }
 
-    const savedCompletedAtFormat = localStorage.getItem(STORAGE_KEY_COMPLETED_AT_FORMAT)
+    const savedCompletedAtFormat = storageGet(STORAGE_KEY_COMPLETED_AT_FORMAT)
     const completedAtFormat: CompletedAtFormat =
       savedCompletedAtFormat === 'dateTime' ? 'dateTime' : DEFAULT_COMPLETED_AT_FORMAT
 
-    const savedWideMode = localStorage.getItem(STORAGE_KEY_WIDE_MODE) === 'true'
-    const savedDiffStyle = localStorage.getItem(STORAGE_KEY_DIFF_STYLE) as DiffStyle | null
+    const savedWideMode = storageGet(STORAGE_KEY_WIDE_MODE) === 'true'
+    const savedDiffStyle = storageGet(STORAGE_KEY_DIFF_STYLE) as DiffStyle | null
     const diffStyle: DiffStyle = savedDiffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE
 
-    const savedDescriptiveToolSteps = localStorage.getItem(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS)
+    const savedDescriptiveToolSteps = storageGet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS)
     const descriptiveToolSteps =
       savedDescriptiveToolSteps === null ? DEFAULT_DESCRIPTIVE_TOOL_STEPS : savedDescriptiveToolSteps === 'true'
 
-    const savedInlineToolRequests = localStorage.getItem(STORAGE_KEY_INLINE_TOOL_REQUESTS)
+    const savedInlineToolRequests = storageGet(STORAGE_KEY_INLINE_TOOL_REQUESTS)
     const inlineToolRequests =
       savedInlineToolRequests === null ? DEFAULT_INLINE_TOOL_REQUESTS : savedInlineToolRequests === 'true'
 
-    const savedCodeWordWrap = localStorage.getItem(STORAGE_KEY_CODE_WORD_WRAP)
+    const savedCodeWordWrap = storageGet(STORAGE_KEY_CODE_WORD_WRAP)
     const codeWordWrap = savedCodeWordWrap === 'true' ? true : DEFAULT_CODE_WORD_WRAP
 
-    const savedFontScale = localStorage.getItem(STORAGE_KEY_FONT_SCALE)
+    const savedFontScale = storageGet(STORAGE_KEY_FONT_SCALE)
     const uiFontScale = savedFontScale !== null ? clampFontScale(Number(savedFontScale)) : DEFAULT_UI_FONT_SCALE
 
-    const savedCodeFontScale = localStorage.getItem(STORAGE_KEY_CODE_FONT_SCALE)
+    const savedCodeFontScale = storageGet(STORAGE_KEY_CODE_FONT_SCALE)
     const codeFontScale =
       savedCodeFontScale !== null ? clampFontScale(Number(savedCodeFontScale)) : DEFAULT_CODE_FONT_SCALE
 
-    const savedToolCardStyle = localStorage.getItem(STORAGE_KEY_TOOL_CARD_STYLE) as ToolCardStyle | null
+    const savedToolCardStyle = storageGet(STORAGE_KEY_TOOL_CARD_STYLE) as ToolCardStyle | null
     const toolCardStyle: ToolCardStyle =
       savedToolCardStyle === 'classic' || savedToolCardStyle === 'compact'
         ? savedToolCardStyle
         : DEFAULT_TOOL_CARD_STYLE
 
-    const savedImmersiveMode = localStorage.getItem(STORAGE_KEY_IMMERSIVE_MODE)
+    const savedImmersiveMode = storageGet(STORAGE_KEY_IMMERSIVE_MODE)
     const immersiveMode = savedImmersiveMode === null ? DEFAULT_IMMERSIVE_MODE : savedImmersiveMode === 'true'
 
-    const savedCompactInlinePermission = localStorage.getItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION)
+    const savedCompactInlinePermission = storageGet(STORAGE_KEY_COMPACT_INLINE_PERMISSION)
     const compactInlinePermission =
       savedCompactInlinePermission === null
         ? DEFAULT_COMPACT_INLINE_PERMISSION
         : savedCompactInlinePermission === 'true'
 
-    const savedGlassEffect = localStorage.getItem(STORAGE_KEY_GLASS_EFFECT)
+    const savedGlassEffect = storageGet(STORAGE_KEY_GLASS_EFFECT)
     const glassEffect = savedGlassEffect === null ? DEFAULT_GLASS_EFFECT : savedGlassEffect === 'true'
 
-    const savedQueueFollowupMessages = localStorage.getItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES)
+    const savedQueueFollowupMessages = storageGet(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES)
     const queueFollowupMessages =
       savedQueueFollowupMessages === null ? DEFAULT_QUEUE_FOLLOWUP_MESSAGES : savedQueueFollowupMessages === 'true'
 
 
-    const savedExternalFileDropMode = localStorage.getItem(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE)
+    const savedExternalFileDropMode = storageGet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE)
     const externalFileDropMode: ExternalFileDropMode =
       savedExternalFileDropMode === 'mention' ? 'mention' : DEFAULT_EXTERNAL_FILE_DROP_MODE
 
-    const savedOutlineCurrentHighlight = localStorage.getItem(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT)
+    const savedOutlineCurrentHighlight = storageGet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT)
     const outlineCurrentHighlight =
       savedOutlineCurrentHighlight === null
         ? DEFAULT_OUTLINE_CURRENT_HIGHLIGHT
         : savedOutlineCurrentHighlight === 'true'
 
-    const savedActionsOnLatestAssistantOnly = localStorage.getItem(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY)
+    const savedActionsOnLatestAssistantOnly = storageGet(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY)
     const actionsOnLatestAssistantOnly =
       savedActionsOnLatestAssistantOnly === null
         ? DEFAULT_ACTIONS_ON_LATEST_ASSISTANT_ONLY
         : savedActionsOnLatestAssistantOnly === 'true'
 
-    const savedDesktopCollapsedInputDock = localStorage.getItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK)
+    const savedDesktopCollapsedInputDock = storageGet(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK)
     const desktopCollapsedInputDock =
       savedDesktopCollapsedInputDock === null
         ? DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK
         : savedDesktopCollapsedInputDock === 'true'
 
-    const savedProcessCollapseEnabled = localStorage.getItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
+    const savedProcessCollapseEnabled = storageGet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
     const processCollapseEnabled =
       savedProcessCollapseEnabled === null
         ? DEFAULT_PROCESS_COLLAPSE_ENABLED
         : savedProcessCollapseEnabled === 'true'
 
     const codeBlockThemeLight = normalizeCodeBlockTheme(
-      localStorage.getItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT) || DEFAULT_CODE_BLOCK_THEME_LIGHT,
+      storageGet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT) || DEFAULT_CODE_BLOCK_THEME_LIGHT,
       DEFAULT_CODE_BLOCK_THEME_LIGHT,
     )
     const codeBlockThemeDark = normalizeCodeBlockTheme(
-      localStorage.getItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK) || DEFAULT_CODE_BLOCK_THEME_DARK,
+      storageGet(STORAGE_KEY_CODE_BLOCK_THEME_DARK) || DEFAULT_CODE_BLOCK_THEME_DARK,
       DEFAULT_CODE_BLOCK_THEME_DARK,
     )
 
@@ -554,7 +580,7 @@ class ThemeStore {
   setPreset(id: string) {
     if (this.state.presetId === id) return
     this.state = { ...this.state, presetId: id }
-    localStorage.setItem(STORAGE_KEY_PRESET, id)
+    storageSet(STORAGE_KEY_PRESET, id)
     this.applyTheme()
     this.emit()
   }
@@ -562,14 +588,14 @@ class ThemeStore {
   setColorMode(mode: ColorMode) {
     if (this.state.colorMode === mode) return
     this.state = { ...this.state, colorMode: mode }
-    localStorage.setItem(STORAGE_KEY_COLOR_MODE, mode)
+    storageSet(STORAGE_KEY_COLOR_MODE, mode)
     this.applyTheme()
     this.emit()
   }
 
   setCustomCSS(css: string) {
     this.state = { ...this.state, customCSS: css }
-    localStorage.setItem(STORAGE_KEY_CUSTOM_CSS, css)
+    storageSet(STORAGE_KEY_CUSTOM_CSS, css)
     this.applyCustomCSS()
     this.emit()
   }
@@ -587,7 +613,7 @@ class ThemeStore {
     const customCSSSnippets = [...this.state.customCSSSnippets, snippet]
     this.state = { ...this.state, customCSSSnippets, activeCustomCSSSnippetId: snippet.id }
     this.persistCustomCSSSnippets(customCSSSnippets)
-    localStorage.setItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, snippet.id)
+    storageSet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, snippet.id)
     this.emit()
     return snippet
   }
@@ -611,9 +637,9 @@ class ThemeStore {
     this.persistCustomCSSSnippets(customCSSSnippets)
 
     if (activeCustomCSSSnippetId) {
-      localStorage.setItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, activeCustomCSSSnippetId)
+      storageSet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, activeCustomCSSSnippetId)
     } else {
-      localStorage.removeItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
+      storageRemove(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
     }
 
     this.emit()
@@ -629,8 +655,8 @@ class ThemeStore {
       activeCustomCSSSnippetId: id,
     }
 
-    localStorage.setItem(STORAGE_KEY_CUSTOM_CSS, snippet.css)
-    localStorage.setItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, id)
+    storageSet(STORAGE_KEY_CUSTOM_CSS, snippet.css)
+    storageSet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, id)
     this.applyCustomCSS()
     this.emit()
   }
@@ -638,49 +664,49 @@ class ThemeStore {
   clearActiveCustomCSSSnippet() {
     if (this.state.activeCustomCSSSnippetId === null) return
     this.state = { ...this.state, activeCustomCSSSnippetId: null }
-    localStorage.removeItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
+    storageRemove(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
     this.emit()
   }
 
   setCollapseUserMessages(enabled: boolean) {
     if (this.state.collapseUserMessages === enabled) return
     this.state = { ...this.state, collapseUserMessages: enabled }
-    localStorage.setItem(STORAGE_KEY_COLLAPSE_USER_MESSAGES, String(enabled))
+    storageSet(STORAGE_KEY_COLLAPSE_USER_MESSAGES, String(enabled))
     this.emit()
   }
 
   setRenderUserMarkdown(enabled: boolean) {
     if (this.state.renderUserMarkdown === enabled) return
     this.state = { ...this.state, renderUserMarkdown: enabled }
-    localStorage.setItem(STORAGE_KEY_RENDER_USER_MARKDOWN, String(enabled))
+    storageSet(STORAGE_KEY_RENDER_USER_MARKDOWN, String(enabled))
     this.emit()
   }
 
   setStepFinishDisplay(display: Partial<StepFinishDisplay>) {
     const next = { ...this.state.stepFinishDisplay, ...display }
     this.state = { ...this.state, stepFinishDisplay: next }
-    localStorage.setItem(STORAGE_KEY_STEP_FINISH_DISPLAY, JSON.stringify(next))
+    storageSet(STORAGE_KEY_STEP_FINISH_DISPLAY, JSON.stringify(next))
     this.emit()
   }
 
   setCompletedAtFormat(format: CompletedAtFormat) {
     if (this.state.completedAtFormat === format) return
     this.state = { ...this.state, completedAtFormat: format }
-    localStorage.setItem(STORAGE_KEY_COMPLETED_AT_FORMAT, format)
+    storageSet(STORAGE_KEY_COMPLETED_AT_FORMAT, format)
     this.emit()
   }
 
   setReasoningDisplayMode(mode: ReasoningDisplayMode) {
     if (this.state.reasoningDisplayMode === mode) return
     this.state = { ...this.state, reasoningDisplayMode: mode }
-    localStorage.setItem(STORAGE_KEY_REASONING_DISPLAY_MODE, mode)
+    storageSet(STORAGE_KEY_REASONING_DISPLAY_MODE, mode)
     this.emit()
   }
 
   setWideMode(enabled: boolean) {
     if (this.state.wideMode === enabled) return
     this.state = { ...this.state, wideMode: enabled }
-    localStorage.setItem(STORAGE_KEY_WIDE_MODE, String(enabled))
+    storageSet(STORAGE_KEY_WIDE_MODE, String(enabled))
     this.emit()
   }
 
@@ -691,28 +717,28 @@ class ThemeStore {
   setDiffStyle(style: DiffStyle) {
     if (this.state.diffStyle === style) return
     this.state = { ...this.state, diffStyle: style }
-    localStorage.setItem(STORAGE_KEY_DIFF_STYLE, style)
+    storageSet(STORAGE_KEY_DIFF_STYLE, style)
     this.emit()
   }
 
   setDescriptiveToolSteps(enabled: boolean) {
     if (this.state.descriptiveToolSteps === enabled) return
     this.state = { ...this.state, descriptiveToolSteps: enabled }
-    localStorage.setItem(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(enabled))
+    storageSet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(enabled))
     this.emit()
   }
 
   setInlineToolRequests(enabled: boolean) {
     if (this.state.inlineToolRequests === enabled) return
     this.state = { ...this.state, inlineToolRequests: enabled }
-    localStorage.setItem(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
+    storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
     this.emit()
   }
 
   setCodeWordWrap(enabled: boolean) {
     if (this.state.codeWordWrap === enabled) return
     this.state = { ...this.state, codeWordWrap: enabled }
-    localStorage.setItem(STORAGE_KEY_CODE_WORD_WRAP, String(enabled))
+    storageSet(STORAGE_KEY_CODE_WORD_WRAP, String(enabled))
     this.emit()
   }
 
@@ -720,7 +746,7 @@ class ThemeStore {
     const clamped = clampFontScale(scale)
     if (this.state.uiFontScale === clamped) return
     this.state = { ...this.state, uiFontScale: clamped }
-    localStorage.setItem(STORAGE_KEY_FONT_SCALE, String(clamped))
+    storageSet(STORAGE_KEY_FONT_SCALE, String(clamped))
     this.applyFontScale()
     this.emit()
   }
@@ -729,7 +755,7 @@ class ThemeStore {
     const clamped = clampFontScale(scale)
     if (this.state.codeFontScale === clamped) return
     this.state = { ...this.state, codeFontScale: clamped }
-    localStorage.setItem(STORAGE_KEY_CODE_FONT_SCALE, String(clamped))
+    storageSet(STORAGE_KEY_CODE_FONT_SCALE, String(clamped))
     this.applyFontScale()
     this.emit()
   }
@@ -737,7 +763,7 @@ class ThemeStore {
   setToolCardStyle(style: ToolCardStyle) {
     if (this.state.toolCardStyle === style) return
     this.state = { ...this.state, toolCardStyle: style }
-    localStorage.setItem(STORAGE_KEY_TOOL_CARD_STYLE, style)
+    storageSet(STORAGE_KEY_TOOL_CARD_STYLE, style)
     this.emit()
   }
 
@@ -752,25 +778,25 @@ class ThemeStore {
       toolCardStyle: enabled ? 'compact' : 'classic',
       compactInlinePermission: enabled,
     }
-    localStorage.setItem(STORAGE_KEY_IMMERSIVE_MODE, String(enabled))
-    localStorage.setItem(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
-    localStorage.setItem(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(enabled))
-    localStorage.setItem(STORAGE_KEY_TOOL_CARD_STYLE, enabled ? 'compact' : 'classic')
-    localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
+    storageSet(STORAGE_KEY_IMMERSIVE_MODE, String(enabled))
+    storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
+    storageSet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(enabled))
+    storageSet(STORAGE_KEY_TOOL_CARD_STYLE, enabled ? 'compact' : 'classic')
+    storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
     this.emit()
   }
 
   setCompactInlinePermission(enabled: boolean) {
     if (this.state.compactInlinePermission === enabled) return
     this.state = { ...this.state, compactInlinePermission: enabled }
-    localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
+    storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
     this.emit()
   }
 
   setGlassEffect(enabled: boolean) {
     if (this.state.glassEffect === enabled) return
     this.state = { ...this.state, glassEffect: enabled }
-    localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(enabled))
+    storageSet(STORAGE_KEY_GLASS_EFFECT, String(enabled))
     this.applyGlassClass()
     this.emit()
   }
@@ -778,42 +804,42 @@ class ThemeStore {
   setQueueFollowupMessages(enabled: boolean) {
     if (this.state.queueFollowupMessages === enabled) return
     this.state = { ...this.state, queueFollowupMessages: enabled }
-    localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(enabled))
+    storageSet(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(enabled))
     this.emit()
   }
 
   setExternalFileDropMode(mode: ExternalFileDropMode) {
     if (this.state.externalFileDropMode === mode) return
     this.state = { ...this.state, externalFileDropMode: mode }
-    localStorage.setItem(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, mode)
+    storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, mode)
     this.emit()
   }
 
   setOutlineCurrentHighlight(enabled: boolean) {
     if (this.state.outlineCurrentHighlight === enabled) return
     this.state = { ...this.state, outlineCurrentHighlight: enabled }
-    localStorage.setItem(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(enabled))
+    storageSet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(enabled))
     this.emit()
   }
 
   setActionsOnLatestAssistantOnly(enabled: boolean) {
     if (this.state.actionsOnLatestAssistantOnly === enabled) return
     this.state = { ...this.state, actionsOnLatestAssistantOnly: enabled }
-    localStorage.setItem(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY, String(enabled))
+    storageSet(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY, String(enabled))
     this.emit()
   }
 
   setDesktopCollapsedInputDock(enabled: boolean) {
     if (this.state.desktopCollapsedInputDock === enabled) return
     this.state = { ...this.state, desktopCollapsedInputDock: enabled }
-    localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(enabled))
+    storageSet(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(enabled))
     this.emit()
   }
 
   setProcessCollapseEnabled(enabled: boolean) {
     if (this.state.processCollapseEnabled === enabled) return
     this.state = { ...this.state, processCollapseEnabled: enabled }
-    localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(enabled))
+    storageSet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(enabled))
     this.emit()
   }
 
@@ -821,7 +847,7 @@ class ThemeStore {
     const next = normalizeCodeBlockTheme(id, DEFAULT_CODE_BLOCK_THEME_LIGHT)
     if (this.state.codeBlockThemeLight === next) return
     this.state = { ...this.state, codeBlockThemeLight: next }
-    localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, next)
+    storageSet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, next)
     this.emit()
   }
 
@@ -829,7 +855,7 @@ class ThemeStore {
     const next = normalizeCodeBlockTheme(id, DEFAULT_CODE_BLOCK_THEME_DARK)
     if (this.state.codeBlockThemeDark === next) return
     this.state = { ...this.state, codeBlockThemeDark: next }
-    localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, next)
+    storageSet(STORAGE_KEY_CODE_BLOCK_THEME_DARK, next)
     this.emit()
   }
 
@@ -994,7 +1020,7 @@ class ThemeStore {
   }
 
   private persistCustomCSSSnippets(customCSSSnippets: CustomCSSSnippet[]) {
-    localStorage.setItem(STORAGE_KEY_CUSTOM_CSS_SNIPPETS, JSON.stringify(customCSSSnippets))
+    storageSet(STORAGE_KEY_CUSTOM_CSS_SNIPPETS, JSON.stringify(customCSSSnippets))
   }
 
   // ---- Subscription (useSyncExternalStore compatible) ----
@@ -1110,40 +1136,40 @@ export function exportThemeBackup(): ThemeBackup {
 
 export function importThemeBackup(raw: unknown): void {
   const backup = normalizeThemeBackup(raw)
-  localStorage.setItem(STORAGE_KEY_PRESET, backup.presetId)
-  localStorage.setItem(STORAGE_KEY_COLOR_MODE, backup.colorMode)
-  localStorage.setItem(STORAGE_KEY_CUSTOM_CSS, backup.customCSS)
-  localStorage.setItem(STORAGE_KEY_CUSTOM_CSS_SNIPPETS, JSON.stringify(backup.customCSSSnippets))
+  storageSet(STORAGE_KEY_PRESET, backup.presetId)
+  storageSet(STORAGE_KEY_COLOR_MODE, backup.colorMode)
+  storageSet(STORAGE_KEY_CUSTOM_CSS, backup.customCSS)
+  storageSet(STORAGE_KEY_CUSTOM_CSS_SNIPPETS, JSON.stringify(backup.customCSSSnippets))
   if (backup.activeCustomCSSSnippetId) {
-    localStorage.setItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, backup.activeCustomCSSSnippetId)
+    storageSet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, backup.activeCustomCSSSnippetId)
   } else {
-    localStorage.removeItem(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
+    storageRemove(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID)
   }
-  localStorage.setItem(STORAGE_KEY_COLLAPSE_USER_MESSAGES, String(backup.collapseUserMessages))
-  localStorage.setItem(STORAGE_KEY_RENDER_USER_MARKDOWN, String(backup.renderUserMarkdown))
-  localStorage.setItem(STORAGE_KEY_STEP_FINISH_DISPLAY, JSON.stringify(backup.stepFinishDisplay))
-  localStorage.setItem(STORAGE_KEY_COMPLETED_AT_FORMAT, backup.completedAtFormat)
-  localStorage.setItem(STORAGE_KEY_REASONING_DISPLAY_MODE, backup.reasoningDisplayMode)
-  localStorage.setItem(STORAGE_KEY_WIDE_MODE, String(backup.wideMode))
-  localStorage.setItem(STORAGE_KEY_DIFF_STYLE, backup.diffStyle)
-  localStorage.setItem(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(backup.descriptiveToolSteps))
-  localStorage.setItem(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(backup.inlineToolRequests))
-  localStorage.setItem(STORAGE_KEY_CODE_WORD_WRAP, String(backup.codeWordWrap))
-  localStorage.setItem(STORAGE_KEY_FONT_SCALE, String(backup.uiFontScale))
-  localStorage.setItem(STORAGE_KEY_CODE_FONT_SCALE, String(backup.codeFontScale))
-  localStorage.setItem(STORAGE_KEY_TOOL_CARD_STYLE, backup.toolCardStyle)
-  localStorage.setItem(STORAGE_KEY_IMMERSIVE_MODE, String(backup.immersiveMode))
-  localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(backup.compactInlinePermission))
-  localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
-  localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
-  localStorage.setItem(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
-  localStorage.setItem(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
-  localStorage.setItem(
+  storageSet(STORAGE_KEY_COLLAPSE_USER_MESSAGES, String(backup.collapseUserMessages))
+  storageSet(STORAGE_KEY_RENDER_USER_MARKDOWN, String(backup.renderUserMarkdown))
+  storageSet(STORAGE_KEY_STEP_FINISH_DISPLAY, JSON.stringify(backup.stepFinishDisplay))
+  storageSet(STORAGE_KEY_COMPLETED_AT_FORMAT, backup.completedAtFormat)
+  storageSet(STORAGE_KEY_REASONING_DISPLAY_MODE, backup.reasoningDisplayMode)
+  storageSet(STORAGE_KEY_WIDE_MODE, String(backup.wideMode))
+  storageSet(STORAGE_KEY_DIFF_STYLE, backup.diffStyle)
+  storageSet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(backup.descriptiveToolSteps))
+  storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(backup.inlineToolRequests))
+  storageSet(STORAGE_KEY_CODE_WORD_WRAP, String(backup.codeWordWrap))
+  storageSet(STORAGE_KEY_FONT_SCALE, String(backup.uiFontScale))
+  storageSet(STORAGE_KEY_CODE_FONT_SCALE, String(backup.codeFontScale))
+  storageSet(STORAGE_KEY_TOOL_CARD_STYLE, backup.toolCardStyle)
+  storageSet(STORAGE_KEY_IMMERSIVE_MODE, String(backup.immersiveMode))
+  storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(backup.compactInlinePermission))
+  storageSet(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
+  storageSet(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
+  storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
+  storageSet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
+  storageSet(
     STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY,
     String(backup.actionsOnLatestAssistantOnly),
   )
-  localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
-  localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
-  localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
-  localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)
+  storageSet(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
+  storageSet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
+  storageSet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
+  storageSet(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)
 }
