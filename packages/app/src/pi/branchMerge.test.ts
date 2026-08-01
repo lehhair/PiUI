@@ -68,4 +68,15 @@ describe('mergeLatestBranchPage', () => {
     const merged = mergeLatestBranchPage(current, latest)
     expect(merged).toBe(latest)
   })
+
+  it('replaces wholesale when the local leaf is gone (tree navigation shrank the branch)', () => {
+    // Navigate from d back to b: old branch [a,b,c,d] overlaps but its tail
+    // must not survive as phantom entries.
+    const current = page(['a', 'b', 'c', 'd'], { hasMore: true, beforeCursor: 'cursor-at-a' })
+    const latest = page(['a', 'b'])
+    const merged = mergeLatestBranchPage(current, latest)
+    expect(merged).toBe(latest)
+    expect(merged.items.map(i => i.id)).toEqual(['a', 'b'])
+    expect(merged.hasMore).toBe(false)
+  })
 })
