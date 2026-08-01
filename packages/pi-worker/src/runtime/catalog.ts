@@ -97,15 +97,17 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     const resolved = path.resolve(target)
     // Windows paths compare case-insensitively; a legal path differing only
     // in case must not be rejected (fails closed, but still a false 403).
-    const rootKey = process.platform === "win32" ? root.toLowerCase() : root
-    const resolvedKey = process.platform === "win32" ? resolved.toLowerCase() : resolved
+    if (!existsSync(target)) return
+    const realRoot = await fs.realpath(root)
+    const realTarget = await fs.realpath(target)
+    const rootKey = process.platform === "win32" ? realRoot.toLowerCase() : realRoot
+    const resolvedKey = process.platform === "win32" ? realTarget.toLowerCase() : realTarget
     if (resolvedKey !== rootKey && !resolvedKey.startsWith(rootKey + path.sep)) {
       throw Object.assign(new Error("session file is outside the Pi session directory"), {
         code: "PATH_OUTSIDE_WORKSPACE",
       })
     }
     // 幂等：文件可能从未落盘（新会话首个条目才写文件），缺文件即视为已删
-    if (!existsSync(target)) return
     await fs.unlink(target)
   }
 
