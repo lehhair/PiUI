@@ -86,11 +86,11 @@ export class ProviderAuthHost {
       this.finish(flowId, { type: "failed", flowId, providerId, message: "provider auth timed out" })
     }, AUTH_FLOW_TIMEOUT_MS)
     flow.timer.unref?.()
-    void runtime.login(providerId, authType, {
+    void Promise.resolve().then(() => runtime.login(providerId, authType, {
       signal: flow.controller.signal,
       prompt: prompt => this.prompt(flowId, providerId, prompt),
       notify: event => this.emit({ type: "notification", flowId, providerId, event: safeJson(event) as JsonValue }),
-    }).then(
+    })).then(
       () => this.finish(flowId, { type: "completed", flowId, providerId }),
       error => this.finish(flowId, flow.controller.signal.aborted
         ? { type: "cancelled", flowId, providerId }
@@ -122,6 +122,7 @@ export class ProviderAuthHost {
       prompt?.reject(Object.assign(new Error("provider auth cancelled"), { code: "EXTENSION_UI_CANCELLED" }))
     }
     flow.promptIds.clear()
+    this.finish(flowId, { type: "cancelled", flowId, providerId: flow.providerId })
   }
 
   async logout(providerId: string): Promise<void> {
@@ -178,7 +179,7 @@ export class ProviderAuthHost {
   }
 
   dispose(): void {
-    for (const flowId of this.flows.keys()) this.cancel(flowId)
+    for (const flowId of [...this.flows.keys()]) this.cancel(flowId)
     this.listeners.clear()
     this.runtimeApiKeys.clear()
   }
