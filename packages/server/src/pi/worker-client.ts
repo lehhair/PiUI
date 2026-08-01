@@ -355,13 +355,11 @@ export class WorkerSession {
     this.disposed = true
     if (this.exitHandled) return
     try {
+      // Send the dispose command and wait for the worker's ok reply. The
+      // reply means the worker has started its teardown (session jsonl tail
+      // flush, in-flight result persistence); only SIGKILL on timeout.
       await Promise.race([
-        new Promise<void>(resolve => {
-          const hello = this.ready
-          void hello.then(helloMessage => {
-            this.child.send({ kind: "request", id: randomUUID(), generation: helloMessage.generation, command: { type: "dispose" } }, () => resolve())
-          }).catch(() => resolve())
-        }),
+        this.request({ type: "dispose" }).catch(() => undefined),
         new Promise<void>(resolve => setTimeout(resolve, 5_000)),
       ])
     } finally {
