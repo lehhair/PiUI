@@ -36,6 +36,7 @@ import { piBranchStore } from '../../pi/state/index.js'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
+import { clearSessionEditorDraft, configureSessionEditorDraftSync, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
 import { uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
@@ -249,6 +250,14 @@ export function PiChatPane({
       if (sid === sessionId) applySeed(sid)
     })
   }, [sessionId])
+
+  // 树导航的编辑器草稿（undo 语义：回到用户消息前，文本进输入框）。
+  // 树面板写 draft store，这里消费并同步到 worker 编辑器状态
+  const editorDraft = useSessionEditorDraft(sessionId)
+  useEffect(() => {
+    configureSessionEditorDraftSync((sid, text) => setPiExtensionEditorState(sid, text).catch(() => undefined))
+    return () => configureSessionEditorDraftSync(undefined)
+  }, [])
 
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
@@ -496,6 +505,8 @@ export function PiChatPane({
       // immediately; the event stream drives updates, and we kick the first
       // refresh so the user message shows without waiting for the debounce.
       // 发送失败必须让用户看见——静默丢掉一条消息比报错糟糕得多
+      clearSessionEditorDraft(sid)
+      setForkSeedText(undefined)
       void sendPiUserMessage(sid, text, images.length ? images : undefined, deliverAs).catch(error => {
         uiErrorHandler('send message', error)
         void refreshPiBranch(sid).catch(() => undefined)
@@ -816,7 +827,7 @@ export function PiChatPane({
             variants={thinkingLevels}
             selectedVariant={thinkingLevel}
             onVariantChange={handleVariantChange}
-            revertedText={forkSeedText}
+            revertedText={editorDraft?.text ?? forkSeedText}
           />
         </div>
       </div>
