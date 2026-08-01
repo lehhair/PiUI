@@ -35,6 +35,7 @@ export interface PackagesGateway {
 
 export interface CommandContext {
   runtime: SessionRuntime | undefined
+  driver?: "pi" | "mock"
   catalog: CatalogProvider
   auth: ProviderAuthGateway
   packages: PackagesGateway
@@ -190,7 +191,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   // Model visibility and provider credentials must come from the same
   // runtime. The catalog creates a fresh credential-blind runtime, which
   // loses temporary keys set through the provider auth UI after a refresh.
-  "models.list": async (ctx) => ctx.auth.listModels(),
+  "models.list": async (ctx) => ctx.driver === "mock" ? ctx.catalog.listModels() : ctx.auth.listModels(),
   "settings.get": async (ctx, p) => ctx.catalog.getSettings(P.reqString(p, "cwd")),
   "settings.patch": async (ctx, p) =>
     ctx.catalog.patchSettings(P.reqString(p, "cwd"), P.optObject(p, "patch") ?? {}),

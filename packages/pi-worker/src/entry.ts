@@ -211,6 +211,7 @@ const ctx: CommandContext = {
   get runtime() {
     return runtime
   },
+  driver,
   catalog,
   auth: providerAuth,
   packages: catalog,
