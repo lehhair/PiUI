@@ -39,7 +39,8 @@ export class WorkspaceWatcher {
   }
 
   watch(workspace: WorkspaceRecord): void {
-    const existing = this.watched.get(workspace.canonicalRoot)
+    const key = workspacePathKey(workspace.canonicalRoot)
+    const existing = this.watched.get(key)
     if (existing) {
       existing.lastAccessedAt = Date.now()
       return
@@ -60,7 +61,7 @@ export class WorkspaceWatcher {
       rescan: false,
       lastAccessedAt: Date.now(),
     }
-    this.watched.set(workspace.canonicalRoot, state)
+    this.watched.set(key, state)
     state.watcher.on("all", (event, absolutePath) => {
       const relative = path.relative(workspace.canonicalRoot, absolutePath).replace(/\\/g, "/")
       if (!relative || relative.startsWith("../")) return
@@ -111,7 +112,7 @@ export class WorkspaceWatcher {
         path.join(commonDir, "packed-refs"),
         path.join(commonDir, "refs"),
       ], { ignoreInitial: true, persistent: true, followSymlinks: false, atomic: true })
-      if (this.watched.get(workspace.canonicalRoot) !== state) {
+      if (this.watched.get(workspacePathKey(workspace.canonicalRoot)) !== state) {
         await watcher.close()
         return
       }
