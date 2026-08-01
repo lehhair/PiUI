@@ -116,6 +116,7 @@ export type EventServerMessage =
       type: "resync_required"
       streams: Partial<Record<EventStreamKey, { cursor: EventCursor; reason: EventResyncReason }>>
     }
+  | { channel: "control"; type: "problem"; problem: Problem }
   | { type: "pong"; protocolVersion: typeof PROTOCOL_VERSION; t: number }
 
 export type CommandAcceptedResponse = {
