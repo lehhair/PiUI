@@ -259,7 +259,7 @@ export class SessionHost {
   }
 
   async piRegistry(): Promise<PiRegistrySnapshot> {
-    const data = await this.catalogCommand("registry.describe", undefined, { retry: true }) as PiRegistrySnapshot | undefined
+    const data = await this.catalogCommand("registry.describe", undefined, { retry: true, idempotent: true }) as PiRegistrySnapshot | undefined
     if (!data || typeof data !== "object") {
       throw Object.assign(new Error("Pi registry is unavailable"), { code: "REGISTRY_UNAVAILABLE" })
     }
@@ -290,7 +290,8 @@ export class SessionHost {
         if (live) await this.closeSession(live.sessionId)
       }
     }
-    return this.catalogCommand(type, params, { retry: true })
+    const idempotent = type === "registry.describe" || getCommandCapability(type)?.idempotent === true
+    return this.catalogCommand(type, params, { retry: idempotent, idempotent })
   }
 
   executeSessionCommand(sessionId: string, type: string, params?: JsonObject, id?: string): JsonValue | SubmittedCommand | Promise<JsonValue | SubmittedCommand | undefined> {
@@ -320,7 +321,7 @@ export class SessionHost {
     return this.executor.get(commandId)
   }
 
-  async catalogCommand(type: string, params?: JsonObject, options?: { retry?: boolean }): Promise<JsonValue | undefined> {
+  async catalogCommand(type: string, params?: JsonObject, options?: { retry?: boolean; idempotent?: boolean }): Promise<JsonValue | undefined> {
     return this.supervisor.catalogCommand(type, params, options)
   }
 

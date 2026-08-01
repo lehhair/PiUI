@@ -258,6 +258,7 @@ function describeRegistry(): PiRegistrySnapshot {
     description: "Describe registered Pi capabilities exposed by this worker",
     paramsSchema: { type: "object", additionalProperties: false, properties: {} },
     queue: "immediate",
+    idempotent: true,
   }
   return {
     protocolVersion: PROTOCOL_VERSION,

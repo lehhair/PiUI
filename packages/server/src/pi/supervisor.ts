@@ -67,23 +67,20 @@ export class RuntimeSupervisor {
     return host
   }
 
-  async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean } = {}): Promise<JsonValue | undefined> {
+  async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean; idempotent?: boolean } = {}): Promise<JsonValue | undefined> {
     if (this.disposed) throw new Error("Runtime supervisor is disposed")
     const catalog = this.catalog ?? (this.catalog = this.createCatalog())
     try {
       return await catalog.command(type, params)
     } catch (error) {
+      const code = errorCode(error)
+      if (code !== "WORKER_RESULT_UNKNOWN") throw error
       // 失败的 catalog（握手超时、崩溃）立刻丢弃，下次命令重新孵化——
       // 握不上手的 worker ready 已拒，留着只会无限 500
       if (this.catalog === catalog) this.catalog = undefined
       void catalog.dispose().catch(() => undefined)
       if (this.disposed) throw error
-      if (!options.retry) {
-        throw Object.assign(
-          new Error("Pi catalog worker crashed before confirming the command result", { cause: error }),
-          { code: "WORKER_RESULT_UNKNOWN" },
-        )
-      }
+      if (!options.retry || !options.idempotent) throw error
       const replacement = this.catalog ?? (this.catalog = this.createCatalog())
       return replacement.command(type, params)
     }
@@ -235,6 +232,10 @@ export class RuntimeSupervisor {
     })
     return catalog
   }
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error ? String(error.code) : undefined
 }
 
 function once(run: () => void): () => void {
