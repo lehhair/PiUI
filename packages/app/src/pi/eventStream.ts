@@ -6,12 +6,15 @@ import {
   type EventCursorMap,
   type EventEnvelope,
   type EventServerMessage,
+  type EventStreamKey,
   type EventStreamRef,
+  isJsonObject,
+  type CommandRecord,
 } from '@piui/protocol'
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase, getPiAuthToken } from './httpClient.js'
-import { piBranchStore, piSessionStateStore } from './state/index.js'
+import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { notifyReconnected, notifySessionIdle } from '../hooks/useGlobalEvents'
@@ -153,6 +156,7 @@ class PiEventStream {
     this.refCounts.clear()
     this.workspaceRefCounts.clear()
     this.cursors.clear()
+    piCommandStore.clearAll()
     this.closeSocket()
   }
 
@@ -274,7 +278,7 @@ class PiEventStream {
     }
     if ('channel' in message && message.channel === 'control' && message.type === 'resync_required') {
       for (const key of Object.keys(message.streams)) {
-        this.handleResync(key)
+        this.handleResync(key, message.streams[key as EventStreamKey]?.cursor)
       }
       return
     }
@@ -299,6 +303,12 @@ class PiEventStream {
         break
       case 'sessions.activity':
         this.handleActivitySnapshot(envelope.payload as unknown as SessionsActivitySnapshot)
+        break
+      case 'command.updated':
+        if (isCommandRecord(envelope.payload)) {
+          piCommandStore.upsert(envelope.payload)
+          window.dispatchEvent(new CustomEvent('piui:command-updated', { detail: envelope.payload }))
+        }
         break
       case 'extension.ui':
         if (sessionId) this.handleExtensionUiEvent(sessionId, envelope.payload as unknown as PiExtensionUiEvent)
@@ -351,6 +361,7 @@ class PiEventStream {
       this.stateRefreshTimers.delete(payload.sourceSessionId)
       piBranchStore.clear(payload.sourceSessionId)
       piSessionStateStore.clear(payload.sourceSessionId)
+      piCommandStore.clearSession(payload.sourceSessionId)
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
     void loadPiSessions().catch(() => undefined)
@@ -453,10 +464,10 @@ class PiEventStream {
     piBranchStore.setData(sessionId, { ...data, checkpoint: { ...data.checkpoint, liveMessage } })
   }
 
-  private handleResync(key: string): void {
+  private handleResync(key: string, cursor?: EventCursor): void {
     const stream = parseEventStreamKey(key)
     if (!stream) return
-    this.cursors.delete(key)
+    if (cursor) this.cursors.set(key, cursor)
     if (stream.kind === 'session') {
       void loadPiSessionData(stream.id).catch(() => undefined)
     } else if (stream.kind === 'server') {
@@ -505,6 +516,15 @@ class PiEventStream {
 }
 
 export const piEventStream = new PiEventStream()
+
+function isCommandRecord(value: unknown): value is CommandRecord {
+  if (!isJsonObject(value)) return false
+  return typeof value.id === 'string' &&
+    typeof value.type === 'string' &&
+    (value.status === 'accepted' || value.status === 'running' || value.status === 'completed' ||
+      value.status === 'failed' || value.status === 'cancelled' || value.status === 'unknown_after_crash') &&
+    typeof value.submittedAt === 'string'
+}
 
 function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
   if (status.type === 'retry') {
