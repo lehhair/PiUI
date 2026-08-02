@@ -150,6 +150,17 @@ describe("http api", () => {
     assert.equal(settingsNow.status, 200)
     assert.equal(settingsNow.json.data.workspacePath, mockHome)
 
+    const opened = await request(port, "POST", "/api/v1/pi/commands/session.open", { body: { cwd: mockHome } })
+    assert.equal(opened.status, 200)
+    const sessionId = opened.json.data.sessionId as string
+    const globalThroughSession = await request(
+      port,
+      "POST",
+      `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/models.list`,
+    )
+    assert.equal(globalThroughSession.status, 404)
+    assert.equal(globalThroughSession.json.code, "UNKNOWN_COMMAND")
+
     const trust = await request(port, "POST", "/api/v1/pi/commands/trust.get", { body: { cwd: mockHome } })
     assert.equal(trust.status, 200)
     assert.equal(trust.json.data.trusted, true)
