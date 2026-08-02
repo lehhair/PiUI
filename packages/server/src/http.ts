@@ -351,6 +351,7 @@ export function statusForError(error: unknown): number {
     case "METHOD_NOT_ALLOWED":
       return 405
     case "SESSION_BUSY":
+    case "WORKSPACE_BUSY":
     case "COMMAND_ALREADY_ACCEPTED":
     case "FILE_CONFLICT":
     case "SESSION_CONFLICT":
