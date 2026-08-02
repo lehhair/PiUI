@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
@@ -103,6 +103,20 @@ describe("workspace files", () => {
     const { workspace } = fixture()
     await assert.rejects(writeFileContent(workspace, "../escape", "x"), /escapes workspace/)
     await assert.rejects(writeFileContent(workspace, "bad.bin", "%%%", { encoding: "base64" }), /invalid base64/)
+  })
+
+  it("writes through an internal directory link at its physical target", async () => {
+    const { root, workspace } = fixture()
+    const physical = path.join(root, "physical")
+    const alias = path.join(root, "alias")
+    mkdirSync(physical)
+    try {
+      symlinkSync(physical, alias, "junction")
+    } catch {
+      return
+    }
+    await writeFileContent(workspace, "alias/new.txt", "physical")
+    assert.equal(readFileSync(path.join(physical, "new.txt"), "utf8"), "physical")
   })
 })
 
