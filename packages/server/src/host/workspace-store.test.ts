@@ -87,4 +87,18 @@ describe("workspace identity", () => {
     symlinkSync(outside, root, process.platform === "win32" ? "junction" : "dir")
     assert.throws(() => store.resolve(root), /workspace root was replaced/)
   })
+
+  it("rejects an operation using a known root after replacement", () => {
+    const parent = mkdtempSync(path.join(tmpdir(), "piui-ws-operation-replaced-"))
+    const root = path.join(parent, "root")
+    const outside = path.join(parent, "outside")
+    mkdirSync(root)
+    mkdirSync(outside)
+    roots.push(parent)
+    const store = new WorkspaceStore()
+    const record = store.resolve(root)
+    renameSync(root, path.join(parent, "moved"))
+    symlinkSync(outside, root, process.platform === "win32" ? "junction" : "dir")
+    assert.throws(() => store.assertCurrent(record), /workspace root was replaced/)
+  })
 })

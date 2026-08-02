@@ -126,6 +126,7 @@ function optLimit(params: JsonObject, key: string, fallback: number, maximum: nu
 function workspace(ctx: HostCommandContext, params: JsonObject): WorkspaceRecord {
   const found = ctx.store.find(reqString(params, "workspacePath"))
   if (!found) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  ctx.store.assertCurrent(found)
   return found
 }
 

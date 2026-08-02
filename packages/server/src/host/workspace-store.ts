@@ -29,6 +29,22 @@ export class WorkspaceStore {
     return this.byInputPath.get(key) ?? this.byPath.get(key)
   }
 
+  /** Revalidates a known workspace before an operation uses its root. */
+  assertCurrent(record: WorkspaceRecord): void {
+    if (record.rootIdentity === undefined) return
+    try {
+      const resolved = path.resolve(record.canonicalRoot)
+      const real = realpathSync.native(resolved)
+      const identity = fileIdentity(statSync(real))
+      if (workspacePathKey(real) !== workspacePathKey(record.canonicalRoot) || identity !== record.rootIdentity) {
+        throw workspaceReplaced(record.canonicalRoot)
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "WORKSPACE_REPLACED") throw error
+      throw workspaceReplaced(record.canonicalRoot)
+    }
+  }
+
   /**
    * Validates the path, resolves it through symlinks, and records it. Callers
    * pass whatever path they were given, so this is the single place that decides
