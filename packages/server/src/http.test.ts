@@ -71,6 +71,7 @@ describe("http api", () => {
     assert.equal(registry.status, 200)
     assert.ok(registry.json.commands.some((command: any) => command.name === "files.read"))
     assert.ok(registry.json.commands.some((command: any) => command.name === "git.status"))
+    assert.ok(registry.json.commands.some((command: any) => command.name === "terminals.create"))
 
     const created = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { body: { rootPath: root } })
     assert.equal(created.status, 200)
@@ -100,6 +101,26 @@ describe("http api", () => {
       body: { workspacePath, path: "hello.txt", content: "stale write", ifMatch: etag },
     })
     assert.equal(stale.status, 409)
+
+    const terminal = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
+      body: { workspacePath, title: "HTTP terminal", cwd: "" },
+    })
+    assert.equal(terminal.status, 200)
+    const terminalId = terminal.json.data.id as string
+    assert.equal(terminal.json.data.status, "running")
+
+    const terminals = await request(port, "POST", "/api/v1/host/commands/terminals.list", { body: { workspacePath } })
+    assert.equal(terminals.status, 200)
+    assert.ok(terminals.json.data.terminals.some((item: any) => item.id === terminalId))
+
+    const renamed = await request(port, "POST", "/api/v1/host/commands/terminals.update", {
+      body: { workspacePath, terminalId, title: "Renamed terminal", rows: 30, cols: 100 },
+    })
+    assert.equal(renamed.status, 200)
+    assert.equal(renamed.json.data.title, "Renamed terminal")
+
+    const removed = await request(port, "POST", "/api/v1/host/commands/terminals.remove", { body: { workspacePath, terminalId } })
+    assert.equal(removed.status, 200)
 
     const search = await request(port, "POST", "/api/v1/host/commands/files.searchName", { body: { workspacePath, query: "index" } })
     assert.equal(search.status, 200)

@@ -184,4 +184,57 @@ describe("event websocket", () => {
     })
     assert.equal(closed, 1006)
   })
+
+  it("streams terminal replay, input, and exit frames through a one-time ticket", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-terminal-"))
+    const app = createAppServer({ authToken: null })
+    const wss: WebSocketServer = attachEventWebSocket(app.server, {
+      eventHub: app.eventHub,
+      authToken: null,
+      terminalManager: app.terminals,
+    })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      closeEventWebSocket(wss)
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    const opened = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { rootPath: root })
+    const workspacePath = opened.json.data.workspace.path as string
+    const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
+      workspacePath,
+      title: "Stream terminal",
+    })
+    assert.equal(created.status, 200)
+    const terminalId = created.json.data.id as string
+    const ticketResponse = await request(port, "POST", "/api/v1/host/commands/terminals.connectToken", {
+      workspacePath,
+      terminalId,
+    })
+    assert.equal(ticketResponse.status, 200)
+    const ticket = ticketResponse.json.data.token as string
+
+    const frames: any[] = []
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${port}/api/v1/host/terminals/${encodeURIComponent(terminalId)}/stream?ticket=${encodeURIComponent(ticket)}`,
+    )
+    ws.on("message", data => frames.push(JSON.parse(String(data))))
+    await waitFor(() => frames.some(frame => frame.type === "ready"))
+    ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo piui-ws\r\n" : "printf piui-ws\\n" }))
+    await waitFor(() => frames.some(frame => frame.type === "output" && frame.data.includes("piui-ws")))
+    ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
+    await waitFor(() => frames.some(frame => frame.type === "exit"))
+    assert.equal(frames[0]?.type, "hello")
+    assert.equal(frames[1]?.type, "ready")
+    ws.close()
+  })
 })
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for websocket frame")
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+}

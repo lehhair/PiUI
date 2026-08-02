@@ -19,6 +19,7 @@ import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } fr
 import { resolveAuthToken } from "./host/auth-token.ts"
 import { PathSafetyError } from "./host/path-safety.ts"
 import { HostRuntime } from "./host/command-table.ts"
+import { TerminalManager } from "./host/terminal-manager.ts"
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
@@ -157,6 +158,7 @@ export interface AppServer {
   eventHub: EventHub
   sessionHost: SessionHost
   supervisor: RuntimeSupervisor
+  terminals: TerminalManager
   dispose(): Promise<void>
 }
 
@@ -166,7 +168,12 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const supervisor = options.supervisor ?? new RuntimeSupervisor()
   const sessions = options.sessionHost ?? new SessionHost(supervisor, hub)
   const watcher = new WorkspaceWatcher(hub)
-  const host = new HostRuntime({ store, watcher, sessions })
+  const terminals = new TerminalManager({
+    publish: (workspacePath, channel, payload) => {
+      hub.publish({ kind: "workspace", id: workspacePath }, channel, payload)
+    },
+  })
+  const host = new HostRuntime({ store, watcher, sessions, terminals })
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
   let disposal: Promise<void> | undefined
 
@@ -287,11 +294,13 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
     eventHub: hub,
     sessionHost: sessions,
     supervisor,
+    terminals,
     dispose: async () => {
       if (disposal) return disposal
       disposal = (async () => {
         await closeHttpServer()
         await watcher.dispose()
+        terminals.dispose()
         await supervisor.dispose()
       })()
       return disposal
@@ -329,7 +338,15 @@ export function statusForError(error: unknown): number {
     case "UNKNOWN_COMMAND":
     case "SESSION_NOT_FOUND":
     case "WORKSPACE_NOT_FOUND":
+    case "TERMINAL_NOT_FOUND":
       return 404
+    case "TERMINAL_CURSOR_EXPIRED":
+      return 409
+    case "TERMINAL_EXITED":
+      return 409
+    case "TERMINAL_LIMIT_REACHED":
+    case "TERMINAL_START_FAILED":
+      return 503
     case "FILE_TOO_LARGE":
     case "GIT_OUTPUT_LIMIT":
       return 413

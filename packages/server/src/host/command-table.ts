@@ -12,6 +12,7 @@ import { searchFilesByName, searchWorkspaceText } from "./file-search.ts"
 import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./git.ts"
 import type { WorkspaceStore, WorkspaceRecord } from "./workspace-store.ts"
 import type { WorkspaceWatcher } from "./workspace-watcher.ts"
+import type { TerminalManager } from "./terminal-manager.ts"
 
 type HostCommandHandler = (ctx: HostCommandContext, params: JsonObject) => JsonValue | undefined | Promise<JsonValue | undefined>
 
@@ -37,6 +38,7 @@ export type HostCommandContext = {
   store: WorkspaceStore
   watcher: WorkspaceWatcher
   sessions: SessionHost
+  terminals: TerminalManager
   signal?: AbortSignal
 }
 
@@ -130,6 +132,15 @@ function workspace(ctx: HostCommandContext, params: JsonObject): WorkspaceRecord
   return found
 }
 
+function optSize(params: JsonObject, key: string): number | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 500) {
+    throw Object.assign(new Error(`params.${key} must be an integer from 1 to 500`), { code: "INVALID_REQUEST" })
+  }
+  return value
+}
+
 function workspaceDto(record: WorkspaceRecord): JsonObject {
   return {
     path: record.canonicalRoot,
@@ -176,6 +187,79 @@ export const HOST_CAPABILITIES = [
       const record = ctx.sessions.getCommand(reqString(params, "id"))
       if (!record) throw Object.assign(new Error("command not found"), { code: "NOT_FOUND" })
       return requireJsonValue({ command: record })
+    },
+  }),
+  registerHostCapability({
+    name: "terminals.list",
+    domain: "terminals",
+    description: "List terminal sessions owned by a workspace",
+    paramsSchema: objectSchema(WORKSPACE_PATH, ["workspacePath"]),
+    idempotent: true,
+    handler: (ctx, params) => ({ terminals: ctx.terminals.list(workspace(ctx, params).canonicalRoot) }),
+  }),
+  registerHostCapability({
+    name: "terminals.create",
+    domain: "terminals",
+    description: "Create an interactive terminal session in a workspace",
+    paramsSchema: objectSchema({
+      ...WORKSPACE_PATH,
+      cwd: STRING,
+      shell: STRING,
+      title: STRING,
+      rows: { type: "integer", minimum: 1, maximum: 500 },
+      cols: { type: "integer", minimum: 1, maximum: 500 },
+    }, ["workspacePath"]),
+    emits: ["terminal.created"],
+    handler: (ctx, params) => ctx.terminals.create(workspace(ctx, params).canonicalRoot, {
+      cwd: optString(params, "cwd"),
+      shell: optString(params, "shell"),
+      title: optString(params, "title"),
+      rows: optSize(params, "rows"),
+      cols: optSize(params, "cols"),
+    }) as Promise<JsonValue>,
+  }),
+  registerHostCapability({
+    name: "terminals.get",
+    domain: "terminals",
+    description: "Read one terminal session",
+    paramsSchema: objectSchema({ ...WORKSPACE_PATH, terminalId: STRING }, ["workspacePath", "terminalId"]),
+    idempotent: true,
+    handler: (ctx, params) => ctx.terminals.get(workspace(ctx, params).canonicalRoot, reqString(params, "terminalId")) as JsonValue,
+  }),
+  registerHostCapability({
+    name: "terminals.connectToken",
+    domain: "terminals",
+    description: "Issue a one-time token for a terminal WebSocket",
+    paramsSchema: objectSchema({ ...WORKSPACE_PATH, terminalId: STRING }, ["workspacePath", "terminalId"]),
+    handler: (ctx, params) => ctx.terminals.issueConnectToken(workspace(ctx, params).canonicalRoot, reqString(params, "terminalId")),
+  }),
+  registerHostCapability({
+    name: "terminals.update",
+    domain: "terminals",
+    description: "Rename or resize a terminal session",
+    paramsSchema: objectSchema({
+      ...WORKSPACE_PATH,
+      terminalId: STRING,
+      title: STRING,
+      rows: { type: "integer", minimum: 1, maximum: 500 },
+      cols: { type: "integer", minimum: 1, maximum: 500 },
+    }, ["workspacePath", "terminalId"]),
+    emits: ["terminal.updated"],
+    handler: (ctx, params) => ctx.terminals.update(workspace(ctx, params).canonicalRoot, reqString(params, "terminalId"), {
+      title: optString(params, "title"),
+      rows: optSize(params, "rows"),
+      cols: optSize(params, "cols"),
+    }) as JsonValue,
+  }),
+  registerHostCapability({
+    name: "terminals.remove",
+    domain: "terminals",
+    description: "Terminate and remove a terminal session",
+    paramsSchema: objectSchema({ ...WORKSPACE_PATH, terminalId: STRING }, ["workspacePath", "terminalId"]),
+    emits: ["terminal.deleted"],
+    handler: (ctx, params) => {
+      ctx.terminals.remove(workspace(ctx, params).canonicalRoot, reqString(params, "terminalId"))
+      return { ok: true }
     },
   }),
   registerHostCapability({

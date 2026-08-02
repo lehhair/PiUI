@@ -54,6 +54,10 @@ export type EventChannel =
   | "sessions.updated"
   | "sessions.activity"
   | "resources.updated"
+  | "terminal.created"
+  | "terminal.updated"
+  | "terminal.exited"
+  | "terminal.deleted"
 
 export type EventEnvelope = {
   protocolVersion: typeof PROTOCOL_VERSION
