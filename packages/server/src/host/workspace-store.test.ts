@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
@@ -72,5 +72,19 @@ describe("workspace identity", () => {
     assert.equal(store.find(root), undefined)
     store.resolve(root)
     assert.equal(store.find(root)?.canonicalRoot, realpathSync.native(root))
+  })
+
+  it("rejects a known root replaced by a symlink", () => {
+    const parent = mkdtempSync(path.join(tmpdir(), "piui-ws-replaced-"))
+    const root = path.join(parent, "root")
+    const outside = path.join(parent, "outside")
+    mkdirSync(root)
+    mkdirSync(outside)
+    roots.push(parent)
+    const store = new WorkspaceStore()
+    store.resolve(root)
+    renameSync(root, path.join(parent, "moved"))
+    symlinkSync(outside, root, process.platform === "win32" ? "junction" : "dir")
+    assert.throws(() => store.resolve(root), /workspace root was replaced/)
   })
 })
