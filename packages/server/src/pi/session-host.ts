@@ -238,6 +238,22 @@ export class SessionHost {
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
+    try {
+      const listed = await this.catalogCommand("session.listAll", undefined, { retry: true, idempotent: true })
+      if (Array.isArray(listed)) {
+        const match = listed.find(item => isJsonObject(item) && item.id === sessionId)
+        if (isJsonObject(match)) {
+          const sessionFile = typeof match.path === "string"
+            ? match.path
+            : typeof match.sessionFile === "string" ? match.sessionFile : undefined
+          const cwd = typeof match.cwd === "string" ? match.cwd : undefined
+          if (sessionFile && cwd) return { cwd, sessionFile }
+        }
+      }
+    } catch {
+      // Fall back to the legacy default directory scan below.
+    }
+
     // Scan the Pi sessions directory directly for `<ts>_<sessionId>.jsonl` —
     // more reliable than the catalog list, and reads cwd from the file header.
     try {
