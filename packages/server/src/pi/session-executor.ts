@@ -19,6 +19,9 @@ export class SessionExecutor {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly commands = new Map<string, CommandEntry>()
   private readonly crashEpochs = new Map<string, number>()
+  private readonly closing = new Set<string>()
+  private readonly closed = new Set<string>()
+  private readonly closeFlights = new Map<string, Promise<void>>()
 
   constructor(private readonly onUpdate?: (record: CommandRecord) => void) {}
 
@@ -26,6 +29,9 @@ export class SessionExecutor {
     envelope: CommandEnvelope,
     run: () => Promise<JsonValue | undefined>,
   ): SubmittedCommand {
+    if (envelope.sessionId && (this.closing.has(envelope.sessionId) || this.closed.has(envelope.sessionId))) {
+      throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
+    }
     const requestFingerprint = createHash("sha256").update(JSON.stringify(envelope)).digest("hex")
     const existing = this.commands.get(envelope.id)
     if (existing) {
@@ -54,7 +60,7 @@ export class SessionExecutor {
           record.status === "cancelled" ||
           (envelope.sessionId && (this.crashEpochs.get(envelope.sessionId) ?? 0) !== crashEpoch)
         ) {
-          throw runtimeCrashError()
+          throw record.error?.code === "RUNTIME_CLOSING" ? runtimeClosingError() : runtimeCrashError()
         }
         record.status = "running"
         record.startedAt = new Date().toISOString()
@@ -130,6 +136,49 @@ export class SessionExecutor {
     }
   }
 
+  isClosing(sessionId: string): boolean {
+    return this.closing.has(sessionId) || this.closed.has(sessionId)
+  }
+
+  close(sessionId: string, options: {
+    interrupt?: () => Promise<void>
+    dispose: () => Promise<void>
+  }): Promise<void> {
+    const existing = this.closeFlights.get(sessionId)
+    if (existing) return existing
+    if (this.closed.has(sessionId)) return Promise.resolve()
+
+    this.closing.add(sessionId)
+    for (const entry of this.commands.values()) {
+      if (entry.record.sessionId !== sessionId || entry.record.status !== "accepted") continue
+      entry.record.status = "cancelled"
+      entry.record.completedAt = new Date().toISOString()
+      entry.record.error = {
+        code: "RUNTIME_CLOSING",
+        message: "Session runtime is closing",
+      }
+      this.emit(entry.record)
+    }
+
+    const lane = `session:${sessionId}`
+    const previous = this.tails.get(lane) ?? Promise.resolve()
+    const flight = Promise.resolve()
+      .then(() => options.interrupt?.())
+      .catch(() => undefined)
+      .then(() => previous)
+      .catch(() => undefined)
+      .then(() => options.dispose())
+      .finally(() => {
+        this.closing.delete(sessionId)
+        this.closed.add(sessionId)
+        this.closeFlights.delete(sessionId)
+        if (this.tails.get(lane) === flight) this.tails.delete(lane)
+      })
+    this.closeFlights.set(sessionId, flight)
+    this.tails.set(lane, flight)
+    return flight
+  }
+
   private emit(record: CommandRecord): void {
     this.onUpdate?.({
       ...record,
@@ -142,6 +191,10 @@ function runtimeCrashError(): Error {
   return Object.assign(new Error("Pi worker crashed before command completion could be confirmed"), {
     code: "SESSION_RUNTIME_CRASHED",
   })
+}
+
+function runtimeClosingError(): Error {
+  return Object.assign(new Error("Session runtime is closing"), { code: "RUNTIME_CLOSING" })
 }
 
 function isCrashTerminalStatus(status: CommandStatus): boolean {

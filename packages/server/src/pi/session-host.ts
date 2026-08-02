@@ -3,21 +3,14 @@ import { homedir } from "node:os"
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionExecutor, type SubmittedCommand } from "./session-executor.ts"
-import type { WorkerSession } from "./worker-client.ts"
-
-export interface AttachedSession {
-  sessionId: string
-  cwd: string
-  sessionFile?: string
-  worker: WorkerSession
-}
+import { SessionRuntimeRegistry, type AttachedSession } from "./session-registry.ts"
 
 const SERVER_GLOBAL_CAPABILITIES: PiCapability[] = [
   {
@@ -52,25 +45,10 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
   queue: "immediate",
 }]
 
-/** Path comparison that ignores slash direction and case on Windows. */
-function arePathsEqual(a: string, b: string): boolean {
-  const normalize = (value: string) => {
-    const normalized = resolve(value).replace(/\\/g, "/")
-    return process.platform === "win32" ? normalized.toLowerCase() : normalized
-  }
-  return normalize(a) === normalize(b)
-}
-
-function sessionFileKey(sessionFile: string): string {
-  const normalized = resolve(sessionFile).replace(/\\/g, "/")
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized
-}
-
 export class SessionHost {
-  private readonly attached = new Map<string, AttachedSession>()
+  private readonly runtimes = new SessionRuntimeRegistry()
   private readonly activity = new Map<string, SessionActivityStatus>()
   private readonly materialized = new Set<string>()
-  private readonly openFlights = new Map<string, Promise<JsonObject>>()
   readonly executor: SessionExecutor
 
   constructor(
@@ -83,16 +61,7 @@ export class SessionHost {
 
   async openSession(cwd: string, sessionFile?: string): Promise<JsonObject> {
     if (!sessionFile) return this.openSessionOnce(cwd, sessionFile)
-    const key = sessionFileKey(sessionFile)
-    const inFlight = this.openFlights.get(key)
-    if (inFlight) return inFlight
-    const flight = this.openSessionOnce(cwd, sessionFile)
-    this.openFlights.set(key, flight)
-    try {
-      return await flight
-    } finally {
-      if (this.openFlights.get(key) === flight) this.openFlights.delete(key)
-    }
+    return this.runtimes.openFlight(sessionFile, () => this.openSessionOnce(cwd, sessionFile))
   }
 
   private async openSessionOnce(cwd: string, sessionFile?: string): Promise<JsonObject> {
@@ -100,9 +69,7 @@ export class SessionHost {
     // its runtime instead of spawning a second worker that would lose the
     // session lease (SESSION_BUSY 409).
     if (sessionFile) {
-      const existing = [...this.attached.values()].find(
-        session => session.sessionFile && arePathsEqual(session.sessionFile, sessionFile),
-      )
+      const existing = this.runtimes.findBySessionFile(sessionFile)
       if (existing) {
         const state = await existing.worker.command("state.get") as JsonObject | undefined
         return {
@@ -131,7 +98,7 @@ export class SessionHost {
   }
 
   private attach(session: AttachedSession): void {
-    this.attached.set(session.sessionId, session)
+    this.runtimes.set(session)
     // A session file that already exists is visible to the disk-scanning
     // session list; only fresh sessions need the materialized broadcast.
     if (session.sessionFile && existsSync(session.sessionFile)) {
@@ -140,7 +107,7 @@ export class SessionHost {
     session.worker.onEvent(event => this.routeSessionEvent(session, event))
     session.worker.onCrash(() => {
       this.executor.markRuntimeCrashed(session.sessionId)
-      this.attached.delete(session.sessionId)
+      this.runtimes.delete(session.sessionId)
       this.activity.delete(session.sessionId)
       // Dispose so the process exits and the supervisor releases the lease —
       // without this a crashed runtime orphans the session (permanent
@@ -153,8 +120,9 @@ export class SessionHost {
       })
     })
     session.worker.onClose(() => {
-      this.attached.delete(session.sessionId)
-      this.activity.delete(session.sessionId)
+      const wasAttached = this.runtimes.delete(session.sessionId)
+      const hadActivity = this.activity.delete(session.sessionId)
+      if (!wasAttached && !hadActivity) return
       this.publishActivity()
       this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
         sessionId: session.sessionId,
@@ -169,26 +137,34 @@ export class SessionHost {
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    const session = this.attached.get(sessionId)
+    const session = this.runtimes.get(sessionId)
     if (!session) throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
-    this.attached.delete(sessionId)
-    await session.worker.dispose()
-    this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
-      sessionId,
-      detached: true,
+    await this.executor.close(sessionId, {
+      interrupt: async () => {
+        await session.worker.command("abort").catch(() => undefined)
+      },
+      dispose: async () => {
+        this.runtimes.delete(sessionId)
+        this.activity.delete(sessionId)
+        await session.worker.dispose()
+        this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
+          sessionId,
+          detached: true,
+        })
+      },
     })
   }
 
   getAttached(sessionId: string): AttachedSession | undefined {
-    return this.attached.get(sessionId)
+    return this.runtimes.get(sessionId)
   }
 
   listAttachedIds(): string[] {
-    return [...this.attached.keys()]
+    return [...this.runtimes.keys()]
   }
 
   requireAttached(sessionId: string): AttachedSession {
-    const session = this.attached.get(sessionId)
+    const session = this.runtimes.get(sessionId)
     if (!session) {
       throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
     }
@@ -198,6 +174,9 @@ export class SessionHost {
   async sessionQuery(sessionId: string, type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
     return withAbort((async () => {
       const session = await this.ensureAttached(sessionId)
+      if (this.executor.isClosing(sessionId)) {
+        throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
+      }
       const capability = this.getSessionCapability(type)
       if (capability?.queue !== "immediate") {
         throw Object.assign(new Error(`${type} is not a query command`), { code: "INVALID_REQUEST" })
@@ -211,30 +190,20 @@ export class SessionHost {
    * restart, or a client deep-linking to a session id), locate it on disk
    * via the global session list and attach it before failing.
    */
-  private attachFlights = new Map<string, Promise<AttachedSession>>()
-
   private async ensureAttached(sessionId: string): Promise<AttachedSession> {
-    const existing = this.attached.get(sessionId)
+    const existing = this.runtimes.get(sessionId)
     if (existing) return existing
     // Single-flight: concurrent queries (state.get + branch.get fire together)
     // must share one attach, or the second worker loses the session lease
     // with SESSION_BUSY.
-    const inFlight = this.attachFlights.get(sessionId)
-    if (inFlight) return inFlight
-    const flight = (async (): Promise<AttachedSession> => {
+    return this.runtimes.attachFlight(sessionId, async (): Promise<AttachedSession> => {
       const found = await this.findSessionOnDisk(sessionId)
       if (!found) {
         throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
       }
       await this.openSession(found.cwd, found.sessionFile)
       return this.requireAttached(sessionId)
-    })()
-    this.attachFlights.set(sessionId, flight)
-    try {
-      return await flight
-    } finally {
-      this.attachFlights.delete(sessionId)
-    }
+    })
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
@@ -302,9 +271,7 @@ export class SessionHost {
       // its next append, resurrecting the deleted session.
       const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
       if (sessionFile) {
-        const live = [...this.attached.values()].find(
-          session => session.sessionFile && arePathsEqual(session.sessionFile, sessionFile),
-        )
+        const live = this.runtimes.findBySessionFile(sessionFile)
         if (live) await this.closeSession(live.sessionId)
       }
     }
@@ -330,7 +297,7 @@ export class SessionHost {
         this.trackReplacement(session, data)
         return data
       })
-    const existing = this.attached.get(sessionId)
+    const existing = this.runtimes.get(sessionId)
     if (existing) return submit(existing)
     return this.ensureAttached(sessionId).then(submit)
   }
@@ -350,7 +317,7 @@ export class SessionHost {
   private trackReplacement(session: AttachedSession, data: JsonValue | undefined): void {
     if (!isJsonObject(data) || data.cancelled !== false || typeof data.targetSessionId !== "string") return
     if (data.targetSessionId === session.sessionId) return
-    this.attached.delete(session.sessionId)
+    this.runtimes.delete(session.sessionId)
     session.sessionId = data.targetSessionId
     session.sessionFile = typeof data.targetSessionFile === "string" ? data.targetSessionFile : session.sessionFile
     session.cwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
@@ -359,7 +326,7 @@ export class SessionHost {
     // ports stay held and it can never be attached again (SESSION_BUSY).
     void this.supervisor.replaceRuntimeLease(session.worker, session.sessionFile, session.sessionId)
       .catch(() => undefined)
-    this.attached.set(session.sessionId, session)
+    this.runtimes.set(session)
     this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
       replaced: true,
       sourceSessionId: typeof data.sourceSessionId === "string" ? data.sourceSessionId : undefined,

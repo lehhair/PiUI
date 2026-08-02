@@ -124,3 +124,41 @@ test("SessionExecutor invalidates running and queued commands after a runtime cr
   await after.promise
   assert.equal(after.record.status, "completed")
 })
+
+test("SessionExecutor closes a lane by cancelling queued work and interrupting the active command", async () => {
+  const executor = new SessionExecutor()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let started!: () => void
+  const activeStarted = new Promise<void>(resolve => { started = resolve })
+  let interrupted = false
+  let disposed = false
+
+  const active = executor.submit(envelope("active", "a", "prompt"), async () => {
+    started()
+    await gate
+    return "active"
+  })
+  const queued = executor.submit(envelope("queued", "a", "compact"), async () => "queued")
+  await activeStarted
+  const closing = executor.close("a", {
+    interrupt: async () => {
+      interrupted = true
+      release()
+    },
+    dispose: async () => {
+      disposed = true
+    },
+  })
+
+  await closing
+  assert.equal(interrupted, true)
+  assert.equal(disposed, true)
+  assert.equal(await active.promise, "active")
+  await assert.rejects(queued.promise, { code: "RUNTIME_CLOSING" })
+  assert.equal(executor.isClosing("a"), true)
+  assert.throws(
+    () => executor.submit(envelope("after", "a", "prompt"), async () => "after"),
+    { code: "RUNTIME_CLOSING" },
+  )
+})
