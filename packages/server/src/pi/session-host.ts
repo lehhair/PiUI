@@ -281,7 +281,11 @@ export class SessionHost {
         if (live) await this.closeSession(live.sessionId)
       }
     }
-    const idempotent = type === "registry.describe" || getCommandCapability(type)?.idempotent === true
+    const capability = getCommandCapability(type)
+    if (SERVER_SESSION_CAPABILITIES.some(item => item.name === type) || capability?.scope === "session") {
+      throw Object.assign(new Error(`unknown global command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    }
+    const idempotent = type === "registry.describe" || capability?.idempotent === true
     return this.catalogCommand(type, params, { retry: idempotent, idempotent, signal: options.signal })
   }
 
@@ -317,7 +321,8 @@ export class SessionHost {
   }
 
   private getSessionCapability(type: string): PiCapability | undefined {
-    return SERVER_SESSION_CAPABILITIES.find(capability => capability.name === type) ?? getCommandCapability(type)
+    const capability = SERVER_SESSION_CAPABILITIES.find(item => item.name === type) ?? getCommandCapability(type)
+    return capability?.scope === "session" ? capability : undefined
   }
 
   private trackReplacement(session: AttachedSession, data: JsonValue | undefined): void {
