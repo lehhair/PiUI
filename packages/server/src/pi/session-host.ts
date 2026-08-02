@@ -71,6 +71,9 @@ export class SessionHost {
     if (sessionFile) {
       const existing = this.runtimes.findBySessionFile(sessionFile)
       if (existing) {
+        if (this.executor.isClosing(existing.sessionId)) {
+          throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
+        }
         const state = await existing.worker.command("state.get") as JsonObject | undefined
         return {
           sessionId: existing.sessionId,

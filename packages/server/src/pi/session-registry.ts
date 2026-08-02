@@ -73,7 +73,10 @@ export class SessionRuntimeRegistry {
         callback()
       }
       const abort = () => finish(() => {
-        if (flight!.waiters === 0) flight!.controller.abort()
+        if (flight!.waiters === 0) {
+          flight!.controller.abort()
+          if (this.openFlights.get(key) === flight) this.openFlights.delete(key)
+        }
         reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
       })
       if (signal?.aborted) {

@@ -61,3 +61,23 @@ test("SessionRuntimeRegistry aborts an open only after its last waiter leaves", 
   await assert.rejects(second, { code: "REQUEST_ABORTED" })
   assert.equal(aborted, true)
 })
+
+test("SessionRuntimeRegistry does not reuse an open flight after its last waiter aborts", async () => {
+  const registry = new SessionRuntimeRegistry()
+  const controller = new AbortController()
+  let calls = 0
+
+  const first = registry.openFlight("abandoned-session.jsonl", async signal => {
+    calls += 1
+    if (signal.aborted) throw Object.assign(new Error("open aborted"), { code: "REQUEST_ABORTED" })
+    return "first"
+  }, controller.signal)
+
+  controller.abort()
+  await assert.rejects(first, { code: "REQUEST_ABORTED" })
+  assert.equal(await registry.openFlight("abandoned-session.jsonl", async () => {
+    calls += 1
+    return "second"
+  }), "second")
+  assert.equal(calls, 2)
+})
