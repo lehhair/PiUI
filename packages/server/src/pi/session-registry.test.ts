@@ -35,3 +35,29 @@ test("SessionRuntimeRegistry removes completed attach flights", async () => {
   await registry.attachFlight("session", operation)
   assert.equal(calls, 2)
 })
+
+test("SessionRuntimeRegistry aborts an open only after its last waiter leaves", async () => {
+  const registry = new SessionRuntimeRegistry()
+  const firstController = new AbortController()
+  const secondController = new AbortController()
+  let aborted = false
+
+  const operation = registry.openFlight("shared-session.jsonl", async signal => {
+    await new Promise<void>((_, reject) => {
+      signal.addEventListener("abort", () => {
+        aborted = true
+        reject(Object.assign(new Error("open aborted"), { code: "REQUEST_ABORTED" }))
+      }, { once: true })
+    })
+    return "opened"
+  }, firstController.signal)
+  const second = registry.openFlight("shared-session.jsonl", async () => "wrong", secondController.signal)
+
+  firstController.abort()
+  await assert.rejects(operation, { code: "REQUEST_ABORTED" })
+  assert.equal(aborted, false)
+
+  secondController.abort()
+  await assert.rejects(second, { code: "REQUEST_ABORTED" })
+  assert.equal(aborted, true)
+})

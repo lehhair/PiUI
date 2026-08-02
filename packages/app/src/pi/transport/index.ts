@@ -18,6 +18,12 @@ import type {
   FileReadResponse,
   FileTextSearchResponse,
   ImageInput,
+  FollowUpParams,
+  PromptParams,
+  SendUserMessageParams,
+  SetModelParams,
+  SetThinkingLevelParams,
+  SteerParams,
 } from '@piui/protocol'
 import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
@@ -38,33 +44,6 @@ export type PiSessionOpenResult = {
   cwd?: string
   state?: JsonValue
   [key: string]: JsonValue | undefined
-}
-
-// Command parameter types
-export type PiPromptParams = {
-  text: string
-  expandPromptTemplates?: boolean
-  streamingBehavior?: 'steer' | 'followUp'
-  images?: ImageInput[]
-}
-
-export type PiSteerParams = {
-  text: string
-  images?: ImageInput[]
-}
-
-export type PiFollowUpParams = {
-  text: string
-  images?: ImageInput[]
-}
-
-export type PiSetModelParams = {
-  provider: string
-  modelId: string
-}
-
-export type PiSetThinkingLevelParams = {
-  level: string
 }
 
 export type PiBranchGetParams = {
@@ -353,15 +332,15 @@ export function getPiSkills(sessionId: string, signal?: AbortSignal): Promise<Sk
 }
 
 // Action commands
-export function promptPi(sessionId: string, params: PiPromptParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function promptPi(sessionId: string, params: PromptParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'prompt', params, signal)
 }
 
-export function steerPi(sessionId: string, params: PiSteerParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function steerPi(sessionId: string, params: SteerParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'steer', params, signal)
 }
 
-export function followUpPi(sessionId: string, params: PiFollowUpParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function followUpPi(sessionId: string, params: FollowUpParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'followUp', params, signal)
 }
 
@@ -430,7 +409,7 @@ export type PiImageInput = ImageInput
 
 export function sendPiUserMessage(
   sessionId: string,
-  params: { text: string; images?: PiImageInput[]; deliverAs?: 'steer' | 'followUp' },
+  params: SendUserMessageParams,
   signal?: AbortSignal,
 ): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'sendUserMessage', params as unknown as JsonObject, signal)
@@ -565,7 +544,7 @@ export async function waitHostCommand(commandId: string, signal?: AbortSignal, t
 }
 
 // Model commands
-export function setPiModel(sessionId: string, params: PiSetModelParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function setPiModel(sessionId: string, params: SetModelParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setModel', params, signal)
 }
 
@@ -573,7 +552,7 @@ export function cyclePiModel(sessionId: string, direction?: 'forward' | 'backwar
   return postPiSessionCommand(sessionId, 'cycleModel', direction ? { direction } : undefined, signal)
 }
 
-export function setPiThinkingLevel(sessionId: string, params: PiSetThinkingLevelParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function setPiThinkingLevel(sessionId: string, params: SetThinkingLevelParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setThinkingLevel', params, signal)
 }
 

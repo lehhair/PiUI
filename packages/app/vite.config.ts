@@ -9,6 +9,7 @@ import { bundledLanguagesInfo } from 'shiki/langs'
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
 
 const shikiSupportedLangs = bundledLanguagesInfo.flatMap(info => [info.id, ...(info.aliases ?? [])])
+const tauriDevHost = process.env.TAURI_DEV_HOST?.trim()
 
 function katexWoff2Only() {
   return {
@@ -85,8 +86,9 @@ export default defineConfig({
     host: process.env.TAURI_DEV_HOST || false,
     // 避免端口冲突
     strictPort: true,
-    // 允许所有域名
-    allowedHosts: true,
+    // The proxy injects the local backend token, so only allow the explicit
+    // host used by the Tauri dev bridge.
+    allowedHosts: tauriDevHost ? [tauriDevHost] : [],
 
     proxy: {
       // Phase 1 server (no OpenCode). Will expand with /api/v1 routes.

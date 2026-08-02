@@ -91,15 +91,15 @@ export class RuntimeSupervisor {
     return () => this.eventListeners.delete(listener)
   }
 
-  open(cwd: string, sessionFile?: string): Promise<WorkerSession> {
+  open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
-    const opening = this.performOpen(cwd, sessionFile)
+    const opening = this.performOpen(cwd, sessionFile, signal)
     this.pendingOpens.add(opening)
     void opening.finally(() => this.pendingOpens.delete(opening)).catch(() => undefined)
     return opening
   }
 
-  private async performOpen(cwd: string, sessionFile?: string): Promise<WorkerSession> {
+  private async performOpen(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     let lease: SessionLease | undefined = sessionFile ? await this.leases.acquire(sessionFile) : undefined
     if (this.disposed) {
       lease?.release()
@@ -108,7 +108,7 @@ export class RuntimeSupervisor {
     const host = this.takeStandby()
     this.opening.add(host)
     try {
-      const runtime = await host.open(cwd, sessionFile)
+      const runtime = await host.open(cwd, sessionFile, signal)
       if (this.disposed) {
         await runtime.dispose()
         lease?.release()
