@@ -22,6 +22,7 @@ import type {
 import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, piFetch } from '../httpClient.js'
+import { piCommandStore } from '../state/index.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
@@ -109,6 +110,7 @@ export async function postPiGlobalCommand<T = JsonValue | undefined>(
     body,
     signal,
   })
+  if (response.command) piCommandStore.upsert(response.command)
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
@@ -128,6 +130,7 @@ export async function postPiSessionCommand<T = JsonValue | undefined>(
       signal,
     },
   )
+  if (response.command) piCommandStore.upsert(response.command)
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 

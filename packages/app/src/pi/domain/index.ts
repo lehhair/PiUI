@@ -348,7 +348,7 @@ export type PiComposerMode =
 export type PiCommandLifecycle = {
   id: string
   name: string
-  status: 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown_after_crash'
   submittedAt: string
   completedAt?: string
   result?: unknown
