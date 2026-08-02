@@ -14,13 +14,17 @@ const QUERY_COMMANDS = new Set([
   "registry.get",
 ])
 
-function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand | undefined, promptActive: boolean): boolean {
+function canRunConcurrently(
+  command: SchedulerCommand,
+  active: SchedulerCommand | undefined,
+  concurrentPrompts: number,
+): boolean {
   const text = command.params?.text
   // sendUserMessage is semantically a prompt (SDK runs prompt(streamingBehavior)
   // under the hood) — query, queue, and abort commands must not block behind
   // it for the whole turn, or streaming state reads and aborts would only
   // land after the turn ends.
-  const activeIsPrompt = promptActive || active?.type === "prompt" || active?.type === "sendUserMessage"
+  const activeIsPrompt = concurrentPrompts > 0 || active?.type === "prompt" || active?.type === "sendUserMessage"
   switch (command.type) {
     case "prompt":
       return activeIsPrompt && typeof text === "string" && /^\/[^\s/]+(?:\s|$)/.test(text)
@@ -54,25 +58,37 @@ function canRunConcurrently(command: SchedulerCommand, active: SchedulerCommand 
 
 export function createWorkerCommandScheduler<T>(
   execute: (command: SchedulerCommand) => Promise<T>,
-): (command: SchedulerCommand) => Promise<T> {
+): ((command: SchedulerCommand) => Promise<T>) & { close: (cleanup: () => Promise<void>) => Promise<void> } {
   let queue: Promise<void> = Promise.resolve()
   let active: SchedulerCommand | undefined
-  // Concurrent commands bypass the serial queue but must still keep the
-  // "a prompt is running" guard true for their whole lifetime, otherwise a
-  // subsequent plain prompt could overlap a concurrent one after the serial
-  // prompt finishes.
-  let concurrentPrompts = 0
-  return command => {
-    const isPrompt = command.type === "prompt" || command.type === "sendUserMessage"
-    if (canRunConcurrently(command, active, concurrentPrompts > 0)) {
-      if (isPrompt) concurrentPrompts++
-      const result = execute(command)
-      if (isPrompt) {
-        void result.then(() => { concurrentPrompts-- }, () => { concurrentPrompts-- })
-      }
-      return result
+  const concurrentOperations = new Set<Promise<unknown>>()
+  const concurrentPrompts = new Set<Promise<unknown>>()
+  let closing = false
+  let closePromise: Promise<void> | undefined
+
+  const trackConcurrent = (command: SchedulerCommand, result: Promise<T>): Promise<T> => {
+    concurrentOperations.add(result)
+    if (command.type === "prompt" || command.type === "sendUserMessage") concurrentPrompts.add(result)
+    const remove = () => {
+      concurrentOperations.delete(result)
+      concurrentPrompts.delete(result)
+    }
+    void result.then(remove, remove)
+    return result
+  }
+
+  const schedule = ((command: SchedulerCommand): Promise<T> => {
+    if (closing) {
+      return Promise.reject(Object.assign(new Error("worker scheduler is closing"), { code: "RUNTIME_CLOSING" }))
+    }
+
+    if (canRunConcurrently(command, active, concurrentPrompts.size)) {
+      return trackConcurrent(command, execute(command))
     }
     const result = queue.then(async () => {
+      // Serial commands are barriers. In particular, a normal prompt must not
+      // begin while a slash prompt or queued native delivery is still active.
+      if (concurrentOperations.size > 0) await Promise.allSettled([...concurrentOperations])
       active = command
       try {
         return await execute(command)
@@ -82,5 +98,17 @@ export function createWorkerCommandScheduler<T>(
     })
     queue = result.then(() => undefined, () => undefined)
     return result
+  }) as ((command: SchedulerCommand) => Promise<T>) & { close: (cleanup: () => Promise<void>) => Promise<void> }
+
+  schedule.close = (cleanup: () => Promise<void>): Promise<void> => {
+    if (closePromise) return closePromise
+    closing = true
+    closePromise = queue.then(async () => {
+      await Promise.allSettled([...concurrentOperations])
+      await cleanup()
+    })
+    return closePromise
   }
+
+  return schedule
 }
