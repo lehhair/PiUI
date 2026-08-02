@@ -10,7 +10,9 @@ import {
   rm,
   unlink,
   writeFile,
+  stat,
 } from "node:fs/promises"
+import { realpathSync, statSync } from "node:fs"
 import path from "node:path"
 import type {
   FileListResponse,
@@ -19,7 +21,7 @@ import type {
   FileReadResponse,
 } from "@piui/protocol"
 import { PathSafetyError, resolveWorkspacePath } from "./path-safety.ts"
-import type { WorkspaceRecord } from "./workspace-store.ts"
+import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
 
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_BINARY_BYTES = 8 * 1024 * 1024
@@ -32,6 +34,7 @@ export async function listFiles(
   relativePath: string,
   opts: { cursor?: string; limit?: number } = {},
 ): Promise<FileListResponse> {
+  assertWorkspaceCurrent(ws)
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (!resolved.exists) throw new PathSafetyError("INVALID_REQUEST", "path does not exist")
   const directory = await lstat(resolved.absolute)
@@ -62,32 +65,35 @@ export async function listFiles(
 }
 
 export async function readFileContent(ws: WorkspaceRecord, relativePath: string): Promise<FileReadResponse> {
+  assertWorkspaceCurrent(ws)
   const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
   if (!resolved.exists) throw new PathSafetyError("INVALID_REQUEST", "path does not exist")
   if (resolved.restricted) throw new PathSafetyError("SYMLINK_ESCAPE", "restricted path")
   const handle = await open(resolved.absolute, "r")
-  let buffer: Buffer
   try {
-    const stat = await handle.stat()
-    if (!stat.isFile()) throw new PathSafetyError("INVALID_REQUEST", "not a file")
-    if (stat.size > MAX_BINARY_BYTES) throw fileTooLarge("file too large for remote preview")
-    buffer = await handle.readFile()
+    const opened = await handle.stat()
+    if (!opened.isFile()) throw new PathSafetyError("INVALID_REQUEST", "not a file")
+    if (opened.size > MAX_BINARY_BYTES) throw fileTooLarge("file too large for remote preview")
+    const buffer = await handle.readFile()
+    if (buffer.length > MAX_BINARY_BYTES) throw fileTooLarge("file too large for remote preview")
+    const verified = resolveWorkspacePath(ws.canonicalRoot, relativePath)
+    if (verified.absolute !== resolved.absolute) throw new PathSafetyError("SYMLINK_ESCAPE", "file target changed during read")
+    const current = await stat(verified.absolute)
+    const afterRead = await handle.stat()
+    if (!sameFile(current, afterRead)) throw new PathSafetyError("SYMLINK_ESCAPE", "file target changed during read")
+    const binary = isBinary(buffer)
+    if (!binary && buffer.length > MAX_TEXT_BYTES) throw fileTooLarge("text file too large for remote preview")
+    return {
+      path: resolved.relative,
+      content: binary ? buffer.toString("base64") : buffer.toString("utf8"),
+      encoding: binary ? "base64" : "utf-8",
+      type: binary ? "binary" : "text",
+      mimeType: mimeType(relativePath, binary),
+      size: buffer.length,
+      etag: etag(buffer),
+    }
   } finally {
     await handle.close()
-  }
-  if (buffer.length > MAX_BINARY_BYTES) throw fileTooLarge("file too large for remote preview")
-  const verified = resolveWorkspacePath(ws.canonicalRoot, relativePath)
-  if (verified.absolute !== resolved.absolute) throw new PathSafetyError("SYMLINK_ESCAPE", "file target changed during read")
-  const binary = isBinary(buffer)
-  if (!binary && buffer.length > MAX_TEXT_BYTES) throw fileTooLarge("text file too large for remote preview")
-  return {
-    path: resolved.relative,
-    content: binary ? buffer.toString("base64") : buffer.toString("utf8"),
-    encoding: binary ? "base64" : "utf-8",
-    type: binary ? "binary" : "text",
-    mimeType: mimeType(relativePath, binary),
-    size: buffer.length,
-    etag: etag(buffer),
   }
 }
 
@@ -98,7 +104,10 @@ export async function writeFileContent(
   opts: { ifMatch?: string; encoding?: "utf-8" | "base64"; createOnly?: boolean } = {},
 ): Promise<FileReadResponse> {
   const key = path.join(ws.canonicalRoot, ...relativePath.replace(/\\/g, "/").split("/"))
-  return withWorkspaceMutation(ws, () => withFileLock(key, () => writeFileContentLocked(ws, relativePath, content, opts)))
+  return withWorkspaceMutation(ws, () => {
+    assertWorkspaceCurrent(ws)
+    return withFileLock(key, () => writeFileContentLocked(ws, relativePath, content, opts))
+  })
 }
 
 async function writeFileContentLocked(
@@ -158,7 +167,10 @@ export async function createWorkspaceEntry(
   opts: { content?: string; encoding?: "utf-8" | "base64"; overwrite?: boolean } = {},
 ): Promise<FileOperationResponse | FileReadResponse> {
   const key = path.join(ws.canonicalRoot, ...relativePath.replace(/\\/g, "/").split("/"))
-  return withWorkspaceMutation(ws, () => withFileLock(key, () => createWorkspaceEntryLocked(ws, relativePath, type, opts)))
+  return withWorkspaceMutation(ws, () => {
+    assertWorkspaceCurrent(ws)
+    return withFileLock(key, () => createWorkspaceEntryLocked(ws, relativePath, type, opts))
+  })
 }
 
 async function createWorkspaceEntryLocked(
@@ -189,7 +201,10 @@ export async function moveWorkspaceEntry(
   overwrite = false,
 ): Promise<FileOperationResponse> {
   const keys = [from, to].map(relative => path.join(ws.canonicalRoot, ...relative.replace(/\\/g, "/").split("/"))).sort()
-  return withWorkspaceMutation(ws, () => withFileLocks(keys, () => moveWorkspaceEntryLocked(ws, from, to, overwrite)))
+  return withWorkspaceMutation(ws, () => {
+    assertWorkspaceCurrent(ws)
+    return withFileLocks(keys, () => moveWorkspaceEntryLocked(ws, from, to, overwrite))
+  })
 }
 
 async function moveWorkspaceEntryLocked(
@@ -251,7 +266,10 @@ export async function deleteWorkspaceEntry(
   recursive = false,
 ): Promise<void> {
   const key = path.join(ws.canonicalRoot, ...relativePath.replace(/\\/g, "/").split("/"))
-  return withWorkspaceMutation(ws, () => withFileLock(key, () => deleteWorkspaceEntryLocked(ws, relativePath, recursive)))
+  return withWorkspaceMutation(ws, () => {
+    assertWorkspaceCurrent(ws)
+    return withFileLock(key, () => deleteWorkspaceEntryLocked(ws, relativePath, recursive))
+  })
 }
 
 async function deleteWorkspaceEntryLocked(
@@ -370,6 +388,33 @@ function conflict(message: string): Error {
 
 function fileTooLarge(message: string): Error {
   return Object.assign(new Error(message), { code: "FILE_TOO_LARGE" as const })
+}
+
+function assertWorkspaceCurrent(ws: WorkspaceRecord): void {
+  if (ws.rootIdentity === undefined) return
+  try {
+    const resolved = realpathSync.native(path.resolve(ws.canonicalRoot))
+    const identity = fileIdentity(statSync(resolved))
+    if (workspacePathKey(resolved) !== workspacePathKey(ws.canonicalRoot) || identity !== ws.rootIdentity) {
+      throw workspaceReplaced(ws.canonicalRoot)
+    }
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "WORKSPACE_REPLACED") throw error
+    throw workspaceReplaced(ws.canonicalRoot)
+  }
+}
+
+function fileIdentity(value: { dev: number; ino: number }): string {
+  return `${value.dev}:${value.ino}`
+}
+
+function workspaceReplaced(rootPath: string): Error {
+  return Object.assign(new Error(`workspace root was replaced: ${rootPath}`), { code: "WORKSPACE_REPLACED" })
+}
+
+function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
+  if (left.ino === 0 || right.ino === 0) return true
+  return left.dev === right.dev && left.ino === right.ino
 }
 
 async function withFileLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
