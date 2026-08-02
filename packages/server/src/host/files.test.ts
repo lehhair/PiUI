@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
@@ -118,15 +118,33 @@ describe("workspace files", () => {
     await writeFileContent(workspace, "alias/new.txt", "physical")
     assert.equal(readFileSync(path.join(physical, "new.txt"), "utf8"), "physical")
   })
+
+  it("rejects file operations after the workspace root is replaced", async () => {
+    const { root, workspace } = fixture()
+    writeFileSync(path.join(root, "before.txt"), "before")
+    const moved = `${root}-replaced`
+    renameSync(root, moved)
+    mkdirSync(root)
+    try {
+      writeFileSync(path.join(root, "outside.txt"), "replacement")
+      await assert.rejects(readFileContent(workspace, "outside.txt"), error =>
+        (error as { code?: string }).code === "WORKSPACE_REPLACED")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      renameSync(moved, root)
+    }
+  })
 })
 
 function fixture(): { root: string; workspace: WorkspaceRecord } {
   const root = mkdtempSync(path.join(tmpdir(), "piui-files-"))
   roots.push(root)
+  const identity = statSync(root)
   return {
     root,
     workspace: {
       canonicalRoot: root,
+      rootIdentity: `${identity.dev}:${identity.ino}`,
       displayName: "fixture",
       createdAt: new Date().toISOString(),
       lastOpenedAt: new Date().toISOString(),
