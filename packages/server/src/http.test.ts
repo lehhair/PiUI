@@ -153,13 +153,28 @@ describe("http api", () => {
     const opened = await request(port, "POST", "/api/v1/pi/commands/session.open", { body: { cwd: mockHome } })
     assert.equal(opened.status, 200)
     const sessionId = opened.json.data.sessionId as string
-    const globalThroughSession = await request(
-      port,
-      "POST",
-      `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/models.list`,
-    )
-    assert.equal(globalThroughSession.status, 404)
-    assert.equal(globalThroughSession.json.code, "UNKNOWN_COMMAND")
+    for (const type of [
+      "models.list",
+      "settings.patch",
+      "trust.set",
+      "providers.logout",
+      "modelRuntime.setApiKey",
+      "packages.manage",
+    ]) {
+      const globalThroughSession = await request(
+        port,
+        "POST",
+        `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/${type}`,
+      )
+      assert.equal(globalThroughSession.status, 404, type)
+      assert.equal(globalThroughSession.json.code, "UNKNOWN_COMMAND", type)
+    }
+
+    for (const type of ["prompt", "state.get", "branch.get"]) {
+      const sessionThroughGlobal = await request(port, "POST", `/api/v1/pi/commands/${type}`)
+      assert.equal(sessionThroughGlobal.status, 404, type)
+      assert.equal(sessionThroughGlobal.json.code, "UNKNOWN_COMMAND", type)
+    }
 
     const trust = await request(port, "POST", "/api/v1/pi/commands/trust.get", { body: { cwd: mockHome } })
     assert.equal(trust.status, 200)
