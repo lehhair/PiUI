@@ -80,4 +80,20 @@ describe("resolveWorkspacePath", () => {
       rmSync(outside, { recursive: true, force: true })
     }
   })
+
+  it("resolves missing targets through an internal directory link", () => {
+    const link = path.join(root, "src-alias")
+    try {
+      symlinkSync(path.join(root, "src"), link, "junction")
+    } catch {
+      return
+    }
+    try {
+      const resolved = resolveWorkspacePath(root, "src-alias/new.ts")
+      assert.equal(resolved.exists, false)
+      assert.equal(resolved.absolute, path.join(root, "src", "new.ts"))
+    } finally {
+      rmSync(link, { recursive: true, force: true })
+    }
+  })
 })
