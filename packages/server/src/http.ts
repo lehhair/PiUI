@@ -308,7 +308,7 @@ function allowedMethodsForPath(pathname: string): string | undefined {
   return undefined
 }
 
-function statusForError(error: unknown): number {
+export function statusForError(error: unknown): number {
   if (error instanceof PathSafetyError) {
     return error.code === "INVALID_REQUEST" ? 400 : 403
   }
@@ -331,9 +331,17 @@ function statusForError(error: unknown): number {
     case "WORKSPACE_NOT_FOUND":
       return 404
     case "FILE_TOO_LARGE":
+    case "GIT_OUTPUT_LIMIT":
       return 413
     case "GIT_TIMEOUT":
       return 504
+    case "GIT_BASE_NOT_FOUND":
+    case "EXTENSION_UI_CANCELLED":
+      return 409
+    case "EXTENSION_UI_TUI_ONLY":
+      return 501
+    case "PI_SDK_VERSION_MISMATCH":
+      return 503
     case "HOST_CALL_TIMEOUT":
       return 504
     case "REGISTRY_UNAVAILABLE":
