@@ -16,12 +16,15 @@ import {
   GitBranchIcon,
   PuzzleIcon,
   SettingsIcon,
+  TerminalIcon
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
 import { getInternalDragSnapshot, startInternalDrag, subscribeInternalDrag, subscribeInternalDrop } from '../lib/internalDragCore'
 import { useDragEdgeAutoScroll } from '../hooks/useDragEdgeAutoScroll'
 import { IconButton } from './ui/IconButton'
 import { usePiCapabilities } from '../pi/capabilities'
+import { useTheme } from '../hooks'
+import { uiErrorHandler } from '../utils/errorHandling'
 
 // ============================================
 // Types
@@ -31,6 +34,9 @@ interface PanelContainerProps {
   position: PanelPosition
   children: (activeTab: PanelTab | null) => React.ReactNode
   forceOpen?: boolean
+  onNewTerminal?: () => void | Promise<void>
+  onCloseTerminal?: (terminalId: string) => void | Promise<void>
+  onRenameTerminal?: (terminalId: string, title: string) => void | Promise<void>
 }
 
 // Tab 图标映射
@@ -41,6 +47,7 @@ const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
   'session-controls': <SettingsIcon size={12} />,
   skill: <TeachIcon size={12} />,
   extensions: <PuzzleIcon size={12} />,
+  terminal: <TerminalIcon size={12} />
 }
 
 // Tab 显示名称
@@ -66,6 +73,8 @@ function getTabLabel(tab: PanelTab, tabs: PanelTab[], t: (key: string) => string
       return t('panelContainer.skills')
     case 'extensions':
       return t('panelContainer.extensions')
+    case 'terminal':
+      return tab.title || t('panelContainer.terminal')
     default:
       return t('panelContainer.tab')
   }
@@ -79,9 +88,13 @@ export const PanelContainer = memo(function PanelContainer({
   position,
   children,
   forceOpen = false,
+  onNewTerminal,
+  onCloseTerminal,
+  onRenameTerminal
 }: PanelContainerProps) {
   const { t } = useTranslation(['components', 'common'])
   const capabilities = usePiCapabilities()
+  const { manualTerminalTitles } = useTheme()
   const layout = useLayoutStore()
 
   const isOpen = forceOpen || (position === 'bottom' ? layout.bottomPanelOpen : layout.rightPanelOpen)
@@ -99,18 +112,30 @@ export const PanelContainer = memo(function PanelContainer({
   const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   // 右键菜单状态
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    tabId: string
+  } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  const [editingTabId, setEditingTabId] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+  const editInputRef = useRef<HTMLInputElement>(null)
+  const renamePendingRef = useRef(false)
 
   // Tabs 容器 ref（用于水平滚动）
   const tabsContainerRef = useRef<HTMLDivElement>(null)
 
   useDragEdgeAutoScroll(tabsContainerRef, {
-    payloadKind: 'panel-tab',
+    payloadKind: 'panel-tab'
   })
 
   // Add 菜单状态
-  const [addMenuPos, setAddMenuPos] = useState<{ x: number; y: number; align: 'left' | 'right' } | null>(null)
+  const [addMenuPos, setAddMenuPos] = useState<{
+    x: number
+    y: number
+    align: 'left' | 'right'
+  } | null>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -168,14 +193,85 @@ export const PanelContainer = memo(function PanelContainer({
     (tabId: string) => {
       layoutStore.setActiveTab(position, tabId)
     },
-    [position],
+    [position]
   )
 
   // 关闭 tab
-  const handleCloseTab = useCallback((tabId: string, _tab: PanelTab, e: React.MouseEvent) => {
-    e.stopPropagation()
-    layoutStore.removeTab(tabId)
+  const handleCloseTab = useCallback(
+    (tabId: string, tab: PanelTab, e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (tab.type === 'terminal' && onCloseTerminal) {
+        void onCloseTerminal(tab.terminalId ?? tab.id)
+      }
+      layoutStore.removeTab(tabId)
+    },
+    [onCloseTerminal]
+  )
+
+  const beginRename = useCallback(
+    (tab: PanelTab) => {
+      if (tab.type !== 'terminal' || !manualTerminalTitles) return
+      setContextMenu(null)
+      layoutStore.setActiveTab(position, tab.id)
+      setEditingTabId(tab.id)
+      setEditingValue(tab.customTitle ?? tab.title ?? '')
+    },
+    [manualTerminalTitles, position]
+  )
+
+  // 编辑态保护：手动命名关闭或对应 tab 消失时退出编辑
+  useEffect(() => {
+    if (!editingTabId) return
+    if (!manualTerminalTitles) {
+      setEditingTabId(null)
+      return
+    }
+    if (!tabs.some(tab => tab.id === editingTabId && tab.type === 'terminal')) {
+      setEditingTabId(null)
+    }
+  }, [editingTabId, manualTerminalTitles, tabs])
+
+  useEffect(() => {
+    if (editingTabId) {
+      editInputRef.current?.focus()
+      editInputRef.current?.select()
+    }
+  }, [editingTabId])
+
+  const cancelRename = useCallback(() => {
+    renamePendingRef.current = false
+    setEditingTabId(null)
+    setEditingValue('')
   }, [])
+
+  const submitRename = useCallback(
+    async (tab: PanelTab) => {
+      if (tab.type !== 'terminal' || renamePendingRef.current) return
+
+      const nextTitle = editingValue.trim()
+      if (!nextTitle || nextTitle === (tab.customTitle ?? tab.title ?? '')) {
+        cancelRename()
+        return
+      }
+
+      renamePendingRef.current = true
+      try {
+        if (onRenameTerminal) {
+          await onRenameTerminal(tab.terminalId ?? tab.id, nextTitle)
+        } else {
+          layoutStore.updateTerminalTab(tab.id, {
+            title: nextTitle,
+            customTitle: nextTitle
+          })
+        }
+      } catch (error) {
+        uiErrorHandler('rename terminal', error)
+      } finally {
+        cancelRename()
+      }
+    },
+    [cancelRename, editingValue, onRenameTerminal]
+  )
 
   // 右键菜单
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
@@ -193,7 +289,7 @@ export const PanelContainer = memo(function PanelContainer({
     setContextMenu(null)
   }, [contextMenu, position, tabs])
 
-  const contextTab = contextMenu ? tabs.find(tab => tab.id === contextMenu.tabId) ?? null : null
+  const contextTab = contextMenu ? (tabs.find(tab => tab.id === contextMenu.tabId) ?? null) : null
 
   // 拖拽处理
   useEffect(() => {
@@ -234,13 +330,11 @@ export const PanelContainer = memo(function PanelContainer({
   return (
     <>
       {/* Header with Tabs */}
-      <div className={`${position === 'right' ? 'mobile-safe-topbar-14' : ''} flex items-center justify-between px-3 z-20 bg-bg-100 relative shrink-0`}>
+      <div
+        className={`${position === 'right' ? 'mobile-safe-topbar-14' : ''} flex items-center justify-between px-3 z-20 bg-bg-100 relative shrink-0`}
+      >
         {/* Tabs Container - 水平滚动 */}
-        <div
-          ref={tabsContainerRef}
-          onWheel={handleWheel}
-          className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none"
-        >
+        <div ref={tabsContainerRef} onWheel={handleWheel} className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none">
           {tabs.map(tab => (
             <PanelTabButton
               key={tab.id}
@@ -252,20 +346,20 @@ export const PanelContainer = memo(function PanelContainer({
               onClick={() => handleSelectTab(tab.id)}
               onClose={e => handleCloseTab(tab.id, tab, e)}
               onContextMenu={e => handleContextMenu(e, tab.id)}
-              onDoubleClick={() => undefined}
+              onDoubleClick={() => beginRename(tab)}
               position={position}
-              canRename={false}
-              isEditing={false}
-              editingValue=""
-              editInputRef={{ current: null }}
-              onEditingValueChange={() => undefined}
-              onEditSubmit={() => undefined}
-              onEditCancel={() => undefined}
+              canRename={manualTerminalTitles && tab.type === 'terminal'}
+              isEditing={editingTabId === tab.id}
+              editingValue={editingTabId === tab.id ? editingValue : ''}
+              editInputRef={editInputRef}
+              onEditingValueChange={setEditingValue}
+              onEditSubmit={() => void submitRename(tab)}
+              onEditCancel={cancelRename}
             />
           ))}
 
           {/* New Tab Button */}
-          {(
+          {
             <button
               ref={addButtonRef}
               onClick={() => {
@@ -280,19 +374,20 @@ export const PanelContainer = memo(function PanelContainer({
                   setAddMenuPos({
                     x: align === 'left' ? rect.left : rect.right,
                     y: rect.bottom + 4,
-                    align,
+                    align
                   })
                 }
               }}
               className={`
-                p-2 ml-1 rounded-md transition-colors shrink-0
-                ${addMenuPos ? 'bg-bg-200 text-text-100' : 'text-text-400 hover:text-text-100 hover:bg-bg-200/50'}
-              `}
+                 p-2 ml-1 rounded-md transition-colors shrink-0
+                 ${addMenuPos ? 'bg-bg-200 text-text-100' : 'text-text-400 hover:text-text-100 hover:bg-bg-200/50'}
+               `}
+              aria-label={t('panelContainer.addTab')}
               title={t('panelContainer.addTab')}
             >
               <span className="text-[length:var(--fs-heading-2)] leading-none">+</span>
             </button>
-          )}
+          }
         </div>
 
         {/* Actions — 与 Header 侧栏按钮同尺寸，短分隔线 */}
@@ -322,6 +417,14 @@ export const PanelContainer = memo(function PanelContainer({
             className="fixed z-[9999] bg-bg-100 border border-border-200 rounded-lg shadow-lg p-1 min-w-[160px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
+            {manualTerminalTitles && contextTab?.type === 'terminal' && (
+              <button
+                onClick={() => beginRename(contextTab)}
+                className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                {t('panelContainer.renameTerminal')}
+              </button>
+            )}
             {contextTab?.type !== 'session-tree' && contextTab?.type !== 'session-controls' && (
               <button
                 onClick={handleMoveToOtherPanel}
@@ -331,7 +434,7 @@ export const PanelContainer = memo(function PanelContainer({
               </button>
             )}
           </div>,
-          document.body,
+          document.body
         )}
 
       {/* Add Menu - Portal */}
@@ -343,9 +446,23 @@ export const PanelContainer = memo(function PanelContainer({
             style={{
               top: addMenuPos.y,
               left: addMenuPos.align === 'left' ? addMenuPos.x : undefined,
-              right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined,
+              right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined
             }}
           >
+            {onNewTerminal && (
+              <button
+                onClick={() => {
+                  void onNewTerminal()
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <TerminalIcon size={12} />
+                </span>
+                {t('panelContainer.terminal')}
+              </button>
+            )}
             <button
               onClick={() => {
                 layoutStore.addFilesTab(position)
@@ -369,6 +486,18 @@ export const PanelContainer = memo(function PanelContainer({
                 <GitCommitIcon size={12} />
               </span>
               {t('panelContainer.changes')}
+            </button>
+            <button
+              onClick={() => {
+                layoutStore.addSkillTab(position)
+                setAddMenuPos(null)
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+            >
+              <span className="opacity-60 shrink-0">
+                <TeachIcon size={12} />
+              </span>
+              {t('panelContainer.skills')}
             </button>
             {position === 'right' && capabilities.sessionTree && (
               <button
@@ -398,20 +527,22 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.sessionControls')}
               </button>
             )}
-            <button
-              onClick={() => {
-                layoutStore.addSkillTab(position)
-                setAddMenuPos(null)
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-            >
-              <span className="opacity-60 shrink-0">
-                <TeachIcon size={12} />
-              </span>
-              {t('panelContainer.skills')}
-            </button>
+            {position === 'right' && (
+              <button
+                onClick={() => {
+                  layoutStore.addExtensionsTab(position)
+                  setAddMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
+                <span className="opacity-60 shrink-0">
+                  <PuzzleIcon size={12} />
+                </span>
+                {t('panelContainer.extensions')}
+              </button>
+            )}
           </div>,
-          document.body,
+          document.body
         )}
     </>
   )
@@ -458,9 +589,18 @@ const PanelTabButton = memo(function PanelTabButton({
   editInputRef,
   onEditingValueChange,
   onEditSubmit,
-  onEditCancel,
+  onEditCancel
 }: PanelTabButtonProps) {
   const { t } = useTranslation(['components', 'common'])
+  const statusColor =
+    tab.type === 'terminal' && tab.status
+      ? {
+          connecting: 'bg-warning-100',
+          connected: 'bg-success-100',
+          disconnected: 'bg-text-500',
+          exited: 'bg-danger-100'
+        }[tab.status]
+      : null
 
   const handlePointerDragStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -469,7 +609,7 @@ const PanelTabButton = memo(function PanelTabButton({
       if (target.closest('button, input')) return
       startInternalDrag(event, { kind: 'panel-tab', position, tabId: tab.id })
     },
-    [isEditing, position, tab.id],
+    [isEditing, position, tab.id]
   )
 
   const handleMiddleClose = useCallback(
@@ -479,7 +619,7 @@ const PanelTabButton = memo(function PanelTabButton({
       event.stopPropagation()
       onClose(event)
     },
-    [onClose],
+    [onClose]
   )
 
   return (
@@ -497,16 +637,13 @@ const PanelTabButton = memo(function PanelTabButton({
         group flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--fs-sm)] shrink-0
         border border-transparent cursor-pointer select-none
         transition-all duration-150 ease-out
-        ${
-          isActive
-            ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50'
-            : 'text-text-300 hover:text-text-200 hover:bg-bg-200/50'
-        }
+        ${isActive ? 'bg-bg-000 text-text-100 shadow-sm border-border-200/50' : 'text-text-300 hover:text-text-200 hover:bg-bg-200/50'}
         ${isDragging ? 'opacity-40 scale-95' : ''}
         ${isDragOver ? 'border-accent-main-100 bg-accent-main-100/10' : ''}
       `}
     >
       {/* Status indicator for terminals */}
+      {statusColor && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor}`} />}
 
       {/* Icon */}
       <span className="opacity-60 shrink-0">{TAB_ICONS[tab.type]}</span>

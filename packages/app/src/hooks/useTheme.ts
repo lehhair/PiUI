@@ -334,6 +334,10 @@ export function useTheme() {
     }, []),
 
     // 终端标签标题模式
+    manualTerminalTitles: state.manualTerminalTitles,
+    setManualTerminalTitles: useCallback((enabled: boolean) => {
+      themeStore.setManualTerminalTitles(enabled)
+    }, []),
 
     // 外部文件拖拽模式
     externalFileDropMode: state.externalFileDropMode,

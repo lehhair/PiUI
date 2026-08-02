@@ -12,12 +12,22 @@ export function WorkspaceSettings() {
     setDiffStyle,
     codeWordWrap,
     setCodeWordWrap,
+    manualTerminalTitles,
+    setManualTerminalTitles,
   } = useTheme()
   const {
     sidebarFolderRecents,
     sidebarShowChildSessions,
     wakeLock,
+    terminalCopyOnSelect,
+    terminalRightClickPaste,
   } = useLayoutStore()
+
+  const toggleManualTerminalTitles = () => {
+    const next = !manualTerminalTitles
+    setManualTerminalTitles(next)
+    layoutStore.syncTerminalTitleMode(next)
+  }
 
   return (
     <div>
@@ -42,6 +52,14 @@ export function WorkspaceSettings() {
           <Toggle enabled={codeWordWrap} onChange={() => setCodeWordWrap(!codeWordWrap)} />
         </SettingRow>
 
+        <SettingRow
+          label={t('workspace.manualTerminalTitles')}
+          description={t('workspace.manualTerminalTitlesDesc')}
+          onClick={toggleManualTerminalTitles}
+        >
+          <Toggle enabled={manualTerminalTitles} onChange={toggleManualTerminalTitles} />
+        </SettingRow>
+
         <SettingField label={t('appearance.diffStyle')} description={t('appearance.diffStyleDesc')}>
           <div className="w-full max-w-[300px]">
             <SegmentedControl
@@ -54,6 +72,30 @@ export function WorkspaceSettings() {
             />
           </div>
         </SettingField>
+      </SettingsSection>
+
+      <SettingsSection title={t('workspace.terminal')} description={t('workspace.terminalDesc')}>
+        <SettingRow
+          label={t('workspace.terminalCopyOnSelect')}
+          description={t('workspace.terminalCopyOnSelectDesc')}
+          onClick={() => layoutStore.setTerminalCopyOnSelect(!terminalCopyOnSelect)}
+        >
+          <Toggle
+            enabled={terminalCopyOnSelect}
+            onChange={() => layoutStore.setTerminalCopyOnSelect(!terminalCopyOnSelect)}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('workspace.terminalRightClickPaste')}
+          description={t('workspace.terminalRightClickPasteDesc')}
+          onClick={() => layoutStore.setTerminalRightClickPaste(!terminalRightClickPaste)}
+        >
+          <Toggle
+            enabled={terminalRightClickPaste}
+            onChange={() => layoutStore.setTerminalRightClickPaste(!terminalRightClickPaste)}
+          />
+        </SettingRow>
       </SettingsSection>
 
       <SettingsSection title={t('workspace.sidebar')} description={t('workspace.sidebarDesc')}>

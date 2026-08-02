@@ -5,23 +5,32 @@ import { PanelContainer } from './PanelContainer'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { normalizeToForwardSlash } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
+import { createHostTerminal, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
+import { uiErrorHandler } from '../utils'
 
 const SessionChangesPanel = lazy(() =>
-  import('./SessionChangesPanel').then(module => ({ default: module.SessionChangesPanel })),
+  import('./SessionChangesPanel').then(module => ({
+    default: module.SessionChangesPanel
+  }))
 )
 const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ default: module.FileExplorer })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
-const ExtensionsPanel = lazy(() => import('./ExtensionsPanel').then(module => ({ default: module.ExtensionsPanel })))
-const SessionTreePanel = lazy(() =>
-  import('./SessionTreePanel').then(module => ({ default: module.SessionTreePanel })),
+const ExtensionsPanel = lazy(() =>
+  import('./ExtensionsPanel').then(module => ({
+    default: module.ExtensionsPanel
+  }))
 )
+const SessionTreePanel = lazy(() =>
+  import('./SessionTreePanel').then(module => ({
+    default: module.SessionTreePanel
+  }))
+)
+const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 
 function PanelFallback() {
   const { t } = useTranslation(['components', 'common'])
   return (
-    <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
-      {t('rightPanel.loadingPanel')}
-    </div>
+    <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('rightPanel.loadingPanel')}</div>
   )
 }
 
@@ -40,12 +49,49 @@ export const RightPanel = memo(function RightPanel({
   inline = false,
   renderPanelContent = true,
   onNavigateSession,
-  onNewChat,
+  onNewChat
 }: RightPanelProps) {
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
+
+  const handleNewTerminal = useCallback(async () => {
+    if (!normalizedDirectory) return
+    try {
+      const terminal = await createHostTerminal(normalizedDirectory)
+      layoutStore.addTerminalTab(
+        {
+          id: terminal.id,
+          title: terminal.title,
+          shell: terminal.shell,
+          cwd: terminal.cwd,
+          status: 'connecting'
+        },
+        true,
+        'right'
+      )
+    } catch (error) {
+      uiErrorHandler('create terminal', error)
+    }
+  }, [normalizedDirectory])
+
+  const handleCloseTerminal = useCallback(
+    async (terminalId: string) => {
+      if (!normalizedDirectory) return
+      await removeHostTerminal(normalizedDirectory, terminalId).catch(() => undefined)
+    },
+    [normalizedDirectory]
+  )
+
+  const handleRenameTerminal = useCallback(
+    async (terminalId: string, title: string) => {
+      if (!normalizedDirectory) return
+      const terminal = await updateHostTerminal(normalizedDirectory, terminalId, { title })
+      layoutStore.updateTerminalCustomTitle(terminalId, terminal.title)
+    },
+    [normalizedDirectory]
+  )
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -65,9 +111,7 @@ export const RightPanel = memo(function RightPanel({
     (activeTab: PanelTab | null) => {
       if (!activeTab) {
         return (
-          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
-            {t('common:noContent')}
-          </div>
+          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('common:noContent')}</div>
         )
       }
 
@@ -76,12 +120,7 @@ export const RightPanel = memo(function RightPanel({
           {/* Keep files mounted so expanded folders and previews survive tab switches. */}
           <div className={activeTab.type === 'files' ? 'h-full' : 'hidden'}>
             <Suspense fallback={<PanelFallback />}>
-              <FilesContent
-                activeTab={activeTab}
-                directory={normalizedDirectory}
-                isPanelResizing={isPanelResizing}
-                sessionId={sessionId}
-              />
+              <FilesContent activeTab={activeTab} directory={normalizedDirectory} isPanelResizing={isPanelResizing} sessionId={sessionId} />
             </Suspense>
           </div>
 
@@ -117,11 +156,7 @@ export const RightPanel = memo(function RightPanel({
           {activeTab.type === 'session-tree' ? (
             sessionId ? (
               <Suspense fallback={<PanelFallback />}>
-                <SessionTreePanel
-                  sessionId={sessionId}
-                  onNavigateSession={onNavigateSession}
-                  onNewChat={onNewChat}
-                />
+                <SessionTreePanel sessionId={sessionId} onNavigateSession={onNavigateSession} onNewChat={onNewChat} />
               </Suspense>
             ) : (
               <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] px-4 text-center">
@@ -133,12 +168,7 @@ export const RightPanel = memo(function RightPanel({
           {activeTab.type === 'session-controls' ? (
             sessionId ? (
               <Suspense fallback={<PanelFallback />}>
-                <SessionTreePanel
-                  sessionId={sessionId}
-                  mode="controls"
-                  onNavigateSession={onNavigateSession}
-                  onNewChat={onNewChat}
-                />
+                <SessionTreePanel sessionId={sessionId} mode="controls" onNavigateSession={onNavigateSession} onNewChat={onNewChat} />
               </Suspense>
             ) : (
               <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] px-4 text-center">
@@ -146,10 +176,16 @@ export const RightPanel = memo(function RightPanel({
               </div>
             )
           ) : null}
+
+          {activeTab.type === 'terminal' ? (
+            <Suspense fallback={<PanelFallback />}>
+              <TerminalContent activeTab={activeTab} workspacePath={normalizedDirectory} />
+            </Suspense>
+          ) : null}
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, t, onNavigateSession],
+    [normalizedDirectory, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
   )
 
   if (inline) {
@@ -159,6 +195,9 @@ export const RightPanel = memo(function RightPanel({
           <PanelContainer
             position="right"
             forceOpen
+            onNewTerminal={handleNewTerminal}
+            onCloseTerminal={handleCloseTerminal}
+            onRenameTerminal={handleRenameTerminal}
           >
             {renderContent}
           </PanelContainer>
@@ -180,10 +219,30 @@ export const RightPanel = memo(function RightPanel({
     >
       <PanelContainer
         position="right"
+        onNewTerminal={handleNewTerminal}
+        onCloseTerminal={handleCloseTerminal}
+        onRenameTerminal={handleRenameTerminal}
       >
         {renderContent}
       </PanelContainer>
     </ResizablePanel>
+  )
+})
+
+interface TerminalContentProps {
+  activeTab: PanelTab
+  workspacePath?: string
+}
+
+const TerminalContent = memo(function TerminalContent({ activeTab, workspacePath }: TerminalContentProps) {
+  const { panelTabs } = useLayoutStore()
+  const tabs = panelTabs.filter(tab => tab.position === 'right' && tab.type === 'terminal')
+  return (
+    <>
+      {tabs.map(tab => (
+        <Terminal key={tab.id} terminalId={tab.terminalId ?? tab.id} workspacePath={workspacePath} isActive={tab.id === activeTab.id} />
+      ))}
+    </>
   )
 })
 
@@ -194,12 +253,7 @@ interface FilesContentProps {
   sessionId?: string | null
 }
 
-const FilesContent = memo(function FilesContent({
-  activeTab,
-  directory,
-  isPanelResizing = false,
-  sessionId,
-}: FilesContentProps) {
+const FilesContent = memo(function FilesContent({ activeTab, directory, isPanelResizing = false, sessionId }: FilesContentProps) {
   const { panelTabs } = useLayoutStore()
   const fileTabs = panelTabs.filter(t => t.position === 'right' && t.type === 'files')
 
@@ -229,12 +283,7 @@ interface ChangesContentProps {
   isPanelResizing?: boolean
 }
 
-const ChangesContent = memo(function ChangesContent({
-  activeTab,
-  directory,
-  sessionId,
-  isPanelResizing = false,
-}: ChangesContentProps) {
+const ChangesContent = memo(function ChangesContent({ activeTab, directory, sessionId, isPanelResizing = false }: ChangesContentProps) {
   const { panelTabs } = useLayoutStore()
   const changeTabs = panelTabs.filter(t => t.position === 'right' && t.type === 'changes')
 
@@ -242,12 +291,7 @@ const ChangesContent = memo(function ChangesContent({
     <>
       {changeTabs.map(tab => (
         <div key={tab.id} className={tab.id === activeTab.id ? 'h-full' : 'hidden'}>
-          <SessionChangesPanel
-            sessionId={sessionId}
-            directory={directory}
-            position="right"
-            isResizing={isPanelResizing}
-          />
+          <SessionChangesPanel sessionId={sessionId} directory={directory} position="right" isResizing={isPanelResizing} />
         </div>
       ))}
     </>

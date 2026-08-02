@@ -187,6 +187,7 @@ export interface ThemeState {
   /** 忙碌时后续消息是否进入队列 */
   queueFollowupMessages: boolean
   /** 终端标签是否改为手动命名模式 */
+  manualTerminalTitles: boolean
   /** 外部文件拖入输入框时的处理方式 */
   externalFileDropMode: ExternalFileDropMode
   /** 是否在对话历史导航中高亮当前对话位置 */
@@ -261,6 +262,7 @@ const STORAGE_KEY_EXTERNAL_FILE_DROP_MODE = 'piui-external-file-drop-mode'
 const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'piui-outline-current-highlight'
 const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'piui-actions-on-latest-assistant-only'
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'piui-desktop-collapsed-input-dock'
+const STORAGE_KEY_MANUAL_TERMINAL_TITLES = 'piui-manual-terminal-titles'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'piui-process-collapse-enabled'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'piui-code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'piui-code-block-theme-dark'
@@ -408,6 +410,9 @@ class ThemeStore {
         ? DEFAULT_PROCESS_COLLAPSE_ENABLED
         : savedProcessCollapseEnabled === 'true'
 
+    const savedManualTerminalTitles = storageGet(STORAGE_KEY_MANUAL_TERMINAL_TITLES)
+    const manualTerminalTitles = savedManualTerminalTitles === null ? false : savedManualTerminalTitles === 'true'
+
     const codeBlockThemeLight = normalizeCodeBlockTheme(
       storageGet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT) || DEFAULT_CODE_BLOCK_THEME_LIGHT,
       DEFAULT_CODE_BLOCK_THEME_LIGHT,
@@ -445,6 +450,7 @@ class ThemeStore {
       actionsOnLatestAssistantOnly,
       desktopCollapsedInputDock,
       processCollapseEnabled,
+      manualTerminalTitles,
       codeBlockThemeLight,
       codeBlockThemeDark,
     }
@@ -521,6 +527,9 @@ class ThemeStore {
   }
   get queueFollowupMessages() {
     return this.state.queueFollowupMessages
+  }
+  get manualTerminalTitles() {
+    return this.state.manualTerminalTitles
   }
   get externalFileDropMode() {
     return this.state.externalFileDropMode
@@ -739,6 +748,13 @@ class ThemeStore {
     if (this.state.codeWordWrap === enabled) return
     this.state = { ...this.state, codeWordWrap: enabled }
     storageSet(STORAGE_KEY_CODE_WORD_WRAP, String(enabled))
+    this.emit()
+  }
+
+  setManualTerminalTitles(enabled: boolean) {
+    if (this.state.manualTerminalTitles === enabled) return
+    this.state = { ...this.state, manualTerminalTitles: enabled }
+    storageSet(STORAGE_KEY_MANUAL_TERMINAL_TITLES, String(enabled))
     this.emit()
   }
 
@@ -1097,6 +1113,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.queueFollowupMessages === 'boolean'
         ? parsed.queueFollowupMessages
         : DEFAULT_QUEUE_FOLLOWUP_MESSAGES,
+    manualTerminalTitles: typeof parsed?.manualTerminalTitles === 'boolean' ? parsed.manualTerminalTitles : false,
     externalFileDropMode: parsed?.externalFileDropMode === 'mention' ? 'mention' : DEFAULT_EXTERNAL_FILE_DROP_MODE,
     outlineCurrentHighlight:
       typeof parsed?.outlineCurrentHighlight === 'boolean'
