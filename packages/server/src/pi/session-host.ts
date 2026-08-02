@@ -59,12 +59,12 @@ export class SessionHost {
     this.supervisor.onEvent(event => this.routeCatalogEvent(event))
   }
 
-  async openSession(cwd: string, sessionFile?: string): Promise<JsonObject> {
-    if (!sessionFile) return this.openSessionOnce(cwd, sessionFile)
-    return this.runtimes.openFlight(sessionFile, () => this.openSessionOnce(cwd, sessionFile))
+  async openSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<JsonObject> {
+    if (!sessionFile) return this.openSessionOnce(cwd, sessionFile, signal)
+    return this.runtimes.openFlight(sessionFile, openSignal => this.openSessionOnce(cwd, sessionFile, openSignal), signal)
   }
 
-  private async openSessionOnce(cwd: string, sessionFile?: string): Promise<JsonObject> {
+  private async openSessionOnce(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<JsonObject> {
     // Idempotent attach: reopening an already-attached session file reuses
     // its runtime instead of spawning a second worker that would lose the
     // session lease (SESSION_BUSY 409).
@@ -80,20 +80,26 @@ export class SessionHost {
         }
       }
     }
-    const worker = await this.supervisor.open(cwd, sessionFile)
-    const session: AttachedSession = {
-      sessionId: worker.getSessionId(),
-      cwd: worker.getCwd() || cwd,
-      sessionFile: worker.getSessionFile() ?? sessionFile,
-      worker,
-    }
-    this.attach(session)
-    const state = await worker.command("state.get") as JsonObject | undefined
-    return {
-      sessionId: session.sessionId,
-      sessionFile: session.sessionFile ?? null,
-      cwd: session.cwd,
-      state: state ?? null,
+    let worker: Awaited<ReturnType<RuntimeSupervisor["open"]>> | undefined
+    try {
+      worker = await this.supervisor.open(cwd, sessionFile, signal)
+      const state = await worker.command("state.get", undefined, signal) as JsonObject | undefined
+      const session: AttachedSession = {
+        sessionId: worker.getSessionId(),
+        cwd: worker.getCwd() || cwd,
+        sessionFile: worker.getSessionFile() ?? sessionFile,
+        worker,
+      }
+      this.attach(session)
+      return {
+        sessionId: session.sessionId,
+        sessionFile: session.sessionFile ?? null,
+        cwd: session.cwd,
+        state: state ?? null,
+      }
+    } catch (error) {
+      await worker?.dispose().catch(() => undefined)
+      throw error
     }
   }
 
@@ -262,7 +268,7 @@ export class SessionHost {
       const cwd = typeof params?.cwd === "string" ? params.cwd : undefined
       if (!cwd) throw Object.assign(new Error("params.cwd must be a non-empty string"), { code: "INVALID_REQUEST" })
       const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
-      return withAbort(this.openSession(cwd, sessionFile), options.signal)
+      return this.openSession(cwd, sessionFile, options.signal)
     }
     if (type === "session.attached") return this.listAttachedIds()
     if (type === "session.delete") {

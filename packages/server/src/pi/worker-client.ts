@@ -43,7 +43,7 @@ export interface WorkerCatalog {
 
 export interface WorkerHost {
   getHandshake(): Promise<WorkerHello>
-  open(cwd: string, sessionFile?: string): Promise<WorkerSession>
+  open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession>
   dispose(): Promise<void>
 }
 
@@ -90,7 +90,7 @@ export class WorkerSession {
     const session = new WorkerSession(workerEntry, options)
     return {
       getHandshake: () => session.ready,
-      open: (cwd, sessionFile) => session.openRuntime(cwd, sessionFile),
+      open: (cwd, sessionFile, signal) => session.openRuntime(cwd, sessionFile, signal),
       dispose: () => session.dispose(),
     }
   }
@@ -263,12 +263,12 @@ export class WorkerSession {
     }
   }
 
-  private async openRuntime(cwd: string, sessionFile?: string): Promise<WorkerSession> {
+  private async openRuntime(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     await this.ready
     const data = await this.request({
       type: "session.open",
       params: { cwd, sessionFile: sessionFile ?? null },
-    })
+    }, signal)
     const opened = data as { sessionId?: string; sessionFile?: string; cwd?: string } | undefined
     this.sessionId = opened?.sessionId
     this.sessionFile = opened?.sessionFile ?? sessionFile
