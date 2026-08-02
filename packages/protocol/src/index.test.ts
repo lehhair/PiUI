@@ -11,6 +11,7 @@ import {
   PI_PARITY_SDK_VERSION,
   EVENT_WS_SUBPROTOCOL,
   CORE_COMMAND_TYPES,
+  type CoreCommandParams,
 } from "./index.js"
 
 describe("protocol foundation", () => {
@@ -56,5 +57,19 @@ describe("protocol foundation", () => {
     assert.ok(CORE_COMMAND_TYPES.includes("invokeTool"))
     assert.ok(CORE_COMMAND_TYPES.includes("invokeCommand"))
     assert.ok(CORE_COMMAND_TYPES.includes("prompt"))
+  })
+
+  it("models the native prompt and user-message delivery options", () => {
+    const prompt: CoreCommandParams["prompt"] = {
+      text: "hello",
+      streamingBehavior: "followUp",
+    }
+    const userMessage: CoreCommandParams["sendUserMessage"] = {
+      text: "hello",
+      deliverAs: "steer",
+    }
+
+    assert.equal(prompt.streamingBehavior, "followUp")
+    assert.equal(userMessage.deliverAs, "steer")
   })
 })

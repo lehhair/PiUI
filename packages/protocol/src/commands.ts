@@ -61,6 +61,7 @@ export type PromptParams = {
   text: string
   images?: ImageInput[]
   expandPromptTemplates?: boolean
+  streamingBehavior?: "steer" | "followUp"
 }
 
 export type SteerParams = {
@@ -71,6 +72,12 @@ export type SteerParams = {
 export type FollowUpParams = {
   text: string
   images?: ImageInput[]
+}
+
+export type SendUserMessageParams = {
+  text: string
+  images?: ImageInput[]
+  deliverAs?: "steer" | "followUp"
 }
 
 export type NewSessionParams = {
@@ -188,7 +195,7 @@ export type CoreCommandParams = {
   prompt: PromptParams
   steer: SteerParams
   followUp: FollowUpParams
-  sendUserMessage: FollowUpParams
+  sendUserMessage: SendUserMessageParams
   abort: Record<string, never>
   newSession: NewSessionParams
   switchSession: SwitchSessionParams

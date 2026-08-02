@@ -16,9 +16,11 @@
     "dev:server:pi": "node scripts/dev-server-pi.mjs",
     "dev:host": "npm run dev -w @piui/server",
     "dev:app": "npm run dev -w @piui/app",
-    "build": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run build -w @piui/server",
+    "build": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run build -w @piui/server && npm run build -w @piui/app",
     "test": "node scripts/test-mock.mjs",
-    "typecheck": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run typecheck -w @piui/server"
+    "typecheck": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run typecheck -w @piui/server && npm run typecheck -w @piui/app",
+    "lint": "npm run lint -w @piui/app",
+    "validate": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "engines": {
     "node": ">=22.19.0"
