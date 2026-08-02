@@ -22,6 +22,7 @@ import type {
 } from "@piui/protocol"
 import { PathSafetyError, resolveWorkspacePath } from "./path-safety.ts"
 import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
+import { acquireWorkspaceMutationLock } from "./workspace-lock.ts"
 
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_BINARY_BYTES = 8 * 1024 * 1024
@@ -440,5 +441,12 @@ function withFileLocks<T>(keys: string[], operation: () => Promise<T>): Promise<
 }
 
 function withWorkspaceMutation<T>(ws: WorkspaceRecord, operation: () => Promise<T>): Promise<T> {
-  return withFileLock(`${ws.canonicalRoot}\0workspace-mutation`, operation)
+  return withFileLock(`${ws.canonicalRoot}\0workspace-mutation`, async () => {
+    const lock = await acquireWorkspaceMutationLock(ws.canonicalRoot)
+    try {
+      return await operation()
+    } finally {
+      lock.release()
+    }
+  })
 }

@@ -13,7 +13,7 @@ export interface DirectoryLock {
 export async function acquireDirectoryLock(
   root: string,
   key: string,
-  options: { staleMs?: number; timeoutMs?: number } = {},
+  options: { staleMs?: number; timeoutMs?: number; busyCode?: "SESSION_BUSY" | "WORKSPACE_BUSY" } = {},
 ): Promise<DirectoryLock> {
   const staleMs = options.staleMs ?? DEFAULT_STALE_MS
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -66,7 +66,10 @@ export async function acquireDirectoryLock(
       }
       if (await removeStaleLock(lockPath, staleMs)) continue
       if (Date.now() >= deadline) {
-        throw Object.assign(new Error(`lock is busy: ${key}`), { code: "SESSION_BUSY", retryable: true })
+        throw Object.assign(new Error(`lock is busy: ${key}`), {
+          code: options.busyCode ?? "SESSION_BUSY",
+          retryable: true,
+        })
       }
       await new Promise(resolve => setTimeout(resolve, 25))
     }
