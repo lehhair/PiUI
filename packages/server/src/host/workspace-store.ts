@@ -5,6 +5,7 @@ import type { WorkspaceDto } from "@piui/protocol"
 export interface WorkspaceRecord {
   displayName: string
   canonicalRoot: string
+  rootIdentity?: string
   createdAt: string
   lastOpenedAt: string
 }
@@ -16,6 +17,7 @@ export interface WorkspaceRecord {
  */
 export class WorkspaceStore {
   private readonly byPath = new Map<string, WorkspaceRecord>()
+  private readonly byInputPath = new Map<string, WorkspaceRecord>()
 
   list(): WorkspaceDto[] {
     return [...this.byPath.values()].map(toDto)
@@ -23,7 +25,8 @@ export class WorkspaceStore {
 
   /** Looks up an already-known workspace without touching the filesystem. */
   find(rootPath: string): WorkspaceRecord | undefined {
-    return this.byPath.get(workspacePathKey(path.resolve(rootPath)))
+    const key = workspacePathKey(path.resolve(rootPath))
+    return this.byInputPath.get(key) ?? this.byPath.get(key)
   }
 
   /**
@@ -33,6 +36,7 @@ export class WorkspaceStore {
    */
   resolve(rootPath: string, displayName?: string): WorkspaceRecord {
     const resolved = path.resolve(rootPath)
+    const inputKey = workspacePathKey(resolved)
     if (!existsSync(resolved)) {
       throw Object.assign(new Error(`workspace root not found: ${resolved}`), {
         code: "WORKSPACE_NOT_FOUND" as const,
@@ -45,27 +49,60 @@ export class WorkspaceStore {
       })
     }
     const abs = realpathSync.native(resolved)
+    const rootIdentity = fileIdentity(statSync(abs))
     const key = workspacePathKey(abs)
+    const prior = this.byInputPath.get(inputKey)
+    if (prior && (workspacePathKey(prior.canonicalRoot) !== key ||
+      prior.rootIdentity !== undefined && prior.rootIdentity !== rootIdentity)) {
+      throw workspaceReplaced(resolved)
+    }
+    if (prior) {
+      prior.lastOpenedAt = new Date().toISOString()
+      if (displayName?.trim()) prior.displayName = displayName.trim()
+      return prior
+    }
     const existing = this.byPath.get(key)
     if (existing) {
+      if (existing.rootIdentity !== undefined && existing.rootIdentity !== rootIdentity) {
+        throw workspaceReplaced(resolved)
+      }
       existing.lastOpenedAt = new Date().toISOString()
       if (displayName?.trim()) existing.displayName = displayName.trim()
+      this.byInputPath.set(inputKey, existing)
       return existing
     }
     const now = new Date().toISOString()
     const rec: WorkspaceRecord = {
       displayName: displayName?.trim() || path.basename(abs) || abs,
       canonicalRoot: abs,
+      rootIdentity,
       createdAt: now,
       lastOpenedAt: now,
     }
     this.byPath.set(key, rec)
+    this.byInputPath.set(inputKey, rec)
+    this.byInputPath.set(key, rec)
     return rec
   }
 
   remove(rootPath: string): boolean {
-    return this.byPath.delete(workspacePathKey(rootPath))
+    const key = workspacePathKey(path.resolve(rootPath))
+    const record = this.byInputPath.get(key) ?? this.byPath.get(key)
+    if (!record) return false
+    this.byPath.delete(workspacePathKey(record.canonicalRoot))
+    for (const [input, value] of this.byInputPath) {
+      if (value === record) this.byInputPath.delete(input)
+    }
+    return true
   }
+}
+
+function fileIdentity(stat: { dev: number; ino: number }): string {
+  return `${stat.dev}:${stat.ino}`
+}
+
+function workspaceReplaced(rootPath: string): Error {
+  return Object.assign(new Error(`workspace root was replaced: ${rootPath}`), { code: "WORKSPACE_REPLACED" })
 }
 
 /** Two paths name one workspace when their keys match. */

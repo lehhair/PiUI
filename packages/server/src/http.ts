@@ -337,6 +337,7 @@ function statusForError(error: unknown): number {
     case "SESSION_CONFLICT":
     case "SESSION_IDENTITY_MISMATCH":
     case "RUNTIME_REPLACED":
+    case "WORKSPACE_REPLACED":
     case "STALE_REVISION":
       return 409
     case "CAPABILITY_DISABLED":
