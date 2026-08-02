@@ -88,18 +88,26 @@ export function resolveWorkspacePath(rootPath: string, relativeInput: string): R
       if (!isInsideRoot(rootReal, parentReal)) {
         throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "parent outside workspace")
       }
+      const missingParent = path.relative(cur, parent)
+      return {
+        relative,
+        absolute: path.join(path.resolve(parentReal, missingParent), path.basename(joined)),
+        exists: false,
+        isSymlink: false,
+        restricted: false,
+      }
     } else {
       const parentReal = realpathSync(parent)
       if (!isInsideRoot(rootReal, parentReal)) {
         throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "parent outside workspace")
       }
-    }
-    return {
-      relative,
-      absolute: joined,
-      exists: false,
-      isSymlink: false,
-      restricted: false,
+      return {
+        relative,
+        absolute: path.join(parentReal, path.basename(joined)),
+        exists: false,
+        isSymlink: false,
+        restricted: false,
+      }
     }
   }
 

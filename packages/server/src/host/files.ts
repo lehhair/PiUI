@@ -211,7 +211,7 @@ async function moveWorkspaceEntryLocked(
   if (latestSource.absolute !== source.absolute) throw new PathSafetyError("SYMLINK_ESCAPE", "source changed during move")
   const targetParent = path.posix.dirname(target.relative)
   resolveWorkspacePath(ws.canonicalRoot, targetParent === "." ? "" : targetParent)
-  const targetPath = lexicalPath(ws, target.relative)
+  const targetPath = target.isSymlink ? lexicalPath(ws, target.relative) : target.absolute
   const sourceLexicalPath = lexicalPath(ws, source.relative)
   if (process.platform === "win32" && sourceLexicalPath.toLowerCase() === targetPath.toLowerCase() &&
     sourceLexicalPath !== targetPath) {
