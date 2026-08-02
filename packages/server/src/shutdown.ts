@@ -7,6 +7,7 @@ export interface ShutdownOptions {
   hardStopGraceMs?: number
   forceExit?: (code: number) => void
   onTimeout?: () => void
+  cleanup?: () => Promise<void>
 }
 
 export function shutdownAppServer(
@@ -33,9 +34,10 @@ export function shutdownAppServer(
     new Promise<void>((resolve, reject) => {
       server.close(error => (error ? reject(error) : resolve()))
     }),
-  ]).then(results => {
+  ]).then(async results => {
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
     if (failure) throw failure.reason
+    await options.cleanup?.()
   })
 
   void closing.finally(() => {

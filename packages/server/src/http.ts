@@ -3,6 +3,7 @@ import { networkInterfaces } from "node:os"
 import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_VERSION,
+  isErrorCode,
   problem,
   problemFromError,
   type HealthResponse,
@@ -41,10 +42,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
 }
 
 function sendProblem(res: ServerResponse, status: number, error: unknown): boolean {
-  const p = error && typeof error === "object" && "code" in error && "message" in error
-    ? { code: String((error as { code: unknown }).code), message: String((error as { message: unknown }).message) }
-    : problemFromError(error)
-  return sendJson(res, status, problem(p.code as Parameters<typeof problem>[0], p.message))
+  const p = problemFromError(error)
+  return sendJson(res, status, problem(isErrorCode(p.code) ? p.code : "INTERNAL", p.message))
 }
 
 async function readBody(req: IncomingMessage, signal?: AbortSignal, maxBytes = MAX_JSON_BODY_BYTES): Promise<JsonObject> {
@@ -169,6 +168,14 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const watcher = new WorkspaceWatcher(hub)
   const host = new HostRuntime({ store, watcher, sessions })
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
+  let disposal: Promise<void> | undefined
+
+  const closeHttpServer = (): Promise<void> => {
+    if (!server.listening) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      server.close(error => (error ? reject(error) : resolve()))
+    })
+  }
 
   const server = createServer(async (req, res) => {
     const scope = requestScope(req, res)
@@ -281,9 +288,13 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
     sessionHost: sessions,
     supervisor,
     dispose: async () => {
-      watcher.dispose()
-      await supervisor.dispose()
-      await new Promise<void>(resolve => server.close(() => resolve()))
+      if (disposal) return disposal
+      disposal = (async () => {
+        await closeHttpServer()
+        await watcher.dispose()
+        await supervisor.dispose()
+      })()
+      return disposal
     },
   }
 }
@@ -337,6 +348,7 @@ function statusForError(error: unknown): number {
     case "SESSION_CONFLICT":
     case "SESSION_IDENTITY_MISMATCH":
     case "RUNTIME_REPLACED":
+    case "RUNTIME_CLOSING":
     case "WORKSPACE_REPLACED":
     case "STALE_REVISION":
       return 409
