@@ -18,6 +18,7 @@ const app = createAppServer({ authToken, share: { host: HOST, port: PORT } })
 const eventServer = attachEventWebSocket(app.server, {
   eventHub: app.eventHub,
   authToken,
+  terminalManager: app.terminals,
   onSubscribe: send => {
     // Push the current activity snapshot so fresh subscribers see busy
     // sessions without waiting for the next change
@@ -41,6 +42,7 @@ const eventServer = attachEventWebSocket(app.server, {
 app.server.listen(PORT, HOST, () => {
   console.info(`[piui-server] listening http://${HOST}:${PORT} (base ${DEFAULT_HTTP_BASE})`)
   console.info(`[piui-server] events ws://${HOST}:${PORT}/api/v1/events`)
+  console.info(`[piui-server] terminal stream ws://${HOST}:${PORT}/api/v1/host/terminals/:terminalId/stream`)
   console.info(`[piui-server] driver=${driver}${driver === "pi" ? " (real models when prompt)" : " (no LLM)"}`)
   console.info(
     process.env.PIUI_AUTH_TOKEN

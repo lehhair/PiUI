@@ -1,0 +1,13 @@
+diff --git a/node_modules/@lydell/node-pty-win32-x64/lib/windowsPtyAgent.js b/node_modules/@lydell/node-pty-win32-x64/lib/windowsPtyAgent.js
+index 2728b76..930866a 100644
+--- a/node_modules/@lydell/node-pty-win32-x64/lib/windowsPtyAgent.js
++++ b/node_modules/@lydell/node-pty-win32-x64/lib/windowsPtyAgent.js
+@@ -189,7 +189,7 @@ var WindowsPtyAgent = /** @class */ (function () {
+             var agent = (0, child_process_1.fork)(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()]);
+             agent.on('message', function (message) {
+                 clearTimeout(timeout);
+-                resolve(message.consoleProcessList);
++                resolve(Array.isArray(message === null || message === void 0 ? void 0 : message.consoleProcessList) ? message.consoleProcessList : []);
+             });
+             var timeout = setTimeout(function () {
+                 // Something went wrong, just send back the shell PID
