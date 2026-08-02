@@ -66,8 +66,10 @@ export class WorkerSession {
   private heartbeatMisses = 0
   private exitError?: Error
   private readonly ready: Promise<WorkerHello>
+  private readonly exited: Promise<void>
   private resolveReady!: (hello: WorkerHello) => void
   private rejectReady!: (error: Error) => void
+  private resolveExited!: () => void
   private readySettled = false
 
   private constructor(
@@ -77,6 +79,9 @@ export class WorkerSession {
     this.ready = new Promise<WorkerHello>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
+    })
+    this.exited = new Promise<void>(resolve => {
+      this.resolveExited = resolve
     })
     this.child = this.spawn()
   }
@@ -212,6 +217,7 @@ export class WorkerSession {
   private handleExit(code: number | null, signal: NodeJS.Signals | null, error?: Error): void {
     if (this.exitHandled) return
     this.exitHandled = true
+    this.resolveExited()
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
     this.exitError = error ?? (this.disposed
       ? Object.assign(new Error("Pi worker disposed"), { code: "SESSION_RUNTIME_CRASHED" })
@@ -381,12 +387,17 @@ export class WorkerSession {
     this.disposed = true
     if (this.exitHandled) return
     try {
-      // Send the dispose command and wait for the worker's ok reply. The
-      // reply means the worker has started its teardown (session jsonl tail
-      // flush, in-flight result persistence); only SIGKILL on timeout.
+      // The worker replies only after runtime cleanup. Still wait for the
+      // process exit so the parent never kills a worker between its ACK and
+      // its final JSONL/provider cleanup.
+      const timeout = new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, 5_000)
+        timer.unref()
+      })
       await Promise.race([
-        this.request({ type: "dispose" }).catch(() => undefined),
-        new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+        this.request({ type: "dispose" }).then(() => this.exited, () => this.exited),
+        this.exited,
+        timeout,
       ])
     } finally {
       if (!this.exitHandled) {

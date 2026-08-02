@@ -8,6 +8,7 @@ import { PiCatalog } from "./runtime/catalog.js"
 import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
 import { COMMAND_HANDLERS, listCommandCapabilities, type CommandContext } from "./command-table.js"
 import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
+import { getDriverMode } from "./driver.js"
 import {
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
   PI_WORKER_PROTOCOL_VERSION,
@@ -28,7 +29,7 @@ let runtimeRegistryDigest: string | undefined
 let registryCheck: Promise<void> = Promise.resolve()
 const runtimeUnsubs: Array<() => void> = []
 
-const driver = (process.env.PIUI_DRIVER ?? "mock").toLowerCase() === "pi" ? "pi" : "mock"
+const driver = getDriverMode()
 
 const catalog = driver === "pi" ? new PiCatalog() : new MockCatalog()
 const providerAuth = new ProviderAuthHost(() => {
@@ -285,18 +286,11 @@ function toJsonObject(value: unknown): JsonObject {
   return json
 }
 
-async function disposeAndExit(): Promise<void> {
+async function cleanupWorker(): Promise<void> {
   clearInterval(heartbeatTimer)
   unsubscribeProviderAuth()
   providerAuth.dispose()
-  let exitCode = 0
-  try {
-    await closeRuntime()
-  } catch (error) {
-    console.error(`[piui-worker] dispose failed: ${error instanceof Error ? error.message : String(error)}`)
-    exitCode = 1
-  }
-  process.exit(exitCode)
+  await closeRuntime()
 }
 
 const unsubscribeProviderAuth = providerAuth.onEvent(event => send({
@@ -360,8 +354,39 @@ process.on("message", (value: unknown) => {
     return
   }
   if (request.command.type === "dispose") {
-    send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
-    setImmediate(() => void disposeAndExit())
+    void schedule.close(cleanupWorker).then(
+      () => {
+        send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
+        setImmediate(() => process.exit(0))
+      },
+      error => {
+        send({
+          kind: "response",
+          id: request.id,
+          generation: workerGeneration,
+          ok: false,
+          error: problemFromError(error),
+        })
+        setImmediate(() => process.exit(1))
+      },
+    )
+    return
+  }
+  if (request.command.type === "session.close") {
+    void schedule.close(closeRuntime).then(
+      () => {
+        send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
+      },
+      error => {
+        send({
+          kind: "response",
+          id: request.id,
+          generation: workerGeneration,
+          ok: false,
+          error: problemFromError(error),
+        })
+      },
+    )
     return
   }
   void schedule({ ...request.command, sessionId: request.sessionId }).then(
@@ -390,9 +415,7 @@ process.on("disconnect", () => {
   void (async () => {
     let exitCode = 0
     try {
-      unsubscribeProviderAuth()
-      providerAuth.dispose()
-      await closeRuntime()
+      await schedule.close(cleanupWorker)
     } catch (error) {
       console.error(`[piui-worker] disconnect cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
       exitCode = 1

@@ -81,6 +81,56 @@ describe("createWorkerCommandScheduler", () => {
     assert.deepEqual(started, ["prompt", "prompt"])
   })
 
+  it("waits for a concurrent slash prompt before starting a plain prompt", async () => {
+    const firstGate = deferred()
+    const slashGate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
+      started.push(command.params?.text ?? command.type)
+      if (command.params?.text === "one") await firstGate.promise
+      if (command.params?.text === "/help") await slashGate.promise
+      return undefined
+    })
+
+    const first = schedule({ type: "prompt", params: { text: "one" } })
+    await Promise.resolve()
+    const slash = schedule({ type: "prompt", params: { text: "/help" } })
+    await Promise.resolve()
+    const plain = schedule({ type: "prompt", params: { text: "two" } })
+
+    firstGate.resolve()
+    await first
+    await Promise.resolve()
+    assert.deepEqual(started, ["one", "/help"])
+
+    slashGate.resolve()
+    await slash
+    await plain
+    assert.deepEqual(started, ["one", "/help", "two"])
+  })
+
+  it("rejects new commands and waits for active work during close", async () => {
+    const gate = deferred()
+    let cleaned = false
+    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
+      if (command.type === "prompt") await gate.promise
+      return undefined
+    })
+
+    const active = schedule({ type: "prompt", params: { text: "hello" } })
+    await Promise.resolve()
+    const closing = schedule.close(async () => {
+      cleaned = true
+    })
+    await assert.rejects(schedule({ type: "state.get" }), { code: "RUNTIME_CLOSING" })
+    assert.equal(cleaned, false)
+
+    gate.resolve()
+    await active
+    await closing
+    assert.equal(cleaned, true)
+  })
+
   it("lets queries and abort run alongside an active sendUserMessage turn", async () => {
     const gate = deferred()
     const started: string[] = []
