@@ -14,6 +14,7 @@ const commands = [
   ["run", "test", "-w", "@piui/protocol"],
   ["run", "test", "-w", "@piui/pi-worker"],
   ["run", "test", "-w", "@piui/server"],
+  ["run", "test:run", "-w", "@piui/app"],
 ]
 
 for (const args of commands) {
