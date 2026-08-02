@@ -20,6 +20,10 @@ export interface LoadSdkOptions {
 
 let cached: LoadedSdk | undefined
 
+export function shouldRequireVerifiedSdk(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PIUI_SDK_STRICT !== "0"
+}
+
 function resolveSdkEntry(sdkPath: string): string {
   const absolute = isAbsolute(sdkPath) ? sdkPath : resolve(sdkPath)
   if (!existsSync(absolute)) {
