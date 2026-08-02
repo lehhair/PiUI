@@ -1,0 +1,1132 @@
+// ============================================
+// Terminal - 单个 xterm 终端实例
+// 使用 xterm.js + WebSocket 连接后端 PTY
+// ============================================
+
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
+import '@xterm/xterm/css/xterm.css'
+import type { TerminalStreamServerFrame } from '@piui/protocol'
+import { getHostTerminalWebSocketUrl, issueHostTerminalToken } from '../pi/transport/index.js'
+import { useTheme } from '../hooks'
+import { layoutStore, useLayoutStore } from '../store/layoutStore'
+import { useInputCapabilities } from '../hooks/useInputCapabilities'
+import { copyTextToClipboard, readTextFromClipboard } from '../utils/clipboard'
+import { hapticTap } from '../utils/haptics'
+import { keybindingStore } from '../store/keybindingStore'
+import { isTauri } from '../utils/tauri'
+
+const TERMINAL_FONT_FALLBACK =
+  "'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace"
+
+// ============================================
+// 终端主题 - 与应用主题配合
+// ============================================
+
+// 获取 CSS 变量的实际 HSL 值并转换为 hex
+function getHSLColor(varName: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+  if (!value) return ''
+
+  // CSS 变量格式是 "h s% l%" 或 "h s l"
+  const parts = value.split(/\s+/)
+  if (parts.length < 3) return ''
+
+  const h = parseFloat(parts[0])
+  const s = parseFloat(parts[1]) / 100
+  const l = parseFloat(parts[2]) / 100
+  if (![h, s, l].every(Number.isFinite)) return ''
+
+  // HSL to RGB
+  const a = s * Math.min(l, 1 - l)
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+function getTerminalTheme(isDark: boolean) {
+  const fgColor = getHSLColor('--text-100') || (isDark ? '#e8e0d5' : '#2d2a26')
+  // 背景色需要设为实际颜色（而非透明），因为 xterm 在处理反转视频（\e[7m）时
+  // 会用 theme.background 作为反转后的前景色。如果设为 #00000000，
+  // 反转视频的文字会变成黑色，且反转背景也会出现黑框。
+  // 实际的透明效果由 CSS `.xterm-viewport { background-color: transparent !important }` 实现。
+  const bgColor = getHSLColor('--bg-100') || (isDark ? '#1a1a1a' : '#f5f3ef')
+
+  if (isDark) {
+    return {
+      background: bgColor,
+      foreground: fgColor,
+      cursor: '#e8e0d5',
+      cursorAccent: '#1a1a1a',
+      selectionBackground: '#4a4540',
+      selectionForeground: '#e8e0d5',
+      selectionInactiveBackground: '#3a3530',
+      // ANSI colors - 暖色调适配
+      black: '#1a1a1a',
+      red: '#e55561',
+      green: '#8cc265',
+      yellow: '#d4a656',
+      blue: '#6cb6ff',
+      magenta: '#c678dd',
+      cyan: '#56b6c2',
+      white: '#abb2bf',
+      brightBlack: '#5c6370',
+      brightRed: '#ff6b7a',
+      brightGreen: '#a8e075',
+      brightYellow: '#e5b567',
+      brightBlue: '#82cfff',
+      brightMagenta: '#de8ef0',
+      brightCyan: '#70d0dc',
+      brightWhite: '#ffffff'
+    }
+  } else {
+    return {
+      background: bgColor,
+      foreground: fgColor,
+      cursor: '#2d2a26',
+      cursorAccent: '#f5f3ef',
+      selectionBackground: '#d5d0c8',
+      selectionForeground: '#2d2a26',
+      selectionInactiveBackground: '#e5e0d8',
+      // ANSI colors - 浅色模式
+      // 注意：在浅色背景下，white/brightWhite 需要是深色，
+      // 因为 PowerShell 等 shell 会用这些 ANSI 颜色渲染用户输入文本
+      black: '#f5f3ef',
+      red: '#c9514a',
+      green: '#4a9f4a',
+      yellow: '#b58900',
+      blue: '#3a7fc9',
+      magenta: '#a04a9f',
+      cyan: '#3a9f9f',
+      white: '#655f58',
+      brightBlack: '#6b6560',
+      brightRed: '#e55561',
+      brightGreen: '#6ab56a',
+      brightYellow: '#d4a020',
+      brightBlue: '#5a9fe0',
+      brightMagenta: '#c06abf',
+      brightCyan: '#5abfbf',
+      brightWhite: '#2d2a26'
+    }
+  }
+}
+
+function isDarkMode(): boolean {
+  const mode = document.documentElement.getAttribute('data-mode')
+  if (mode === 'dark') return true
+  if (mode === 'light') return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
+// ============================================
+// Mobile Extra Keys Toolbar
+// 参考 Termux / Moshi / Blink Shell 业界方案
+// CTRL / ALT 为粘滞修饰键，支持同时激活，下一次按键自动附带
+// ============================================
+
+type ModifierKey = 'ctrl' | 'alt'
+
+type StickyModifiers = Record<ModifierKey, boolean>
+
+function createStickyModifiers(): StickyModifiers {
+  return { ctrl: false, alt: false }
+}
+
+interface MobileExtraKey {
+  data?: string
+  label: string
+  modifier?: ModifierKey
+}
+
+const MOBILE_EXTRA_KEY_ROWS: MobileExtraKey[][] = [
+  [
+    { label: 'ESC', data: '\x1b' },
+    { label: '/', data: '/' },
+    { label: '-', data: '-' },
+    { label: 'HOME', data: '\x1b[H' },
+    { label: '↑', data: '\x1b[A' },
+    { label: 'END', data: '\x1b[F' },
+    { label: 'PGUP', data: '\x1b[5~' }
+  ],
+  [
+    { label: 'TAB', data: '\t' },
+    { label: 'CTRL', modifier: 'ctrl' },
+    { label: 'ALT', modifier: 'alt' },
+    { label: '←', data: '\x1b[D' },
+    { label: '↓', data: '\x1b[B' },
+    { label: '→', data: '\x1b[C' },
+    { label: 'PGDN', data: '\x1b[6~' }
+  ]
+]
+
+function toCtrlSequence(data: string): string {
+  if (data.length !== 1) return data
+
+  const upper = data.toUpperCase()
+  if (upper >= 'A' && upper <= 'Z') {
+    return String.fromCharCode(upper.charCodeAt(0) - 64)
+  }
+
+  switch (data) {
+    case ' ':
+    case '@':
+    case '`':
+      return '\x00'
+    case '[':
+      return '\x1b'
+    case '\\':
+      return '\x1c'
+    case ']':
+      return '\x1d'
+    case '^':
+      return '\x1e'
+    case '_':
+    case '/':
+      return '\x1f'
+    case '?':
+      return '\x7f'
+    default:
+      return data
+  }
+}
+
+function hasStickyModifier(sticky: StickyModifiers): boolean {
+  return sticky.ctrl || sticky.alt
+}
+
+function isNativePasteShortcut(event: KeyboardEvent) {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v'
+}
+
+function canReadClipboardText() {
+  // Ctrl/Cmd+V uses ClipboardEvent.clipboardData, but smart right-click paste must actively call
+  // navigator.clipboard.readText(), which browsers only expose in secure contexts.
+  return typeof window !== 'undefined' && window.isSecureContext && typeof navigator !== 'undefined' && !!navigator.clipboard?.readText
+}
+
+function parseServerFrame(value: unknown): TerminalStreamServerFrame | undefined {
+  if (!value || typeof value !== 'object' || typeof (value as { type?: unknown }).type !== 'string') return undefined
+  return value as TerminalStreamServerFrame
+}
+
+function applyStickyModifiers(data: string, sticky: StickyModifiers): string {
+  let output = data
+  if (sticky.ctrl) output = toCtrlSequence(output)
+  if (sticky.alt) output = `\x1b${output}`
+  return output
+}
+
+const REPEAT_DELAY = 350
+const REPEAT_INTERVAL = 80
+
+// 长按连续触发：pointerdown 立即触发 + 触觉反馈，持续按住后间隔重复。
+// 释放监听挂 window，确保指针移出按钮也能清理。
+function useRepeatablePress() {
+  const timerRef = useRef<number | null>(null)
+
+  const clear = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('pointerup', clear)
+    window.addEventListener('pointercancel', clear)
+    return () => {
+      window.removeEventListener('pointerup', clear)
+      window.removeEventListener('pointercancel', clear)
+      clear()
+    }
+  }, [clear])
+
+  return useCallback(
+    (action: () => void, repeat: boolean) => {
+      clear()
+      action()
+      hapticTap()
+      if (!repeat) return
+      const schedule = (delay: number) => {
+        timerRef.current = window.setTimeout(() => {
+          action()
+          schedule(REPEAT_INTERVAL)
+        }, delay)
+      }
+      schedule(REPEAT_DELAY)
+    },
+    [clear]
+  )
+}
+
+interface MobileExtraKeysProps {
+  onFocusTerminal: () => void
+  onSend: (data: string) => void
+  onToggleSticky: (modifier: ModifierKey) => void
+  stickyModifiers: StickyModifiers
+}
+
+function MobileExtraKeys({ onSend, stickyModifiers, onToggleSticky, onFocusTerminal }: MobileExtraKeysProps) {
+  const toolbarGridStyle = {
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))'
+  } as const
+  const press = useRepeatablePress()
+
+  const handleSend = useCallback(
+    (data: string) => {
+      onSend(data)
+      onFocusTerminal()
+    },
+    [onFocusTerminal, onSend]
+  )
+
+  const btnBase =
+    'flex h-8 min-w-0 w-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md border px-0 text-[length:var(--fs-xxs)] leading-none font-mono font-semibold tracking-[-0.02em] text-text-200 transition-[background-color,color,border-color,transform] duration-100 select-none active:scale-[0.98] touch-none'
+  const btnNormal = `${btnBase} border-border-200/20 bg-bg-200/70 active:bg-bg-300/80`
+  const btnActive = `${btnBase} border-accent-main-100/45 bg-accent-main-100/18 text-accent-main-100`
+
+  return (
+    <div
+      className="w-full border-t border-border-200/40 bg-bg-100/95 supports-[backdrop-filter]:bg-bg-100/85 supports-[backdrop-filter]:backdrop-blur-sm"
+      style={{ WebkitTextSizeAdjust: '100%', textSizeAdjust: '100%' }}
+    >
+      <div className="px-1 py-1">
+        <div className="grid gap-0.5">
+          {MOBILE_EXTRA_KEY_ROWS.map((row, rowIndex) => (
+            <div key={rowIndex} className="grid w-full gap-0.5" style={toolbarGridStyle}>
+              {row.map(key => {
+                const isActive = key.modifier ? stickyModifiers[key.modifier] : false
+
+                return (
+                  <button
+                    key={key.label}
+                    type="button"
+                    aria-pressed={isActive}
+                    className={isActive ? btnActive : btnNormal}
+                    onPointerDown={e => {
+                      e.preventDefault()
+                      const { modifier, data } = key
+                      if (modifier) {
+                        // 粘滞修饰键：单次切换，不连发
+                        press(() => {
+                          onToggleSticky(modifier)
+                          onFocusTerminal()
+                        }, false)
+                        return
+                      }
+                      if (data) {
+                        press(() => handleSend(data), true)
+                      }
+                    }}
+                    onContextMenu={e => e.preventDefault()}
+                  >
+                    <span className="block max-w-full overflow-hidden whitespace-nowrap text-center leading-none [text-wrap:nowrap]">
+                      {key.label}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================
+// Terminal Component
+// ============================================
+
+interface TerminalProps {
+  terminalId: string
+  workspacePath?: string
+  isActive: boolean
+}
+
+export const Terminal = memo(function Terminal({ terminalId, workspacePath, isActive }: TerminalProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isTouchScrolling, setIsTouchScrolling] = useState(false)
+  const [stickyModifiers, setStickyModifiers] = useState<StickyModifiers>(() => createStickyModifiers())
+  const terminalRef = useRef<XTerm | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const stickyModifiersRef = useRef<StickyModifiers>(createStickyModifiers())
+  const cursorRef = useRef(0)
+  const transportSendRef = useRef<((data: string) => void) | null>(null)
+  const transportDisconnectRef = useRef<(() => void) | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const pendingInputRef = useRef<string[]>([])
+  const resizeTimeoutRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
+  const isPanelResizingRef = useRef(false)
+  const [hasBeenActive, setHasBeenActive] = useState(isActive)
+  const { preferTouchUi, hasTouch, hasCoarsePointer } = useInputCapabilities()
+  const { manualTerminalTitles } = useTheme()
+  const { terminalCopyOnSelect, terminalRightClickPaste } = useLayoutStore()
+  const touchCapable = hasTouch || hasCoarsePointer
+  const manualTerminalTitlesRef = useRef(manualTerminalTitles)
+  const terminalCopyOnSelectRef = useRef(terminalCopyOnSelect)
+  const terminalRightClickPasteRef = useRef(terminalRightClickPaste)
+
+  const clearStickyModifiers = useCallback(() => {
+    const next = createStickyModifiers()
+    stickyModifiersRef.current = next
+    setStickyModifiers(next)
+  }, [])
+
+  const toggleStickyModifier = useCallback((modifier: ModifierKey) => {
+    setStickyModifiers(prev => {
+      const next = { ...prev, [modifier]: !prev[modifier] }
+      stickyModifiersRef.current = next
+      return next
+    })
+  }, [])
+
+  const focusTerminal = useCallback(() => {
+    terminalRef.current?.focus()
+  }, [])
+
+  const sendTerminalData = useCallback(
+    (data: string) => {
+      const sticky = stickyModifiersRef.current
+      const outgoing = applyStickyModifiers(data, sticky)
+
+      if (transportSendRef.current) transportSendRef.current(outgoing)
+      else pendingInputRef.current.push(outgoing)
+
+      if (hasStickyModifier(sticky)) {
+        clearStickyModifiers()
+      }
+    },
+    [clearStickyModifiers]
+  )
+
+  useEffect(() => {
+    manualTerminalTitlesRef.current = manualTerminalTitles
+  }, [manualTerminalTitles])
+
+  useEffect(() => {
+    terminalCopyOnSelectRef.current = terminalCopyOnSelect
+  }, [terminalCopyOnSelect])
+
+  useEffect(() => {
+    terminalRightClickPasteRef.current = terminalRightClickPaste
+  }, [terminalRightClickPaste])
+
+  // 当 tab 第一次变为活动状态时，标记它
+  useEffect(() => {
+    if (isActive && !hasBeenActive) {
+      setHasBeenActive(true)
+    }
+  }, [isActive, hasBeenActive])
+
+  // 初始化终端
+  useEffect(() => {
+    if (!containerRef.current) return
+    if (!hasBeenActive) return
+    if (!workspacePath) return
+
+    // Read latest snapshot values from the store directly, not from
+    // the render closure. This breaks the infinite cycle:
+    //   old terminal cleanup → updateTerminalSnapshot → notify →
+    //   re-render → effect deps changed → cleanup → notify → ...
+    const freshTab = layoutStore.getState().panelTabs.find(t => t.id === terminalId && t.type === 'terminal')
+    const effectBuffer = typeof freshTab?.buffer === 'string' ? freshTab.buffer : ''
+    const effectScrollY = typeof freshTab?.scrollY === 'number' ? freshTab.scrollY : undefined
+    const effectCursor =
+      typeof freshTab?.cursor === 'number' && Number.isSafeInteger(freshTab.cursor) && freshTab.cursor >= 0 ? freshTab.cursor : 0
+    const effectCols =
+      typeof freshTab?.cols === 'number' && Number.isSafeInteger(freshTab.cols) && freshTab.cols > 0 ? freshTab.cols : undefined
+    const effectRows =
+      typeof freshTab?.rows === 'number' && Number.isSafeInteger(freshTab.rows) && freshTab.rows > 0 ? freshTab.rows : undefined
+
+    const restoreSize = effectBuffer && effectCols && effectRows ? { cols: effectCols, rows: effectRows } : undefined
+    const shouldConnect = freshTab?.status !== 'exited'
+
+    mountedRef.current = true
+    cursorRef.current = effectCursor
+    let effectActive = true
+    let wsConnectTimeout: number | null = null
+    let disposeData: { dispose: () => void } | null = null
+    const terminalWorkspacePath = workspacePath
+
+    const touchUi = preferTouchUi
+    const theme = getTerminalTheme(isDarkMode())
+
+    // 从 CSS 变量读取终端字号（跟随 fontScale 设置）
+    const rootStyle = getComputedStyle(document.documentElement)
+    const termFontSize = parseInt(rootStyle.getPropertyValue('--fs-terminal').trim(), 10) || 13
+    const termLineHeight = parseFloat(rootStyle.getPropertyValue('--fs-terminal-line-height').trim()) || 1.2
+
+    const terminal = new XTerm({
+      theme,
+      fontFamily: rootStyle.getPropertyValue('--font-mono').trim() || TERMINAL_FONT_FALLBACK,
+      fontSize: touchUi ? Math.max(termFontSize, 14) : termFontSize,
+      lineHeight: touchUi ? Math.max(termLineHeight, 1.3) : termLineHeight,
+      ...(restoreSize ? { cols: restoreSize.cols, rows: restoreSize.rows } : {}),
+      cursorBlink: true,
+      cursorStyle: 'block',
+      smoothScrollDuration: touchUi ? 100 : 0,
+      allowProposedApi: true,
+      scrollback: 10000,
+      convertEol: true,
+      allowTransparency: true, // 开启透明背景
+      ...(touchUi
+        ? {
+            scrollSensitivity: 2,
+            macOptionIsMeta: true,
+            disableStdin: false
+          }
+        : {})
+    })
+
+    const fitAddon = new FitAddon()
+    const serializeAddon = new SerializeAddon()
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      if (isTauri()) {
+        import('@tauri-apps/plugin-opener').then(mod => mod.openUrl(uri)).catch(() => window.open(uri))
+      } else {
+        window.open(uri)
+      }
+    })
+
+    terminal.loadAddon(fitAddon)
+    terminal.loadAddon(serializeAddon)
+    terminal.loadAddon(webLinksAddon)
+
+    terminal.open(containerRef.current)
+
+    // WebGL 渲染器: GPU 加速，大幅提升 TUI 渲染性能
+    // 若 WebGL 不可用则静默回退到内置 DOM 渲染器
+    const webglAddon = new WebglAddon()
+    webglAddon.onContextLoss(() => {
+      webglAddon.dispose()
+    })
+    try {
+      terminal.loadAddon(webglAddon)
+    } catch {
+      webglAddon.dispose()
+    }
+
+    const textarea = terminal.textarea
+    const handleTextareaBlur = () => clearStickyModifiers()
+
+    terminal.attachCustomKeyEventHandler(event => {
+      if (event.type !== 'keydown') return true
+
+      const action = keybindingStore.findMatchingAction(event, 'terminal')
+      if (action === 'terminal.paste') {
+        if (isNativePasteShortcut(event)) {
+          return false
+        }
+
+        event.preventDefault()
+        void readTextFromClipboard()
+          .then(text => {
+            if (!text || !mountedRef.current) return
+            sendTerminalData(text)
+          })
+          .catch(() => {})
+        return false
+      }
+
+      if (action !== 'terminal.copySelection' || !terminal.hasSelection()) return true
+
+      const selected = terminal.getSelection()
+      if (!selected) return true
+
+      event.preventDefault()
+      void copyTextToClipboard(selected).catch(() => {})
+      terminal.clearSelection()
+      return false
+    })
+
+    const terminalElement = terminal.element
+    const handleSelectionCopy = (event: MouseEvent) => {
+      if (event.button !== 0) return
+      if (!terminalCopyOnSelectRef.current || !terminal.hasSelection()) return
+
+      const selected = terminal.getSelection()
+      if (!selected) return
+
+      void copyTextToClipboard(selected)
+        .then(() => terminal.clearSelection())
+        .catch(() => {})
+    }
+
+    const handleContextMenuPaste = (event: MouseEvent) => {
+      if (!terminalRightClickPasteRef.current) return
+
+      if (terminal.hasSelection()) {
+        event.preventDefault()
+        const selected = terminal.getSelection()
+        if (selected) {
+          void copyTextToClipboard(selected).catch(() => {})
+          terminal.clearSelection()
+        }
+        return
+      }
+
+      if (!canReadClipboardText()) {
+        terminal.focus()
+        return
+      }
+
+      event.preventDefault()
+      void readTextFromClipboard()
+        .then(text => {
+          if (!text || !mountedRef.current) return
+          sendTerminalData(text)
+          terminal.focus()
+        })
+        .catch(() => {})
+    }
+
+    terminalElement?.addEventListener('mouseup', handleSelectionCopy)
+    terminalElement?.addEventListener('contextmenu', handleContextMenuPaste)
+    if (touchUi && textarea) {
+      textarea.setAttribute('autocapitalize', 'none')
+      textarea.setAttribute('autocomplete', 'off')
+      textarea.setAttribute('autocorrect', 'off')
+      textarea.setAttribute('enterkeyhint', 'send')
+      textarea.setAttribute('inputmode', 'text')
+      textarea.setAttribute('spellcheck', 'false')
+      textarea.addEventListener('blur', handleTextareaBlur)
+    }
+
+    terminalRef.current = terminal
+    fitAddonRef.current = fitAddon
+    disposeData = terminal.onData(sendTerminalData)
+
+    // 连接 WebSocket（带自动重连）
+    let reconnectTimer: number | null = null
+    let reconnectAttempt = 0
+    const MAX_RECONNECT_DELAY = 30000 // 最大 30s
+    const BASE_RECONNECT_DELAY = 1000 // 起始 1s
+    let intentionalClose = false // 标记主动关闭
+
+    const resetTransport = () => {
+      transportSendRef.current = null
+      transportDisconnectRef.current = null
+    }
+
+    const sendResize = () => {
+      const socket = socketRef.current
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            type: 'resize',
+            rows: terminal.rows,
+            cols: terminal.cols
+          })
+        )
+      }
+      layoutStore.updateTerminalSnapshot(terminalId, {
+        rows: terminal.rows,
+        cols: terminal.cols
+      })
+    }
+
+    const handleConnected = (socket: WebSocket) => {
+      if (!mountedRef.current || !effectActive) return
+      if (socketRef.current !== socket) return
+      reconnectAttempt = 0
+      layoutStore.updateTerminalTab(terminalId, { status: 'connected' })
+      transportSendRef.current = data => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data }))
+        }
+      }
+      sendResize()
+      for (const data of pendingInputRef.current.splice(0)) {
+        socket.send(JSON.stringify({ type: 'input', data }))
+      }
+    }
+
+    const handleDisconnected = ({ socket, code }: { socket?: WebSocket; code?: number }) => {
+      if (!effectActive) return
+      if (socket && socketRef.current !== socket) return
+      resetTransport()
+      if (!socket || socketRef.current === socket) socketRef.current = null
+      if (!mountedRef.current) return
+
+      const current = layoutStore.getState().panelTabs.find(tab => tab.id === terminalId)
+      if (current?.status === 'exited') return
+      layoutStore.updateTerminalTab(terminalId, { status: 'disconnected' })
+
+      if (intentionalClose || code === 1000) {
+        terminal.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n')
+        return
+      }
+
+      reconnectAttempt++
+      const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempt - 1), MAX_RECONNECT_DELAY)
+      terminal.write(`\r\n\x1b[90m[Disconnected, reconnecting in ${(delay / 1000).toFixed(0)}s...]\x1b[0m\r\n`)
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null
+        if (mountedRef.current) {
+          connectTransport()
+        }
+      }, delay)
+    }
+
+    const connectTransport = async () => {
+      if (!mountedRef.current || !effectActive) return
+
+      fitAddon.fit()
+      const cursor = cursorRef.current
+
+      try {
+        const ticket = await issueHostTerminalToken(terminalWorkspacePath, terminalId)
+        if (!mountedRef.current || !effectActive) return
+        const socket = new WebSocket(getHostTerminalWebSocketUrl(terminalId, ticket.token, cursor))
+        socketRef.current = socket
+        transportDisconnectRef.current = () => socket.close()
+
+        socket.onopen = () => handleConnected(socket)
+
+        socket.onmessage = event => {
+          if (!mountedRef.current || !effectActive || socketRef.current !== socket) return
+          let value: unknown
+          try {
+            value = JSON.parse(String(event.data))
+          } catch {
+            return
+          }
+          const frame = parseServerFrame(value)
+          if (!frame) return
+          if (frame.type === 'hello') {
+            const current = layoutStore.getState().panelTabs.find(tab => tab.id === terminalId)
+            layoutStore.updateTerminalTab(terminalId, {
+              title: manualTerminalTitlesRef.current && current?.customTitle ? current.customTitle : frame.terminal.title,
+              shell: frame.terminal.shell,
+              cwd: frame.terminal.cwd
+            })
+          } else if (frame.type === 'output') {
+            terminal.write(frame.data)
+            cursorRef.current = frame.cursor
+          } else if (frame.type === 'title') {
+            if (manualTerminalTitlesRef.current) {
+              layoutStore.updateTerminalTab(terminalId, {
+                shellTitle: frame.title
+              })
+            } else {
+              layoutStore.updateTerminalTab(terminalId, { title: frame.title })
+            }
+          } else if (frame.type === 'ready') {
+            cursorRef.current = Math.max(cursorRef.current, frame.cursor)
+            layoutStore.updateTerminalTab(terminalId, { status: 'connected' })
+          } else if (frame.type === 'exit') {
+            cursorRef.current = frame.cursor
+            layoutStore.updateTerminalTab(terminalId, {
+              status: 'exited',
+              cursor: frame.cursor
+            })
+            if (socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.close(1000, 'terminal exited')
+            }
+          } else if (frame.type === 'problem') {
+            terminal.write(`\r\n\x1b[31m${frame.problem.message}\x1b[0m\r\n`)
+          }
+        }
+
+        socket.onclose = e => {
+          handleDisconnected({ socket, code: e.code })
+        }
+
+        socket.onerror = () => {
+          // onclose 会在 onerror 之后触发，重连逻辑交给 onclose
+        }
+      } catch {
+        handleDisconnected({})
+      }
+    }
+
+    const scheduleInitialConnect = () => {
+      wsConnectTimeout = requestAnimationFrame(connectTransport) as unknown as number
+    }
+
+    if (effectBuffer) {
+      terminal.write(effectBuffer, () => {
+        if (!mountedRef.current) return
+        if (effectScrollY !== undefined) {
+          terminal.scrollToLine(effectScrollY)
+        }
+        if (shouldConnect) scheduleInitialConnect()
+      })
+    } else if (shouldConnect) {
+      scheduleInitialConnect()
+    }
+
+    return () => {
+      effectActive = false
+      mountedRef.current = false
+      intentionalClose = true
+      if (wsConnectTimeout) {
+        cancelAnimationFrame(wsConnectTimeout)
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+        resizeTimeoutRef.current = null
+      }
+
+      try {
+        layoutStore.updateTerminalSnapshot(terminalId, {
+          buffer: serializeAddon.serialize(),
+          scrollY: terminal.buffer.active.viewportY,
+          cursor: cursorRef.current,
+          rows: terminal.rows,
+          cols: terminal.cols
+        })
+      } catch {
+        // ignore snapshot persistence failures
+      }
+
+      transportDisconnectRef.current?.()
+      socketRef.current = null
+      pendingInputRef.current.length = 0
+      disposeData?.dispose()
+      textarea?.removeEventListener('blur', handleTextareaBlur)
+      terminalElement?.removeEventListener('mouseup', handleSelectionCopy)
+      terminalElement?.removeEventListener('contextmenu', handleContextMenuPaste)
+      resetTransport()
+      // 显式 dispose addons
+      fitAddon.dispose()
+      serializeAddon.dispose()
+      webLinksAddon.dispose()
+      webglAddon.dispose()
+      terminal.dispose()
+      terminalRef.current = null
+      fitAddonRef.current = null
+    }
+  }, [terminalId, workspacePath, hasBeenActive, clearStickyModifiers, sendTerminalData, preferTouchUi])
+
+  useEffect(() => {
+    const container = containerRef.current
+    const terminal = terminalRef.current
+    if (!container || !terminal) return
+    if (!touchCapable) return
+
+    let touchStartY = 0
+    let scrollStart = 0
+    let lastTouchY = 0
+    let lastTouchTime = 0
+    let velocity = 0
+    let momentumRaf = 0
+
+    const stopMomentum = () => {
+      if (momentumRaf) {
+        cancelAnimationFrame(momentumRaf)
+        momentumRaf = 0
+      }
+    }
+
+    const startMomentum = () => {
+      const viewport = terminal.element?.querySelector('.xterm-viewport') as HTMLElement | null
+      if (!viewport || Math.abs(velocity) < 0.5) {
+        setIsTouchScrolling(false)
+        return
+      }
+
+      const friction = 0.95
+      const step = () => {
+        velocity *= friction
+        if (Math.abs(velocity) < 0.5) {
+          momentumRaf = 0
+          // 惯性结束后延迟淡出滚动条
+          setTimeout(() => setIsTouchScrolling(false), 600)
+          return
+        }
+        viewport.scrollTop += velocity
+        momentumRaf = requestAnimationFrame(step)
+      }
+      momentumRaf = requestAnimationFrame(step)
+    }
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
+      stopMomentum()
+      const y = e.touches[0].clientY
+      touchStartY = y
+      lastTouchY = y
+      lastTouchTime = Date.now()
+      velocity = 0
+      const viewport = terminal.element?.querySelector('.xterm-viewport') as HTMLElement | null
+      scrollStart = viewport?.scrollTop ?? 0
+      setIsTouchScrolling(false)
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
+      const viewport = terminal.element?.querySelector('.xterm-viewport') as HTMLElement | null
+      if (!viewport) return
+
+      const y = e.touches[0].clientY
+      const delta = touchStartY - y
+
+      if (Math.abs(delta) > 6) {
+        setIsTouchScrolling(true)
+      }
+
+      // 计算速度（用于惯性）
+      const now = Date.now()
+      const dt = now - lastTouchTime
+      if (dt > 0) {
+        velocity = ((lastTouchY - y) / dt) * 16 // 归一化到每帧 px
+      }
+      lastTouchY = y
+      lastTouchTime = now
+
+      viewport.scrollTop = scrollStart + delta
+      if (touchCapable) {
+        e.preventDefault()
+      }
+    }
+
+    const handleTouchEnd = () => {
+      startMomentum()
+    }
+
+    container.addEventListener('touchstart', handleTouchStart, {
+      passive: true
+    })
+    container.addEventListener('touchmove', handleTouchMove, {
+      passive: false
+    })
+    container.addEventListener('touchend', handleTouchEnd)
+
+    return () => {
+      stopMomentum()
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('touchend', handleTouchEnd)
+    }
+  }, [isActive, touchCapable])
+
+  // 处理大小变化
+  useEffect(() => {
+    if (!isActive || !fitAddonRef.current || !terminalRef.current) return
+
+    const handleResize = () => {
+      if (isPanelResizingRef.current) return
+
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+      resizeTimeoutRef.current = window.setTimeout(() => {
+        if (fitAddonRef.current && terminalRef.current && !isPanelResizingRef.current) {
+          fitAddonRef.current.fit()
+          const terminal = terminalRef.current
+          const socket = socketRef.current
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(
+              JSON.stringify({
+                type: 'resize',
+                rows: terminal.rows,
+                cols: terminal.cols
+              })
+            )
+          }
+          layoutStore.updateTerminalSnapshot(terminalId, {
+            rows: terminal.rows,
+            cols: terminal.cols
+          })
+        }
+      }, 16)
+    }
+
+    window.addEventListener('resize', handleResize)
+    const resizeObserver = new ResizeObserver(handleResize)
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+    }
+
+    const handlePanelResizeStart = () => {
+      isPanelResizingRef.current = true
+    }
+    window.addEventListener('panel-resize-start', handlePanelResizeStart)
+
+    // 手机软键盘弹出/收起：布局视口不变但 visualViewport 变化，
+    // 不重新 fit 的话内容会被系统键盘盖住。
+    const handleVisualViewportResize = () => handleResize()
+    window.visualViewport?.addEventListener('resize', handleVisualViewportResize)
+
+    handleResize()
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('panel-resize-start', handlePanelResizeStart)
+      window.visualViewport?.removeEventListener('resize', handleVisualViewportResize)
+      resizeObserver.disconnect()
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+        resizeTimeoutRef.current = null
+      }
+    }
+  }, [isActive, terminalId])
+
+  // 主题变化时更新
+  useEffect(() => {
+    const observer = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        if (mutation.attributeName === 'data-mode') {
+          if (terminalRef.current) {
+            terminalRef.current.options.theme = getTerminalTheme(isDarkMode())
+          }
+          break
+        }
+      }
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-mode']
+    })
+
+    return () => observer.disconnect()
+  }, [])
+
+  // 当 tab 变为活动状态时，聚焦并重新 fit
+  useEffect(() => {
+    if (isActive && terminalRef.current) {
+      terminalRef.current.focus()
+      if (fitAddonRef.current) {
+        requestAnimationFrame(() => {
+          fitAddonRef.current?.fit()
+        })
+      }
+    }
+  }, [isActive])
+
+  useEffect(() => {
+    if (!isActive) {
+      clearStickyModifiers()
+    }
+  }, [isActive, clearStickyModifiers])
+
+  // 监听面板 resize 结束事件
+  useEffect(() => {
+    if (!isActive) return
+
+    const handlePanelResizeEnd = () => {
+      isPanelResizingRef.current = false
+      if (fitAddonRef.current && terminalRef.current) {
+        requestAnimationFrame(() => {
+          if (!fitAddonRef.current || !terminalRef.current) return
+          fitAddonRef.current.fit()
+          const terminal = terminalRef.current
+          const socket = socketRef.current
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(
+              JSON.stringify({
+                type: 'resize',
+                rows: terminal.rows,
+                cols: terminal.cols
+              })
+            )
+          }
+          layoutStore.updateTerminalSnapshot(terminalId, {
+            rows: terminal.rows,
+            cols: terminal.cols
+          })
+        })
+      }
+    }
+
+    window.addEventListener('panel-resize-end', handlePanelResizeEnd)
+    return () => window.removeEventListener('panel-resize-end', handlePanelResizeEnd)
+  }, [isActive, terminalId])
+
+  return (
+    <>
+      <style>{`
+        .xterm-viewport,
+        .xterm-screen,
+        .xterm-scrollable-element {
+          background-color: transparent !important;
+        }
+        .xterm {
+          padding: 0 !important;
+        }
+        /* 滚动条基础样式 */
+        .xterm-viewport {
+          scrollbar-width: thin;
+          scrollbar-color: hsl(var(--border-300) / 0.25) transparent;
+        }
+        .xterm-viewport::-webkit-scrollbar {
+          width: 6px;
+          background: transparent;
+        }
+        .xterm-viewport::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .xterm-viewport::-webkit-scrollbar-thumb {
+          background-color: hsl(var(--border-300) / 0.25);
+          border-radius: 99px;
+          transition: background-color 0.2s ease;
+        }
+        .xterm-viewport::-webkit-scrollbar-thumb:hover {
+          background-color: hsl(var(--border-300) / 0.5);
+        }
+        /* 移动端：空闲时滚动条淡出，滚动时显示 */
+        .scrollbar-idle .xterm-viewport::-webkit-scrollbar-thumb {
+          background-color: hsl(var(--border-300) / 0);
+          transition: background-color 0.8s ease;
+        }
+        .scrollbar-active .xterm-viewport::-webkit-scrollbar-thumb {
+          background-color: hsl(var(--border-300) / 0.35);
+          transition: background-color 0.15s ease;
+        }
+      `}</style>
+      <div
+        className={`${preferTouchUi ? 'flex flex-col' : ''} h-full w-full`}
+        style={{
+          visibility: isActive ? 'visible' : 'hidden',
+          position: isActive ? 'relative' : 'absolute',
+          pointerEvents: isActive ? 'auto' : 'none',
+          inset: isActive ? undefined : 0
+        }}
+      >
+        <div
+          ref={containerRef}
+          className={`${preferTouchUi ? 'flex-1 min-h-0' : 'h-full'} w-full bg-bg-100 ${preferTouchUi ? 'no-scrollbar' : ''} ${preferTouchUi ? (isTouchScrolling ? 'scrollbar-active' : 'scrollbar-idle') : ''}`}
+          style={{
+            padding: preferTouchUi ? '0' : '4px 0 0 4px',
+            touchAction: touchCapable ? 'pan-y' : 'auto'
+          }}
+          onClick={() => {
+            if (preferTouchUi && terminalRef.current) {
+              focusTerminal()
+            }
+          }}
+          onTouchEnd={e => {
+            if (terminalRef.current && e.target === containerRef.current) {
+              focusTerminal()
+            }
+          }}
+        />
+        {preferTouchUi && (
+          <MobileExtraKeys
+            stickyModifiers={stickyModifiers}
+            onToggleSticky={toggleStickyModifier}
+            onSend={sendTerminalData}
+            onFocusTerminal={focusTerminal}
+          />
+        )}
+      </div>
+    </>
+  )
+})

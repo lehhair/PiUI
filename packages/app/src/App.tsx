@@ -585,9 +585,12 @@ function App() {
       archiveSession: capabilities.sessionArchive ? () => focusedController?.archiveSession() : undefined,
       previousSession: () => focusedController?.previousSession(),
       nextSession: () => focusedController?.nextSession(),
-      toggleTerminal: () => {
-        layoutStore.toggleBottomPanel()
-      },
+       toggleTerminal: () => {
+         layoutStore.toggleBottomPanel()
+       },
+       newTerminal: () => {
+         window.dispatchEvent(new Event('piui:new-terminal'))
+       },
       selectModel: () => focusedController?.openModelSelector(),
       toggleAgent: () => focusedController?.toggleAgent(),
       cancelMessage: () => focusedController?.cancelMessage(),
@@ -742,6 +745,14 @@ function App() {
         category: t('commands:categories.terminal'),
         shortcut: getShortcut('toggleTerminal'),
         action: () => layoutStore.toggleBottomPanel(),
+      },
+      {
+        id: 'newTerminal',
+        label: t('commands:newTerminal'),
+        description: t('commands:newTerminalDesc'),
+        category: t('commands:categories.terminal'),
+        shortcut: getShortcut('newTerminal'),
+        action: () => window.dispatchEvent(new Event('piui:new-terminal')),
       },
       {
         id: 'selectModel',

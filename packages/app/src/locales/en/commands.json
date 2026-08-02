@@ -24,6 +24,8 @@
   "toggleTerminal": "Toggle Terminal",
   "toggleTerminalDesc": "Show or hide terminal panel",
   "newTerminal": "New Terminal",
+  "newTerminalDesc": "Create a terminal in the current workspace",
+  "newTerminal": "New Terminal",
   "newTerminalDesc": "Open new terminal tab",
   "terminalCopySelection": "Copy Terminal Selection",
   "terminalCopySelectionDesc": "Copy selected text from the focused terminal",

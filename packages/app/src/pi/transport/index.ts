@@ -24,10 +24,13 @@ import type {
   SetModelParams,
   SetThinkingLevelParams,
   SteerParams,
+  TerminalCreateParams,
+  TerminalInfo,
+  TerminalUpdateParams,
 } from '@piui/protocol'
 import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
-import { getApiBase, piFetch } from '../httpClient.js'
+import { getApiBase, getPiAuthToken, piFetch } from '../httpClient.js'
 import { piCommandStore } from '../state/index.js'
 
 // Response types
@@ -194,6 +197,46 @@ export function searchHostFilesByName(
 
 export function searchHostFilesText(workspacePath: string, query: string, limit?: number, signal?: AbortSignal): Promise<FileTextSearchResponse> {
   return postHostCommand('files.searchText', { workspacePath, query, limit }, signal)
+}
+
+// Host terminal commands. Terminal output itself uses a dedicated WebSocket stream.
+export function listHostTerminals(workspacePath: string, signal?: AbortSignal): Promise<{ terminals: TerminalInfo[] }> {
+  return postHostCommand('terminals.list', { workspacePath }, signal)
+}
+
+export function createHostTerminal(
+  workspacePath: string,
+  params: TerminalCreateParams = {},
+  signal?: AbortSignal,
+): Promise<TerminalInfo> {
+  return postHostCommand('terminals.create', { workspacePath, ...params }, signal)
+}
+
+export function updateHostTerminal(
+  workspacePath: string,
+  terminalId: string,
+  params: TerminalUpdateParams,
+  signal?: AbortSignal,
+): Promise<TerminalInfo> {
+  return postHostCommand('terminals.update', { workspacePath, terminalId, ...params }, signal)
+}
+
+export function removeHostTerminal(workspacePath: string, terminalId: string, signal?: AbortSignal): Promise<{ ok: boolean }> {
+  return postHostCommand('terminals.remove', { workspacePath, terminalId }, signal)
+}
+
+export function issueHostTerminalToken(workspacePath: string, terminalId: string, signal?: AbortSignal): Promise<{ token: string; expiresIn: number }> {
+  return postHostCommand('terminals.connectToken', { workspacePath, terminalId }, signal)
+}
+
+export function getHostTerminalWebSocketUrl(terminalId: string, ticket: string, cursor?: number): string {
+  const base = getApiBase() || (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8787')
+  const url = new URL(`${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(terminalId)}/stream`)
+  url.searchParams.set('ticket', ticket)
+  if (cursor !== undefined && Number.isSafeInteger(cursor) && cursor >= 0) url.searchParams.set('cursor', String(cursor))
+  const token = getPiAuthToken()
+  if (token && getApiBase()) url.searchParams.set('token', token)
+  return url.toString()
 }
 
 // Global Pi commands (settings / trust / providers / model runtime / packages)

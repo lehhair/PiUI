@@ -24,6 +24,8 @@
   "toggleTerminal": "切换终端",
   "toggleTerminalDesc": "显示或隐藏终端面板",
   "newTerminal": "新建终端",
+  "newTerminalDesc": "在当前工作区创建终端",
+  "newTerminal": "新建终端",
   "newTerminalDesc": "打开新的终端标签",
   "terminalCopySelection": "复制终端选区",
   "terminalCopySelectionDesc": "复制当前聚焦终端中的选中文本",
