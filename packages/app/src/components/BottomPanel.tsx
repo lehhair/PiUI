@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PanelContainer } from './PanelContainer'
 import { layoutStore, useLayoutStore, type PanelTab } from '../store/layoutStore'
@@ -6,8 +6,8 @@ import { useFocusedSessionId } from '../pi/hooks/index.js'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
 import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
-import { serverStore } from '../store/serverStore'
-import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
+import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
+import { uiErrorHandler } from '../utils'
 import { TerminalIcon } from './Icons'
 
 const SessionChangesPanel = lazy(() =>
@@ -40,44 +40,7 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useFocusedSessionId()
   const { interaction, layout } = useChatViewport()
-  const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
-  const [isRestoring, setIsRestoring] = useState(false)
-
-  const previousDirectoryRef = useRef<string | undefined>(undefined)
-  const restoreRequestIdRef = useRef(0)
-  useEffect(() => {
-    if (previousDirectoryRef.current === normalizedDirectory && restoreRequestIdRef.current > 0) return
-    previousDirectoryRef.current = normalizedDirectory
-
-    const restoreSessions = async (requestId: number) => {
-      setIsRestoring(true)
-      if (!normalizedDirectory) {
-        if (restoreRequestIdRef.current === requestId) {
-          layoutStore.syncTerminalSessions(undefined, [])
-          setIsRestoring(false)
-        }
-        return
-      }
-
-      try {
-        const result = await listHostTerminals(normalizedDirectory)
-        if (restoreRequestIdRef.current !== requestId) return
-        layoutStore.syncTerminalSessions(normalizedDirectory, result.terminals)
-      } catch (error) {
-        if (restoreRequestIdRef.current === requestId) {
-          uiErrorHandler('restore terminal sessions', error)
-        }
-      } finally {
-        if (restoreRequestIdRef.current === requestId) setIsRestoring(false)
-      }
-    }
-
-    const requestId = ++restoreRequestIdRef.current
-    void restoreSessions(requestId)
-    return serverStore.onServerChange(() => {
-      void restoreSessions(++restoreRequestIdRef.current)
-    })
-  }, [normalizedDirectory])
+  const { isRestoring, normalizedDirectory } = useTerminalSessionRestore(directory)
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -117,7 +80,18 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
   const handleCloseTerminal = useCallback(
     async (terminalId: string) => {
       if (!normalizedDirectory) return
-      await removeHostTerminal(normalizedDirectory, terminalId).catch(() => undefined)
+      try {
+        await removeHostTerminal(normalizedDirectory, terminalId)
+      } catch (error) {
+        uiErrorHandler('close terminal', error)
+        // 服务端可能仍持有该终端，重新拉取列表把 tab 恢复回来
+        try {
+          const result = await listHostTerminals(normalizedDirectory)
+          layoutStore.syncTerminalSessions(normalizedDirectory, result.terminals)
+        } catch {
+          // 列表也失败时保持现状，tab 由下次恢复流程修正
+        }
+      }
     },
     [normalizedDirectory]
   )

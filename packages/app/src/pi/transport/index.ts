@@ -234,8 +234,10 @@ export function getHostTerminalWebSocketUrl(terminalId: string, ticket: string, 
   const url = new URL(`${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(terminalId)}/stream`)
   url.searchParams.set('ticket', ticket)
   if (cursor !== undefined && Number.isSafeInteger(cursor) && cursor >= 0) url.searchParams.set('cursor', String(cursor))
+  // 同源模式（无 API base）下 WebSocket 升级请求无法携带 Authorization 头，
+  // 因此只要配置了 token 就必须走 query 参数，与事件流保持一致。
   const token = getPiAuthToken()
-  if (token && getApiBase()) url.searchParams.set('token', token)
+  if (token) url.searchParams.set('token', token)
   return url.toString()
 }
 
