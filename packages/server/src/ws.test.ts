@@ -232,7 +232,7 @@ describe("event websocket", () => {
     await waitFor(() => frames.some(frame => frame.type === "output" && frame.data.includes("piui-ws")))
     ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
     await waitFor(() => frames.some(frame => frame.type === "exit"))
-assert.equal(frames[0]?.type, "hello")
+    assert.equal(frames[0]?.type, "hello")
     assert.equal(frames[1]?.type, "ready")
     ws.close()
   })
