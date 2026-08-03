@@ -136,6 +136,31 @@ describe("http api", () => {
     assert.equal(oldWorkspaceRoute.status, 404)
   })
 
+  it("re-registers a real workspace when the in-memory registry is empty", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-http-reopen-"))
+    writeFileSync(path.join(root, "after-restart.txt"), "ready", "utf8")
+    const app = createAppServer({ authToken: null })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    const listedBefore = await request(port, "POST", "/api/v1/host/commands/workspaces.list")
+    assert.equal(listedBefore.status, 200)
+    assert.deepEqual(listedBefore.json.data.workspaces, [])
+
+    const files = await request(port, "POST", "/api/v1/host/commands/files.list", {
+      body: { workspacePath: root, path: "" },
+    })
+    assert.equal(files.status, 200)
+    assert.ok(files.json.data.entries.some((entry: any) => entry.name === "after-restart.txt"))
+
+    const listedAfter = await request(port, "POST", "/api/v1/host/commands/workspaces.list")
+    assert.equal(listedAfter.status, 200)
+    assert.equal(listedAfter.json.data.workspaces.length, 1)
+  })
+
   it("serves catalog commands and reports unknown commands", async () => {
     const mockHome = mkdtempSync(path.join(tmpdir(), "piui-http-catalog-"))
     process.env.PIUI_MOCK_DIR = mockHome

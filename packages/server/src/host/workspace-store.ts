@@ -18,6 +18,7 @@ export interface WorkspaceRecord {
 export class WorkspaceStore {
   private readonly byPath = new Map<string, WorkspaceRecord>()
   private readonly byInputPath = new Map<string, WorkspaceRecord>()
+  private readonly closed = new Set<string>()
 
   list(): WorkspaceDto[] {
     return [...this.byPath.values()].map(toDto)
@@ -27,6 +28,12 @@ export class WorkspaceStore {
   find(rootPath: string): WorkspaceRecord | undefined {
     const key = workspacePathKey(path.resolve(rootPath))
     return this.byInputPath.get(key) ?? this.byPath.get(key)
+  }
+
+  /** A closed workspace must be explicitly opened again before host commands use it. */
+  isClosed(rootPath: string): boolean {
+    const key = workspacePathKey(path.resolve(rootPath))
+    return this.closed.has(key)
   }
 
   /** Revalidates a known workspace before an operation uses its root. */
@@ -67,6 +74,8 @@ export class WorkspaceStore {
     const abs = realpathSync.native(resolved)
     const rootIdentity = fileIdentity(statSync(abs))
     const key = workspacePathKey(abs)
+    this.closed.delete(inputKey)
+    this.closed.delete(key)
     const prior = this.byInputPath.get(inputKey)
     if (prior && (workspacePathKey(prior.canonicalRoot) !== key ||
       prior.rootIdentity !== undefined && prior.rootIdentity !== rootIdentity)) {
@@ -102,9 +111,12 @@ export class WorkspaceStore {
   }
 
   remove(rootPath: string): boolean {
-    const key = workspacePathKey(path.resolve(rootPath))
+    const inputKey = workspacePathKey(path.resolve(rootPath))
+    const key = inputKey
     const record = this.byInputPath.get(key) ?? this.byPath.get(key)
     if (!record) return false
+    this.closed.add(inputKey)
+    this.closed.add(workspacePathKey(record.canonicalRoot))
     this.byPath.delete(workspacePathKey(record.canonicalRoot))
     for (const [input, value] of this.byInputPath) {
       if (value === record) this.byInputPath.delete(input)

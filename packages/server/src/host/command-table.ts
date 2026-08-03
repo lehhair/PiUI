@@ -126,8 +126,13 @@ function optLimit(params: JsonObject, key: string, fallback: number, maximum: nu
 }
 
 function workspace(ctx: HostCommandContext, params: JsonObject): WorkspaceRecord {
-  const found = ctx.store.find(reqString(params, "workspacePath"))
-  if (!found) throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  const workspacePath = reqString(params, "workspacePath")
+  // Host commands may arrive after a server restart, when the in-memory
+  // workspace registry is empty. A real directory is enough to re-register it.
+  if (ctx.store.isClosed(workspacePath)) {
+    throw Object.assign(new Error("workspace not found"), { code: "WORKSPACE_NOT_FOUND" })
+  }
+  const found = ctx.store.find(workspacePath) ?? ctx.store.resolve(workspacePath)
   ctx.store.assertCurrent(found)
   return found
 }
