@@ -88,4 +88,22 @@ describe('useTerminalSessionRestore', () => {
     await waitFor(() => expect(uiErrorHandlerMock).toHaveBeenCalled())
     expect(result.current.isRestoring).toBe(false)
   })
+
+  it('ignores a pending restore after unmount', async () => {
+    let resolveRequest: ((value: { terminals: [] }) => void) | undefined
+    listHostTerminalsMock.mockReturnValue(
+      new Promise(resolve => {
+        resolveRequest = resolve
+      })
+    )
+    const syncSpy = vi.spyOn(layoutStore, 'syncTerminalSessions')
+
+    const { unmount } = renderHook(() => useTerminalSessionRestore('C:/p'))
+    unmount()
+    resolveRequest?.({ terminals: [] })
+    await Promise.resolve()
+
+    expect(syncSpy).not.toHaveBeenCalled()
+    syncSpy.mockRestore()
+  })
 })

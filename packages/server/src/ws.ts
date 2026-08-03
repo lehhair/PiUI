@@ -193,7 +193,7 @@ function attachTerminalConnection(
     return
   }
 
-let closed = false
+  let closed = false
   let writing = false
   let queuedBytes = 0
   const queue: string[] = []

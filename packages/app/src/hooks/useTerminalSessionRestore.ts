@@ -44,9 +44,13 @@ export function useTerminalSessionRestore(directory?: string) {
 
     const requestId = ++restoreRequestIdRef.current
     void restoreSessions(requestId)
-    return serverStore.onServerChange(() => {
+    const unsubscribe = serverStore.onServerChange(() => {
       void restoreSessions(++restoreRequestIdRef.current)
     })
+    return () => {
+      restoreRequestIdRef.current += 1
+      unsubscribe()
+    }
   }, [normalizedDirectory])
 
   return { isRestoring, normalizedDirectory }
