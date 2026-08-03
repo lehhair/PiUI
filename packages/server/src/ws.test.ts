@@ -183,6 +183,13 @@ describe("event websocket", () => {
       ws.on("error", () => undefined)
     })
     assert.equal(closed, 1006)
+
+    const accepted = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events?token=${encodeURIComponent("secret-token")}`)
+    await new Promise<void>((resolve, reject) => {
+      accepted.once("open", () => resolve())
+      accepted.once("error", reject)
+    })
+    accepted.close()
   })
 
   it("streams terminal replay, input, and exit frames through a one-time ticket", async () => {
