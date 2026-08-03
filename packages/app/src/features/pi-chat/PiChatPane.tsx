@@ -39,7 +39,7 @@ import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
 import { clearSessionEditorDraft, configureSessionEditorDraftSync, setSessionEditorDraft, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
-import { isSessionNotFoundError, uiErrorHandler } from '../../utils'
+import { isSessionBusyError, isSessionNotFoundError, uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -247,7 +247,8 @@ export function PiChatPane({
   // 启动中的临时错误不能被误报成已删除。
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
   const sessionLoadError = Boolean(sessionId && !branch && branchError && !sessionUnavailable)
-  sessionUnavailableRef.current = sessionUnavailable
+  const sessionBusy = Boolean(sessionId && !branch && branchError && isSessionBusyError(branchError))
+  sessionUnavailableRef.current = sessionUnavailable || sessionLoadError
 
   const retrySession = useCallback(async () => {
     if (!sessionId || isRetryingSession) return
@@ -263,13 +264,13 @@ export function PiChatPane({
 
   useEffect(() => {
     // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
-    if (!sessionId || sessionUnavailable) return
+    if (!sessionId || sessionUnavailable || sessionLoadError) return
     piEventStream.connect(sessionId)
     if (!piBranchStore.getData(sessionId)) {
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
     return () => piEventStream.disconnect(sessionId)
-  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionUnavailable])
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
 
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
@@ -1012,10 +1013,18 @@ export function PiChatPane({
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-text-400 max-w-xs text-center">
               <p className="text-[length:var(--fs-md)] font-medium text-text-200">
-                {sessionUnavailable ? t('chat:chatArea.sessionNotFound') : t('chat:chatArea.sessionLoadFailed')}
+                {sessionUnavailable
+                  ? t('chat:chatArea.sessionNotFound')
+                  : sessionBusy
+                    ? t('chat:chatArea.sessionBusy')
+                    : t('chat:chatArea.sessionLoadFailed')}
               </p>
               <p className="text-[length:var(--fs-sm)] text-text-400">
-                {sessionUnavailable ? t('chat:chatArea.sessionNotFoundDesc') : t('chat:chatArea.sessionLoadFailedDesc')}
+                {sessionUnavailable
+                  ? t('chat:chatArea.sessionNotFoundDesc')
+                  : sessionBusy
+                    ? t('chat:chatArea.sessionBusyDesc')
+                    : t('chat:chatArea.sessionLoadFailedDesc')}
               </p>
               <button
                 type="button"

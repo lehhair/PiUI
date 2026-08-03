@@ -56,3 +56,8 @@ export function isSessionNotFoundError(error: unknown): boolean {
     /session\s+(does\s+not\s+exist|not\s+found|missing)/i.test(text)
   )
 }
+
+export function isSessionBusyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  return (error as Record<string, unknown>).code === 'SESSION_BUSY'
+}

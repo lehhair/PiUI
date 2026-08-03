@@ -21,6 +21,8 @@
     "sessionNotFoundDesc": "该会话已被删除，或服务端找不到对应的会话文件。",
     "sessionLoadFailed": "会话加载失败",
     "sessionLoadFailedDesc": "服务端暂时无法读取这个会话，请重试。",
+    "sessionBusy": "会话正在使用中",
+    "sessionBusyDesc": "另一个 Pi runtime 正在使用这个会话，请关闭其他实例后重试。",
     "backToHome": "返回首页"
   },
   "emptyState": {

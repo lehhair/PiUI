@@ -71,25 +71,52 @@ export async function openPiSession(cwd: string, sessionFile?: string, signal?: 
 /**
  * Load session data (state + branch) for active session.
  */
-export async function loadPiSessionData(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
-  try {
-    // Load both in parallel
-    const [state, branch] = await Promise.all([
-      transport.getPiSessionState(sessionId, signal),
-      transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
-    ])
+const sessionDataFlights = new Map<string, Promise<void>>()
 
-    if (serverStore.getActiveServerGeneration() !== serverGeneration) return
-    piSessionStateStore.setState(sessionId, state as JsonObject)
-    piBranchStore.setData(sessionId, branch)
-  } catch (error) {
-    if (serverStore.getActiveServerGeneration() !== serverGeneration) return
-    console.error('Failed to load session data:', error)
-    piSessionStateStore.setError(sessionId, error as Error)
-    piBranchStore.setError(sessionId, error as Error)
-    throw error
+export async function loadPiSessionData(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const generation = serverStore.getActiveServerGeneration()
+  const flightKey = `${generation}:${sessionId}`
+  const existing = sessionDataFlights.get(flightKey)
+  if (existing) return existing
+
+  const flight = loadPiSessionDataOnce(sessionId, signal).finally(() => {
+    if (sessionDataFlights.get(flightKey) === flight) sessionDataFlights.delete(flightKey)
+  })
+  sessionDataFlights.set(flightKey, flight)
+  return flight
+}
+
+async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const serverGeneration = serverStore.getActiveServerGeneration()
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      // Load both in parallel
+      const [state, branch] = await Promise.all([
+        transport.getPiSessionState(sessionId, signal),
+        transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
+      ])
+
+      if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+      piSessionStateStore.setState(sessionId, state as JsonObject)
+      piBranchStore.setData(sessionId, branch)
+      return
+    } catch (error) {
+      lastError = error
+      if (!isSessionBusyError(error) || attempt === 2) break
+      await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)))
+    }
   }
+
+  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+  console.error('Failed to load session data:', lastError)
+  piSessionStateStore.setError(sessionId, lastError as Error)
+  piBranchStore.setError(sessionId, lastError as Error)
+  throw lastError
+}
+
+function isSessionBusyError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'SESSION_BUSY')
 }
 
 /**
