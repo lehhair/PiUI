@@ -1,4 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTerminalSessionRestore } from './useTerminalSessionRestore'
 import { layoutStore } from '../store/layoutStore'
@@ -105,5 +106,15 @@ describe('useTerminalSessionRestore', () => {
 
     expect(syncSpy).not.toHaveBeenCalled()
     syncSpy.mockRestore()
+  })
+
+  it('finishes restoring when effects are replayed by StrictMode', async () => {
+    listHostTerminalsMock.mockResolvedValue({ terminals: [] })
+    const { result } = renderHook(() => useTerminalSessionRestore('C:/p'), {
+      wrapper: ({ children }) => <StrictMode>{children}</StrictMode>,
+    })
+
+    await waitFor(() => expect(result.current.isRestoring).toBe(false))
+    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p')
   })
 })
