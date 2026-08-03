@@ -39,7 +39,7 @@ import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
 import { clearSessionEditorDraft, configureSessionEditorDraftSync, setSessionEditorDraft, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
-import { uiErrorHandler } from '../../utils'
+import { isSessionNotFoundError, uiErrorHandler } from '../../utils'
 import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -242,10 +242,24 @@ export function PiChatPane({
   const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
   const sessionUnavailableRef = useRef(false)
-  // 会话不存在（已删除/文件丢失）：branch 加载失败且无数据，
-  // 不能永远停在 loading
-  const sessionUnavailable = Boolean(sessionId && !branch && branchError)
+  const [isRetryingSession, setIsRetryingSession] = useState(false)
+  // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端
+  // 启动中的临时错误不能被误报成已删除。
+  const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
+  const sessionLoadError = Boolean(sessionId && !branch && branchError && !sessionUnavailable)
   sessionUnavailableRef.current = sessionUnavailable
+
+  const retrySession = useCallback(async () => {
+    if (!sessionId || isRetryingSession) return
+    setIsRetryingSession(true)
+    try {
+      await loadPiSessionData(sessionId)
+    } catch {
+      // 错误已写入 branch store，由页面状态展示
+    } finally {
+      setIsRetryingSession(false)
+    }
+  }, [isRetryingSession, sessionId])
 
   useEffect(() => {
     // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
@@ -994,18 +1008,32 @@ export function PiChatPane({
       )}
 
       <div className="absolute inset-0">
-        {sessionUnavailable ? (
+        {sessionUnavailable || sessionLoadError ? (
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-text-400 max-w-xs text-center">
-              <p className="text-[length:var(--fs-md)] font-medium text-text-200">{t('chat:chatArea.sessionNotFound')}</p>
-              <p className="text-[length:var(--fs-sm)] text-text-400">{t('chat:chatArea.sessionNotFoundDesc')}</p>
+              <p className="text-[length:var(--fs-md)] font-medium text-text-200">
+                {sessionUnavailable ? t('chat:chatArea.sessionNotFound') : t('chat:chatArea.sessionLoadFailed')}
+              </p>
+              <p className="text-[length:var(--fs-sm)] text-text-400">
+                {sessionUnavailable ? t('chat:chatArea.sessionNotFoundDesc') : t('chat:chatArea.sessionLoadFailedDesc')}
+              </p>
               <button
                 type="button"
-                onClick={() => onNewChatRef.current?.()}
-                className="mt-1 h-8 px-3 rounded-md text-[length:var(--fs-sm)] font-medium text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+                onClick={() => void retrySession()}
+                disabled={isRetryingSession}
+                className="mt-1 h-8 px-3 rounded-md text-[length:var(--fs-sm)] font-medium text-accent-main-100 hover:bg-accent-main-100/10 disabled:opacity-50 transition-colors"
               >
-                {t('chat:chatArea.backToHome')}
+                {isRetryingSession ? t('chat:chatArea.loadingSession') : t('common:retry')}
               </button>
+              {sessionLoadError ? null : (
+                <button
+                  type="button"
+                  onClick={() => onNewChatRef.current?.()}
+                  className="h-8 px-3 text-[length:var(--fs-sm)] text-text-400 hover:text-text-200 transition-colors"
+                >
+                  {t('chat:chatArea.backToHome')}
+                </button>
+              )}
             </div>
           </div>
         ) : chatAreaMountKey == null ? (

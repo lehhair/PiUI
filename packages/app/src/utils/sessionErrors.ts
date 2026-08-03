@@ -14,6 +14,7 @@ function collectErrorText(error: unknown, seen = new Set<unknown>()): string {
     return [
       error.name,
       error.message,
+      typeof record.code === 'string' ? record.code : '',
       collectErrorText(record.cause, seen),
       collectErrorText(record.error, seen),
       collectErrorText(record.response, seen),

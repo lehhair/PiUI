@@ -19,6 +19,8 @@
     "dropFolderToAddProjectHint": "Drop a folder here",
     "sessionNotFound": "Session unavailable",
     "sessionNotFoundDesc": "This session was deleted or its file is missing on the server.",
+    "sessionLoadFailed": "Unable to load session",
+    "sessionLoadFailedDesc": "The server could not load this session right now. Please try again.",
     "backToHome": "Back to home"
   },
   "emptyState": {
