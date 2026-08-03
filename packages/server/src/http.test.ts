@@ -199,6 +199,11 @@ describe("http api", () => {
     const opened = await request(port, "POST", "/api/v1/pi/commands/session.open", { body: { cwd: mockHome } })
     assert.equal(opened.status, 200)
     const sessionId = opened.json.data.sessionId as string
+
+    const allSessions = await request(port, "POST", "/api/v1/pi/commands/session.listAll")
+    assert.equal(allSessions.status, 200)
+    assert.ok(allSessions.json.data.some((session: any) => session.id === sessionId))
+
     for (const type of [
       "models.list",
       "settings.patch",
