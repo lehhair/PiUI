@@ -51,6 +51,11 @@ export function configuredSessionDir(cwd: string, agentDir?: string): string {
   if (fromSettings) return fromSettings
   // SDK 未配置自定义 session 目录时 fallback 到其默认位置
   // (~/.pi/agent/sessions/<encoded-cwd>/)，保证 deleteSession 的围栏始终有真实根可查。
+  return defaultSessionDir(cwd, dir)
+}
+
+function defaultSessionDir(cwd: string, agentDir?: string): string {
+  const dir = agentDir ?? getLoadedSdk().sdk.getAgentDir()
   const safePath = `--${path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`
   return path.join(path.resolve(dir), "sessions", safePath)
 }
@@ -88,7 +93,14 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async listAllSessions(): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
-    return requireJsonValue(await SessionManager.listAll(configuredSessionDir(process.cwd(), this.dir())), "SESSION_LIST_NOT_JSON")
+    const configured = configuredSessionDir(process.cwd(), this.dir())
+    const defaultForProcessCwd = defaultSessionDir(process.cwd(), this.dir())
+    // With the default layout, the SDK's no-argument listAll scans every encoded
+    // workspace directory. A custom sessionDir must be passed explicitly.
+    const sessions = path.resolve(configured) === path.resolve(defaultForProcessCwd)
+      ? await SessionManager.listAll()
+      : await SessionManager.listAll(configured)
+    return requireJsonValue(sessions, "SESSION_LIST_NOT_JSON")
   }
 
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {
