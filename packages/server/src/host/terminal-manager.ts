@@ -64,6 +64,8 @@ export class TerminalManager {
   private readonly tickets = new Map<string, TerminalTicket>()
   /** Processes whose kill failed and whose handle must be retried at dispose. */
   private readonly staleProcesses: IPty[] = []
+  /** Creates still awaiting async cwd resolution; counts toward the limit. */
+  private pendingCreates = 0
 
   constructor(private readonly options: TerminalManagerOptions = {}) {}
 
@@ -78,9 +80,20 @@ export class TerminalManager {
   }
 
   async create(workspacePath: string, params: TerminalCreateParams = {}): Promise<TerminalInfo> {
-    if (this.terminals.size >= TERMINAL_LIMIT) {
+    // Reserve a slot synchronously so concurrent creates cannot all pass the
+    // limit check while an earlier one is still awaiting its working directory.
+    if (this.terminals.size + this.pendingCreates >= TERMINAL_LIMIT) {
       throw Object.assign(new Error("terminal limit reached"), { code: "TERMINAL_LIMIT_REACHED" })
     }
+    this.pendingCreates += 1
+    try {
+      return await this.createReserved(workspacePath, params)
+    } finally {
+      this.pendingCreates -= 1
+    }
+  }
+
+  private async createReserved(workspacePath: string, params: TerminalCreateParams): Promise<TerminalInfo> {
     const cwd = await this.resolveCwd(workspacePath, params.cwd)
     const shell = resolveShell(params.shell)
     const size = terminalSize(params.rows, params.cols)
@@ -171,9 +184,6 @@ export class TerminalManager {
 
   issueConnectToken(workspacePath: string, id: string): { token: string; expiresIn: number } {
     const terminal = this.require(workspacePath, id)
-    if (terminal.info.status !== "running") {
-      throw Object.assign(new Error("terminal has exited"), { code: "TERMINAL_EXITED" })
-    }
     const token = randomUUID()
     this.tickets.set(token, { terminalId: id, workspacePath: terminal.workspacePath, expiresAt: Date.now() + TICKET_TTL_MS })
     return { token, expiresIn: TICKET_TTL_MS / 1000 }
@@ -185,7 +195,7 @@ export class TerminalManager {
     this.tickets.delete(token)
     if (record.expiresAt < Date.now() || record.terminalId !== id) return undefined
     const terminal = this.terminals.get(id)
-    if (!terminal || terminal.info.status !== "running") return undefined
+    if (!terminal) return undefined
     return terminal.workspacePath
   }
 
@@ -206,24 +216,42 @@ export class TerminalManager {
     onTitle: (title: string) => void = () => {},
   ): TerminalAttachment {
     const terminal = this.require(workspacePath, id)
-    if (terminal.info.status !== "running") {
-      throw Object.assign(new Error("terminal has exited"), { code: "TERMINAL_EXITED" })
-    }
-    const subscriber: Subscriber = { active: false, pending: [], onData, onEnd, onTitle }
-    const token = {}
-    terminal.subscribers.set(token, subscriber)
     const end = terminal.info.cursor
     const from = cursor === -1 ? end : cursor ?? terminal.bufferCursor
     if (!Number.isSafeInteger(from) || from < 0) {
-      terminal.subscribers.delete(token)
       throw Object.assign(new Error("terminal cursor must be a non-negative integer or -1"), { code: "INVALID_REQUEST" })
     }
+    if (from > end) {
+      throw Object.assign(new Error("terminal cursor is in the future"), { code: "INVALID_REQUEST" })
+    }
     if (from < terminal.bufferCursor) {
-      terminal.subscribers.delete(token)
       throw Object.assign(new Error("terminal output cursor has expired"), { code: "TERMINAL_CURSOR_EXPIRED" })
     }
     const offset = Math.max(0, from - terminal.bufferCursor)
     const replay = offset >= terminal.output.length ? "" : terminal.output.slice(offset)
+
+    // An exited terminal is a retained replay window: attach, deliver what is
+    // still buffered, then report the exit. There is no live process to write to.
+    if (terminal.info.status !== "running") {
+      const exitCode = terminal.info.exitCode ?? null
+      return {
+        replay,
+        replayCursor: from,
+        cursor: end,
+        activate: () => {
+          try {
+            onEnd({ exitCode })
+          } catch {
+            // A detached client must not prevent the socket from closing.
+          }
+        },
+        detach: () => {},
+      }
+    }
+
+    const subscriber: Subscriber = { active: false, pending: [], onData, onEnd, onTitle }
+    const token = {}
+    terminal.subscribers.set(token, subscriber)
 
     return {
       replay,

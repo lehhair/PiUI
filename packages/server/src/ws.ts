@@ -193,20 +193,31 @@ function attachTerminalConnection(
     return
   }
 
-  let closed = false
+let closed = false
   let writing = false
   let queuedBytes = 0
   const queue: string[] = []
+  let closeAfterFlush: { code: number; reason: string } | undefined
   const close = (code = 1000, reason = "") => {
     if (closed) return
     closed = true
     ws.close(code, reason)
+  }
+  const closeWhenDrained = (code: number, reason: string) => {
+    if (closed) return
+    closeAfterFlush = { code, reason }
+    pump()
   }
   const pump = () => {
     if (closed || writing) return
     const next = queue.shift()
     if (!next) {
       queuedBytes = 0
+      if (closeAfterFlush) {
+        const pending = closeAfterFlush
+        closeAfterFlush = undefined
+        close(pending.code, pending.reason)
+      }
       return
     }
     queuedBytes -= Buffer.byteLength(next)
@@ -248,7 +259,10 @@ function attachTerminalConnection(
           sendFrame({ type: "output", cursor: outputCursor, data: chunk })
         }
       },
-      event => sendFrame({ type: "exit", cursor: outputCursor, exitCode: event.exitCode }),
+      event => {
+        sendFrame({ type: "exit", cursor: outputCursor, exitCode: event.exitCode })
+        closeWhenDrained(1001, "terminal exited")
+      },
       title => sendFrame({ type: "title", title }),
     )
   } catch (error) {

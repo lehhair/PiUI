@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
+import type { TerminalInfo } from "@piui/protocol"
 import { extractTerminalTitle, TerminalManager } from "./terminal-manager.ts"
 
 test("TerminalManager creates, streams, replays, and removes a terminal", async () => {
@@ -87,6 +88,65 @@ test("removing a terminal invalidates its connect ticket", async () => {
     const ticket = manager.issueConnectToken(root, created.id).token
     manager.remove(root, created.id)
     assert.equal(manager.consumeConnectToken(created.id, ticket), undefined)
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+  }
+})
+
+test("attach rejects a future cursor", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-future-"))
+  const manager = new TerminalManager()
+  try {
+    const created = await manager.create(root, { title: "future" })
+    manager.write(root, created.id, process.platform === "win32" ? "echo future-cursor\r\n" : "printf future-cursor\\n")
+    await waitFor(() => manager.get(root, created.id).cursor > 0)
+    const cursor = manager.get(root, created.id).cursor
+    assert.throws(() => manager.attach(root, created.id, cursor + 10, () => {}, () => {}), (error: unknown) =>
+      (error as { code?: string }).code === "INVALID_REQUEST")
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+  }
+})
+
+test("exited terminals replay buffered output and report the exit code", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-exited-replay-"))
+  const manager = new TerminalManager()
+  try {
+    const created = await manager.create(root, { title: "replay" })
+    manager.write(root, created.id, process.platform === "win32" ? "echo replay-me\r\n" : "printf replay-me\\n")
+    await waitFor(() => manager.get(root, created.id).cursor > 0)
+    manager.write(root, created.id, process.platform === "win32" ? "exit\r\n" : "exit\n")
+    await waitFor(() => manager.get(root, created.id).status === "exited")
+    assert.equal(manager.issueConnectToken(root, created.id).token.length > 0, true)
+
+    let replayed = ""
+    let exitCode: number | null | undefined
+    const attachment = manager.attach(root, created.id, 0, data => (replayed += data), event => {
+      exitCode = event.exitCode
+    })
+    assert.match(attachment.replay, /replay-me/)
+    attachment.activate()
+    assert.equal(exitCode, 0)
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+  }
+})
+
+test("enforces the terminal limit under concurrent creates", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-limit-"))
+  const manager = new TerminalManager()
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 40 }, () => manager.create(root, { title: "limit" })))
+    const ok = results.filter((result): result is PromiseFulfilledResult<TerminalInfo> => result.status === "fulfilled")
+    const failed = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    assert.equal(ok.length, 32)
+    assert.equal(failed.length, 8)
+    for (const result of failed) {
+      assert.equal((result.reason as { code?: string }).code, "TERMINAL_LIMIT_REACHED")
+    }
   } finally {
     manager.dispose()
     await removeWithRetry(root)
