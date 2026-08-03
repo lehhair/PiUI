@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { serverStore } from '../store/serverStore'
 import { layoutStore } from '../store/layoutStore'
 import { listHostTerminals } from '../pi/transport/index.js'
+import { resolveWorkspacePath } from '../pi/workspaces'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 
 /**
@@ -26,9 +27,15 @@ export function useTerminalSessionRestore(directory?: string) {
       }
 
       try {
-        const result = await listHostTerminals(normalizedDirectory)
+        const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+        if (!workspacePath) {
+          if (restoreRequestIdRef.current !== requestId) return
+          layoutStore.syncTerminalSessions(undefined, [])
+          return
+        }
+        const result = await listHostTerminals(workspacePath)
         if (restoreRequestIdRef.current !== requestId) return
-        layoutStore.syncTerminalSessions(normalizedDirectory, result.terminals)
+        layoutStore.syncTerminalSessions(workspacePath, result.terminals)
       } catch (error) {
         if (restoreRequestIdRef.current === requestId) {
           uiErrorHandler('restore terminal sessions', error)

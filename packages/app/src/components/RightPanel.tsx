@@ -6,6 +6,7 @@ import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
 import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
 import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
+import { resolveWorkspacePath } from '../pi/workspaces'
 import { uiErrorHandler } from '../utils'
 
 const SessionChangesPanel = lazy(() =>
@@ -59,7 +60,9 @@ export const RightPanel = memo(function RightPanel({
   const handleNewTerminal = useCallback(async () => {
     if (!normalizedDirectory) return
     try {
-      const terminal = await createHostTerminal(normalizedDirectory)
+      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+      if (!workspacePath) return
+      const terminal = await createHostTerminal(workspacePath)
       layoutStore.addTerminalTab(
         {
           id: terminal.id,
@@ -80,13 +83,17 @@ export const RightPanel = memo(function RightPanel({
     async (terminalId: string) => {
       if (!normalizedDirectory) return
       try {
-        await removeHostTerminal(normalizedDirectory, terminalId)
+        const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+        if (!workspacePath) return
+        await removeHostTerminal(workspacePath, terminalId)
       } catch (error) {
         uiErrorHandler('close terminal', error)
         // 服务端可能仍持有该终端，重新拉取列表把 tab 恢复回来
         try {
-          const result = await listHostTerminals(normalizedDirectory)
-          layoutStore.syncTerminalSessions(normalizedDirectory, result.terminals)
+          const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+          if (!workspacePath) return
+          const result = await listHostTerminals(workspacePath)
+          layoutStore.syncTerminalSessions(workspacePath, result.terminals)
         } catch {
           // 列表也失败时保持现状，tab 由下次恢复流程修正
         }
@@ -98,7 +105,9 @@ export const RightPanel = memo(function RightPanel({
   const handleRenameTerminal = useCallback(
     async (terminalId: string, title: string) => {
       if (!normalizedDirectory) return
-      const terminal = await updateHostTerminal(normalizedDirectory, terminalId, { title })
+      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+      if (!workspacePath) return
+      const terminal = await updateHostTerminal(workspacePath, terminalId, { title })
       layoutStore.updateTerminalCustomTitle(terminalId, terminal.title)
     },
     [normalizedDirectory]
