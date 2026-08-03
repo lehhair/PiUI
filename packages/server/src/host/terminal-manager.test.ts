@@ -41,6 +41,58 @@ test("extractTerminalTitle reads OSC 0 and OSC 2 titles", () => {
   assert.equal(extractTerminalTitle("ordinary output"), undefined)
 })
 
+test("closeWorkspace kills owned terminals and consumes their tickets", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-close-"))
+  const other = mkdtempSync(path.join(tmpdir(), "piui-terminal-close-other-"))
+  const manager = new TerminalManager()
+  try {
+    const first = await manager.create(root, { title: "close-me" })
+    const second = await manager.create(root, { title: "close-me-too" })
+    const unrelated = await manager.create(other, { title: "keep-me" })
+    const ticket = manager.issueConnectToken(root, first.id).token
+
+    manager.closeWorkspace(root)
+
+    assert.deepEqual(manager.list(root), [])
+    assert.equal(manager.consumeConnectToken(first.id, ticket), undefined)
+    assert.throws(() => manager.get(root, first.id), /not found/)
+    assert.throws(() => manager.get(root, second.id), /not found/)
+    assert.equal(manager.list(other).some(t => t.id === unrelated.id), true)
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+    await removeWithRetry(other)
+  }
+})
+
+test("closing an already-closed workspace is a no-op", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-close-idem-"))
+  const manager = new TerminalManager()
+  try {
+    await manager.create(root, { title: "still-running" })
+    manager.closeWorkspace(root)
+    manager.closeWorkspace(root)
+    assert.deepEqual(manager.list(root), [])
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+  }
+})
+
+test("removing a terminal invalidates its connect ticket", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piui-terminal-ticket-"))
+  const manager = new TerminalManager()
+  try {
+    const created = await manager.create(root, { title: "ticketed" })
+    const ticket = manager.issueConnectToken(root, created.id).token
+    manager.remove(root, created.id)
+    assert.equal(manager.consumeConnectToken(created.id, ticket), undefined)
+  } finally {
+    manager.dispose()
+    await removeWithRetry(root)
+  }
+})
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 5_000
   while (!predicate()) {
