@@ -711,6 +711,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
             const current = layoutStore.getState().panelTabs.find(tab => tab.id === terminalId)
             layoutStore.updateTerminalTab(terminalId, {
               title: manualTerminalTitlesRef.current && current?.customTitle ? current.customTitle : frame.terminal.title,
+              shellTitle: frame.terminal.title,
               shell: frame.terminal.shell,
               cwd: frame.terminal.cwd
             })
@@ -718,13 +719,10 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
             terminal.write(frame.data)
             cursorRef.current = frame.cursor
           } else if (frame.type === 'title') {
-            if (manualTerminalTitlesRef.current) {
-              layoutStore.updateTerminalTab(terminalId, {
-                shellTitle: frame.title
-              })
-            } else {
-              layoutStore.updateTerminalTab(terminalId, { title: frame.title })
-            }
+            layoutStore.updateTerminalTab(terminalId, {
+              shellTitle: frame.title,
+              ...(manualTerminalTitlesRef.current ? {} : { title: frame.title })
+            })
           } else if (frame.type === 'ready') {
             cursorRef.current = Math.max(cursorRef.current, frame.cursor)
             layoutStore.updateTerminalTab(terminalId, { status: 'connected' })

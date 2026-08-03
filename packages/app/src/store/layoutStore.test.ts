@@ -120,4 +120,41 @@ describe('LayoutStore panel layout', () => {
     })
     expect(restored.getState().activeTabId.right).toBe('term-1')
   })
+
+  it('switches terminal titles between shell and custom modes', () => {
+    const store = new LayoutStore()
+    store.syncTerminalSessions('C:/project', [
+      {
+        id: 'term-1',
+        title: 'PowerShell',
+        shell: 'powershell.exe',
+        cwd: 'C:/project',
+        status: 'running',
+        pid: 1,
+        cursor: 0
+      }
+    ])
+
+    store.updateTerminalShellTitle('term-1', 'frontend', false)
+    store.syncTerminalTitleMode(true)
+    expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
+      title: 'frontend',
+      shellTitle: 'frontend'
+    })
+
+    store.updateTerminalCustomTitle('term-1', 'Build')
+    store.updateTerminalShellTitle('term-1', 'backend', true)
+    expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
+      title: 'Build',
+      customTitle: 'Build',
+      shellTitle: 'backend'
+    })
+
+    store.syncTerminalTitleMode(false)
+    expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
+      title: 'backend',
+      shellTitle: 'backend',
+      customTitle: 'Build'
+    })
+  })
 })
