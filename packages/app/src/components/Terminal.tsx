@@ -681,6 +681,9 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
 
     const connectTransport = async () => {
       if (!mountedRef.current || !effectActive) return
+      // workspace 切换期间旧 tab 可能已被列表重建移除，此时不再发起连接
+      const liveTab = layoutStore.getState().panelTabs.find(tab => tab.id === terminalId && tab.type === 'terminal')
+      if (!liveTab) return
 
       fitAddon.fit()
       const cursor = cursorRef.current
@@ -735,7 +738,28 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
               socketRef.current.close(1000, 'terminal exited')
             }
           } else if (frame.type === 'problem') {
+            if (frame.problem.code === 'TERMINAL_CURSOR_EXPIRED') {
+              // 服务端 cursor 已失效（会话可能被重建），清空本地快照后立即重新 attach
+              cursorRef.current = 0
+              layoutStore.updateTerminalSnapshot(terminalId, { buffer: '', cursor: 0, scrollY: 0 })
+              terminal.clear()
+              if (reconnectTimer) {
+                clearTimeout(reconnectTimer)
+                reconnectTimer = null
+              }
+              reconnectAttempt = 0
+              socketRef.current = null
+              socket.close(1000, 'cursor expired')
+              reconnectTimer = window.setTimeout(() => {
+                reconnectTimer = null
+                if (mountedRef.current && effectActive) void connectTransport()
+              }, 0)
+              return
+            }
+            // 其余问题（如 TERMINAL_NOT_FOUND）说明该终端已不可用，停止重连
+            intentionalClose = true
             terminal.write(`\r\n\x1b[31m${frame.problem.message}\x1b[0m\r\n`)
+            socket.close(1000, frame.problem.code)
           }
         }
 

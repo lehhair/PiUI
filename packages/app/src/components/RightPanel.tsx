@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useLayoutStore, layoutStore, type PanelTab } from '../store/layoutStore'
 import { PanelContainer } from './PanelContainer'
 import { ResizablePanel } from './ui/ResizablePanel'
-import { normalizeToForwardSlash } from '../utils'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { createHostTerminal, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
+import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
+import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
 import { uiErrorHandler } from '../utils'
 
 const SessionChangesPanel = lazy(() =>
@@ -54,7 +54,7 @@ export const RightPanel = memo(function RightPanel({
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
-  const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
+  const { isRestoring, normalizedDirectory } = useTerminalSessionRestore(directory)
 
   const handleNewTerminal = useCallback(async () => {
     if (!normalizedDirectory) return
@@ -79,7 +79,18 @@ export const RightPanel = memo(function RightPanel({
   const handleCloseTerminal = useCallback(
     async (terminalId: string) => {
       if (!normalizedDirectory) return
-      await removeHostTerminal(normalizedDirectory, terminalId).catch(() => undefined)
+      try {
+        await removeHostTerminal(normalizedDirectory, terminalId)
+      } catch (error) {
+        uiErrorHandler('close terminal', error)
+        // 服务端可能仍持有该终端，重新拉取列表把 tab 恢复回来
+        try {
+          const result = await listHostTerminals(normalizedDirectory)
+          layoutStore.syncTerminalSessions(normalizedDirectory, result.terminals)
+        } catch {
+          // 列表也失败时保持现状，tab 由下次恢复流程修正
+        }
+      }
     },
     [normalizedDirectory]
   )
@@ -109,6 +120,14 @@ export const RightPanel = memo(function RightPanel({
   // 渲染内容
   const renderContent = useCallback(
     (activeTab: PanelTab | null) => {
+      if (isRestoring) {
+        return (
+          <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+            {t('terminal.restoringSessions')}
+          </div>
+        )
+      }
+
       if (!activeTab) {
         return (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('common:noContent')}</div>
@@ -185,7 +204,7 @@ export const RightPanel = memo(function RightPanel({
         </>
       )
     },
-    [normalizedDirectory, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
+    [normalizedDirectory, isRestoring, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
   )
 
   if (inline) {
