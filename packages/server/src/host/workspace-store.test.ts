@@ -74,6 +74,21 @@ describe("workspace identity", () => {
     assert.equal(store.find(root)?.canonicalRoot, realpathSync.native(root))
   })
 
+  it("keeps an explicitly closed workspace closed until it is opened again", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-closed-"))
+    roots.push(root)
+    const store = new WorkspaceStore()
+    store.resolve(root)
+
+    assert.equal(store.remove(root), true)
+    assert.equal(store.isClosed(root), true)
+    assert.equal(store.find(root), undefined)
+
+    const reopened = store.resolve(root)
+    assert.equal(store.isClosed(root), false)
+    assert.equal(reopened.canonicalRoot, realpathSync.native(root))
+  })
+
   it("rejects a known root replaced by a symlink", () => {
     const parent = mkdtempSync(path.join(tmpdir(), "piui-ws-replaced-"))
     const root = path.join(parent, "root")
