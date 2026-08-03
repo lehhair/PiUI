@@ -12,13 +12,9 @@ import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 export function useTerminalSessionRestore(directory?: string) {
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
   const [isRestoring, setIsRestoring] = useState(false)
-  const previousDirectoryRef = useRef<string | undefined>(undefined)
   const restoreRequestIdRef = useRef(0)
 
   useEffect(() => {
-    if (previousDirectoryRef.current === normalizedDirectory && restoreRequestIdRef.current > 0) return
-    previousDirectoryRef.current = normalizedDirectory
-
     const restoreSessions = async (requestId: number) => {
       setIsRestoring(true)
       if (!normalizedDirectory) {
