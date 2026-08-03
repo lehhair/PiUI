@@ -4,11 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTerminalSessionRestore } from './useTerminalSessionRestore'
 import { layoutStore } from '../store/layoutStore'
 
-const { listHostTerminalsMock, onServerChangeMock, resolveWorkspacePathMock, serverChangeCallback, uiErrorHandlerMock } = vi.hoisted(() => ({
+const { activeServerSnapshot, listHostTerminalsMock, onServerChangeMock, resolveWorkspacePathMock, serverChangeCallback, serverHealthSnapshot, serverSnapshot, uiErrorHandlerMock } = vi.hoisted(() => ({
+  activeServerSnapshot: { id: 'test', url: '', token: '' },
   listHostTerminalsMock: vi.fn(),
   onServerChangeMock: vi.fn<(callback: () => void) => () => void>(() => () => {}),
   resolveWorkspacePathMock: vi.fn(async (directory?: string) => directory ?? null),
   serverChangeCallback: { current: undefined as (() => void) | undefined },
+  serverHealthSnapshot: new Map(),
+  serverSnapshot: [] as never[],
   uiErrorHandlerMock: vi.fn(),
 }))
 
@@ -17,7 +20,13 @@ vi.mock('../pi/transport/index.js', () => ({
 }))
 
 vi.mock('../store/serverStore', () => ({
-  serverStore: { onServerChange: onServerChangeMock },
+  serverStore: {
+    onServerChange: onServerChangeMock,
+    subscribe: vi.fn(() => () => {}),
+    getServers: vi.fn(() => serverSnapshot),
+    getActiveServer: vi.fn(() => activeServerSnapshot),
+    getAllHealth: vi.fn(() => serverHealthSnapshot),
+  },
 }))
 
 vi.mock('../pi/workspaces', () => ({
