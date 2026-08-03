@@ -3,6 +3,8 @@ import { serverStore } from '../store/serverStore'
 import { layoutStore } from '../store/layoutStore'
 import { listHostTerminals } from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
+import { piEventStream } from '../pi/eventStream'
+import { useServerStore } from './useServerStore'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 
 /**
@@ -12,8 +14,24 @@ import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
  */
 export function useTerminalSessionRestore(directory?: string) {
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
+  const { activeServer } = useServerStore()
   const [isRestoring, setIsRestoring] = useState(false)
   const restoreRequestIdRef = useRef(0)
+
+  useEffect(() => {
+    if (!normalizedDirectory) return
+    let workspacePath: string | null = null
+    let active = true
+    void resolveWorkspacePath(normalizedDirectory).then(resolved => {
+      if (!active || !resolved) return
+      workspacePath = resolved
+      piEventStream.connectWorkspace(resolved)
+    }).catch(() => undefined)
+    return () => {
+      active = false
+      if (workspacePath) piEventStream.disconnectWorkspace(workspacePath)
+    }
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, normalizedDirectory])
 
   useEffect(() => {
     const restoreSessions = async (requestId: number) => {
