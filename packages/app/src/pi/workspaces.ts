@@ -1,5 +1,6 @@
 import { postHostCommand } from './transport/index.js'
 import { trackPiWorkspace } from './piSessionIndex'
+import { serverStore } from '../store/serverStore'
 
 /**
  * Host workspace commands (workspaces.*). A workspace is just a directory
@@ -25,6 +26,10 @@ export async function openHostWorkspace(rootPath: string, displayName?: string, 
   )
   trackPiWorkspace(data.workspace.path)
   return data.workspace
+}
+
+export async function watchHostWorkspace(workspacePath: string, signal?: AbortSignal): Promise<void> {
+  await postHostCommand<{ ok: boolean }>('workspaces.watch', { workspacePath }, signal)
 }
 
 const workspaceResolutionPromises = new Map<string, Promise<string | null>>()
@@ -54,11 +59,15 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
  */
 export async function resolveWorkspacePath(directory?: string): Promise<string | null> {
   if (directory && (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith('/'))) {
-    const key = directory.replace(/\\/g, '/').replace(/\/+$/, '')
+    const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '')
+    const key = `${serverStore.getActiveServerId()}:${serverStore.getActiveServerGeneration()}:${normalized}`
     let pending = workspaceResolutionPromises.get(key)
     if (!pending) {
       pending = openHostWorkspace(directory)
-        .then(workspace => workspace.path)
+        .then(async workspace => {
+          await watchHostWorkspace(workspace.path)
+          return workspace.path
+        })
         .catch(error => {
           workspaceResolutionPromises.delete(key)
           // Saved directory no longer exists on disk — treat as absent
