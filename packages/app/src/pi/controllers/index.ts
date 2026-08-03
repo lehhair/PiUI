@@ -261,7 +261,7 @@ export async function abortPiBashExecution(sessionId: string, signal?: AbortSign
 }
 
 /** Export the session; resolves with the native result (output path etc.). */
-export async function exportPiSession(sessionId: string, format: 'html' | 'jsonl', outputPath?: string, signal?: AbortSignal): Promise<JsonValue> {
+export async function exportPiSession(sessionId: string, format: 'html' | 'jsonl', outputPath: string, signal?: AbortSignal): Promise<JsonValue> {
   const submit = format === 'html'
     ? () => transport.exportPiSessionHtml(sessionId, outputPath, signal)
     : () => transport.exportPiSessionJsonl(sessionId, outputPath, signal)

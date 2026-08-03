@@ -17,6 +17,7 @@ import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
+import { serverStore } from '../store/serverStore'
 import { notifyReconnected, notifySessionIdle } from '../hooks/useGlobalEvents'
 import {
   getTrackedManagementProviders,
@@ -158,6 +159,15 @@ class PiEventStream {
     this.cursors.clear()
     piCommandStore.clearAll()
     this.closeSocket()
+  }
+
+  /** Replace every subscription when the active backend changes. */
+  handleServerChange(): void {
+    this.disconnectAll()
+    if (getTrackedManagementProviders().length > 0) {
+      this.ensureSocket()
+      if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+    }
   }
 
   private clearRefreshTimers(sessionId: string): void {
@@ -339,6 +349,14 @@ class PiEventStream {
         }
         break
       }
+      case 'terminal.created':
+      case 'terminal.updated':
+      case 'terminal.exited':
+      case 'terminal.deleted':
+        window.dispatchEvent(new CustomEvent('piui:terminals-changed', {
+          detail: { workspacePath: envelope.stream.kind === 'workspace' ? envelope.stream.id : undefined },
+        }))
+        break
     }
   }
 
@@ -516,6 +534,7 @@ class PiEventStream {
 }
 
 export const piEventStream = new PiEventStream()
+serverStore.onServerChange(() => piEventStream.handleServerChange())
 
 function isCommandRecord(value: unknown): value is CommandRecord {
   if (!isJsonObject(value)) return false

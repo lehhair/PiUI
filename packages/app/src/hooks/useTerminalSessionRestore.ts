@@ -47,11 +47,18 @@ export function useTerminalSessionRestore(directory?: string) {
 
     const requestId = ++restoreRequestIdRef.current
     void restoreSessions(requestId)
+    const onTerminalsChanged = (event: Event) => {
+      const workspacePath = (event as CustomEvent<{ workspacePath?: string }>).detail?.workspacePath
+      if (!workspacePath || normalizeToForwardSlash(workspacePath) !== normalizedDirectory) return
+      void restoreSessions(++restoreRequestIdRef.current)
+    }
+    window.addEventListener('piui:terminals-changed', onTerminalsChanged)
     const unsubscribe = serverStore.onServerChange(() => {
       void restoreSessions(++restoreRequestIdRef.current)
     })
     return () => {
       restoreRequestIdRef.current += 1
+      window.removeEventListener('piui:terminals-changed', onTerminalsChanged)
       unsubscribe()
     }
   }, [normalizedDirectory])

@@ -381,15 +381,15 @@ export function promptPi(sessionId: string, params: PromptParams, signal?: Abort
   return postPiSessionCommand(sessionId, 'prompt', params, signal)
 }
 
-export function steerPi(sessionId: string, params: SteerParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function steerPi(sessionId: string, params: SteerParams, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'steer', params, signal)
 }
 
-export function followUpPi(sessionId: string, params: FollowUpParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function followUpPi(sessionId: string, params: FollowUpParams, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'followUp', params, signal)
 }
 
-export function abortPi(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function abortPi(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'abort', undefined, signal)
 }
 
@@ -417,12 +417,12 @@ export function abortPiBash(sessionId: string, signal?: AbortSignal): Promise<Js
   return postPiSessionCommand(sessionId, 'abortBash', undefined, signal)
 }
 
-export function exportPiSessionHtml(sessionId: string, outputPath?: string, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'exportHtml', outputPath ? { outputPath } : undefined, signal)
+export function exportPiSessionHtml(sessionId: string, outputPath: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'exportHtml', { outputPath }, signal)
 }
 
-export function exportPiSessionJsonl(sessionId: string, outputPath?: string, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'exportJsonl', outputPath ? { outputPath } : undefined, signal)
+export function exportPiSessionJsonl(sessionId: string, outputPath: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'exportJsonl', { outputPath }, signal)
 }
 
 export function waitPiForIdle(sessionId: string, signal?: AbortSignal): Promise<CommandRecord> {
@@ -456,7 +456,7 @@ export function sendPiUserMessage(
   sessionId: string,
   params: SendUserMessageParams,
   signal?: AbortSignal,
-): Promise<CommandRecord> {
+): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'sendUserMessage', params as unknown as JsonObject, signal)
 }
 
@@ -469,11 +469,11 @@ export function respondPiExtensionUi(
   requestId: string,
   response: JsonObject,
   signal?: AbortSignal,
-): Promise<CommandRecord> {
+): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'respondExtensionUi', { requestId, response }, signal)
 }
 
-export function setPiExtensionEditorState(sessionId: string, text: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function setPiExtensionEditorState(sessionId: string, text: string, signal?: AbortSignal): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'setExtensionEditorState', { text }, signal)
 }
 
