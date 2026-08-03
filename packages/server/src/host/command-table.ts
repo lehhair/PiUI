@@ -286,6 +286,7 @@ export const HOST_CAPABILITIES = [
     mutatesWorkspace: true,
     handler: (ctx, params) => {
       const record = workspace(ctx, params)
+      ctx.terminals.closeWorkspace(record.canonicalRoot)
       ctx.watcher.unwatch(record)
       ctx.store.remove(record.canonicalRoot)
       return { ok: true }

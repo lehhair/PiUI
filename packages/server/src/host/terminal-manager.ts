@@ -62,6 +62,8 @@ export class TerminalManager {
   private readonly terminals = new Map<string, ActiveTerminal>()
   private readonly exitedOrder: string[] = []
   private readonly tickets = new Map<string, TerminalTicket>()
+  /** Processes whose kill failed and whose handle must be retried at dispose. */
+  private readonly staleProcesses: IPty[] = []
 
   constructor(private readonly options: TerminalManagerOptions = {}) {}
 
@@ -265,6 +267,28 @@ export class TerminalManager {
     this.terminals.clear()
     this.exitedOrder.length = 0
     this.tickets.clear()
+    const stale = this.staleProcesses.splice(0)
+    for (const process of stale) {
+      try {
+        process.kill()
+      } catch {
+        // The process is already gone; nothing left to reap.
+      }
+    }
+  }
+
+  /**
+   * Kills every terminal owned by the workspace and invalidates their connect
+   * tickets. Idempotent, so closing an already-closed workspace is a no-op.
+   */
+  closeWorkspace(workspacePath: string): void {
+    const key = workspacePathKey(workspacePath)
+    for (const terminal of Array.from(this.terminals.values())) {
+      if (workspacePathKey(terminal.workspacePath) === key) this.removeTerminal(terminal)
+    }
+    for (const [token, record] of this.tickets) {
+      if (workspacePathKey(record.workspacePath) === key) this.tickets.delete(token)
+    }
   }
 
   private require(workspacePath: string, id: string): ActiveTerminal {
@@ -351,12 +375,14 @@ export class TerminalManager {
     this.terminals.delete(terminal.info.id)
     const index = this.exitedOrder.indexOf(terminal.info.id)
     if (index >= 0) this.exitedOrder.splice(index, 1)
+    this.invalidateTerminalTickets(terminal.info.id)
     for (const listener of terminal.listeners) listener.dispose()
     terminal.listeners.length = 0
     try {
       terminal.process.kill()
     } catch {
-      // The process may have exited before the native PTY handle was released.
+      // Keep the handle so dispose can retry instead of losing the process.
+      this.staleProcesses.push(terminal.process)
     }
     for (const subscriber of terminal.subscribers.values()) {
       if (subscriber.active) {
@@ -369,6 +395,12 @@ export class TerminalManager {
     }
     terminal.subscribers.clear()
     if (publish) this.publish(terminal, "terminal.deleted")
+  }
+
+  private invalidateTerminalTickets(id: string): void {
+    for (const [token, record] of this.tickets) {
+      if (record.terminalId === id) this.tickets.delete(token)
+    }
   }
 
   private publish(terminal: ActiveTerminal, channel: TerminalEventChannel): void {

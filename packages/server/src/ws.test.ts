@@ -225,9 +225,48 @@ describe("event websocket", () => {
     await waitFor(() => frames.some(frame => frame.type === "output" && frame.data.includes("piui-ws")))
     ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
     await waitFor(() => frames.some(frame => frame.type === "exit"))
-    assert.equal(frames[0]?.type, "hello")
+assert.equal(frames[0]?.type, "hello")
     assert.equal(frames[1]?.type, "ready")
     ws.close()
+  })
+
+  it("cleans up terminals when a workspace is closed and reopened", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-terminal-close-"))
+    const app = createAppServer({ authToken: null })
+    const wss: WebSocketServer = attachEventWebSocket(app.server, {
+      eventHub: app.eventHub,
+      authToken: null,
+      terminalManager: app.terminals,
+    })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      closeEventWebSocket(wss)
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    const opened = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { rootPath: root })
+    const workspacePath = opened.json.data.workspace.path as string
+    const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
+      workspacePath,
+      title: "close-me",
+    })
+    assert.equal(created.status, 200)
+    const terminalId = created.json.data.id as string
+    const beforeClose = await request(port, "POST", "/api/v1/host/commands/terminals.list", { workspacePath })
+    assert.equal(beforeClose.status, 200)
+    assert.deepEqual(beforeClose.json.data.terminals.map((t: any) => t.id), [terminalId])
+
+    const closed = await request(port, "POST", "/api/v1/host/commands/workspaces.close", { workspacePath })
+    assert.equal(closed.status, 200)
+    const afterClose = await request(port, "POST", "/api/v1/host/commands/terminals.list", { workspacePath })
+    assert.notEqual(afterClose.status, 200)
+
+    const reopened = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { rootPath: root })
+    const reopenedPath = reopened.json.data.workspace.path as string
+    assert.equal(reopenedPath, workspacePath)
+    const reopenedList = await request(port, "POST", "/api/v1/host/commands/terminals.list", { workspacePath: reopenedPath })
+    assert.deepEqual(reopenedList.json.data.terminals, [])
   })
 })
 
