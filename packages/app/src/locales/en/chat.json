@@ -21,6 +21,8 @@
     "sessionNotFoundDesc": "This session was deleted or its file is missing on the server.",
     "sessionLoadFailed": "Unable to load session",
     "sessionLoadFailedDesc": "The server could not load this session right now. Please try again.",
+    "sessionBusy": "Session is busy",
+    "sessionBusyDesc": "Another Pi runtime is using this session. Close it or try again later.",
     "backToHome": "Back to home"
   },
   "emptyState": {
