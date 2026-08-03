@@ -268,6 +268,59 @@ assert.equal(frames[0]?.type, "hello")
     const reopenedList = await request(port, "POST", "/api/v1/host/commands/terminals.list", { workspacePath: reopenedPath })
     assert.deepEqual(reopenedList.json.data.terminals, [])
   })
+
+  it("reconnects to an exited terminal for replay and closes server-side", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-ws-terminal-reexit-"))
+    const app = createAppServer({ authToken: null })
+    const wss: WebSocketServer = attachEventWebSocket(app.server, {
+      eventHub: app.eventHub,
+      authToken: null,
+      terminalManager: app.terminals,
+    })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      closeEventWebSocket(wss)
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    const opened = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { rootPath: root })
+    const workspacePath = opened.json.data.workspace.path as string
+    const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", { workspacePath })
+    const terminalId = created.json.data.id as string
+
+    const connect = async (): Promise<{ ws: WebSocket; frames: any[]; closed: Promise<void> }> => {
+      const ticket = (await request(port, "POST", "/api/v1/host/commands/terminals.connectToken", { workspacePath, terminalId }))
+        .json.data.token as string
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${port}/api/v1/host/terminals/${encodeURIComponent(terminalId)}/stream?ticket=${encodeURIComponent(ticket)}`,
+      )
+      const frames: any[] = []
+      ws.on("message", data => frames.push(JSON.parse(String(data))))
+      const closed = new Promise<void>(resolve => ws.on("close", () => resolve()))
+      return { ws, frames, closed }
+    }
+
+    const first = await connect()
+    await waitFor(() => first.frames.some(frame => frame.type === "ready"))
+    first.ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo replay-ws\r\n" : "printf replay-ws\\n" }))
+    first.ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
+    await waitFor(() => first.frames.some(frame => frame.type === "exit"))
+    await first.closed
+
+    const listed = await request(port, "POST", "/api/v1/host/commands/terminals.list", { workspacePath })
+    assert.equal(listed.json.data.terminals[0].status, "exited")
+
+    const second = await connect()
+    await waitFor(() => second.frames.some(frame => frame.type === "ready"))
+    await waitFor(() => second.frames.some(frame => frame.type === "exit"))
+    const output = second.frames
+      .filter(frame => frame.type === "output")
+      .map(frame => frame.data as string)
+      .join("")
+    assert.match(output, /replay-ws/)
+    await second.closed
+  })
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
