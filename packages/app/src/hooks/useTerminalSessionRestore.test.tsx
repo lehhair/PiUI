@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTerminalSessionRestore } from './useTerminalSessionRestore'
 import { layoutStore } from '../store/layoutStore'
 
-const { listHostTerminalsMock, onServerChangeMock, uiErrorHandlerMock } = vi.hoisted(() => ({
+const { listHostTerminalsMock, onServerChangeMock, serverChangeCallback, uiErrorHandlerMock } = vi.hoisted(() => ({
   listHostTerminalsMock: vi.fn(),
-  onServerChangeMock: vi.fn(() => () => {}),
+  onServerChangeMock: vi.fn<(callback: () => void) => () => void>(() => () => {}),
+  serverChangeCallback: { current: undefined as (() => void) | undefined },
   uiErrorHandlerMock: vi.fn(),
 }))
 
@@ -25,7 +26,11 @@ vi.mock('../utils', async importOriginal => {
 describe('useTerminalSessionRestore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    onServerChangeMock.mockImplementation(() => () => {})
+    serverChangeCallback.current = undefined
+    onServerChangeMock.mockImplementation((callback: () => void) => {
+      serverChangeCallback.current = callback
+      return () => {}
+    })
   })
 
   afterEach(() => {
@@ -49,7 +54,7 @@ describe('useTerminalSessionRestore', () => {
 
   it('re-syncs when the workspace changes', async () => {
     listHostTerminalsMock.mockResolvedValue({ terminals: [] })
-    const { result, rerender } = renderHook(({ directory }) => useTerminalSessionRestore(directory), {
+    const { rerender } = renderHook(({ directory }) => useTerminalSessionRestore(directory), {
       initialProps: { directory: 'C:/one' },
     })
 
@@ -78,7 +83,7 @@ describe('useTerminalSessionRestore', () => {
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
 
     listHostTerminalsMock.mockRejectedValue(new Error('boom'))
-    onServerChangeMock.mock.calls.forEach(([callback]) => callback())
+    serverChangeCallback.current?.()
 
     await waitFor(() => expect(uiErrorHandlerMock).toHaveBeenCalled())
     expect(result.current.isRestoring).toBe(false)
