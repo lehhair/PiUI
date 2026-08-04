@@ -8,7 +8,7 @@
  * 用法：node scripts/package-desktop.mjs [--skip-build] [--target bun-windows-x64]
  */
 import { execFileSync, execSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -60,9 +60,14 @@ console.info("[package] copying native node-pty packages")
 const nativeOut = join(outDir, "node_modules")
 rmSync(nativeOut, { recursive: true, force: true })
 mkdirSync(nativeOut, { recursive: true })
-for (const name of ["@lydell/node-pty", "@lydell/node-pty-win32-x64", "jiti"]) {
-  cpSync(join(repoRoot, "node_modules", ...name.split("/")), join(nativeOut, ...name.split("/")), { recursive: true })
+const lydellDir = join(repoRoot, "node_modules", "@lydell")
+const lydellPackages = existsSync(lydellDir) ? readdirSync(lydellDir) : []
+const externalPackages = ["jiti"]
+for (const name of lydellPackages) {
+  cpSync(join(lydellDir, name), join(nativeOut, "@lydell", name), { recursive: true })
+  externalPackages.push(`@lydell/${name}`)
 }
+cpSync(join(repoRoot, "node_modules", "jiti"), join(nativeOut, "jiti"), { recursive: true })
 
 // ---- 3. bun compile ----
 // pi SDK 只是运行时动态 import 的外部路径，不进 bundle；node-pty 原生包
@@ -74,9 +79,8 @@ run("bun", [
   `--target=${target}`,
   "--external", "@earendil-works/*",
   "--external", "@mariozechner/*",
-  "--external", "@lydell/node-pty",
-  "--external", "@lydell/node-pty-win32-x64",
-  "--external", "jiti",
+  ...externalPackages.flatMap(name => ["--external", name]),
+  ...(target.includes("windows") ? ["--icon", join("packages", "app", "assets", "build", "pi.ico")] : []),
   "--outfile", outfile,
 ])
 
