@@ -20,7 +20,7 @@ export class SessionLeaseManager {
   private readonly held = new Set<SessionLease>()
   private disposed = false
 
-  constructor(private readonly namespace = path.join(tmpdir(), "piui-session-leases")) {}
+  constructor(private readonly namespace = process.env.PIUI_SESSION_LEASE_DIR ?? path.join(tmpdir(), "piui-session-leases")) {}
 
   async acquire(sessionFile: string, sessionId?: string): Promise<SessionLease> {
     if (this.disposed) throw new Error("Session lease manager is disposed")
