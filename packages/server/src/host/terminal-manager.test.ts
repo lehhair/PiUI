@@ -154,7 +154,8 @@ test("enforces the terminal limit under concurrent creates", async () => {
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000
+  // CI runner 负载高时 pty 退出信号会迟到，5s 不够用
+  const deadline = Date.now() + 15_000
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("timed out waiting for terminal exit")
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -167,7 +168,7 @@ async function removeWithRetry(root: string): Promise<void> {
       rmSync(root, { recursive: true, force: true })
       return
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error
+      if ((error as NodeJS.ErrnoException).code !== "EPERM" && (error as NodeJS.ErrnoException).code !== "EBUSY") throw error
       await new Promise(resolve => setTimeout(resolve, 50))
     }
   }
