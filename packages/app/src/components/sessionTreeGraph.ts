@@ -1,5 +1,5 @@
 import dagre from '@dagrejs/dagre'
-import { MarkerType, type Edge, type Node } from '@xyflow/react'
+import type { Edge, Node } from '@xyflow/react'
 import type { JsonObject, JsonValue } from '@piui/protocol'
 
 // Tree entries arrive as SDK SessionEntry/SessionTreeNode; the graph renders
@@ -255,14 +255,17 @@ export function buildSessionTreeGraph(
 
   const edges: Edge[] = graph.edges().map(({ v, w }) => {
     const onActivePath = activePath.has(v) && activePath.has(w)
-    const color = onActivePath ? 'hsl(var(--accent-main-100))' : 'hsl(var(--border-200) / 0.9)'
+    // 贝塞尔曲线 + 无箭头：树形方向由布局（自上而下）表达，
+    // 箭头和折线只会增加噪点
     return {
       id: `${v}->${w}`,
       source: v,
       target: w,
-      type: 'smoothstep',
-      style: { stroke: color, strokeWidth: onActivePath ? 2.5 : 1.5, opacity: 0.95 },
-      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
+      type: 'default',
+      style: {
+        stroke: onActivePath ? 'hsl(var(--accent-main-100) / 0.75)' : 'hsl(var(--border-200) / 0.55)',
+        strokeWidth: onActivePath ? 2 : 1.5,
+      },
       zIndex: onActivePath ? 2 : 1,
     }
   })

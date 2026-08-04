@@ -36,53 +36,64 @@ function roleLabel(data: SessionTreeNodeData, t: (key: string) => string): strin
   return t(`sessionTree.entryTypes.${data.type}`)
 }
 
+/** 角色 → 图标与芯片配色（图标上色代替整条左边框，视觉更轻） */
+function roleVisual(data: SessionTreeNodeData) {
+  if (data.role === 'user') return { Icon: UserRound, chip: 'bg-accent-main-100/12 text-accent-main-100' }
+  if (data.role === 'assistant') return { Icon: Bot, chip: 'bg-success-100/12 text-success-100' }
+  if (data.type === 'branch_summary') return { Icon: GitBranch, chip: 'bg-info-100/12 text-info-100' }
+  if (data.type === 'compaction') return { Icon: FileText, chip: 'bg-bg-300/50 text-text-400' }
+  return { Icon: Wrench, chip: 'bg-warning-100/12 text-warning-100' }
+}
+
+function nodeStateClass(data: SessionTreeNodeData, selected: boolean): string {
+  if (data.currentLeaf) return 'border-accent-main-100 shadow-[0_0_0_1px_hsl(var(--accent-main-100)/0.45)]'
+  if (selected) return 'border-text-200 shadow-[0_0_0_1px_hsl(var(--text-200)/0.4)]'
+  if (data.activePath) return 'border-accent-main-100/40'
+  return 'border-border-200/70 hover:border-border-300'
+}
+
+const handleClass = '!h-2 !w-2 !opacity-0 !pointer-events-none'
+
 const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: NodeProps<SessionGraphNode>) {
   const { t } = useTranslation('components')
-  const isUser = data.role === 'user'
-  const isAssistant = data.role === 'assistant'
-  const stateClass = data.currentLeaf
-    ? 'border-accent-main-100 bg-accent-main-100/10 shadow-[0_0_0_2px_hsl(var(--accent-main-100)/0.22)]'
-    : data.activePath
-      ? 'border-accent-main-100/60 bg-bg-100 shadow-sm'
-      : selected
-        ? 'border-text-300 bg-bg-100 shadow-[0_0_0_1px_hsl(var(--text-300)/0.4)]'
-        : 'border-border-200 bg-bg-100 shadow-sm'
-  const roleClass = isUser
-    ? 'border-l-accent-main-100'
-    : isAssistant
-      ? 'border-l-success-100'
-      : 'border-l-warning-100'
-  const RoleIcon = isUser ? UserRound : isAssistant ? Bot : data.type === 'branch_summary' ? GitBranch : data.type === 'compaction' ? FileText : Wrench
+  const { Icon, chip } = roleVisual(data)
+  const stateClass = nodeStateClass(data, Boolean(selected))
 
   if (data.compact) {
     return (
-      <div className={`relative flex h-full w-[240px] items-center gap-2 overflow-hidden rounded-md border border-l-[3px] px-2.5 ${roleClass} ${stateClass}`} title={data.preview}>
-        <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
-        <RoleIcon size={13} className="shrink-0 text-text-400" aria-hidden="true" />
+      <div className={`relative flex h-full w-[240px] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border bg-bg-100 px-2.5 transition-colors ${stateClass}`} title={data.preview}>
+        <Handle type="target" position={Position.Top} className={handleClass} />
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true"><Icon size={12} /></span>
         <span className="shrink-0 text-[length:var(--fs-xs)] font-medium text-text-300">{data.label || roleLabel(data, t)}</span>
         <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)] text-text-500">{data.preview}</span>
-        {data.currentLeaf ? <span className="shrink-0 text-[length:var(--fs-xs)] text-accent-main-100">{t('sessionTree.currentShort')}</span> : null}
-        <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
+        {data.currentLeaf ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-main-100" aria-label={t('sessionTree.currentShort')} /> : null}
+        <Handle type="source" position={Position.Bottom} className={handleClass} />
       </div>
     )
   }
 
   return (
     <div
-      className={`relative h-full w-[240px] overflow-hidden rounded-md border border-l-[3px] ${roleClass} ${stateClass}`}
+      className={`relative h-full w-[240px] cursor-pointer overflow-hidden rounded-lg border bg-bg-100 transition-colors ${stateClass}`}
       title={data.preview}
     >
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
-      <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2">
-        <RoleIcon size={13} className="shrink-0 text-text-400" aria-hidden="true" />
-        <span className="min-w-0 truncate text-[length:var(--fs-xs)] font-medium text-text-300">
+      <Handle type="target" position={Position.Top} className={handleClass} />
+      <div className="flex min-w-0 items-center gap-1.5 px-2.5 pt-2">
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true"><Icon size={12} /></span>
+        <span className="min-w-0 truncate text-[length:var(--fs-xs)] font-medium text-text-400">
           {data.label || roleLabel(data, t)}
         </span>
+        {data.currentLeaf ? (
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[length:var(--fs-xs)] font-medium text-accent-main-100">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent-main-100" aria-hidden="true" />
+            {t('sessionTree.currentShort')}
+          </span>
+        ) : null}
       </div>
-      <p className="line-clamp-1 break-words px-2.5 pt-1.5 text-[length:var(--fs-sm)] leading-snug text-text-100">
+      <p className="line-clamp-1 break-words px-2.5 pt-1 text-[length:var(--fs-sm)] leading-snug text-text-100">
         {data.preview}
       </p>
-      <div className="flex min-h-5 items-center gap-2 px-2.5 pb-1.5 pt-1 text-[length:var(--fs-xs)] text-text-500">
+      <div className="flex min-h-5 items-center gap-2.5 px-2.5 pb-1.5 pt-1 text-[length:var(--fs-xs)] text-text-500">
         {data.toolCount > 0 ? (
           <span className={`inline-flex items-center gap-1 tabular-nums ${data.hasToolError ? 'text-danger-100' : 'text-text-500'}`} title={t('sessionTree.toolCount', { count: data.toolCount })}>
             <Wrench size={10} aria-hidden="true" />{data.toolCount}
@@ -93,13 +104,8 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
             <GitBranch size={10} aria-hidden="true" />{data.branchCount}
           </span>
         ) : null}
-        {data.currentLeaf ? (
-          <span className="ml-auto shrink-0 font-medium text-accent-main-100">
-            {t('sessionTree.currentShort')}
-          </span>
-        ) : null}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-bg-100 !bg-border-200" />
+      <Handle type="source" position={Position.Bottom} className={handleClass} />
     </div>
   )
 })
@@ -179,10 +185,11 @@ function CanvasContent({
   }, [fitView, matchedNodes, normalizedQuery, selectedEntryId, viewportRevision])
 
   return (
-    <div ref={rootRef} className="relative h-full min-h-0 overflow-hidden bg-bg-100">
-      <div className="absolute left-2 right-2 top-2 z-10 flex min-w-0 items-center gap-1.5">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border-200 bg-bg-100/95 px-2 shadow-sm focus-within:border-accent-main-100">
-          <Search size={14} className="shrink-0 text-text-500" aria-hidden="true" />
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-bg-100">
+      {/* 通栏工具条：与文件面板头部同款（h-10、内嵌图标搜索框、幽灵按钮、inset 细线） */}
+      <div className="relative flex h-10 shrink-0 items-center gap-2 px-3">
+        <div className="group relative min-w-0 flex-1">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 transition-colors group-focus-within:text-accent-main-100" aria-hidden="true" />
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
@@ -197,73 +204,75 @@ function CanvasContent({
             aria-label={t('sessionTree.search')}
             placeholder={t('sessionTree.searchPlaceholder')}
             autoComplete="off"
-            className="min-w-0 flex-1 bg-transparent text-[length:var(--fs-sm)] text-text-100 outline-none placeholder:text-text-500"
+            className="w-full rounded-lg border border-transparent bg-bg-200/40 py-1 pl-[30px] pr-12 text-[length:var(--fs-xs)] text-text-100 transition-all placeholder:text-text-400/70 hover:bg-bg-200/60 focus:border-border-200 focus:bg-bg-000 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-200 focus-visible:outline-none"
           />
-          <span className="shrink-0 tabular-nums text-[length:var(--fs-xs)] text-text-500" aria-live="polite">
+          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 tabular-nums text-[length:var(--fs-xs)] text-text-500" aria-live="polite">
             {normalizedQuery ? `${matchedNodes.length}/${nodes.length}` : nodes.length}
           </span>
-        </label>
-        <IconButton aria-label={t('sessionTree.focusCurrent')} title={t('sessionTree.focusCurrent')} onClick={focusCurrent}>
-          <Focus size={15} />
-        </IconButton>
-        <IconButton
-          aria-label={t('sessionTree.fitView')}
-          title={t('sessionTree.fitView')}
-          onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 250 })}
+        </div>
+        <button
+          type="button"
+          aria-label={t('sessionTree.focusCurrent')}
+          title={t('sessionTree.focusCurrent')}
+          onClick={focusCurrent}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-400 transition-colors hover:bg-bg-200/50 hover:text-text-100"
         >
-          <Maximize2 size={15} />
-        </IconButton>
+          <Focus size={14} />
+        </button>
+        <div className="pointer-events-none absolute inset-x-3 bottom-0 h-px bg-border-200/30" />
       </div>
 
-      <ReactFlow<SessionGraphNode>
-        nodes={nodes}
-        edges={graph.edges}
-        nodeTypes={nodeTypes}
-        onNodeClick={(_, node) => onSelectEntry(node.id)}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable
-        panOnDrag
-        zoomOnPinch
-        zoomOnScroll
-        minZoom={0.15}
-        maxZoom={2}
-        fitView={false}
-        onlyRenderVisibleElements
-        proOptions={{ hideAttribution: true }}
-        className="session-tree-flow"
-      >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1.4} color="hsl(var(--border-200) / 0.65)" />
-      </ReactFlow>
+      <div className="relative min-h-0 flex-1">
+        <ReactFlow<SessionGraphNode>
+          nodes={nodes}
+          edges={graph.edges}
+          nodeTypes={nodeTypes}
+          onNodeClick={(_, node) => onSelectEntry(node.id)}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable
+          panOnDrag
+          zoomOnPinch
+          zoomOnScroll
+          minZoom={0.15}
+          maxZoom={2}
+          fitView={false}
+          onlyRenderVisibleElements
+          proOptions={{ hideAttribution: true }}
+          className="session-tree-flow"
+        >
+          <Background variant={BackgroundVariant.Dots} gap={16} size={1.4} color="hsl(var(--border-200) / 0.65)" />
+        </ReactFlow>
 
-      <div className="absolute bottom-2 left-2 z-10 flex items-center rounded-md border border-border-200 bg-bg-100/95 p-0.5 shadow-sm">
-        <IconButton aria-label={t('sessionTree.zoomOut')} title={t('sessionTree.zoomOut')} size="sm" onClick={() => void zoomOut({ duration: 150 })}>
-          <Minus size={14} />
-        </IconButton>
-        <IconButton aria-label={t('sessionTree.zoomIn')} title={t('sessionTree.zoomIn')} size="sm" onClick={() => void zoomIn({ duration: 150 })}>
-          <Plus size={14} />
-        </IconButton>
-        <span className="mx-0.5 h-4 w-px bg-border-200" aria-hidden="true" />
-        <IconButton aria-label={t('sessionTree.fitView')} title={t('sessionTree.fitView')} size="sm" onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 200 })}>
-          <Maximize2 size={14} />
-        </IconButton>
+        <div className="absolute bottom-2 left-2 z-10 flex items-center rounded-md border border-border-200 bg-bg-100/95 p-0.5 shadow-sm">
+          <IconButton aria-label={t('sessionTree.zoomOut')} title={t('sessionTree.zoomOut')} size="sm" onClick={() => void zoomOut({ duration: 150 })}>
+            <Minus size={14} />
+          </IconButton>
+          <IconButton aria-label={t('sessionTree.zoomIn')} title={t('sessionTree.zoomIn')} size="sm" onClick={() => void zoomIn({ duration: 150 })}>
+            <Plus size={14} />
+          </IconButton>
+          <span className="mx-0.5 h-4 w-px bg-border-200" aria-hidden="true" />
+          <IconButton aria-label={t('sessionTree.fitView')} title={t('sessionTree.fitView')} size="sm" onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 200 })}>
+            <Maximize2 size={14} />
+          </IconButton>
+        </div>
+
+        {loading && nodes.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-sm)] text-text-400" role="status">
+            {t('sessionTree.loading')}
+          </div>
+        ) : null}
+        {!loading && nodes.length === 0 && !error ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[length:var(--fs-sm)] text-text-400">
+            {t('sessionTree.empty')}
+          </div>
+        ) : null}
+        {error ? (
+          <div className="absolute bottom-2 left-2 right-2 rounded-md border border-danger-100/30 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100" role="alert">
+            {error}
+          </div>
+        ) : null}
       </div>
-
-      {loading && nodes.length === 0 ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-sm)] text-text-400" role="status">
-          {t('sessionTree.loading')}
-        </div>
-      ) : null}
-      {!loading && nodes.length === 0 && !error ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[length:var(--fs-sm)] text-text-400">
-          {t('sessionTree.empty')}
-        </div>
-      ) : null}
-      {error ? (
-        <div className="absolute bottom-2 left-2 right-2 rounded-md border border-danger-100/30 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100" role="alert">
-          {error}
-        </div>
-      ) : null}
     </div>
   )
 }
