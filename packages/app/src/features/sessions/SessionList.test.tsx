@@ -65,7 +65,9 @@ describe('SessionListItem', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Session One/i }))
+    const sessionButton = screen.getByText('Session One').closest('button')
+    expect(sessionButton).not.toBeNull()
+    fireEvent.click(sessionButton!)
 
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(markSessionNotificationsReadMock).toHaveBeenCalledWith('session-1', 'completed')
