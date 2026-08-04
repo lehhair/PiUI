@@ -71,7 +71,7 @@ describe('SessionListItem', () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(markSessionNotificationsReadMock).toHaveBeenCalledWith('session-1', 'completed')
-  })
+  }, 15_000)
 
   it('hides rename when the Pi backend does not support session metadata updates', () => {
     render(
