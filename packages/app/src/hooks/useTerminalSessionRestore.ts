@@ -17,6 +17,9 @@ export function useTerminalSessionRestore(directory?: string) {
   const { activeServer } = useServerStore()
   const [isRestoring, setIsRestoring] = useState(false)
   const restoreRequestIdRef = useRef(0)
+  // 只有首次恢复允许切换"恢复会话中"占位；后续后台刷新如果也置位，
+  // 面板会把已挂载的 Terminal 卸载掉，连接一断一连造成状态闪烁
+  const hasRestoredRef = useRef(false)
 
   useEffect(() => {
     if (!normalizedDirectory) return
@@ -35,10 +38,11 @@ export function useTerminalSessionRestore(directory?: string) {
 
   useEffect(() => {
     const restoreSessions = async (requestId: number) => {
-      setIsRestoring(true)
+      if (!hasRestoredRef.current) setIsRestoring(true)
       if (!normalizedDirectory) {
         if (restoreRequestIdRef.current === requestId) {
           layoutStore.syncTerminalSessions(undefined, [])
+          hasRestoredRef.current = true
           setIsRestoring(false)
         }
         return
@@ -59,11 +63,15 @@ export function useTerminalSessionRestore(directory?: string) {
           uiErrorHandler('restore terminal sessions', error)
         }
       } finally {
-        if (restoreRequestIdRef.current === requestId) setIsRestoring(false)
+        if (restoreRequestIdRef.current === requestId) {
+          hasRestoredRef.current = true
+          setIsRestoring(false)
+        }
       }
     }
 
     const requestId = ++restoreRequestIdRef.current
+    hasRestoredRef.current = false
     void restoreSessions(requestId)
     const onTerminalsChanged = (event: Event) => {
       const workspacePath = (event as CustomEvent<{ workspacePath?: string }>).detail?.workspacePath

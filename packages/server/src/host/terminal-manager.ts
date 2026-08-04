@@ -152,28 +152,37 @@ export class TerminalManager {
 
   update(workspacePath: string, id: string, params: TerminalUpdateParams): TerminalInfo {
     const terminal = this.require(workspacePath, id)
+    let changed = false
     if (params.title !== undefined) {
       const title = params.title.trim()
       if (!title) throw Object.assign(new Error("params.title must not be empty"), { code: "INVALID_REQUEST" })
-      terminal.info.title = title
-      terminal.customTitle = title
-      for (const subscriber of terminal.subscribers.values()) {
-        if (!subscriber.active) {
-          subscriber.pendingTitle = title
-          continue
-        }
-        try {
-          subscriber.onTitle(title)
-        } catch {
-          // A disconnected client must not affect the terminal process.
+      if (title !== terminal.info.title) {
+        changed = true
+        terminal.info.title = title
+        terminal.customTitle = title
+        for (const subscriber of terminal.subscribers.values()) {
+          if (!subscriber.active) {
+            subscriber.pendingTitle = title
+            continue
+          }
+          try {
+            subscriber.onTitle(title)
+          } catch {
+            // A disconnected client must not affect the terminal process.
+          }
         }
       }
     }
     if (params.rows !== undefined || params.cols !== undefined) {
       const size = terminalSize(params.rows ?? terminal.process.rows, params.cols ?? terminal.process.cols)
-      if (terminal.info.status === "running") terminal.process.resize(size.cols, size.rows)
+      // 尺寸没变就不动 pty 也不广播——客户端每次连接都会发一次 resize，
+      // 无条件 publish 会触发 "updated → 重新拉列表 → 重连 → 再 resize" 的循环
+      if (size.cols !== terminal.process.cols || size.rows !== terminal.process.rows) {
+        changed = true
+        if (terminal.info.status === "running") terminal.process.resize(size.cols, size.rows)
+      }
     }
-    this.publish(terminal, "terminal.updated")
+    if (changed) this.publish(terminal, "terminal.updated")
     return { ...terminal.info }
   }
 
