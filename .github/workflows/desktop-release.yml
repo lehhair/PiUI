@@ -68,7 +68,9 @@ jobs:
             find packages/app/src-tauri/target/release/bundle/dmg -name '*.dmg' -exec cp {} release-artifacts/ \;
           else
             find packages/app/src-tauri/target/release/bundle/deb -name '*.deb' -exec cp {} release-artifacts/ \;
-            find packages/app/src-tauri/target/release/bundle/appimage -name '*.AppImage' -exec cp {} release-artifacts/ \;
+            if [ -d packages/app/src-tauri/target/release/bundle/appimage ]; then
+              find packages/app/src-tauri/target/release/bundle/appimage -name '*.AppImage' -exec cp {} release-artifacts/ \;
+            fi
           fi
           ls -la release-artifacts
 

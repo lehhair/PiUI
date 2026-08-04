@@ -15,7 +15,6 @@
     "core:window:allow-set-size",
     "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
-    "decorum:allow-show-snap-overlay",
     {
       "identifier": "http:default",
       "allow": [
