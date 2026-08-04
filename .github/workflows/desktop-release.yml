@@ -35,6 +35,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          cache: false
 
       - name: Drop Windows-only patch on Unix
         if: runner.os != 'Windows'
@@ -114,6 +116,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
+          cache: false
 
       - run: npm ci
       - run: npm run build

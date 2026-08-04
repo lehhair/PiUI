@@ -1,15 +1,23 @@
 use serde::Serialize;
 use std::{
     env,
-    fs::{self, create_dir_all, remove_dir_all, rename, File},
-    io::Read,
+    fs::{self, File},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, Window};
+
+#[cfg(not(target_os = "android"))]
+use std::{
+    fs::{create_dir_all, remove_dir_all, rename},
+    io::Read,
+};
+use tauri::Manager;
+#[cfg(not(target_os = "android"))]
+use tauri::{WebviewUrl, WebviewWindowBuilder, Window};
+#[cfg(not(target_os = "android"))]
 use zip::ZipArchive;
 
 struct ServerProcess(Mutex<Option<Child>>);
@@ -204,11 +212,19 @@ fn local_server_config() -> Result<LocalServerConfig, String> {
     ))
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn desktop_window_ready(window: Window) -> Result<(), String> {
     window.show().map_err(|error| error.to_string())
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+fn desktop_window_ready() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(), String> {
     let millis = SystemTime::now()
@@ -223,6 +239,12 @@ fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(
         .build()
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+fn open_new_window() -> Result<(), String> {
+    Ok(())
 }
 
 fn stop_server(app: &tauri::AppHandle) {
