@@ -218,12 +218,6 @@ fn desktop_window_ready(window: Window) -> Result<(), String> {
     window.show().map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "android")]
-#[tauri::command]
-fn desktop_window_ready() -> Result<(), String> {
-    Ok(())
-}
-
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(), String> {
@@ -239,12 +233,6 @@ fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(
         .build()
         .map(|_| ())
         .map_err(|error| error.to_string())
-}
-
-#[cfg(target_os = "android")]
-#[tauri::command]
-fn open_new_window() -> Result<(), String> {
-    Ok(())
 }
 
 fn stop_server(app: &tauri::AppHandle) {
@@ -271,12 +259,17 @@ pub fn run() {
                 return Err(error.into());
             }
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            local_server_config,
-            desktop_window_ready,
-            open_new_window,
-        ]);
+        });
+
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        local_server_config,
+        desktop_window_ready,
+        open_new_window,
+    ]);
+
+    #[cfg(target_os = "android")]
+    let builder = builder.invoke_handler(tauri::generate_handler![local_server_config]);
 
     #[cfg(any(windows, target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_decorum::init());
