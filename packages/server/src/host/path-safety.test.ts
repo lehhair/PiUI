@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, it, after } from "node:test"
@@ -91,7 +91,7 @@ describe("resolveWorkspacePath", () => {
     try {
       const resolved = resolveWorkspacePath(root, "src-alias/new.ts")
       assert.equal(resolved.exists, false)
-      assert.equal(resolved.absolute, path.join(root, "src", "new.ts"))
+      assert.equal(resolved.absolute, path.join(realpathSync(root), "src", "new.ts"))
     } finally {
       rmSync(link, { recursive: true, force: true })
     }

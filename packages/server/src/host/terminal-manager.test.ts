@@ -117,7 +117,9 @@ test("exited terminals replay buffered output and report the exit code", async (
     const created = await manager.create(root, { title: "replay" })
     manager.write(root, created.id, process.platform === "win32" ? "echo replay-me\r\n" : "printf replay-me\\n")
     await waitFor(() => manager.get(root, created.id).cursor > 0)
-    manager.write(root, created.id, process.platform === "win32" ? "exit\r\n" : "exit\n")
+    // Unix interactive shells are more reliable on CI when closed with EOF;
+    // Windows cmd needs the explicit exit command.
+    manager.write(root, created.id, process.platform === "win32" ? "exit\r\n" : "\u0004")
     await waitFor(() => manager.get(root, created.id).status === "exited")
     assert.equal(manager.issueConnectToken(root, created.id).token.length > 0, true)
 
