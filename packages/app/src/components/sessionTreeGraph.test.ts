@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSessionTreeGraph, sessionTreeEntryPreview, type NativeTreeNode } from './sessionTreeGraph'
+import { buildSessionTreeGraph, findNewestDescendantEntries, sessionTreeEntryPreview, type NativeTreeNode } from './sessionTreeGraph'
 import { selectPiTimelineItems } from '../pi/selectors/index.js'
 import type { PiBranchPage } from '../pi/domain'
 
@@ -165,5 +165,30 @@ describe('buildSessionTreeGraph', () => {
 
     expect(graph.nodes.map(node => node.id)).toEqual(['user', 'assistant-final'])
     expect(graph.detailEntriesById.get('assistant-final')?.map(entry => entry.id)).toEqual(['assistant-space', 'assistant-final'])
+  })
+})
+
+describe('findNewestDescendantEntries', () => {
+  it('follows the newest child chain down to the leaf', () => {
+    const oldTip = messageNode('a-old', 'u1', 'assistant', 'old')
+    const forkUser = messageNode('u2', 'a1', 'user', 'newer')
+    const forkTip = messageNode('a2', 'u2', 'assistant', 'newest')
+    forkUser.children = [forkTip]
+    const mid = messageNode('a1', 'u1', 'assistant', 'mid', [oldTip, forkUser])
+    oldTip.entry.timestamp = '2026-01-01T00:00:01.000Z'
+    mid.entry.timestamp = '2026-01-01T00:00:02.000Z'
+    forkUser.entry.timestamp = '2026-01-01T00:00:03.000Z'
+    forkTip.entry.timestamp = '2026-01-01T00:00:04.000Z'
+    const root = messageNode('u1', null, 'user', 'root', [mid])
+
+    expect(findNewestDescendantEntries(root).map(entry => entry.id)).toEqual(['a1', 'u2', 'a2'])
+    expect(findNewestDescendantEntries(mid).map(entry => entry.id)).toEqual(['u2', 'a2'])
+  })
+
+  it('returns empty for a leaf (navigating to the branch tip needs no redo)', () => {
+    const tip = messageNode('a1', 'u1', 'assistant', 'tip')
+    const root = messageNode('u1', null, 'user', 'root', [tip])
+    expect(findNewestDescendantEntries(tip)).toEqual([])
+    expect(findNewestDescendantEntries(root).map(entry => entry.id)).toEqual(['a1'])
   })
 })
