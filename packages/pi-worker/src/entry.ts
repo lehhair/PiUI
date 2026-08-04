@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError, PROTOCOL_VERSION } from "@piui/protocol"
-import { loadPiSdk, shouldRequireVerifiedSdk } from "./sdk-host.js"
+import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
@@ -424,9 +424,15 @@ process.on("disconnect", () => {
   })()
 })
 
+const resolution = defaultSdkResolution()
+if (resolution.source !== "bundled") {
+  console.info(`[piui-worker] pi sdk source=${resolution.source} path=${resolution.sdkPath}`)
+}
 const loaded = await loadPiSdk({
-  sdkPath: process.env.PIUI_SDK_PATH,
-  strict: shouldRequireVerifiedSdk(),
+  sdkPath: resolution.sdkPath,
+  // 自动定位到的 SDK 版本漂移是常态（用户自己升级的 / 热更新的），警告即可；
+  // 只有显式 PIUI_SDK_PATH 才默认严格校验
+  strict: resolution.source === "env" && shouldRequireVerifiedSdk(),
 })
 loadedSdkInfo = loaded
 
