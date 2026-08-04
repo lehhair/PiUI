@@ -14,6 +14,14 @@ import { createAppServer, type AppServer } from "./http.ts"
 import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
 import type { WebSocketServer } from "ws"
 
+// 测试进程的 session 租约目录放进独立临时目录，跑完即删，
+// 不污染默认的 piui-session-leases 命名空间。
+const leaseHome = mkdtempSync(path.join(tmpdir(), "piui-ws-leases-"))
+process.env.PIUI_SESSION_LEASE_DIR = leaseHome
+after(() => {
+  rmSync(leaseHome, { recursive: true, force: true })
+})
+
 async function listen(app: AppServer) {
   await new Promise<void>((resolve, reject) => {
     app.server.listen(0, "127.0.0.1", (err?: Error) => (err ? reject(err) : resolve()))
