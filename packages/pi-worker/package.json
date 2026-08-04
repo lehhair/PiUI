@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./entry": {
+      "types": "./dist/entry.d.ts",
+      "import": "./dist/entry.js"
     }
   },
   "scripts": {
@@ -16,7 +20,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.81.1",
-    "@piui/protocol": "0.1.0"
+    "@piui/protocol": "0.1.0",
+    "jiti": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

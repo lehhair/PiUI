@@ -1,6 +1,7 @@
-import { isAbsolute, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type * as PiSdkModule from "@earendil-works/pi-coding-agent"
 
@@ -39,13 +40,138 @@ function resolveSdkEntry(sdkPath: string): string {
   return absolute
 }
 
+// ============================================
+// SDK 自动定位
+// ============================================
+
+/** pi SDK 的 npm 包名（历史包名也认，用户可能装的是旧的） */
+export const PI_SDK_PACKAGE_NAMES = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"] as const
+
+export interface SdkResolution {
+  /** 解析到的 SDK 包目录；undefined 表示走内置 node_modules 兜底 */
+  sdkPath?: string
+  source: "env" | "global" | "runtime" | "bundled"
+}
+
+interface ResolveDeps {
+  env: NodeJS.ProcessEnv
+  /** 可执行文件所在目录（编译产物旁边就是 runtime/ 目录） */
+  execDir: string
+  exists: (path: string) => boolean
+  npmRootGlobal: () => string | undefined
+}
+
+function sdkPackageDir(root: string, exists: (path: string) => boolean): string | undefined {
+  for (const name of PI_SDK_PACKAGE_NAMES) {
+    const dir = join(root, ...name.split("/"))
+    if (exists(join(dir, "dist", "index.js"))) return dir
+  }
+  return undefined
+}
+
+/**
+ * 打包后的 runtime 目录布局：
+ *   runtime/current.json  { "dir": "pi-0.81.1" }   ← 热更新器切换的指针
+ *   runtime/pi-0.81.1/node_modules/@earendil-works/pi-coding-agent/…
+ * 没有指针时退回 runtime/pi（打包脚本铺的初始版本，同样是 node_modules 布局）。
+ */
+function runtimeSdkPath(runtimeDir: string, exists: (path: string) => boolean): string | undefined {
+  const pointerFile = join(runtimeDir, "current.json")
+  if (exists(pointerFile)) {
+    try {
+      const pointer = JSON.parse(readFileSync(pointerFile, "utf8")) as { dir?: unknown }
+      if (typeof pointer.dir === "string" && pointer.dir && !pointer.dir.includes("..")) {
+        const dir = sdkPackageDir(join(runtimeDir, pointer.dir, "node_modules"), exists)
+        if (dir) return dir
+      }
+    } catch {
+      // 指针坏了就落到下一个候选——不能因为一个 JSON 把整个定位搞死
+    }
+  }
+  return sdkPackageDir(join(runtimeDir, "pi", "node_modules"), exists)
+}
+
+function globalNpmRoot(deps: ResolveDeps): string | undefined {
+  const cached = deps.npmRootGlobal()
+  if (cached) return cached
+  // 常见安装前缀直接猜，猜中了就不用 spawn npm（快而且离线可用）
+  const candidates: string[] = []
+  if (process.platform === "win32") {
+    const appData = deps.env.APPDATA
+    if (appData) candidates.push(join(appData, "npm", "node_modules"))
+  } else {
+    candidates.push("/usr/local/lib/node_modules", "/usr/lib/node_modules")
+    const home = deps.env.HOME
+    if (home) candidates.push(join(home, ".npm-global", "lib", "node_modules"))
+  }
+  return candidates.find(path => deps.exists(path))
+}
+
+function defaultNpmRootGlobal(): string | undefined {
+  try {
+    const command = process.platform === "win32" ? "npm.cmd" : "npm"
+    const result = spawnSync(command, ["root", "-g"], { timeout: 3000, encoding: "utf8", windowsHide: true })
+    const root = result.status === 0 ? result.stdout?.trim() : undefined
+    return root || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * SDK 定位顺序（用户自己的优先，越新越好）：
+ *   1. PIUI_SDK_PATH 显式指定
+ *   2. 用户全局 npm 安装的 pi
+ *   3. 随包分发的 runtime/ 目录（热更新器维护）
+ *   4. undefined → 内置 node_modules（开发态兜底）
+ */
+export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
+  const explicit = deps.env.PIUI_SDK_PATH?.trim()
+  if (explicit) return { sdkPath: explicit, source: "env" }
+
+  const globalRoot = globalNpmRoot(deps)
+  if (globalRoot) {
+    const dir = sdkPackageDir(globalRoot, deps.exists)
+    if (dir) return { sdkPath: dir, source: "global" }
+  }
+
+  const runtimeDir = deps.env.PIUI_RUNTIME_DIR?.trim() || join(deps.execDir, "runtime")
+  const runtime = runtimeSdkPath(runtimeDir, deps.exists)
+  if (runtime) return { sdkPath: runtime, source: "runtime" }
+
+  return { source: "bundled" }
+}
+
+export function defaultSdkResolution(env: NodeJS.ProcessEnv = process.env): SdkResolution {
+  return resolvePiSdkPath({
+    env,
+    execDir: dirname(process.execPath),
+    exists: existsSync,
+    npmRootGlobal: defaultNpmRootGlobal,
+  })
+}
+
+/**
+ * 外部 SDK 走 jiti 加载：它自己做 Node 语义的 node_modules 上溯解析，
+ * 原生 import 在 bun 编译产物里解析不了磁盘模块的裸包名依赖。
+ * 编译形态下 jiti 本体也要按绝对路径从 exe 旁的 node_modules 里请出来
+ * ——bare specifier 在编译产物里同样不可靠。
+ */
+async function importExternalSdk(entry: string): Promise<PiSdk> {
+  const nativeRoot = process.env.PIUI_NATIVE_MODULES?.trim()
+  const createJiti = nativeRoot
+    ? (await import(pathToFileURL(join(nativeRoot, "jiti", "lib", "jiti.mjs")).href) as typeof import("jiti")).createJiti
+    : (await import("jiti")).createJiti
+  const jiti = createJiti(pathToFileURL(entry).href, { moduleCache: false })
+  return await jiti.import(entry) as PiSdk
+}
+
 export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk> {
   if (cached) return cached
   const external = options.sdkPath?.trim()
-  const specifier = external
-    ? pathToFileURL(resolveSdkEntry(external)).href
-    : "@earendil-works/pi-coding-agent"
-  const sdk = await import(specifier) as PiSdk
+  const sdk = external
+    ? await importExternalSdk(resolveSdkEntry(external))
+    : await import("@earendil-works/pi-coding-agent") as PiSdk
   const version = typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown"
   const verified = version === PI_PARITY_SDK_VERSION
   if (!verified && !external) {
