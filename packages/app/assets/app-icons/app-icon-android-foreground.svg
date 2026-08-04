@@ -1,19 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <path
-    d="M178 194 L276 256 L178 318"
-    stroke="#d97706"
-    stroke-width="34"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    fill="none"
-  />
-  <line
-    x1="294"
-    y1="314"
-    x2="348"
-    y2="314"
-    stroke="#d97706"
-    stroke-width="34"
-    stroke-linecap="round"
-  />
+  
+  <path d="M1090 881 1049 740H810L693 343Q661 233 661 180Q661 141 685.5 115.5Q710 90 750 90Q835 90 886 222H925Q858 -24 684 -24Q611 -24 566.5 19.0Q522 62 522 141Q522 203 551 314L576 409Q579 423 585 443L679 740H476L370 375Q297 124 254.5 50.0Q212 -24 143 -24Q108 -24 79.0 -2.5Q50 19 50 55Q50 103 123 188Q304 400 392 740H319Q147 740 97 634H59Q150 881 379 881Z" transform="translate(124.9 354.6) scale(0.2301 -0.2301)" fill="#fafaf9"/>
 </svg>

@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package --error-on-fail false",
     "clean": "node scripts/clean.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev -w @piui/server",

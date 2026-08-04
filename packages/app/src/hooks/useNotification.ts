@@ -196,7 +196,7 @@ export function useNotification() {
 
     const notificationOptions: NotificationOptions = {
       body,
-      icon: '/opencode.svg',
+      icon: '/pi.svg',
       tag: data?.sessionId || 'piui',
       data,
     }
