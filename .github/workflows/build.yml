@@ -30,6 +30,11 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      # win32 专属补丁在非 Windows 上会让 patch-package 直接报错（包不存在）
+      - name: drop windows-only patch
+        if: runner.os != 'Windows'
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
       - run: npm ci
 
       # 全量验证：typecheck + lint + 三个包的测试 + 构建
