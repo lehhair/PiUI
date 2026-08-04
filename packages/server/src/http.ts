@@ -20,6 +20,8 @@ import { resolveAuthToken } from "./host/auth-token.ts"
 import { PathSafetyError } from "./host/path-safety.ts"
 import { HostRuntime } from "./host/command-table.ts"
 import { TerminalManager } from "./host/terminal-manager.ts"
+import { createPiRuntimeUpdater } from "./pi/pi-runtime-updater.ts"
+import { createStaticServer } from "./static.ts"
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
@@ -151,6 +153,8 @@ export interface CreateAppServerOptions {
   authToken?: string | null
   /** Bind address, used to build the share link other clients connect with. */
   share?: { host: string; port: number }
+  /** Web client build directory; when it exists the server hosts the SPA. */
+  staticRoot?: string
 }
 
 export interface AppServer {
@@ -173,8 +177,9 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       hub.publish({ kind: "workspace", id: workspacePath }, channel, payload)
     },
   })
-  const host = new HostRuntime({ store, watcher, sessions, terminals })
+  const host = new HostRuntime({ store, watcher, sessions, terminals, piRuntime: createPiRuntimeUpdater() })
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
+  const staticServer = options.staticRoot ? createStaticServer(options.staticRoot) : undefined
   let disposal: Promise<void> | undefined
 
   const closeHttpServer = (): Promise<void> => {
@@ -193,6 +198,13 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
       const method = req.method ?? "GET"
       const p = url.pathname
+
+      // Web 客户端静态托管：/api 之外的 GET/HEAD 不走 token——页面本身必须
+      // 公开可达，鉴权由 API 层把守（token 通过分享链接带进客户端）
+      if (staticServer && (method === "GET" || method === "HEAD") && !p.startsWith("/api/")) {
+        if (staticServer.serve(req, res, p)) return
+        return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
+      }
 
       if (!requestHasAllowedOrigin(req)) {
         return sendProblem(res, 403, Object.assign(new Error("origin not allowed"), { code: "FORBIDDEN" }))

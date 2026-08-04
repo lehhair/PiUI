@@ -43,3 +43,6 @@ src-tauri/target/
 packages/app/package-lock.json
 packages/app/dist
 packages/app/public/material-icons/
+
+# Packaged desktop runtime
+dist-desktop/

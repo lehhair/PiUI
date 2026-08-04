@@ -13,6 +13,7 @@ import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./git.ts"
 import type { WorkspaceStore, WorkspaceRecord } from "./workspace-store.ts"
 import type { WorkspaceWatcher } from "./workspace-watcher.ts"
 import type { TerminalManager } from "./terminal-manager.ts"
+import type { PiRuntimeUpdater } from "../pi/pi-runtime-updater.ts"
 
 type HostCommandHandler = (ctx: HostCommandContext, params: JsonObject) => JsonValue | undefined | Promise<JsonValue | undefined>
 
@@ -39,6 +40,8 @@ export type HostCommandContext = {
   watcher: WorkspaceWatcher
   sessions: SessionHost
   terminals: TerminalManager
+  /** 打包形态下才有；开发态为 undefined，相关命令报 CAPABILITY_DISABLED */
+  piRuntime?: PiRuntimeUpdater
   signal?: AbortSignal
 }
 
@@ -432,4 +435,30 @@ export const HOST_CAPABILITIES = [
     idempotent: true,
     handler: (ctx, params) => getGitFileDiff(workspace(ctx, params).canonicalRoot, gitMode(params), reqString(params, "path"), ctx.signal) as Promise<JsonValue>,
   }),
+  registerHostCapability({
+    name: "pi-runtime.status",
+    domain: "server",
+    description: "Read the hot-updatable Pi runtime status (current vs latest)",
+    idempotent: true,
+    handler: async ctx => {
+      const updater = requirePiRuntime(ctx)
+      return requireJsonValue(await updater.status() as unknown as JsonObject)
+    },
+  }),
+  registerHostCapability({
+    name: "pi-runtime.update",
+    domain: "server",
+    description: "Download the latest Pi runtime and switch the pointer (takes effect on restart)",
+    handler: async ctx => {
+      const updater = requirePiRuntime(ctx)
+      return requireJsonValue(await updater.update() as unknown as JsonObject)
+    },
+  }),
 ]
+
+function requirePiRuntime(ctx: HostCommandContext): PiRuntimeUpdater {
+  if (!ctx.piRuntime) {
+    throw Object.assign(new Error("Pi runtime updates are unavailable in this environment"), { code: "CAPABILITY_DISABLED" })
+  }
+  return ctx.piRuntime
+}

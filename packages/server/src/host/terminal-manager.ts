@@ -1,7 +1,30 @@
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { lstat } from "node:fs/promises"
-import { spawn, type IPty } from "@lydell/node-pty"
+import { createRequire } from "node:module"
+import { join } from "node:path"
+import type { IPty } from "@lydell/node-pty"
+
+type PtyModule = { spawn: (file: string, args: string[], options: object) => IPty }
+let ptyModule: PtyModule | undefined
+
+/**
+ * 编译形态（PIUI_NATIVE_MODULES 指向 exe 旁的 node_modules）按绝对路径
+ * 直接加载平台包——Bun 编译产物的 require 不会为磁盘上的外部模块做
+ * node_modules 上溯解析，node-pty 的包装包在里面会找不到平台二进制，
+ * 所以绕过包装层。开发态走正常解析。
+ */
+function loadPty(): PtyModule {
+  if (ptyModule) return ptyModule
+  const nativeRoot = process.env.PIUI_NATIVE_MODULES?.trim()
+  if (nativeRoot) {
+    const platformEntry = join(nativeRoot, "@lydell", `node-pty-${process.platform}-${process.arch}`, "package.json")
+    ptyModule = createRequire(platformEntry)(`@lydell/node-pty-${process.platform}-${process.arch}`) as PtyModule
+  } else {
+    ptyModule = createRequire(import.meta.url)("@lydell/node-pty") as PtyModule
+  }
+  return ptyModule
+}
 import type {
   EventChannel,
   TerminalCreateParams,
@@ -109,7 +132,7 @@ export class TerminalManager {
 
     let child: IPty
     try {
-      child = spawn(shell, shellArgs(shell), {
+      child = loadPty().spawn(shell, shellArgs(shell), {
         name: "xterm-256color",
         cwd,
         cols: size.cols,

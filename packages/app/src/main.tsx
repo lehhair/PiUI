@@ -7,6 +7,7 @@ import { initOverlayScrollbars } from './lib/overlayScrollbar'
 import App from './App.tsx'
 import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contexts'
 import { themeStore } from './store/themeStore'
+import { applyUrlTokenParam } from './store/serverStore'
 import { isTauri } from './utils/tauri'
 import { globalErrorHandler } from './utils/errorHandling'
 
@@ -30,6 +31,12 @@ function ensureRandomUUID() {
 }
 
 ensureRandomUUID()
+
+// 服务器托管页面的入口链接带 ?token=（局域网/纯网页访问），落进 serverStore
+// 后立刻从地址栏抹掉，token 不留在历史和书签里
+if (applyUrlTokenParam(window.location.search, window.location.origin)) {
+  window.history.replaceState(null, '', window.location.pathname)
+}
 
 // 禁用浏览器的 scroll restoration（刷新时不恢复旧 scrollTop），
 // 由 ChatArea 自行控制定位
