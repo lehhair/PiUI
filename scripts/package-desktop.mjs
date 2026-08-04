@@ -29,11 +29,11 @@ if (!skipBuild) {
 }
 
 // ---- 1. 组装 runtime/pi：从仓库 node_modules 复制 pi 的依赖闭包 ----
+const piPackageDir = join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent")
+const piPkg = JSON.parse(readFileSync(join(piPackageDir, "package.json"), "utf8"))
 if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   console.info("[package] --skip-runtime: keeping existing runtime directory")
 } else {
-  const piPackageDir = join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent")
-  const piPkg = JSON.parse(readFileSync(join(piPackageDir, "package.json"), "utf8"))
   const runtimePi = join(outDir, "runtime", "pi", "node_modules")
   rmSync(join(outDir, "runtime"), { recursive: true, force: true })
   mkdirSync(runtimePi, { recursive: true })
