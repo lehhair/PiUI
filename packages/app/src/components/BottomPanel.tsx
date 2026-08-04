@@ -23,10 +23,17 @@ const ExtensionsPanel = lazy(() =>
     default: module.ExtensionsPanel
   }))
 )
+const SessionTreePanel = lazy(() =>
+  import('./SessionTreePanel').then(module => ({
+    default: module.SessionTreePanel
+  }))
+)
 const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 
 interface BottomPanelProps {
   directory?: string
+  onNavigateSession?: (session: { id: string; directory?: string }) => void
+  onNewChat?: () => void
 }
 
 function PanelFallback() {
@@ -36,7 +43,7 @@ function PanelFallback() {
   )
 }
 
-export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelProps) {
+export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSession, onNewChat }: BottomPanelProps) {
   const { t } = useTranslation(['components', 'common'])
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useFocusedSessionId()
@@ -179,10 +186,27 @@ export const BottomPanel = memo(function BottomPanel({ directory }: BottomPanelP
               <SkillPanel isResizing={isPanelResizing} sessionId={sessionId} />
             </Suspense>
           ) : null}
+
+          {activeTab.type === 'session-tree' || activeTab.type === 'session-controls' ? (
+            sessionId ? (
+              <Suspense fallback={<PanelFallback />}>
+                <SessionTreePanel
+                  sessionId={sessionId}
+                  mode={activeTab.type === 'session-controls' ? 'controls' : undefined}
+                  onNavigateSession={onNavigateSession}
+                  onNewChat={onNewChat}
+                />
+              </Suspense>
+            ) : (
+              <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] px-4 text-center">
+                {t('rightPanel.noActiveSession')}
+              </div>
+            )
+          ) : null}
         </>
       )
     },
-    [directory, normalizedDirectory, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal]
+    [directory, normalizedDirectory, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
   )
 
   return (

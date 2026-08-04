@@ -282,12 +282,10 @@ export const PanelContainer = memo(function PanelContainer({
   // 移动到另一个面板
   const handleMoveToOtherPanel = useCallback(() => {
     if (!contextMenu) return
-    const tab = tabs.find(item => item.id === contextMenu.tabId)
-    if (tab?.type === 'session-tree') return
     const targetPosition: PanelPosition = position === 'bottom' ? 'right' : 'bottom'
     layoutStore.moveTab(contextMenu.tabId, targetPosition)
     setContextMenu(null)
-  }, [contextMenu, position, tabs])
+  }, [contextMenu, position])
 
   const contextTab = contextMenu ? (tabs.find(tab => tab.id === contextMenu.tabId) ?? null) : null
 
@@ -425,14 +423,12 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.renameTerminal')}
               </button>
             )}
-            {contextTab?.type !== 'session-tree' && contextTab?.type !== 'session-controls' && (
-              <button
-                onClick={handleMoveToOtherPanel}
-                className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                {otherPanelLabel}
-              </button>
-            )}
+            <button
+              onClick={handleMoveToOtherPanel}
+              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+            >
+              {otherPanelLabel}
+            </button>
           </div>,
           document.body
         )}
@@ -499,10 +495,10 @@ export const PanelContainer = memo(function PanelContainer({
               </span>
               {t('panelContainer.skills')}
             </button>
-            {position === 'right' && capabilities.sessionTree && (
+            {capabilities.sessionTree && (
               <button
                 onClick={() => {
-                  layoutStore.addSessionTreeTab()
+                  layoutStore.addSessionTreeTab(position)
                   setAddMenuPos(null)
                 }}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
@@ -513,10 +509,10 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.sessionTree')}
               </button>
             )}
-            {position === 'right' && capabilities.sessionTree && (
+            {capabilities.sessionTree && (
               <button
                 onClick={() => {
-                  layoutStore.addSessionControlsTab()
+                  layoutStore.addSessionControlsTab(position)
                   setAddMenuPos(null)
                 }}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
@@ -527,20 +523,18 @@ export const PanelContainer = memo(function PanelContainer({
                 {t('panelContainer.sessionControls')}
               </button>
             )}
-            {position === 'right' && (
-              <button
-                onClick={() => {
-                  layoutStore.addExtensionsTab(position)
-                  setAddMenuPos(null)
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
-              >
-                <span className="opacity-60 shrink-0">
-                  <PuzzleIcon size={12} />
-                </span>
-                {t('panelContainer.extensions')}
-              </button>
-            )}
+            <button
+              onClick={() => {
+                layoutStore.addExtensionsTab(position)
+                setAddMenuPos(null)
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+            >
+              <span className="opacity-60 shrink-0">
+                <PuzzleIcon size={12} />
+              </span>
+              {t('panelContainer.extensions')}
+            </button>
           </div>,
           document.body
         )}
