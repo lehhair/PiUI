@@ -13,7 +13,19 @@ export function isAllowedLocalOrigin(origin: string | undefined): boolean {
 
 export function requestHasAllowedOrigin(req: IncomingMessage): boolean {
   const origin = req.headers.origin
-  return typeof origin !== "string" || isAllowedLocalOrigin(origin)
+  if (typeof origin !== "string") return true
+  if (isAllowedLocalOrigin(origin)) return true
+  // 同源的 LAN 访问（手机浏览器打开 http://192.168.x.x:8787 后页面内 fetch）
+  // Origin 的 host 必然等于请求的 Host，放行；跨站请求仍然拒绝
+  const host = req.headers.host
+  if (typeof host === "string") {
+    try {
+      return new URL(origin).host === host
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 /**

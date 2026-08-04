@@ -705,6 +705,19 @@ export function parseConnectLink(input: string): { url: string; token: string } 
   }
 }
 
+/**
+ * 服务器托管 Web 客户端时的入口：URL 上的 ?token= 落到本地服务器配置里。
+ * 页面与 API 同源，token 写入 local server 后即可直连；随后清掉地址栏参数，
+ * 避免 token 留在历史记录和书签里。返回是否应用了 token。
+ */
+export function applyUrlTokenParam(search: string, origin: string): boolean {
+  const token = new URLSearchParams(search).get('token')
+  if (!token) return false
+  serverStore.updateServer(LOCAL_SERVER_ID, { url: origin.replace(/\/+$/, ''), token })
+  serverStore.setActiveServer(LOCAL_SERVER_ID)
+  return true
+}
+
 function normalizeServerTimestamp(timestamp: unknown): number | null {
   if (typeof timestamp === 'number') {
     return Number.isFinite(timestamp) ? timestamp : null

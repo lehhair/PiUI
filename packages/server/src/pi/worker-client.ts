@@ -1,4 +1,4 @@
-import { fork, type ChildProcess } from "node:child_process"
+import { fork, spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import type { JsonObject, JsonValue, Problem } from "@piui/protocol"
 import {
@@ -106,11 +106,15 @@ export class WorkerSession {
   }
 
   private spawn(): ChildProcess {
-    const child = fork(this.workerEntry, {
-      env: { ...process.env, ...this.options.env },
-      execArgv: this.options.execArgv,
-      stdio: ["ignore", "inherit", "inherit", "ipc"],
-    })
+    // 编译成单文件 exe 时没有独立 node 可 fork——worker 就是同一个 exe
+    // 加 --pi-worker 参数再拉一个自己，IPC 通道不变
+    const child = process.env.PIUI_WORKER_SELF === "1"
+      ? spawnSelfWorker(this.options.env)
+      : fork(this.workerEntry, {
+        env: { ...process.env, ...this.options.env },
+        execArgv: this.options.execArgv,
+        stdio: ["ignore", "inherit", "inherit", "ipc"],
+      })
     const handshakeTimeout = setTimeout(() => {
       this.settleReadyError(Object.assign(new Error("Pi worker handshake timed out"), { code: "WORKER_PROTOCOL_MISMATCH" }))
       // 握不上手就杀掉——否则僵尸进程占着端口，而它的 ready 已拒，
@@ -410,4 +414,12 @@ export class WorkerSession {
 
 function problemToError(problem: Problem): Error {
   return Object.assign(new Error(problem.message), { code: problem.code, details: problem.details })
+}
+
+function spawnSelfWorker(env?: NodeJS.ProcessEnv): ChildProcess {
+  return spawn(process.execPath, ["--pi-worker"], {
+    env: { ...process.env, ...env },
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+    windowsHide: true,
+  })
 }
