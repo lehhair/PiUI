@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, it } from "node:test"
@@ -137,7 +137,9 @@ describe("workspace files", () => {
 })
 
 function fixture(): { root: string; workspace: WorkspaceRecord } {
-  const root = mkdtempSync(path.join(tmpdir(), "piui-files-"))
+  // canonicalRoot 必须与生产注册一样经过 realpath——CI Windows 的 %TEMP%
+  // 是 8.3 短路径（RUNNER~1），不规范化会误判 WORKSPACE_REPLACED
+  const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "piui-files-")))
   roots.push(root)
   const identity = statSync(root)
   return {
