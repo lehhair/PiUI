@@ -17,7 +17,12 @@ describe('AuthenticatedImage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('loads protected images through the authenticated Pi transport', async () => {
-    piFetch.mockResolvedValue(new Response(new Blob(['image']), { status: 200 }))
+    const blob = new Blob(['image'])
+    piFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => blob,
+    } as Response)
     render(<AuthenticatedImage src="/api/protected-image" requiresAuth alt="result" />)
 
     await waitFor(() => expect(screen.getByAltText('result')).toHaveAttribute('src', 'blob:authenticated-image'))
