@@ -793,7 +793,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                         <summary className="cursor-pointer select-none hover:text-text-100">{t('sessionTree.navigationOptions')}</summary>
                         <div className="mt-2 space-y-2 border-l border-border-200 pl-2">
                           <label className="flex items-center gap-2">
-                            <input type="checkbox" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
+                            <input type="checkbox" className="size-3.5 accent-accent-main-100" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
                             {t('sessionTree.summarizeNavigation')}
                           </label>
                           {summarizeNavigation ? (
@@ -815,7 +815,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                                 onChange={event => setNavigationLabel(event.target.value)}
                               />
                               <label className="flex items-center gap-2">
-                                <input type="checkbox" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />
+                                <input type="checkbox" className="size-3.5 accent-accent-main-100" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />
                                 {t('sessionTree.replaceDefaultInstructions')}
                               </label>
                             </>

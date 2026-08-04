@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import i18n from '../../i18n'
 import type { Model } from '@earendil-works/pi-ai'
 import { ChatArea, Header, InputBox, type ChatAreaHandle, type InputBoxHandle } from '../chat/index.js'
 import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
@@ -700,7 +701,7 @@ export function PiChatPane({
         registerSessionRef.current({
           id: targetSessionId,
           directory: opened.cwd ?? directory,
-          title: text.trim().slice(0, 60) || 'New chat',
+          title: text.trim().slice(0, 60) || i18n.t('chat:sidebar.newChat'),
           firstMessage: text.trim().slice(0, 200),
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -789,10 +790,10 @@ export function PiChatPane({
             const skipped = details.status === 'skipped'
             const message = typeof details.message === 'string'
               ? details.message
-              : skipped ? 'Nothing to compact' : 'Context compacted'
+              : skipped ? i18n.t('chat:notification.nothingToCompact') : i18n.t('chat:notification.contextCompacted')
             notificationStore.push(
               'completed',
-              skipped ? 'Compact skipped' : 'Compact completed',
+              skipped ? i18n.t('chat:notification.compactSkipped') : i18n.t('chat:notification.compactCompleted'),
               message,
               sid,
               currentDirectoryRef.current,
@@ -806,7 +807,7 @@ export function PiChatPane({
             console.error('Failed to compact session:', error)
             notificationStore.push(
               'error',
-              'Compact failed',
+              i18n.t('chat:notification.compactFailed'),
               error instanceof Error ? error.message : String(error),
               sid,
               currentDirectoryRef.current,

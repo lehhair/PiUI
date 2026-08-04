@@ -38,28 +38,28 @@ const EVENT_TYPES: {
     labelKey: 'notifications.eventCompleted',
     descKey: 'notifications.eventCompletedDesc',
     icon: <CheckIcon size={14} />,
-    color: 'text-green-400',
+    color: 'text-success-100',
   },
   {
     type: 'permission',
     labelKey: 'notifications.eventPermission',
     descKey: 'notifications.eventPermissionDesc',
     icon: <ShieldIcon size={14} />,
-    color: 'text-yellow-400',
+    color: 'text-warning-100',
   },
   {
     type: 'question',
     labelKey: 'notifications.eventQuestion',
     descKey: 'notifications.eventQuestionDesc',
     icon: <QuestionIcon size={14} />,
-    color: 'text-blue-400',
+    color: 'text-info-100',
   },
   {
     type: 'error',
     labelKey: 'notifications.eventError',
     descKey: 'notifications.eventErrorDesc',
     icon: <AlertCircleIcon size={14} />,
-    color: 'text-red-400',
+    color: 'text-danger-100',
   },
 ]
 

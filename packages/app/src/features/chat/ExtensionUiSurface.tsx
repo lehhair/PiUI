@@ -1,8 +1,10 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ExtensionUiState } from '@piui/protocol'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 
 export function ExtensionUiSurface({ sessionId, placement }: { sessionId: string | null; placement: 'aboveEditor' | 'belowEditor' }) {
+  const { t } = useTranslation('chat')
   const snapshot = useSyncExternalStore(extensionUiStore.subscribe, extensionUiStore.getSnapshot, extensionUiStore.getSnapshot)
   if (!sessionId) return null
   const state = snapshot.sessions[sessionId]?.state
@@ -23,8 +25,8 @@ export function ExtensionUiSurface({ sessionId, placement }: { sessionId: string
           {state.workingVisible && state.workingIndicator ? <WorkingIndicator indicator={state.workingIndicator} /> : null}
           {state.workingVisible && state.workingMessage ? <span className="text-accent-main-100">{state.workingMessage}</span> : null}
           {state.hiddenThinkingLabel ? <span>{state.hiddenThinkingLabel}</span> : null}
-          {state.themeName ? <span><span className="text-text-500">theme:</span> {state.themeName}</span> : null}
-          <span><span className="text-text-500">tools:</span> {state.toolsExpanded ? 'expanded' : 'collapsed'}</span>
+          {state.themeName ? <span><span className="text-text-500">{t('extensionUi.theme')}:</span> {state.themeName}</span> : null}
+          <span><span className="text-text-500">{t('extensionUi.tools')}:</span> {state.toolsExpanded ? t('extensionUi.toolsExpanded') : t('extensionUi.toolsCollapsed')}</span>
         </div> : null}
         {widgets.map(([key, widget]) => <div key={key} className="whitespace-pre-wrap break-words border-l border-border-200 pl-2 text-text-300">{widget.lines.join('\n')}</div>)}
       </div>

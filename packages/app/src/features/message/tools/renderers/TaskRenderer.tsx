@@ -136,7 +136,7 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
                 <ContentBlock
                   label={t('task.error')}
                   stateKey={`message:${partKey}:task-error`}
-                  content={resultOutput || 'Task failed'}
+                  content={resultOutput || t('task.taskFailed')}
                   variant="error"
                   onFullscreenChange={handleContentFullscreenChange}
                   fullscreenId={`task:${partKey}:error`}

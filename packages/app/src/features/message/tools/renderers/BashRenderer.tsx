@@ -168,7 +168,8 @@ function TerminalSurface({
   onToggleFullscreen?: () => void
   exitCodeLabel?: string
 }) {
-  const fullscreenLabel = isFullscreen ? 'Exit fullscreen' : 'Fullscreen'
+  const { t } = useTranslation(['components'])
+  const fullscreenLabel = isFullscreen ? t('contentBlock.exitFullscreen') : t('contentBlock.fullscreen')
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -250,6 +251,7 @@ function TerminalSurface({
 }
 
 function WorkingDirectoryPrompt({ cwd }: { cwd: string }) {
+  const { t } = useTranslation(['components', 'common'])
   const [copied, setCopied] = useState(false)
   const displayPath = useMemo(() => truncatePromptPath(cwd), [cwd])
 
@@ -271,7 +273,7 @@ function WorkingDirectoryPrompt({ cwd }: { cwd: string }) {
         className={`min-w-0 max-w-full truncate text-left font-mono transition-colors ${
           copied ? 'text-success-100' : 'text-accent-main-100 hover:text-text-100'
         }`}
-        title={copied ? 'Copied!' : `Click to copy: ${cwd}`}
+        title={copied ? t('common:copied') : t('contentBlock.clickToCopyWithPath', { path: cwd })}
         style={{ direction: 'rtl' }}
       >
         <bdi>{displayPath}</bdi>
@@ -301,6 +303,7 @@ function truncatePromptPath(path: string): string {
 // ============================================
 
 function ClickToCopyCommand({ command }: { command: string }) {
+  const { t } = useTranslation(['components', 'common'])
   const [copied, setCopied] = useState(false)
 
   const handleClick = useCallback(async () => {
@@ -317,7 +320,7 @@ function ClickToCopyCommand({ command }: { command: string }) {
     <div
       className="cursor-pointer group/cmd whitespace-pre-wrap break-all"
       onClick={handleClick}
-      title={copied ? 'Copied!' : 'Click to copy'}
+      title={copied ? t('common:copied') : t('contentBlock.clickToCopy')}
     >
       <span className="inline-block w-[1ch] text-center text-accent-main-100 select-none font-semibold">
         {copied ? '✓' : '$'}

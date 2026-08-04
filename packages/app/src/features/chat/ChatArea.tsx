@@ -1008,7 +1008,7 @@ export const ChatArea = memo(
                         onClick={onOpenSettings}
                         className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
                       >
-                        Open server settings
+                        {t('chatArea.openServerSettings')}
                       </button>
                     )}
                   </div>

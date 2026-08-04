@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/Button'
 import { Dialog } from '../../components/ui/Dialog'
 import {
@@ -18,6 +19,7 @@ export function ProviderAuthDialogHost() {
 }
 
 function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
+  const { t } = useTranslation(['settings', 'common'])
   const event = flow.event
   const prompt = event?.type === 'prompt' ? (event.prompt as ProviderAuthPrompt) : undefined
   const [value, setValue] = useState(prompt?.type === 'select' ? prompt.options?.[0]?.id ?? '' : '')
@@ -57,9 +59,9 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
   }
 
   return (
-    <Dialog isOpen onClose={() => void close()} title="Provider authentication" width={500} showCloseButton={!submitting}>
+    <Dialog isOpen onClose={() => void close()} title={t('pi.authTitle')} width={500} showCloseButton={!submitting}>
       <div className="space-y-4">
-        <p className="text-[length:var(--fs-xs)] text-text-400">Provider: {flow.providerId}{flow.sessionId ? ' · session scope' : ' · global scope'}</p>
+        <p className="text-[length:var(--fs-xs)] text-text-400">{t('pi.authProvider', { id: flow.providerId })}{flow.sessionId ? ` · ${t('pi.sessionScope')}` : ` · ${t('pi.globalScopeLabel')}`}</p>
         {event.type === 'prompt' ? (
           <>
             <p className="whitespace-pre-wrap text-[length:var(--fs-sm)] text-text-200">{prompt!.message}</p>
@@ -67,7 +69,7 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
               <div className="space-y-2">
                 {prompt!.options?.map(option => (
                   <label key={option.id} className="flex cursor-pointer gap-2 rounded-md border border-border-100 p-2 text-[length:var(--fs-sm)] text-text-200">
-                    <input type="radio" name="provider-auth-option" value={option.id} checked={value === option.id} onChange={() => setValue(option.id)} />
+                    <input type="radio" name="provider-auth-option" value={option.id} checked={value === option.id} onChange={() => setValue(option.id)} className="accent-accent-main-100" />
                     <span><span className="block text-text-100">{option.label}</span>{option.description ? <span className="block text-[length:var(--fs-xs)] text-text-400">{option.description}</span> : null}</span>
                   </label>
                 ))}
@@ -85,20 +87,20 @@ function ProviderAuthDialog({ flow }: { flow: ProviderAuthFlowState }) {
             )}
           </>
         ) : event.type === 'notification' ? (
-          <div className="space-y-2"><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-200/50 p-3 text-[length:var(--fs-xs)] text-text-200">{formatNotification(event.event)}</pre>{extractUrls(event.event).map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="block break-all text-[length:var(--fs-xs)] text-accent-main-100 underline">Open authentication URL</a>)}</div>
+          <div className="space-y-2"><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-200/50 p-3 text-[length:var(--fs-xs)] text-text-200">{formatNotification(event.event)}</pre>{extractUrls(event.event).map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="block break-all text-[length:var(--fs-xs)] text-accent-main-100 underline">{t('pi.openAuthUrl')}</a>)}</div>
         ) : event.type === 'failed' ? (
           <p className="text-[length:var(--fs-sm)] text-danger-100">{event.message}</p>
         ) : (
-          <p className="text-[length:var(--fs-sm)] text-text-200">{event.type === 'completed' ? 'Authentication completed.' : 'Authentication cancelled.'}</p>
+          <p className="text-[length:var(--fs-sm)] text-text-200">{event.type === 'completed' ? t('pi.authCompleted') : t('pi.authCancelled')}</p>
         )}
         {flow.notifications.length > 0 && event.type !== 'notification' ? (
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-200/40 p-2 text-[length:var(--fs-xs)] text-text-400">{flow.notifications.map(formatNotification).join('\n')}</pre>
         ) : null}
         {error ? <p role="alert" className="text-[length:var(--fs-sm)] text-danger-100">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" disabled={submitting} onClick={() => void close()}>{terminal ? 'Close' : 'Cancel'}</Button>
-          {event.type === 'prompt' ? <Button isLoading={submitting} disabled={!value} onClick={() => void submit()}>Continue</Button> : null}
-          {event.type === 'notification' ? <Button disabled={submitting} onClick={() => clearProviderAuthEvent(flow.flowId)}>Keep waiting</Button> : null}
+          <Button variant="secondary" disabled={submitting} onClick={() => void close()}>{terminal ? t('common:close') : t('common:cancel')}</Button>
+          {event.type === 'prompt' ? <Button isLoading={submitting} disabled={!value} onClick={() => void submit()}>{t('pi.continue')}</Button> : null}
+          {event.type === 'notification' ? <Button disabled={submitting} onClick={() => clearProviderAuthEvent(flow.flowId)}>{t('pi.keepWaiting')}</Button> : null}
         </div>
       </div>
     </Dialog>

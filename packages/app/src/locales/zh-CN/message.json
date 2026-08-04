@@ -86,7 +86,8 @@
     "error": "Error",
     "stop": "Stop",
     "openSession": "打开会话",
-    "waitingForResponse": "等待响应..."
+    "waitingForResponse": "等待响应...",
+    "taskFailed": "任务失败"
   },
   "system": {
     "retryAttempt": "重试第 {{attempt}} 次",
@@ -119,5 +120,10 @@
     "apiErrorWithCode": "API 错误 ({{code}})",
     "unknownError": "错误",
     "unknownErrorDesc": "发生未知错误。"
+  },
+  "truncation": {
+    "linesShown": "已显示 {{count}} 行",
+    "outputTruncated": "输出已截断",
+    "fullOutput": "完整输出：{{path}}"
   }
 }

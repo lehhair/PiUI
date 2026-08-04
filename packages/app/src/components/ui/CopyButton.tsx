@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CopyIcon, CheckIcon } from '../Icons'
 import { clsx } from 'clsx'
 import { clipboardErrorHandler, copyTextToClipboard } from '../../utils'
@@ -12,6 +13,7 @@ interface CopyButtonProps {
 }
 
 export function CopyButton({ text, className, position = 'absolute', groupName }: CopyButtonProps) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -58,8 +60,8 @@ export function CopyButton({ text, className, position = 'absolute', groupName }
         position === 'absolute' && `absolute top-2 right-2 z-10 opacity-0 ${hoverClass}`,
         className,
       )}
-      title={copied ? 'Copied!' : 'Copy'}
-      aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+      title={copied ? t('copied') : t('copy')}
+      aria-label={copied ? t('copied') : t('copyToClipboard')}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
     </button>

@@ -299,11 +299,11 @@ export const FileExplorer = memo(function FileExplorer({
       setFileOperation(null)
       await refresh()
     } catch (operationError) {
-      setFileOperationError(operationError instanceof Error ? operationError.message : 'File operation failed')
+      setFileOperationError(operationError instanceof Error ? operationError.message : t('fileExplorer.operationFailed'))
     } finally {
       setFileOperationBusy(false)
     }
-  }, [directory, fileOperation, fileOperationBusy, fileOperationValue, panelTabId, position, previewFile?.path, refresh])
+  }, [directory, fileOperation, fileOperationBusy, fileOperationValue, panelTabId, position, previewFile?.path, refresh, t])
 
   useEffect(() => {
     if (!fileContextMenu) return
@@ -516,18 +516,18 @@ export const FileExplorer = memo(function FileExplorer({
           <button
             type="button"
             onClick={() => openFileOperation({ kind: 'create-file', parent: '' })}
-            aria-label="New file"
+            aria-label={t('fileExplorer.newFile')}
             className="inline-flex h-6 w-6 items-center justify-center text-text-400 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors"
-            title="New file"
+            title={t('fileExplorer.newFile')}
           >
             <FileIcon size={12} />
           </button>
           <button
             type="button"
             onClick={() => openFileOperation({ kind: 'create-directory', parent: '' })}
-            aria-label="New directory"
+            aria-label={t('fileExplorer.newDirectory')}
             className="relative inline-flex h-6 w-6 items-center justify-center text-text-400 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors"
-            title="New directory"
+            title={t('fileExplorer.newDirectory')}
           >
             <FolderIcon size={12} />
             <PlusIcon size={7} className="absolute right-0.5 bottom-0.5" />
@@ -603,13 +603,13 @@ export const FileExplorer = memo(function FileExplorer({
             ) : null}
             {fileContextMenu.type === 'directory' ? (
               <>
-                <button type="button" onClick={() => openFileOperation({ kind: 'create-file', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">New file</button>
-                <button type="button" onClick={() => openFileOperation({ kind: 'create-directory', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">New directory</button>
+                <button type="button" onClick={() => openFileOperation({ kind: 'create-file', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.newFile')}</button>
+                <button type="button" onClick={() => openFileOperation({ kind: 'create-directory', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.newDirectory')}</button>
               </>
             ) : null}
-            <button type="button" onClick={() => openFileOperation({ kind: 'rename', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">Rename</button>
+            <button type="button" onClick={() => openFileOperation({ kind: 'rename', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.rename')}</button>
             <button type="button" onClick={() => openFileOperation({ kind: 'delete', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-danger-100 hover:bg-danger-100/10 rounded-md flex items-center gap-2">
-              <TrashIcon size={12} />Delete
+              <TrashIcon size={12} />{t('common:delete')}
             </button>
           </div>,
           document.body,
@@ -618,12 +618,12 @@ export const FileExplorer = memo(function FileExplorer({
       <Dialog
         isOpen={fileOperation !== null}
         onClose={() => { if (!fileOperationBusy) setFileOperation(null) }}
-        title={fileOperation?.kind === 'delete' ? 'Delete entry' : fileOperation?.kind === 'rename' ? 'Rename entry' : fileOperation?.kind === 'create-directory' ? 'New directory' : 'New file'}
+        title={fileOperation?.kind === 'delete' ? t('fileExplorer.deleteEntry') : fileOperation?.kind === 'rename' ? t('fileExplorer.renameEntry') : fileOperation?.kind === 'create-directory' ? t('fileExplorer.newDirectory') : t('fileExplorer.newFile')}
         width={420}
       >
         <div className="space-y-3">
           {fileOperation?.kind === 'delete' ? (
-            <p className="text-[length:var(--fs-sm)] text-text-200 break-all">Delete {fileOperation.path}{fileOperation.type === 'directory' ? ' and all of its contents' : ''}?</p>
+            <p className="text-[length:var(--fs-sm)] text-text-200 break-all">{fileOperation.type === 'directory' ? t('fileExplorer.deleteConfirmDir', { path: fileOperation.path }) : t('fileExplorer.deleteConfirm', { path: fileOperation.path })}</p>
           ) : (
             <input
               autoFocus
@@ -631,13 +631,13 @@ export const FileExplorer = memo(function FileExplorer({
               onChange={event => setFileOperationValue(event.target.value)}
               onKeyDown={event => { if (event.key === 'Enter') void submitFileOperation() }}
               className="w-full h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100"
-              aria-label="File name"
+              aria-label={t('fileExplorer.fileName')}
             />
           )}
           {fileOperationError ? <p className="text-[length:var(--fs-xs)] text-danger-100">{fileOperationError}</p> : null}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setFileOperation(null)} disabled={fileOperationBusy}>Cancel</Button>
-            <Button variant={fileOperation?.kind === 'delete' ? 'danger' : 'primary'} size="sm" isLoading={fileOperationBusy} onClick={() => void submitFileOperation()}>{fileOperation?.kind === 'delete' ? 'Delete' : 'Apply'}</Button>
+            <Button variant="secondary" size="sm" onClick={() => setFileOperation(null)} disabled={fileOperationBusy}>{t('common:cancel')}</Button>
+            <Button variant={fileOperation?.kind === 'delete' ? 'danger' : 'primary'} size="sm" isLoading={fileOperationBusy} onClick={() => void submitFileOperation()}>{fileOperation?.kind === 'delete' ? t('common:delete') : t('fileExplorer.apply')}</Button>
           </div>
         </div>
       </Dialog>
@@ -1043,19 +1043,19 @@ function FilePreview({
       setIsEditing(false)
       setSaveConflict(false)
     } catch (saveFailure) {
-      setSaveError(saveFailure instanceof Error ? saveFailure.message : 'Failed to save file')
+      setSaveError(saveFailure instanceof Error ? saveFailure.message : t('fileExplorer.saveFailed'))
       setSaveConflict(Boolean(
         saveFailure && typeof saveFailure === 'object' && 'code' in saveFailure && saveFailure.code === 'STALE_REVISION',
       ))
     } finally {
       setIsSaving(false)
     }
-  }, [draft, editEtag, isSaving, onSave, path])
+  }, [draft, editEtag, isSaving, onSave, path, t])
   const originalText = content?.type === 'text'
     ? (content.encoding === 'base64' ? decodeBase64Text(content.content) : content.content)
     : ''
   const isDirty = isEditing && draft !== originalText
-  const confirmDiscard = useCallback(() => !isDirty || window.confirm('Discard unsaved changes?'), [isDirty])
+  const confirmDiscard = useCallback(() => !isDirty || window.confirm(t('fileExplorer.discardUnsaved')), [isDirty, t])
 
   useEffect(() => {
     setFileEditorDirty(editorId, isDirty)
@@ -1306,7 +1306,7 @@ function FilePreview({
                 <button
                   onClick={beginEditing}
                   className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
-                  title="Edit"
+                  title={t('common:edit')}
                 >
                   <PencilIcon size={12} />
                 </button>
@@ -1348,8 +1348,8 @@ function FilePreview({
                 <span>{saveError}</span>
                 {saveConflict ? (
                   <span className="flex gap-2 shrink-0">
-                    <button className="text-text-200 hover:text-text-100" onClick={() => { if (path) { setIsEditing(false); void onReload(path) } }}>Reload</button>
-                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>Overwrite</button>
+                    <button className="text-text-200 hover:text-text-100" onClick={() => { if (path) { setIsEditing(false); void onReload(path) } }}>{t('fileExplorer.reload')}</button>
+                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>{t('fileExplorer.overwrite')}</button>
                   </span>
                 ) : null}
               </div>

@@ -688,9 +688,9 @@ const AssistantMessageView = memo(function AssistantMessageView({
   // 消息级别错误（stopReason error/aborted）
   const messageError: MessageError | undefined =
     message.stopReason === 'error'
-      ? { name: 'UnknownError', data: { message: message.errorMessage ?? 'Unknown error' } }
+      ? { name: 'UnknownError', data: { message: message.errorMessage ?? t('errors.unknownErrorDesc') } }
       : message.stopReason === 'aborted'
-        ? { name: 'MessageAbortedError', data: { message: message.errorMessage ?? 'Aborted' } }
+        ? { name: 'MessageAbortedError', data: { message: message.errorMessage ?? t('errors.messageAborted') } }
         : undefined
 
   // agent / model（仅 assistant 消息）

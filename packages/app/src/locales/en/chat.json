@@ -8,7 +8,13 @@
     "closeBottomPanel": "Close bottom panel",
     "openBottomPanel": "Open bottom panel",
     "closePanel": "Close panel",
-    "openPanel": "Open panel"
+    "openPanel": "Open panel",
+    "fullscreenPane": "Fullscreen pane",
+    "exitFullscreenPane": "Exit fullscreen pane",
+    "splitPane": "Split pane",
+    "splitHorizontal": "Split horizontal",
+    "splitVertical": "Split vertical",
+    "closePane": "Close pane"
   },
   "chatArea": {
     "loadingSession": "Loading session...",
@@ -23,7 +29,8 @@
     "sessionLoadFailedDesc": "The server could not load this session right now. Please try again.",
     "sessionBusy": "Session is busy",
     "sessionBusyDesc": "Another Pi runtime is using this session. Close it or try again later.",
-    "backToHome": "Back to home"
+    "backToHome": "Back to home",
+    "openServerSettings": "Open server settings"
   },
   "emptyState": {
     "title": "Start a new conversation",
@@ -108,7 +115,9 @@
     "steer": "Current turn",
     "steerHint": "Add this message to the response currently being generated",
     "followUp": "Next turn",
-    "followUpHint": "Send this message as the next turn after the current response finishes"
+    "followUpHint": "Send this message as the next turn after the current response finishes",
+    "agentMenu": "Agent menu",
+    "variantMenu": "Variant menu"
   },
   "inputFooter": {
     "autoApproveOff": "Auto-approve: off",
@@ -188,7 +197,18 @@
     "completed": "Completed",
     "error": "Error",
     "permission": "Permission",
-    "question": "Question"
+    "question": "Question",
+    "compactCompleted": "Compact completed",
+    "compactSkipped": "Compact skipped",
+    "compactFailed": "Compact failed",
+    "nothingToCompact": "Nothing to compact",
+    "contextCompacted": "Context compacted"
+  },
+  "extensionUi": {
+    "theme": "theme",
+    "tools": "tools",
+    "toolsExpanded": "expanded",
+    "toolsCollapsed": "collapsed"
   },
   "contextDetails": {
     "context": "Context",

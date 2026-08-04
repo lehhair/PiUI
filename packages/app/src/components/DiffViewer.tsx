@@ -389,6 +389,7 @@ function CollapsedExpandButton({
   onExpand?: (direction: ExpandDirection) => void
   width?: number
 }) {
+  const { t } = useTranslation('components')
   const buttonWidth = width !== undefined && directions.length > 0 ? width / directions.length : undefined
 
   return (
@@ -404,7 +405,7 @@ function CollapsedExpandButton({
           data-expand-both={direction === 'both' ? '' : undefined}
           className="diff-separator-button"
           style={buttonWidth !== undefined ? { width: buttonWidth, minWidth: 0, flexBasis: buttonWidth } : undefined}
-          title={direction === 'up' ? 'Expand upward' : direction === 'down' ? 'Expand downward' : 'Expand hidden lines'}
+          title={direction === 'up' ? t('diffViewer.expandUpward') : direction === 'down' ? t('diffViewer.expandDownward') : t('diffViewer.expandHiddenLines')}
           onClick={() => onExpand?.(direction)}
         >
           <ExpandIcon type={direction} />

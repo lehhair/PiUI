@@ -16,6 +16,7 @@
   "skip": "跳过",
   "copy": "复制",
   "copied": "已复制!",
+  "copyToClipboard": "复制到剪贴板",
   "search": "搜索",
   "filter": "筛选",
   "clear": "清除",
@@ -66,5 +67,6 @@
   "upDownSelect": "↑↓ 选择",
   "enterRun": "↵ 执行",
   "enterConfirmShort": "↵ 确认",
-  "escCancel": "Esc 取消"
+  "escCancel": "Esc 取消",
+  "reload": "重新加载"
 }
