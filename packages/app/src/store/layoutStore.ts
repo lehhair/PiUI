@@ -606,10 +606,23 @@ export class LayoutStore {
   }
 
   /**
-   * 添加单例 tab（同一位置同类型只允许一个）
-   * 如果已存在则激活，否则创建新的
+   * 添加单例 tab（同一类型全局只允许一个）
+   * 已存在于其他位置时移动到目标位置，已存在于本位置时激活
    */
   private addSingletonTab(type: PanelTab['type'], position: PanelPosition, fixedId?: string): string {
+    if (fixedId) {
+      const existingAnywhere = this.state.panelTabs.find(t => t.id === fixedId)
+      if (existingAnywhere) {
+        if (existingAnywhere.position !== position) {
+          this.moveTab(existingAnywhere.id, position)
+        } else {
+          this.setActiveTab(position, existingAnywhere.id)
+          this.setPanelOpen(position, true)
+          this.notify()
+        }
+        return existingAnywhere.id
+      }
+    }
     const existing = this.state.panelTabs.find(t => t.type === type && t.position === position)
     if (existing) {
       this.setActiveTab(position, existing.id)
@@ -635,12 +648,12 @@ export class LayoutStore {
     return this.addTab({ type: 'changes', position })
   }
 
-  addSessionTreeTab() {
-    return this.addSingletonTab('session-tree', 'right', 'session-tree')
+  addSessionTreeTab(position: PanelPosition = 'right') {
+    return this.addSingletonTab('session-tree', position, 'session-tree')
   }
 
-  addSessionControlsTab() {
-    return this.addSingletonTab('session-controls', 'right', 'session-controls')
+  addSessionControlsTab(position: PanelPosition = 'right') {
+    return this.addSingletonTab('session-controls', position, 'session-controls')
   }
 
   // 添加 MCP 标签
@@ -691,7 +704,6 @@ export class LayoutStore {
   moveTab(tabId: string, toPosition: PanelPosition) {
     const tab = this.state.panelTabs.find(t => t.id === tabId)
     if (!tab || tab.position === toPosition) return
-    if (tab.type === 'session-tree' || tab.type === 'session-controls') return
 
     const fromPosition = tab.position
 

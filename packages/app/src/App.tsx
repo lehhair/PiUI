@@ -983,7 +983,7 @@ function App() {
                 </section>
               </div>
 
-              <BottomPanel directory={focusedDirectory} />
+              <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
             </>
           ) : (
             <>
@@ -1014,7 +1014,7 @@ function App() {
                     />
                   </div>
 
-                  <BottomPanel directory={focusedDirectory} />
+                  <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
                 </div>
 
                 <RightPanel

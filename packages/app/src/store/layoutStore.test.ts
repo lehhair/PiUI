@@ -52,7 +52,7 @@ describe('LayoutStore panel layout', () => {
     expect(restored.panelTabs.some(tab => tab.id === 'skill' && tab.position === 'bottom')).toBe(true)
   })
 
-  it('keeps session controls as a persisted right-panel singleton', () => {
+  it('keeps session controls as a persisted singleton across panel positions', () => {
     const store = new LayoutStore()
 
     const firstId = store.addSessionControlsTab()
@@ -63,8 +63,15 @@ describe('LayoutStore panel layout', () => {
     expect(firstId).toBe('session-controls')
     expect(secondId).toBe(firstId)
     expect(state.panelTabs.filter(tab => tab.type === 'session-controls')).toHaveLength(1)
-    expect(state.panelTabs.find(tab => tab.id === firstId)?.position).toBe('right')
-    expect(state.activeTabId.right).toBe(firstId)
+    expect(state.panelTabs.find(tab => tab.id === firstId)?.position).toBe('bottom')
+    expect(state.activeTabId.bottom).toBe(firstId)
+
+    // 从另一个面板再次添加时移动单例而不是重复创建
+    const thirdId = store.addSessionControlsTab('right')
+    expect(thirdId).toBe(firstId)
+    const after = store.getState()
+    expect(after.panelTabs.filter(tab => tab.type === 'session-controls')).toHaveLength(1)
+    expect(after.panelTabs.find(tab => tab.id === firstId)?.position).toBe('right')
 
     const restored = new LayoutStore().getState()
     expect(restored.panelTabs.find(tab => tab.id === firstId)).toMatchObject({
