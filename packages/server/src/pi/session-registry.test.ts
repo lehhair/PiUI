@@ -4,7 +4,9 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { SessionRuntimeRegistry } from "./session-registry.ts"
 
-test("SessionRuntimeRegistry coalesces concurrent opens for one session file", async () => {
+// 反斜杠变体归并是 Windows 路径语义；POSIX 上 \ 是合法文件名字符，两个
+// 键本来就不同，这个用例只在 win32 有意义
+test("SessionRuntimeRegistry coalesces concurrent opens for one session file", { skip: process.platform !== "win32" }, async () => {
   const registry = new SessionRuntimeRegistry()
   let calls = 0
   let release!: () => void
