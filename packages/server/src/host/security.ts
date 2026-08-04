@@ -8,7 +8,11 @@ export const MAX_PROMPT_BODY_BYTES = 24 * 1024 * 1024
 
 /** Browser clients must originate from a local PiUI/Vite page. */
 export function isAllowedLocalOrigin(origin: string | undefined): boolean {
-  return origin === undefined || LOCAL_ORIGIN.test(origin)
+  return origin === undefined || LOCAL_ORIGIN.test(origin) || isTauriOrigin(origin)
+}
+
+function isTauriOrigin(origin: string): boolean {
+  return origin === "tauri://localhost" || origin === "http://tauri.localhost" || origin === "https://tauri.localhost"
 }
 
 export function requestHasAllowedOrigin(req: IncomingMessage): boolean {

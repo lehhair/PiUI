@@ -718,6 +718,15 @@ export function applyUrlTokenParam(search: string, origin: string): boolean {
   return true
 }
 
+/** Tauri 桌面壳启动本地 server 后，把 Rust 读到的 token 接入现有 server store。 */
+export function applyLocalServerConfig(url: string, token: string): boolean {
+  if (!url || !token) return false
+  serverStore.updateServer(LOCAL_SERVER_ID, { token })
+  serverStore.setLocalServerRuntimeUrl(url)
+  serverStore.setActiveServer(LOCAL_SERVER_ID)
+  return true
+}
+
 function normalizeServerTimestamp(timestamp: unknown): number | null {
   if (typeof timestamp === 'number') {
     return Number.isFinite(timestamp) ? timestamp : null

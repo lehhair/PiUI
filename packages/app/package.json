@@ -21,6 +21,8 @@
     "check": "npm run format:check && npm run lint && npm run test:run && npm run build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "postinstall": "node scripts/copy-material-icons.mjs"
   },
   "dependencies": {

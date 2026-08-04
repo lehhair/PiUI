@@ -7,8 +7,8 @@ import { initOverlayScrollbars } from './lib/overlayScrollbar'
 import App from './App.tsx'
 import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contexts'
 import { themeStore } from './store/themeStore'
-import { applyUrlTokenParam } from './store/serverStore'
-import { isTauri } from './utils/tauri'
+import { applyLocalServerConfig, applyUrlTokenParam } from './store/serverStore'
+import { isTauri, isTauriMobile } from './utils/tauri'
 import { globalErrorHandler } from './utils/errorHandling'
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
@@ -103,6 +103,16 @@ function bootstrap() {
 }
 
 async function startApp() {
+  if (isNativeTauri && !isTauriMobile()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const config = await invoke<{ url: string; token: string }>('local_server_config')
+      applyLocalServerConfig(config.url, config.token)
+    } catch (error) {
+      console.warn('[PiUI] native shell could not connect to the bundled server', error)
+    }
+  }
+
   // Do not mount legacy OpenCode consumers before the PiUI backend decision.
   const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
   installPiBackendServerSwitch()
