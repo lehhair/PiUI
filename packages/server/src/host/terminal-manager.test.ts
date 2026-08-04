@@ -115,11 +115,11 @@ test("exited terminals replay buffered output and report the exit code", async (
   const manager = new TerminalManager()
   try {
     const created = await manager.create(root, { title: "replay" })
-    manager.write(root, created.id, process.platform === "win32" ? "echo replay-me\r\n" : "printf replay-me\\n")
+    // PTY 的回车提交在 macOS/Linux runner 上用 CR 更稳定；命令本身仍
+    // 输出 LF，Windows cmd 使用 CRLF。
+    manager.write(root, created.id, process.platform === "win32" ? "echo replay-me\r\n" : "printf replay-me\\n\r")
     await waitFor(() => manager.get(root, created.id).cursor > 0)
-    // Unix interactive shells are more reliable on CI when closed with EOF;
-    // Windows cmd needs the explicit exit command.
-    manager.write(root, created.id, process.platform === "win32" ? "exit\r\n" : "\u0004")
+    manager.write(root, created.id, process.platform === "win32" ? "exit\r\n" : "exit\r")
     await waitFor(() => manager.get(root, created.id).status === "exited")
     assert.equal(manager.issueConnectToken(root, created.id).token.length > 0, true)
 
