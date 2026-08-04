@@ -127,11 +127,33 @@ jobs:
         working-directory: packages/app
         run: npx tauri android build --apk --target ${{ matrix.target }}
 
-      - name: Collect Android artifact
+      - name: Sign Android APK
         shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          set -e
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/piui.keystore"
+          UNSIGNED=$(find packages/app/src-tauri/gen/android/app/build/outputs/apk -name '*unsigned*.apk' -type f | head -1)
+          if [ -z "$UNSIGNED" ]; then
+            echo "no unsigned APK found" >&2
+            find packages/app/src-tauri/gen/android/app/build/outputs/apk -type f >&2
+            exit 1
+          fi
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           mkdir -p release-artifacts
-          find packages/app/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -type f -exec cp {} release-artifacts/piui-android-${{ matrix.name }}.apk \;
+          ALIGNED="$RUNNER_TEMP/piui-aligned.apk"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/piui.keystore" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --out "release-artifacts/piui-android-${{ matrix.name }}.apk" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --print-certs "release-artifacts/piui-android-${{ matrix.name }}.apk"
+          rm -f "$RUNNER_TEMP/piui.keystore"
           ls -la release-artifacts
 
       - uses: actions/upload-artifact@v7
