@@ -142,7 +142,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const changeOptions = useMemo<ChangeMode[]>(() => {
     const options: ChangeMode[] = []
     if (vcsInfo) options.push('git')
-    if (vcsInfo?.branch && !vcsInfo?.unborn) {
+    // 分支对比需要基准：默认分支或 upstream，两者都没有时服务端只能 409
+    if (vcsInfo?.branch && !vcsInfo?.unborn && (vcsInfo.upstream ?? vcsInfo.defaultBranch)) {
       options.push('branch')
     }
     if (vcsInfo) options.push('staged', 'unstaged')
@@ -158,7 +159,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       },
       branch: {
         label: t('sessionChanges.branchScope'),
-        description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.defaultBranch ?? 'main' }),
+        description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.defaultBranch ?? vcsInfo?.upstream ?? 'main' }),
         icon: <GitBranchIcon size={12} />,
       },
       staged: {
@@ -172,7 +173,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         icon: <GitDiffIcon size={12} />,
       },
     }),
-    [t, vcsInfo?.defaultBranch],
+    [t, vcsInfo?.defaultBranch, vcsInfo?.upstream],
   )
   const diffs = useMemo(
     () =>
@@ -388,6 +389,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         setLoadedModes(prev => ({ ...prev, [mode]: true }))
       } catch (err) {
         if (requestId !== diffRequestIdRef.current[mode]) return
+        // 分支对比没有基准（无 upstream/默认分支）：不是故障，按空差异处理
+        if (mode === 'branch' && (err as { code?: string }).code === 'GIT_BASE_NOT_FOUND') {
+          setBranchDiffs([])
+          setLoadedModes(prev => ({ ...prev, branch: true }))
+          return
+        }
         sessionErrorHandler(`load ${mode} diff`, err)
         setError(t('sessionChanges.failedToLoad'))
       } finally {
