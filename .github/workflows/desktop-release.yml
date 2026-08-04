@@ -1,0 +1,156 @@
+name: Desktop And Mobile Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, target: bun-windows-x64 }
+          - { name: macos-arm64, os: macos-latest, target: bun-darwin-arm64 }
+          - { name: linux-x64, os: ubuntu-24.04, target: bun-linux-x64 }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Drop Windows-only patch on Unix
+        if: runner.os != 'Windows'
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Build bundled PiUI server
+        run: node scripts/package-desktop.mjs --skip-build --target ${{ matrix.target }}
+
+      - name: Prepare Tauri resources
+        run: node scripts/prepare-tauri-resources.mjs
+
+      - name: Build Tauri desktop bundle
+        run: npm run tauri:build -w @piui/app
+
+      - name: Collect desktop artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            find packages/app/src-tauri/target/release/bundle/nsis -name '*.exe' -exec cp {} release-artifacts/ \;
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            find packages/app/src-tauri/target/release/bundle/dmg -name '*.dmg' -exec cp {} release-artifacts/ \;
+          else
+            find packages/app/src-tauri/target/release/bundle/deb -name '*.deb' -exec cp {} release-artifacts/ \;
+            find packages/app/src-tauri/target/release/bundle/appimage -name '*.AppImage' -exec cp {} release-artifacts/ \;
+          fi
+          ls -la release-artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piui-desktop-${{ matrix.name }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  android:
+    name: android ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: arm64, target: aarch64, rust-target: aarch64-linux-android }
+          - { name: armv7, target: armv7, rust-target: armv7-linux-androideabi }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Drop Windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;29.0.14206865"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/prepare-tauri-mobile-resources.mjs
+
+      - name: Initialize Android project
+        working-directory: packages/app
+        run: npx tauri android init
+
+      - name: Build Android APK
+        working-directory: packages/app
+        run: npx tauri android build --apk --target ${{ matrix.target }}
+
+      - name: Collect Android artifact
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          find packages/app/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -type f -exec cp {} release-artifacts/piui-android-${{ matrix.name }}.apk \;
+          ls -la release-artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piui-android-${{ matrix.name }}
+          path: release-artifacts/*.apk
+          if-no-files-found: error
+
+  publish:
+    name: publish desktop and Android assets
+    needs: [desktop, android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: piui-*
+          path: release-assets
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**
+          generate_release_notes: false

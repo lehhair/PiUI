@@ -21,7 +21,8 @@
     "typecheck": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run typecheck -w @piui/server && npm run typecheck -w @piui/app",
     "lint": "npm run lint -w @piui/app",
     "validate": "npm run typecheck && npm run lint && npm test && npm run build",
-    "package:desktop": "node scripts/package-desktop.mjs"
+    "package:desktop": "node scripts/package-desktop.mjs",
+    "prepare:tauri-resources": "node scripts/prepare-tauri-resources.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

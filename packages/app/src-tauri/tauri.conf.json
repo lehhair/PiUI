@@ -1,0 +1,51 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "PiUI",
+  "version": "0.1.0",
+  "identifier": "com.piui.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "PiUI",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 520,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 12,
+          "y": 14
+        },
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "notification": null
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "deb"],
+    "resources": ["resources/piui-server", "resources/piui-server.exe", "resources/piui-runtime.zip", "resources/piui-runtime.version"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsi"
+      }
+    }
+  }
+}
