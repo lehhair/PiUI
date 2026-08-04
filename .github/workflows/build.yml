@@ -21,9 +21,9 @@ jobs:
           - { name: macos-arm64, os: macos-latest, target: bun-darwin-arm64 }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -53,7 +53,7 @@ jobs:
             tar -czf "../piui-${{ matrix.name }}.tar.gz" .
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: piui-${{ matrix.name }}
           path: |
@@ -67,7 +67,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: piui-*
           merge-multiple: true
