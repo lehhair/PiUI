@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import i18n from '../i18n'
 import type { UiSession } from '../types/session'
 import { loadPiSessions, loadPiSessionsForCwd, openPiSession, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
@@ -112,7 +113,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const session: UiSession = {
       id: opened.sessionId,
       directory,
-      title: title?.trim() || 'New chat',
+      title: title?.trim() || i18n.t('chat:sidebar.newChat'),
       createdAt: now,
       updatedAt: now,
     }

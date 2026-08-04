@@ -65,6 +65,8 @@ describe('PiManagementSettings', () => {
       theme: 'light',
       httpProxy: 'http://127.0.0.1:7890',
     })))
+
+    fireEvent.click(screen.getByText('All effective settings and advanced patch'))
     expect(screen.getByText('Global scope')).toBeInTheDocument()
     expect(screen.getByText('Project scope')).toBeInTheDocument()
     expect(screen.getByText('Effective settings')).toBeInTheDocument()

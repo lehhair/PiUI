@@ -162,13 +162,13 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         icon: <GitBranchIcon size={12} />,
       },
       staged: {
-        label: 'Staged',
-        description: 'Changes currently staged in the Git index',
+        label: t('sessionChanges.stagedScope'),
+        description: t('sessionChanges.stagedScopeHint'),
         icon: <GitDiffIcon size={12} />,
       },
       unstaged: {
-        label: 'Unstaged',
-        description: 'Working tree changes not staged in the Git index',
+        label: t('sessionChanges.unstagedScope'),
+        description: t('sessionChanges.unstagedScopeHint'),
         icon: <GitDiffIcon size={12} />,
       },
     }),
@@ -992,14 +992,14 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
   onClose,
 }: DiffPreviewPanelProps) {
   const language = detectLanguage(diff.file) || 'text'
+  const { t } = useTranslation(['components', 'common'])
   // 优先用 patch 提取 before/after，回退到直接的 before/after 字段（旧版后端兼容）
   const { before, after } = useMemo(() => {
-    if (diff.binary) return { before: '', after: 'Binary file changed' }
+    if (diff.binary) return { before: '', after: t('sessionChanges.binaryFileChanged') }
     if (diff.patch) return extractContentFromUnifiedDiff(diff.patch)
     return { before: '', after: '' }
-  }, [diff.binary, diff.patch])
+  }, [diff.binary, diff.patch, t])
   const diffViewerData = useDiffViewerData(before, after, language, isResizing)
-  const { t } = useTranslation(['components', 'common'])
   const [fullscreenViewMode, setFullscreenViewMode] = useState<ViewMode>(viewMode)
   const fileName = diff.file.split(/[/\\]/).pop() || diff.file
   const fullscreenLayer = useMemo(

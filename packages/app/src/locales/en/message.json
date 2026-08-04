@@ -110,7 +110,8 @@
     "error": "Error",
     "stop": "Stop",
     "openSession": "Open session",
-    "waitingForResponse": "Waiting for response..."
+    "waitingForResponse": "Waiting for response...",
+    "taskFailed": "Task failed"
   },
   "system": {
     "retryAttempt": "Retry attempt {{attempt}}",
@@ -143,5 +144,10 @@
     "apiErrorWithCode": "API Error ({{code}})",
     "unknownError": "Error",
     "unknownErrorDesc": "An unknown error occurred."
+  },
+  "truncation": {
+    "linesShown": "{{count}} lines shown",
+    "outputTruncated": "Output truncated",
+    "fullOutput": "Full output: {{path}}"
   }
 }

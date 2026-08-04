@@ -246,7 +246,7 @@ export function Header({
         <div className="flex items-center gap-0.5">
           {onTogglePaneFullscreen && (
             <IconButton
-              aria-label={isPaneFullscreen ? 'Exit fullscreen pane' : 'Fullscreen pane'}
+              aria-label={isPaneFullscreen ? t('header.exitFullscreenPane') : t('header.fullscreenPane')}
               onClick={onTogglePaneFullscreen}
               className={`transition-colors ${
                 isPaneFullscreen
@@ -260,7 +260,7 @@ export function Header({
 
           {onSplitPane && (
             <IconButton
-              aria-label="Split pane"
+              aria-label={t('header.splitPane')}
               onClick={onSplitPane}
               className="transition-colors text-text-300 hover:text-text-100 hover:bg-bg-200/50"
             >

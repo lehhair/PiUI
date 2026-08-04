@@ -1,5 +1,8 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import type React from 'react'
+import { DropdownMenu } from '../../../components/ui/DropdownMenu'
+import { MenuItem } from '../../../components/ui/MenuItem'
+import { ChevronDownIcon } from '../../../components/Icons'
 
 const SettingLabelContext = createContext<string | undefined>(undefined)
 
@@ -8,6 +11,180 @@ export const settingsFieldClass =
 
 export const settingsFieldAreaClass =
   'min-w-0 w-full px-2.5 py-2 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
+
+/**
+ * Settings select — 设计系统下拉框（非原生 <select>）。
+ * trigger 与 settingsFieldClass 同款外观，弹出层走 DropdownMenu + MenuItem，
+ * 支持 ↑↓ 键盘导航、Esc 关闭、点击外部关闭。
+ */
+export interface SettingsSelectOption<T extends string = string> {
+  value: T
+  label: string
+}
+
+export function SettingsSelect<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  disabled,
+  className,
+}: {
+  value: T | undefined
+  options: SettingsSelectOption<T>[]
+  onChange: (value: T) => void
+  ariaLabel?: string
+  disabled?: boolean
+  className?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [menuWidth, setMenuWidth] = useState<number | undefined>(undefined)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const listboxId = useId()
+
+  const selected = options.find(option => option.value === value)
+
+  // 点击外部关闭
+  useEffect(() => {
+    if (!isOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setIsOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [isOpen])
+
+  const open = () => {
+    if (disabled) return
+    setMenuWidth(triggerRef.current?.offsetWidth)
+    setIsOpen(true)
+  }
+
+  const select = (next: T) => {
+    onChange(next)
+    setIsOpen(false)
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? listboxId : undefined}
+        aria-label={ariaLabel}
+        onClick={() => (isOpen ? setIsOpen(false) : open())}
+        onKeyDown={event => {
+          if (event.key === 'Escape' && isOpen) {
+            event.preventDefault()
+            event.stopPropagation()
+            setIsOpen(false)
+          }
+        }}
+        className={`${settingsFieldClass} flex items-center justify-between gap-2 text-left ${disabled ? 'opacity-55 cursor-not-allowed' : ''} ${className ?? ''}`}
+      >
+        <span className={`truncate ${selected ? '' : 'text-text-400'}`}>{selected?.label ?? value ?? ''}</span>
+        <ChevronDownIcon size={14} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      <DropdownMenu triggerRef={triggerRef} isOpen={isOpen} position="bottom" align="left" width={menuWidth} zIndex={400}>
+        <div
+          id={listboxId}
+          ref={menuRef}
+          role="listbox"
+          aria-label={ariaLabel}
+          className="p-1 max-h-64 overflow-y-auto custom-scrollbar"
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              setIsOpen(false)
+              triggerRef.current?.focus()
+              return
+            }
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+            event.preventDefault()
+            const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])
+            const index = items.indexOf(document.activeElement as HTMLElement)
+            const direction = event.key === 'ArrowDown' ? 1 : -1
+            items[(index + direction + items.length) % items.length]?.focus()
+          }}
+        >
+          {options.map(option => (
+            <MenuItem
+              key={option.value}
+              label={option.label}
+              selected={option.value === value}
+              selectionRole="option"
+              onClick={() => select(option.value)}
+            />
+          ))}
+        </div>
+      </DropdownMenu>
+    </>
+  )
+}
+
+/**
+ * Settings disclosure — 折叠块，替代原生 <details>。
+ * chevron 旋转 + 网格行高动画。
+ * 内容懒挂载：首次展开前不渲染子树（大块 JSON 高亮不会在页面加载时白跑），
+ * 展开过一次后保持挂载，折叠不丢内部状态。
+ */
+export function SettingsDisclosure({
+  title,
+  count,
+  defaultOpen = false,
+  className,
+  children,
+}: {
+  title: React.ReactNode
+  count?: number
+  defaultOpen?: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+  // 展开过一次就保持挂载
+  const [hasOpened, setHasOpened] = useState(defaultOpen)
+  const panelId = useId()
+
+  const toggle = () => {
+    setIsOpen(value => {
+      if (!value) setHasOpened(true)
+      return !value
+    })
+  }
+
+  return (
+    <div className={className ?? ''}>
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={toggle}
+        className="group flex items-center gap-1.5 text-[length:var(--fs-xs)] text-text-300 transition-colors hover:text-text-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent-main-100 rounded"
+      >
+        <ChevronDownIcon size={13} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`} />
+        <span>{title}</span>
+        {count !== undefined && <span className="text-text-500">({count})</span>}
+      </button>
+      <div
+        id={panelId}
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+      >
+        <div className="overflow-hidden">
+          {hasOpened ? <div className="pt-2">{children}</div> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ============================================
 // Shared Settings UI Primitives

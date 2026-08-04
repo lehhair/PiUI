@@ -20,7 +20,21 @@
     "oneToOne": "1:1",
     "revealInExplorer": "在资源管理器中显示",
     "revealInFinder": "在 Finder 中显示",
-    "revealInFileManager": "在文件管理器中显示"
+    "revealInFileManager": "在文件管理器中显示",
+    "newFile": "新建文件",
+    "newDirectory": "新建文件夹",
+    "rename": "重命名",
+    "deleteEntry": "删除条目",
+    "renameEntry": "重命名条目",
+    "deleteConfirm": "删除 {{path}}？",
+    "deleteConfirmDir": "删除 {{path}} 及其全部内容？",
+    "fileName": "文件名",
+    "apply": "应用",
+    "operationFailed": "文件操作失败",
+    "saveFailed": "保存文件失败",
+    "discardUnsaved": "放弃未保存的修改？",
+    "reload": "重新加载",
+    "overwrite": "覆盖"
   },
   "terminal": {
     "terminal": "终端",
@@ -33,7 +47,10 @@
   },
   "diffViewer": {
     "noChanges": "无变更",
-    "linesUnchanged": "{{count}} 行未修改"
+    "linesUnchanged": "{{count}} 行未修改",
+    "expandUpward": "向上展开",
+    "expandDownward": "向下展开",
+    "expandHiddenLines": "展开隐藏行"
   },
   "rightPanel": {
     "loadingPanel": "加载面板中...",
@@ -182,7 +199,12 @@
     "treeView": "树形视图",
     "unified": "统一",
     "split": "分栏",
-    "openInFiles": "在文件中打开"
+    "openInFiles": "在文件中打开",
+    "stagedScope": "已暂存",
+    "stagedScopeHint": "当前已暂存到 Git 索引的更改",
+    "unstagedScope": "未暂存",
+    "unstagedScopeHint": "尚未暂存到 Git 索引的工作区更改",
+    "binaryFileChanged": "二进制文件已更改"
   },
   "mcpPanel": {
     "title": "MCP 服务器",
@@ -264,9 +286,37 @@
   },
   "contentBlock": {
     "fullscreen": "全屏",
-    "exitCode": "exit {{code}}"
+    "exitCode": "exit {{code}}",
+    "exitFullscreen": "退出全屏",
+    "clickToCopy": "点击复制",
+    "clickToCopyWithPath": "点击复制：{{path}}"
   },
   "diffView": {
     "fullscreenView": "全屏查看"
+  },
+  "errorBoundary": {
+    "title": "Pi 遇到了问题",
+    "fallbackMessage": "聊天视图无法渲染这条响应。",
+    "openServerSettings": "打开服务器设置",
+    "tryAgain": "重试",
+    "reload": "重新加载"
+  },
+  "markdown": {
+    "mermaidRenderFailed": "Mermaid 渲染失败",
+    "mermaidRenderError": "无法渲染 Mermaid 图表",
+    "renderingDiagram": "正在渲染图表",
+    "disableDiagramPan": "禁用图表拖动",
+    "enableDiagramPan": "启用图表拖动",
+    "zoomOut": "缩小",
+    "zoomOutDiagram": "缩小图表",
+    "zoomIn": "放大",
+    "zoomInDiagram": "放大图表",
+    "resetView": "重置视图",
+    "resetDiagramView": "重置图表视图",
+    "mermaidDiagram": "Mermaid 图表",
+    "viewHtmlSource": "查看 HTML 源码",
+    "previewHtml": "预览 HTML",
+    "htmlPreview": "HTML 预览",
+    "renderHtml": "渲染 HTML"
   }
 }

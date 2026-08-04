@@ -147,7 +147,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
                 placeholder={request.placeholder}
                 disabled={submitting}
                 autoFocus
-                className="h-9 w-full rounded-md border border-border-200 bg-bg-100 px-3 text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-000"
+                className="h-9 w-full rounded-md border border-border-200 bg-bg-100 px-3 text-[length:var(--fs-sm)] text-text-100 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
               />
             )}
 
@@ -158,7 +158,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
                 disabled={submitting}
                 rows={8}
                 autoFocus
-                className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-3 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none focus:border-accent-main-000"
+                className="w-full resize-y rounded-md border border-border-200 bg-bg-100 p-3 font-mono text-[length:var(--fs-sm)] text-text-100 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30"
               />
             )}
 

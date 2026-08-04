@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import i18n from '../i18n'
 import { globalErrorHandler } from '../utils/errorHandling'
 
 interface ErrorBoundaryProps {
@@ -28,9 +29,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       <div className="h-full min-h-0 overflow-y-auto bg-bg-000 px-5 pb-40 pt-24 text-text-100">
         <div className="mx-auto max-w-2xl space-y-3">
           <div className="rounded-2xl border border-danger-100/25 bg-danger-bg/60 p-4 shadow-sm">
-            <div className="mb-2 text-[length:var(--fs-lg)] font-semibold text-danger-100">Pi ran into a problem</div>
+            <div className="mb-2 text-[length:var(--fs-lg)] font-semibold text-danger-100">{i18n.t('components:errorBoundary.title')}</div>
             <div className="text-[length:var(--fs-sm)] leading-relaxed text-text-200">
-              {this.state.error.message || 'The chat view could not render this response.'}
+              {this.state.error.message || i18n.t('components:errorBoundary.fallbackMessage')}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -38,9 +39,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               <button
                 type="button"
                 onClick={this.props.onOpenSettings}
-                className="rounded-lg bg-accent-main-100 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-white hover:bg-accent-main-200"
+                className="rounded-lg bg-accent-main-000 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-oncolor-100 hover:bg-accent-main-100"
               >
-                Open server settings
+                {i18n.t('components:errorBoundary.openServerSettings')}
               </button>
             )}
             <button
@@ -48,14 +49,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               onClick={() => this.setState({ error: null })}
               className="rounded-lg border border-border-200 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-200 hover:bg-bg-200"
             >
-              Try again
+              {i18n.t('components:errorBoundary.tryAgain')}
             </button>
             <button
               type="button"
               onClick={() => window.location.reload()}
               className="rounded-lg border border-border-200 px-3 py-2 text-[length:var(--fs-sm)] font-medium text-text-200 hover:bg-bg-200"
             >
-              Reload
+              {i18n.t('components:errorBoundary.reload')}
             </button>
           </div>
         </div>

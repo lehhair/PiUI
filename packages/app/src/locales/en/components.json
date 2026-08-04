@@ -20,7 +20,21 @@
     "oneToOne": "1:1",
     "revealInExplorer": "Reveal in File Explorer",
     "revealInFinder": "Reveal in Finder",
-    "revealInFileManager": "Reveal in File Manager"
+    "revealInFileManager": "Reveal in File Manager",
+    "newFile": "New file",
+    "newDirectory": "New directory",
+    "rename": "Rename",
+    "deleteEntry": "Delete entry",
+    "renameEntry": "Rename entry",
+    "deleteConfirm": "Delete {{path}}?",
+    "deleteConfirmDir": "Delete {{path}} and all of its contents?",
+    "fileName": "File name",
+    "apply": "Apply",
+    "operationFailed": "File operation failed",
+    "saveFailed": "Failed to save file",
+    "discardUnsaved": "Discard unsaved changes?",
+    "reload": "Reload",
+    "overwrite": "Overwrite"
   },
   "terminal": {
     "terminal": "Terminal",
@@ -33,7 +47,10 @@
   },
   "diffViewer": {
     "noChanges": "No changes",
-    "linesUnchanged": "{{count}} lines unchanged"
+    "linesUnchanged": "{{count}} lines unchanged",
+    "expandUpward": "Expand upward",
+    "expandDownward": "Expand downward",
+    "expandHiddenLines": "Expand hidden lines"
   },
   "rightPanel": {
     "loadingPanel": "Loading panel...",
@@ -183,7 +200,12 @@
     "treeView": "Tree view",
     "unified": "Unified",
     "split": "Split",
-    "openInFiles": "Open in Files"
+    "openInFiles": "Open in Files",
+    "stagedScope": "Staged",
+    "stagedScopeHint": "Changes currently staged in the Git index",
+    "unstagedScope": "Unstaged",
+    "unstagedScopeHint": "Working tree changes not staged in the Git index",
+    "binaryFileChanged": "Binary file changed"
   },
   "mcpPanel": {
     "title": "MCP Servers",
@@ -267,9 +289,37 @@
   },
   "contentBlock": {
     "fullscreen": "Fullscreen",
-    "exitCode": "exit {{code}}"
+    "exitCode": "exit {{code}}",
+    "exitFullscreen": "Exit fullscreen",
+    "clickToCopy": "Click to copy",
+    "clickToCopyWithPath": "Click to copy: {{path}}"
   },
   "diffView": {
     "fullscreenView": "Fullscreen"
+  },
+  "errorBoundary": {
+    "title": "Pi ran into a problem",
+    "fallbackMessage": "The chat view could not render this response.",
+    "openServerSettings": "Open server settings",
+    "tryAgain": "Try again",
+    "reload": "Reload"
+  },
+  "markdown": {
+    "mermaidRenderFailed": "Mermaid render failed",
+    "mermaidRenderError": "Failed to render Mermaid diagram",
+    "renderingDiagram": "Rendering diagram",
+    "disableDiagramPan": "Disable diagram pan",
+    "enableDiagramPan": "Enable diagram pan",
+    "zoomOut": "Zoom out",
+    "zoomOutDiagram": "Zoom out diagram",
+    "zoomIn": "Zoom in",
+    "zoomInDiagram": "Zoom in diagram",
+    "resetView": "Reset view",
+    "resetDiagramView": "Reset diagram view",
+    "mermaidDiagram": "Mermaid diagram",
+    "viewHtmlSource": "View HTML source",
+    "previewHtml": "Preview HTML",
+    "htmlPreview": "HTML preview",
+    "renderHtml": "Render HTML"
   }
 }

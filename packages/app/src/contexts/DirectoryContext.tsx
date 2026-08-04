@@ -3,6 +3,7 @@
 // ============================================
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import i18n from '../i18n'
 import { useRouter } from '../hooks/useRouter'
 import { normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStorage } from '../utils'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
@@ -72,7 +73,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 设置当前目录（更新 URL + 记录最近使用）
   const setCurrentDirectory = useCallback(
     (directory: string | undefined) => {
-      if (directory !== urlDirectory && hasUnsavedFileChanges() && !window.confirm('Discard unsaved file changes?')) return
+      if (directory !== urlDirectory && hasUnsavedFileChanges() && !window.confirm(i18n.t('components:fileExplorer.discardUnsaved'))) return
       setUrlDirectory(directory)
       if (directory) {
         setRecentProjects(prev => ({ ...prev, [directory]: Date.now() }))

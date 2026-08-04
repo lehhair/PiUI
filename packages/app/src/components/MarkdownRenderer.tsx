@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react'
 import morphdom from 'morphdom'
+import { useTranslation } from 'react-i18next'
 import { CodeBlock } from './CodeBlock'
 import { CodeIcon, EyeIcon, HandIcon, RetryIcon, ZoomInIcon, ZoomOutIcon } from './Icons'
 import { CopyButton } from './ui'
@@ -257,6 +258,7 @@ function getOrderedListPadding(start: number, itemCount: number): string {
 // ─── Mermaid ────────────────────────────────────────────────────
 
 const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { code: string; isIncomplete?: boolean }) {
+  const { t } = useTranslation('components')
   const { resolvedTheme } = useTheme()
   const mermaidTheme = resolvedTheme === 'dark' ? 'dark' : 'default'
   const { hasCoarsePointer, hasTouch, preferTouchUi } = useInputCapabilities()
@@ -426,7 +428,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
         }
         if (!cancelled) {
           setSvg('')
-          setError(err instanceof Error ? err.message : 'Failed to render Mermaid diagram')
+          setError(err instanceof Error ? err.message : t('markdown.mermaidRenderError'))
         }
       }
     }
@@ -436,7 +438,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
     return () => {
       cancelled = true
     }
-  }, [code, isIncomplete, mermaidTheme, renderPrefix, resetView])
+  }, [code, isIncomplete, mermaidTheme, renderPrefix, resetView, t])
 
   if (isIncomplete) {
     return <CodeBlock code={code} language="mermaid" deferHighlight />
@@ -445,7 +447,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
   if (error) {
     return (
       <div className="my-4 first:mt-0 last:mb-0 rounded-md border border-danger-100/30 bg-danger-bg/40 p-3">
-        <p className="mb-2 text-[length:var(--fs-sm)] font-medium text-danger-100">Mermaid render failed</p>
+        <p className="mb-2 text-[length:var(--fs-sm)] font-medium text-danger-100">{t('markdown.mermaidRenderFailed')}</p>
         <CodeBlock code={code} language="mermaid" />
       </div>
     )
@@ -455,7 +457,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
     return (
       <div
         className="my-4 first:mt-0 last:mb-0 flex min-h-40 items-center justify-center"
-        aria-label="Rendering diagram"
+        aria-label={t('markdown.renderingDiagram')}
       >
         <span className="h-4 w-4 animate-spin rounded-full border-2 border-text-400/25 border-t-text-400" />
       </div>
@@ -479,8 +481,8 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
             type="button"
             className={`${MERMAID_CONTROL_BUTTON_CLASS} ${isTouchPanEnabled ? 'ring-1 ring-accent-main-100/60 !text-accent-main-100' : ''}`}
             onClick={() => setIsTouchPanEnabled(current => !current)}
-            title={isTouchPanEnabled ? 'Disable diagram pan' : 'Enable diagram pan'}
-            aria-label={isTouchPanEnabled ? 'Disable diagram pan' : 'Enable diagram pan'}
+            title={isTouchPanEnabled ? t('markdown.disableDiagramPan') : t('markdown.enableDiagramPan')}
+            aria-label={isTouchPanEnabled ? t('markdown.disableDiagramPan') : t('markdown.enableDiagramPan')}
             aria-pressed={isTouchPanEnabled}
           >
             <HandIcon />
@@ -493,8 +495,8 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
               className={MERMAID_CONTROL_BUTTON_CLASS}
               onClick={() => zoomBy(-MERMAID_SCALE_STEP)}
               disabled={scale <= MERMAID_MIN_SCALE}
-              title="Zoom out"
-              aria-label="Zoom out diagram"
+              title={t('markdown.zoomOut')}
+              aria-label={t('markdown.zoomOutDiagram')}
             >
               <ZoomOutIcon />
             </button>
@@ -503,8 +505,8 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
               className={MERMAID_CONTROL_BUTTON_CLASS}
               onClick={() => zoomBy(MERMAID_SCALE_STEP)}
               disabled={scale >= MERMAID_MAX_SCALE}
-              title="Zoom in"
-              aria-label="Zoom in diagram"
+              title={t('markdown.zoomIn')}
+              aria-label={t('markdown.zoomInDiagram')}
             >
               <ZoomInIcon />
             </button>
@@ -514,8 +516,8 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
           type="button"
           className={MERMAID_CONTROL_BUTTON_CLASS}
           onClick={resetView}
-          title="Reset view"
-          aria-label="Reset diagram view"
+          title={t('markdown.resetView')}
+          aria-label={t('markdown.resetDiagramView')}
         >
           <RetryIcon />
         </button>
@@ -523,7 +525,7 @@ const MarkdownMermaid = memo(function MarkdownMermaid({ code, isIncomplete }: { 
       <div
         className={`mermaid-diagram min-h-40 min-w-fit select-none overflow-hidden p-1 [&_svg]:max-w-full [&_svg]:h-auto ${supportsTouchGestures && !isTouchPanEnabled ? 'cursor-default touch-pan-y' : 'cursor-grab touch-none active:cursor-grabbing'}`}
         role="img"
-        aria-label="Mermaid diagram"
+        aria-label={t('markdown.mermaidDiagram')}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
@@ -1031,6 +1033,7 @@ function HtmlPreviewSurface({
   surfaceRef?: React.RefObject<HTMLDivElement | null>
   style?: React.CSSProperties
 }) {
+  const { t } = useTranslation('components')
   const { preferTouchUi } = useInputCapabilities()
 
   const handleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -1055,8 +1058,8 @@ function HtmlPreviewSurface({
         type="button"
         onClick={onViewSource}
         className={`${HTML_SOURCE_BUTTON_CLASS} ${preferTouchUi && !forceTouchControlsVisible ? '[@media(hover:none)]:opacity-0' : '[@media(hover:none)]:opacity-100'}`}
-        title="View HTML source"
-        aria-label="View HTML source"
+        title={t('markdown.viewHtmlSource')}
+        aria-label={t('markdown.viewHtmlSource')}
       >
         <CodeIcon />
       </button>
@@ -1076,6 +1079,7 @@ function MarkdownHtmlArtifact({
   isIncomplete?: boolean
   language?: string
 }) {
+  const { t } = useTranslation('components')
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [contentHeight, setContentHeight] = useState(120)
   const [contentWidth, setContentWidth] = useState<number | null>(null)
@@ -1189,8 +1193,8 @@ function MarkdownHtmlArtifact({
             type="button"
             onClick={() => setView('preview')}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md p-2 text-text-400 transition-colors hover:bg-bg-300/60 hover:text-text-200"
-            title="Preview HTML"
-            aria-label="Preview HTML"
+            title={t('markdown.previewHtml')}
+            aria-label={t('markdown.previewHtml')}
           >
             <EyeIcon />
           </button>
@@ -1219,7 +1223,7 @@ function MarkdownHtmlArtifact({
           {usesStreamBridge && !canonicalReady && (
             <iframe
               ref={streamFrameRef}
-              title="HTML preview"
+              title={t('markdown.htmlPreview')}
               sandbox="allow-scripts"
               referrerPolicy="no-referrer"
               srcDoc={streamSrcDoc}
@@ -1234,7 +1238,7 @@ function MarkdownHtmlArtifact({
           {showCanonical && (
             <iframe
               ref={canonicalFrameRef}
-              title="HTML preview"
+              title={t('markdown.htmlPreview')}
               sandbox="allow-scripts"
               referrerPolicy="no-referrer"
               srcDoc={canonicalSrcDoc}
@@ -1417,6 +1421,7 @@ function MarkdownHtmlIsland({
   isReasoning: boolean
   isLive: boolean
 }) {
+  const { t } = useTranslation('components')
   const [showSource, setShowSource] = useState(false)
   if (showSource) {
     return (
@@ -1431,8 +1436,8 @@ function MarkdownHtmlIsland({
             type="button"
             onClick={() => setShowSource(false)}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md p-2 text-text-400 transition-colors hover:bg-bg-300/60 hover:text-text-200"
-            title="Render HTML"
-            aria-label="Render HTML"
+            title={t('markdown.renderHtml')}
+            aria-label={t('markdown.renderHtml')}
           >
             <EyeIcon />
           </button>

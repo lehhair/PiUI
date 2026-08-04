@@ -204,12 +204,12 @@ export function PaneHeader({
           {paneCount > 1 && (
             <IconButton
               size="sm"
-              aria-label="Close pane"
+              aria-label={t('header.closePane')}
               onClick={e => {
                 e.stopPropagation()
                 handleClose()
               }}
-              className="text-text-300 hover:text-red-400 hover:bg-bg-200/50"
+              className="text-text-300 hover:text-danger-100 hover:bg-bg-200/50"
             >
               <CloseIcon size={14} />
             </IconButton>
@@ -218,7 +218,7 @@ export function PaneHeader({
           {isFocused && onTogglePaneFullscreen && (
             <IconButton
               size="sm"
-              aria-label={isPaneFullscreen ? 'Exit fullscreen pane' : 'Fullscreen pane'}
+              aria-label={isPaneFullscreen ? t('header.exitFullscreenPane') : t('header.fullscreenPane')}
               onClick={e => {
                 e.stopPropagation()
                 onTogglePaneFullscreen()
@@ -237,7 +237,7 @@ export function PaneHeader({
             <>
               <IconButton
                 size="sm"
-                aria-label="Split horizontal"
+                aria-label={t('header.splitHorizontal')}
                 onClick={e => {
                   e.stopPropagation()
                   handleSplitH()
@@ -249,7 +249,7 @@ export function PaneHeader({
 
               <IconButton
                 size="sm"
-                aria-label="Split vertical"
+                aria-label={t('header.splitVertical')}
                 onClick={e => {
                   e.stopPropagation()
                   handleSplitV()

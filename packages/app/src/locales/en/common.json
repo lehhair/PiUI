@@ -16,6 +16,7 @@
   "skip": "Skip",
   "copy": "Copy",
   "copied": "Copied!",
+  "copyToClipboard": "Copy to clipboard",
   "search": "Search",
   "filter": "Filter",
   "clear": "Clear",
@@ -66,5 +67,6 @@
   "upDownSelect": "↑↓ select",
   "enterRun": "↵ run",
   "enterConfirmShort": "↵ confirm",
-  "escCancel": "esc cancel"
+  "escCancel": "esc cancel",
+  "reload": "Reload"
 }

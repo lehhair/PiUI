@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ToolResultMessage } from '@earendil-works/pi-ai'
+import i18n from '../../../i18n'
 import type { PiToolExecution } from '../../../pi/domain/index.js'
 import type { ToolConfig, ToolRegistry, ExtractedToolData, DiagnosticInfo } from './types'
 import { BashRenderer, QuestionRenderer } from './renderers'
@@ -209,8 +210,12 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
   const limits = [nativeDetails?.matchLimitReached, nativeDetails?.resultLimitReached, nativeDetails?.entryLimitReached]
     .filter(value => typeof value === 'number')
   if (truncation?.truncated === true || limits.length > 0) {
-    const shown = typeof truncation?.outputLines === 'number' ? `${truncation.outputLines} lines shown` : 'Output truncated'
-    const fullPath = typeof nativeDetails?.fullOutputPath === 'string' ? ` · Full output: ${nativeDetails.fullOutputPath}` : ''
+    const shown = typeof truncation?.outputLines === 'number'
+      ? i18n.t('message:truncation.linesShown', { count: truncation.outputLines })
+      : i18n.t('message:truncation.outputTruncated')
+    const fullPath = typeof nativeDetails?.fullOutputPath === 'string'
+      ? ` · ${i18n.t('message:truncation.fullOutput', { path: nativeDetails.fullOutputPath })}`
+      : ''
     result.notice = `${shown}${fullPath}`
   }
   if (Array.isArray(metadata?.images)) {
