@@ -33,6 +33,7 @@ import {
   setPiSteeringMode,
 } from '../pi/controllers/index.js'
 import { getPiTree, type PiForkResult } from '../pi/transport/index.js'
+import { commitRedoPlan } from '../pi/redoPlanStore'
 import { clearSessionEditorDraft, setSessionEditorDraft } from '../pi/sessionEditorDraftStore'
 import { usePiSessionRuntimeState } from '../pi/hooks/index.js'
 import { selectPiTimelineItems } from '../pi/selectors/index.js'
@@ -43,6 +44,8 @@ import { MessageRenderer } from '../features/message/MessageRenderer'
 import {
   buildSessionTreeGraph,
   findSessionTreeNode,
+  findNewestDescendantEntries,
+  isTreeVisibleEntry,
   sessionTreeEntryPreview,
   type NativeEntry,
   type NativeTreeNode,
@@ -85,6 +88,15 @@ interface QueueView {
 
 function record(value: JsonValue | undefined): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+/** redo 可落节点：树上可见、非 user 消息（落在 user 消息 = 撤销语义） */
+function isRedoLandingEntry(entry: NativeEntry, currentLeafId: string | null): boolean {
+  if (typeof entry.id !== 'string' || !entry.id) return false
+  if (!isTreeVisibleEntry(entry, currentLeafId)) return false
+  const type = typeof entry.type === 'string' ? entry.type : ''
+  const role = record(entry.message as JsonValue).role
+  return !(type === 'message' && role === 'user')
 }
 
 export const SessionTreePanel = memo(function SessionTreePanel({
@@ -273,6 +285,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const handleNavigate = useCallback(
     (entryId: string) => {
       if (!capabilities.sessionNavigate) return
+      // redo = 目标向下的后续可落节点（沿最新子分支，树上可见且非 user 消息——
+      // pi 的 navigateTree 落在 user 消息上是撤销语义，不能作为 redo 落点）。
+      // 条数即剩余节点数；目标是叶子时为空，不出 redo
+      const targetNode = findSessionTreeNode(nativeTree, entryId)
+      const checkpoints = targetNode
+        ? findNewestDescendantEntries(targetNode)
+            .filter(entry => isRedoLandingEntry(entry, leafId))
+            .map(entry => String(entry.id))
+        : []
       void runEntryCommand(entryId, async () => {
         const result = await navigatePiTree(sessionId, {
           entryId,
@@ -284,9 +305,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         if (result.cancelled || result.aborted) return
         if (result.editorText == null) clearSessionEditorDraft(sessionId)
         else setSessionEditorDraft(sessionId, result.editorText)
+        await commitRedoPlan(sessionId, checkpoints)
       })
     },
-    [capabilities.sessionNavigate, navigationInstructions, navigationLabel, replaceNavigationInstructions, runEntryCommand, sessionId, summarizeNavigation],
+    [capabilities.sessionNavigate, nativeTree, leafId, navigationInstructions, navigationLabel, replaceNavigationInstructions, runEntryCommand, sessionId, summarizeNavigation],
   )
 
   const runRuntimeCommand = useCallback(async (

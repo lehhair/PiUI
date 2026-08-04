@@ -95,7 +95,59 @@ export function findSessionTreeNode(tree: NativeTreeNode[], entryId: string | nu
   return undefined
 }
 
-function isTreeVisibleEntry(entry: NativeEntry, currentLeafId: string | null): boolean {
+/**
+ * 目标节点从根到自身的 id 路径（含目标）。跨分支导航时用它算
+ * "旧分支上被裁掉的部分"：旧时间线 − 这条路径 = redo 的来源。
+ */
+export function findSessionTreePath(tree: NativeTreeNode[], entryId: string): string[] | null {
+  const path: string[] = []
+  const visit = (node: NativeTreeNode): boolean => {
+    const id = typeof node.entry.id === 'string' ? node.entry.id : ''
+    path.push(id)
+    if (id === entryId) return true
+    for (const child of node.children) {
+      if (visit(child)) return true
+    }
+    path.pop()
+    return false
+  }
+  for (const root of tree) {
+    path.length = 0
+    if (visit(root)) return path
+  }
+  return null
+}
+
+function entryTime(entry: NativeEntry): number {
+  const value = entry.timestamp
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  return 0
+}
+
+/**
+ * 节点向下的"分支尾巴"：每步选时间最新的子节点直到叶子。
+ * 导航到某个节点时被裁掉的就是这一段——redo 只恢复自己分支的后续，
+ * 不做跨分支 redo。多叉时最新子分支就是该分支最近的活跃延续。
+ */
+export function findNewestDescendantEntries(node: NativeTreeNode): NativeEntry[] {
+  const entries: NativeEntry[] = []
+  let current = node
+  while (current.children.length > 0) {
+    let next = current.children[0]
+    for (const child of current.children) {
+      if (entryTime(child.entry) > entryTime(next.entry)) next = child
+    }
+    entries.push(next.entry)
+    current = next
+  }
+  return entries
+}
+
+export function isTreeVisibleEntry(entry: NativeEntry, currentLeafId: string | null): boolean {
   const type = typeof entry.type === 'string' ? entry.type : 'unknown'
   const entryId = typeof entry.id === 'string' ? entry.id : null
   if (entryId === currentLeafId) {

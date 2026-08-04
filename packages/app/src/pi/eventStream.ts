@@ -306,7 +306,13 @@ class PiEventStream {
         if (sessionId) this.handlePiEvent(sessionId, envelope.payload as unknown as PiEventPayload)
         break
       case 'session.head':
-        if (sessionId) this.scheduleBranchRefresh(sessionId)
+        // head 移动 = 树形（undo/redo/导航）变化：branch（时间线）和
+        // state（leafId/指纹）都过期了。state 不刷的话会话树面板和
+        // redo 计划都感知不到别处的导航，双向联动就断了
+        if (sessionId) {
+          this.scheduleBranchRefresh(sessionId)
+          this.scheduleStateRefresh(sessionId)
+        }
         break
       case 'sessions.updated':
         this.handleSessionsUpdated(envelope.payload as SessionsUpdatedPayload | undefined)
