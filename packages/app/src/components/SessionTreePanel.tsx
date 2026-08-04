@@ -10,7 +10,8 @@ import {
   UploadIcon,
 } from './Icons'
 import { IconButton } from './ui/IconButton'
-import { SegmentedControl, SettingField, SettingRow, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
+import { Button } from './ui/Button'
+import { SegmentedControl, SettingField, SettingRow, SettingsDisclosure, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
 import { usePiCapabilities } from '../pi/capabilities'
 import { stashForkText } from '../pi/pendingForkText'
 import {
@@ -180,6 +181,14 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     void loadNativeTree()
   }, [headFingerprint, loadNativeTree, mode])
 
+  // 压缩是异步的：命令返回时条目还没写入，等 operation 从忙转闲再补一次重载
+  const compactionBusyRef = useRef(false)
+  useEffect(() => {
+    const busy = compactionOperation !== 'none'
+    if (compactionBusyRef.current && !busy && mode === 'tree') void loadNativeTree()
+    compactionBusyRef.current = busy
+  }, [compactionOperation, loadNativeTree, mode])
+
   // Tools list for the controls tab (registry.get, immediate)
   useEffect(() => {
     if (mode !== 'controls') return
@@ -250,12 +259,16 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     setError(null)
     try {
       await command()
+      // 树操作（navigate/fork/label）完成后主动刷新运行时状态并重载树，
+      // 不能干等 head 指纹变化——这些操作不一定会推状态事件
+      void refreshPiSessionState(sessionId).catch(() => undefined)
+      void loadNativeTree()
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
     } finally {
       setPendingEntryId(null)
     }
-  }, [t])
+  }, [loadNativeTree, sessionId, t])
 
   const handleNavigate = useCallback(
     (entryId: string) => {
@@ -286,12 +299,14 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     try {
       await command()
       if (refreshState) void refreshPiSessionState(sessionId).catch(() => undefined)
+      // 压缩等运行时操作也会往树里写入新条目
+      void loadNativeTree()
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
     } finally {
       setRuntimePending(null)
     }
-  }, [sessionId, t])
+  }, [loadNativeTree, sessionId, t])
 
   const handleToggleTool = useCallback((toolName: string, enabled: boolean) => {
     if (!capabilities.toolsManage) return
@@ -681,8 +696,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               aria-valuemin={splitMinHeight}
               aria-valuemax={splitMaxHeight}
               aria-valuenow={Math.round(canvasHeight ?? splitMinHeight)}
-              className={`h-2 cursor-row-resize shrink-0 relative transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 ${
-                isResizing ? 'bg-accent-main-100' : 'bg-bg-200/60 hover:bg-accent-main-100/50'
+              className={`group/sep relative flex h-2.5 shrink-0 cursor-row-resize items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 ${
+                isResizing ? 'bg-accent-main-100/20' : 'hover:bg-bg-200/60'
               }`}
               onMouseDown={handleResizeStart}
               onTouchStart={handleTouchResizeStart}
@@ -690,9 +705,11 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 if (event.key === 'ArrowUp') { event.preventDefault(); adjustSplitHeight(-24) }
                 if (event.key === 'ArrowDown') { event.preventDefault(); adjustSplitHeight(24) }
               }}
-            />
+            >
+              <span className={`h-1 w-8 rounded-full transition-colors ${isResizing ? 'bg-accent-main-100' : 'bg-border-200 group-hover/sep:bg-border-300'}`} aria-hidden="true" />
+            </div>
             <section className="flex min-h-0 flex-1 flex-col bg-bg-100" style={{ minHeight: 160 }} aria-label={t('sessionTree.selectedEntry')}>
-              <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-200/40 px-3">
+              <div className="flex h-9 shrink-0 items-center gap-2 px-4">
                 <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">
                   {selectedNode.label || t(selectedRole ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}` : `sessionTree.entryTypes.${selectedEntryType}`)}
                 </span>
@@ -708,7 +725,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+              <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
                 {selectedDetailItems.length > 0 ? (
                   <div className="space-y-3">
                     {selectedDetailItems.map(item => (
@@ -727,7 +744,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 ) : null}
 
                 {capabilities.sessionNavigate && !selectedIsLeaf ? (
-                  <p className="mt-2 rounded border border-border-200/40 bg-bg-200/30 px-2.5 py-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+                  <p className="mt-2 rounded-md bg-bg-200/40 px-3 py-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
                     {selectedRole === 'user' || selectedEntryType === 'custom_message'
                       ? t('sessionTree.navigateUserHint')
                       : t('sessionTree.navigateEntryHint')}
@@ -735,7 +752,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 ) : null}
               </div>
 
-              <div className="shrink-0 border-t border-border-200/40 px-3 py-2">
+              <div className="shrink-0 px-4 pb-3 pt-1">
                 {editingEntryId === selectedEntryId ? (
                   <div className="flex items-center gap-1.5">
                     <input
@@ -761,37 +778,35 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">
                     {capabilities.sessionNavigate && !selectedIsLeaf ? (
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
                         disabled={pendingEntryId !== null}
                         onClick={() => handleNavigate(selectedEntryId)}
-                        className="h-7 rounded-md bg-accent-main-100 px-2.5 text-[length:var(--fs-xs)] font-medium text-bg-100 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main-100/60 disabled:opacity-50"
                       >
                         {t('sessionTree.navigate')}
-                      </button>
+                      </Button>
                     ) : null}
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       disabled={pendingEntryId !== null}
                       onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}
-                      className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
                     >
                       {t('sessionTree.label')}
-                    </button>
+                    </Button>
                     {capabilities.fork && selectedRole === 'user' ? (
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        variant="secondary"
                         disabled={pendingEntryId !== null}
                         onClick={() => handleFork(selectedEntryId)}
-                        className="h-7 rounded-md border border-border-200 bg-bg-100 px-2.5 text-[length:var(--fs-xs)] text-text-200 hover:bg-bg-200/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100 disabled:opacity-50"
                       >
                         {t('sessionTree.fork')}
-                      </button>
+                      </Button>
                     ) : null}
                     {capabilities.sessionNavigate && capabilities.compactionManage && !selectedIsLeaf ? (
-                      <details className="text-[length:var(--fs-xs)] text-text-300">
-                        <summary className="cursor-pointer select-none hover:text-text-100">{t('sessionTree.navigationOptions')}</summary>
-                        <div className="mt-2 space-y-2 border-l border-border-200 pl-2">
+                      <SettingsDisclosure title={t('sessionTree.navigationOptions')} className="w-full">
+                        <div className="space-y-2 text-[length:var(--fs-xs)] text-text-300">
                           <label className="flex items-center gap-2">
                             <input type="checkbox" className="size-3.5 accent-accent-main-100" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
                             {t('sessionTree.summarizeNavigation')}
@@ -821,7 +836,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                             </>
                           ) : null}
                         </div>
-                      </details>
+                      </SettingsDisclosure>
                     ) : null}
                   </div>
                 )}
