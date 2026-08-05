@@ -318,7 +318,7 @@
   "about": {
     "title": "关于和更新",
     "versionCardTitle": "版本",
-    "versionCardDesc": "检查是否有新的 OpenCodeUI 发布版本，并直接跳到下载页面。",
+    "versionCardDesc": "检查是否有新的 PiUI 发布版本，并直接跳到下载页面。",
     "backupCardTitle": "备份和恢复",
     "backupCardDesc": "把本地设置导出为 JSON 备份，或在另一台设备上重新导入恢复。",
     "backupWarning": "备份文件会包含当前浏览器或应用资料中的本地服务器凭证、服务环境变量等敏感设置，请妥善保管。",

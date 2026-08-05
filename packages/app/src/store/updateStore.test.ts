@@ -49,9 +49,9 @@ describe('UpdateStore', () => {
         ok: true,
         json: async () => ({
           tag_name: 'v0.5.2',
-          html_url: 'https://github.com/lehhair/OpenCodeUI/releases/tag/v0.5.2',
+          html_url: 'https://github.com/lehhair/PiUI/releases/tag/v0.5.2',
           published_at: '2026-04-15T00:00:00Z',
-          name: 'OpenCodeUI v0.5.2',
+          name: 'PiUI v0.5.2',
         }),
       }),
     )

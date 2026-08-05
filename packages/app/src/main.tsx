@@ -106,6 +106,8 @@ async function startApp() {
   if (isNativeTauri && !isTauriMobile()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
+      // 窗口先显示（壳里是 loading UI），server 就绪慢时不白屏
+      void invoke('desktop_window_ready').catch(() => {})
       const config = await invoke<{ url: string; token: string }>('local_server_config')
       applyLocalServerConfig(config.url, config.token)
     } catch (error) {

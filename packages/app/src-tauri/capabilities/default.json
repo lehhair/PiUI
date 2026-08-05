@@ -16,6 +16,10 @@
     "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
     {
+      "identifier": "decorum:allow-show-snap-overlay",
+      "platforms": ["windows", "macOS", "linux"]
+    },
+    {
       "identifier": "http:default",
       "allow": [
         { "url": "http://**" },

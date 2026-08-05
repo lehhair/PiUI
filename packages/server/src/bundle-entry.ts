@@ -12,5 +12,7 @@ if (process.argv.includes("--pi-worker")) {
 } else {
   // 编译形态没有独立 node 可 fork，worker 统一走自启动
   process.env.PIUI_WORKER_SELF = "1"
+  // 打包分发的是正式产物，默认接真实 pi 驱动（开发态的 mock 默认值只留给仓库内运行）
+  process.env.PIUI_DRIVER ??= "pi"
   await import("./index.ts")
 }
