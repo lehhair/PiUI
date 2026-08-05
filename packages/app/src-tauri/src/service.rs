@@ -214,8 +214,8 @@ fn unpack_runtime(app: &AppHandle, resource: &PathBuf) -> Result<(PathBuf, PathB
     let marker = data_dir.join("piui-runtime.version");
     let runtime_dir = data_dir.join("runtime");
     let native_dir = data_dir.join("node_modules");
-    let partial_json = runtime_dir
-        .join("pi")
+    let active_runtime = current_runtime_dir(&runtime_dir);
+    let partial_json = active_runtime
         .join("node_modules")
         .join("@earendil-works")
         .join("pi-coding-agent")
@@ -273,6 +273,20 @@ fn unpack_runtime(app: &AppHandle, resource: &PathBuf) -> Result<(PathBuf, PathB
     rename(staging.join("node_modules"), &native_dir).map_err(|error| error.to_string())?;
     fs::write(&marker, version.trim()).map_err(|error| error.to_string())?;
     Ok((runtime_dir, native_dir))
+}
+
+fn current_runtime_dir(runtime_dir: &PathBuf) -> PathBuf {
+    let pointer = runtime_dir.join("current.json");
+    if let Ok(bytes) = fs::read(&pointer) {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            if let Some(dir) = value.get("dir").and_then(|dir| dir.as_str()) {
+                if !dir.is_empty() && !dir.contains("..") && !PathBuf::from(dir).is_absolute() {
+                    return runtime_dir.join(dir);
+                }
+            }
+        }
+    }
+    runtime_dir.join("pi")
 }
 
 fn prepare_server(app: &AppHandle) -> Result<PreparedServer, String> {

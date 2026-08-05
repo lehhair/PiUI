@@ -118,6 +118,7 @@ curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
 - `PIUI_DRIVER`: `mock`(默认,不调模型)| `pi`
 - `PIUI_MOCK_DIR`: mock 会话目录（默认 `<tmpdir>/piui-mock`)
 - `PIUI_SDK_PATH`: 外部 SDK 路径（目录或入口文件；版本与验证版不同时警告放行）
+- `PIUI_USE_SYSTEM_PI=1`: 显式优先使用用户全局安装的 Pi SDK；默认优先使用 PiUI 自带的版本化 runtime
 - `PIUI_SDK_STRICT=1`: 外部 SDK 版本不匹配时拒绝启动
 - `PIUI_AUTH_TOKEN`: 覆盖本地 token（默认生成并持久化在数据目录）
 - `PIUI_SESSION_IDLE_TTL_MS`: 非活动 Pi session runtime 的回收时间，默认 120000（至少 30000）

@@ -46,6 +46,12 @@ function resolveSdkEntry(sdkPath: string): string {
 
 /** pi SDK 的 npm 包名（历史包名也认，用户可能装的是旧的） */
 export const PI_SDK_PACKAGE_NAMES = ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"] as const
+const PI_SDK_FAMILY = [
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-tui",
+] as const
 
 export interface SdkResolution {
   /** 解析到的 SDK 包目录；undefined 表示走内置 node_modules 兜底 */
@@ -64,9 +70,42 @@ interface ResolveDeps {
 function sdkPackageDir(root: string, exists: (path: string) => boolean): string | undefined {
   for (const name of PI_SDK_PACKAGE_NAMES) {
     const dir = join(root, ...name.split("/"))
-    if (exists(join(dir, "dist", "index.js"))) return dir
+    if (exists(join(dir, "dist", "index.js")) && sdkFamilyCompatible(dir, exists)) return dir
   }
   return undefined
+}
+
+function packageJsonPath(fromDir: string, packageName: string, exists: (path: string) => boolean): string | undefined {
+  const segments = packageName.split("/")
+  const candidates = [
+    join(fromDir, "node_modules", ...segments, "package.json"),
+    join(dirname(fromDir), ...segments, "package.json"),
+    join(dirname(dirname(fromDir)), ...segments, "package.json"),
+  ]
+  return candidates.find(candidate => exists(candidate))
+}
+
+function packageVersion(packageJson: string): string | undefined {
+  try {
+    const value = JSON.parse(readFileSync(packageJson, "utf8")) as { version?: unknown }
+    return typeof value.version === "string" ? value.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function sdkFamilyCompatible(sdkDir: string, exists: (path: string) => boolean): boolean {
+  const mainVersion = packageVersion(join(sdkDir, "package.json"))
+  // Test doubles and legacy external SDKs may not expose package metadata.
+  if (!mainVersion) return true
+  for (const packageName of PI_SDK_FAMILY) {
+    const packageJson = packageName === "@earendil-works/pi-coding-agent"
+      ? join(sdkDir, "package.json")
+      : packageJsonPath(sdkDir, packageName, exists)
+    const version = packageJson ? packageVersion(packageJson) : undefined
+    if (version && version !== mainVersion) return false
+  }
+  return true
 }
 
 /**
@@ -135,22 +174,21 @@ function appDataRuntimeDir(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * SDK 定位顺序（用户自己的优先，越新越好）：
+ * SDK 定位顺序：
  *   1. PIUI_SDK_PATH 显式指定
- *   2. 用户全局 npm 安装的 pi
- *   3. 随包分发的 runtime/ 目录（热更新器维护）
- *   4. Tauri 壳解压到应用数据目录的 runtime
+ *   2. PIUI_USE_SYSTEM_PI=1 时使用用户全局 npm 安装的 Pi
+ *   3. 随包分发或 Tauri 解压的 current runtime
+ *   4. 没有可用内置 runtime 时回退用户全局 Pi
  *   5. undefined → 内置 node_modules（开发态兜底）
  */
 export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
   const explicit = deps.env.PIUI_SDK_PATH?.trim()
   if (explicit) return { sdkPath: explicit, source: "env" }
 
-  const globalRoot = globalNpmRoot(deps)
-  if (globalRoot) {
-    const dir = sdkPackageDir(globalRoot, deps.exists)
-    if (dir) return { sdkPath: dir, source: "global" }
-  }
+  const useSystemPi = deps.env.PIUI_USE_SYSTEM_PI === "1"
+  const globalRoot = useSystemPi ? globalNpmRoot(deps) : undefined
+  const globalSdk = globalRoot ? sdkPackageDir(globalRoot, deps.exists) : undefined
+  if (globalSdk) return { sdkPath: globalSdk, source: "global" }
 
   const runtimeDir = deps.env.PIUI_RUNTIME_DIR?.trim() || join(deps.execDir, "runtime")
   const runtime = runtimeSdkPath(runtimeDir, deps.exists)
@@ -161,6 +199,10 @@ export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
     const appDataRuntime = runtimeSdkPath(appDataDir, deps.exists)
     if (appDataRuntime) return { sdkPath: appDataRuntime, source: "runtime" }
   }
+
+  const fallbackGlobalRoot = globalNpmRoot(deps)
+  const fallbackGlobalSdk = fallbackGlobalRoot ? sdkPackageDir(fallbackGlobalRoot, deps.exists) : undefined
+  if (fallbackGlobalSdk) return { sdkPath: fallbackGlobalSdk, source: "global" }
 
   return { source: "bundled" }
 }
@@ -192,10 +234,29 @@ async function importExternalSdk(entry: string): Promise<PiSdk> {
 export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk> {
   if (cached) return cached
   const external = options.sdkPath?.trim()
+  if (external && !sdkFamilyCompatible(resolveSdkEntry(external).replace(/[\\/]dist[\\/]index\.js$/, ""), existsSync)) {
+    throw Object.assign(new Error(`Pi SDK dependency family is inconsistent at ${external}`), {
+      code: "PI_SDK_VERSION_MISMATCH",
+    })
+  }
   const sdk = external
     ? await importExternalSdk(resolveSdkEntry(external))
     : await import("@earendil-works/pi-coding-agent") as PiSdk
   const version = typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown"
+  const runtimeContract = sdk as PiSdk & {
+    ModelRuntime?: { create?: unknown }
+    SettingsManager?: unknown
+    SessionManager?: unknown
+  }
+  if (
+    typeof runtimeContract.ModelRuntime?.create !== "function" ||
+    !runtimeContract.SettingsManager ||
+    !runtimeContract.SessionManager
+  ) {
+    throw Object.assign(new Error(`Pi SDK ${version} does not expose the PiUI runtime contract`), {
+      code: "PI_SDK_INCOMPATIBLE",
+    })
+  }
   const verified = version === PI_PARITY_SDK_VERSION
   if (!verified && !external) {
     throw Object.assign(

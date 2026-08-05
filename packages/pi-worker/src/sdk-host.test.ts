@@ -40,12 +40,50 @@ test("explicit PIUI_SDK_PATH wins over every other source", () => {
 
 test("user global npm install is preferred over the bundled runtime", () => {
   const result = resolvePiSdkPath(resolveDeps({
+    env: { PIUI_USE_SYSTEM_PI: "1" } as NodeJS.ProcessEnv,
     exists: fakeFs([
       join(GLOBAL_SDK, "dist", "index.js"),
       join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
     ]),
   }))
   assert.deepEqual(result, { sdkPath: GLOBAL_SDK, source: "global" })
+})
+
+test("bundled runtime wins over a system Pi unless explicitly opted in", () => {
+  const sdk = join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent")
+  const result = resolvePiSdkPath(resolveDeps({
+    exists: fakeFs([
+      join(GLOBAL_SDK, "dist", "index.js"),
+      join(sdk, "dist", "index.js"),
+    ]),
+  }))
+  assert.deepEqual(result, { sdkPath: sdk, source: "runtime" })
+})
+
+test("skips a global SDK when its Pi package family versions disagree", () => {
+  const root = mkdtempSync(join(tmpdir(), "piui-sdk-global-"))
+  try {
+    const globalSdk = join(root, "@earendil-works", "pi-coding-agent")
+    const runtimeSdk = join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent")
+    for (const [dir, version] of [
+      [globalSdk, "0.82.0"],
+      [join(root, "@earendil-works", "pi-ai"), "0.81.1"],
+      [join(root, "@earendil-works", "pi-agent-core"), "0.82.0"],
+      [join(root, "@earendil-works", "pi-tui"), "0.82.0"],
+    ] as const) {
+      mkdirSync(join(dir, "dist"), { recursive: true })
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ version }))
+      writeFileSync(join(dir, "dist", "index.js"), "export {}")
+    }
+
+    const result = resolvePiSdkPath(resolveDeps({
+      npmRootGlobal: () => root,
+      exists: path => existsSync(path) || fakeFs([join(runtimeSdk, "dist", "index.js")])(path),
+    }))
+    assert.deepEqual(result, { sdkPath: runtimeSdk, source: "runtime" })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("legacy @mariozechner package name is accepted as a global install", () => {
