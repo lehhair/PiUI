@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-decorum",
+  "description": "Decorum custom titlebar permissions, desktop only (plugin is not compiled for Android)",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["main", "win-*"],
+  "permissions": [
+    "decorum:allow-show-snap-overlay"
+  ]
+}

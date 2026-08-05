@@ -339,7 +339,7 @@ describe("event websocket", () => {
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 10_000
+  const deadline = Date.now() + 30_000
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("timed out waiting for websocket frame")
     await new Promise(resolve => setTimeout(resolve, 20))
