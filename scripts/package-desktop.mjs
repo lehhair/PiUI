@@ -53,7 +53,7 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
     `--target=${target}`,
     "--define", `process.env.PIUI_BUNDLED_SDK_VERSION=${JSON.stringify(piPkg.version)}`,
     "--outfile", join(runtimePiRoot, workerName),
-  ])
+  ], { shell: false })
   writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
     sdkVersion: piPkg.version,
     worker: workerName,
