@@ -4,7 +4,7 @@
  * 起一个自己（见 worker-client.ts 的 PIUI_WORKER_SELF 分支）。
  */
 const { dirname, join } = await import("node:path")
-const { existsSync } = await import("node:fs")
+const { existsSync, readFileSync } = await import("node:fs")
 // 原生/运行时模块（node-pty、jiti）从 exe 旁的 node_modules 按绝对路径加载；
 // 旁边没有（安装目录里只有 zip）时退回 Tauri 壳解压到应用数据目录的位置
 const execDir = dirname(process.execPath)
@@ -29,6 +29,26 @@ if (!process.env.PIUI_NATIVE_MODULES) {
     }
   }
   if (nativeDir) process.env.PIUI_NATIVE_MODULES = nativeDir
+}
+
+if (!process.env.PIUI_WORKER_BIN) {
+  const runtimeDir = process.env.PIUI_RUNTIME_DIR
+    ?? (localBaseDir ? join(localBaseDir, "runtime") : undefined)
+  if (runtimeDir) {
+    try {
+      const pointer = JSON.parse(readFileSync(join(runtimeDir, "current.json"), "utf8")) as { dir?: unknown }
+      if (typeof pointer.dir === "string" && pointer.dir && !pointer.dir.includes("..")) {
+        const workerName = process.platform === "win32" ? "pi-worker.exe" : "pi-worker"
+        const workerPath = join(runtimeDir, pointer.dir, workerName)
+        if (existsSync(workerPath)) {
+          process.env.PIUI_WORKER_BIN = workerPath
+          process.env.PIUI_BUNDLED_SDK = "1"
+        }
+      }
+    } catch {
+      // Development mode without a packaged worker falls back to self-spawn.
+    }
+  }
 }
 
 if (process.argv.includes("--pi-worker")) {

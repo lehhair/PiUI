@@ -424,7 +424,9 @@ process.on("disconnect", () => {
   })()
 })
 
-const resolution = defaultSdkResolution()
+const resolution = process.env.PIUI_BUNDLED_SDK === "1"
+  ? { source: "bundled" as const, sdkPath: undefined }
+  : defaultSdkResolution()
 if (resolution.source !== "bundled") {
   console.info(`[piui-worker] pi sdk source=${resolution.source} path=${resolution.sdkPath}`)
 }

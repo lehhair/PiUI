@@ -426,6 +426,14 @@ function problemToError(problem: Problem): Error {
 }
 
 function spawnSelfWorker(env?: NodeJS.ProcessEnv): ChildProcess {
+  const workerBinary = env?.PIUI_WORKER_BIN ?? process.env.PIUI_WORKER_BIN
+  if (workerBinary) {
+    return spawn(workerBinary, ["--pi-worker"], {
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      windowsHide: true,
+    })
+  }
   return spawn(process.execPath, ["--pi-worker"], {
     env: { ...process.env, ...env },
     stdio: ["ignore", "inherit", "inherit", "ipc"],

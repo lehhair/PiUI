@@ -215,19 +215,17 @@ fn unpack_runtime(app: &AppHandle, resource: &PathBuf) -> Result<(PathBuf, PathB
     let runtime_dir = data_dir.join("runtime");
     let native_dir = data_dir.join("node_modules");
     let active_runtime = current_runtime_dir(&runtime_dir);
-    let partial_json = active_runtime
-        .join("node_modules")
-        .join("@earendil-works")
-        .join("pi-coding-agent")
-        .join("node_modules")
-        .join("partial-json")
-        .join("package.json");
+    let worker_binary = active_runtime.join(if cfg!(target_os = "windows") {
+        "pi-worker.exe"
+    } else {
+        "pi-worker"
+    });
 
     if marker.exists()
         && fs::read_to_string(&marker).ok().as_deref() == Some(version.trim())
         && runtime_dir.join("current.json").is_file()
         && native_dir.is_dir()
-        && partial_json.is_file()
+        && worker_binary.is_file()
     {
         return Ok((runtime_dir, native_dir));
     }
