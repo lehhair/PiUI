@@ -194,10 +194,16 @@ fn auth_token_path() -> Option<PathBuf> {
 #[tauri::command]
 fn local_server_config() -> Result<LocalServerConfig, String> {
     let path = auth_token_path().ok_or_else(|| "home directory is unavailable".to_string())?;
-    for _ in 0..50 {
+    let address: std::net::SocketAddr = "127.0.0.1:8787"
+        .parse()
+        .map_err(|error| format!("invalid local server address: {error}"))?;
+    for _ in 0..600 {
         if let Ok(token) = fs::read_to_string(&path) {
             let token = token.trim().to_string();
-            if !token.is_empty() {
+            if !token.is_empty()
+                && std::net::TcpStream::connect_timeout(&address, Duration::from_millis(200))
+                    .is_ok()
+            {
                 return Ok(LocalServerConfig {
                     url: "http://127.0.0.1:8787".to_string(),
                     token,
@@ -254,10 +260,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            if let Err(error) = start_server(app.handle()) {
-                eprintln!("[piui] failed to start bundled server: {error}");
-                return Err(error.into());
-            }
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                if let Err(error) = start_server(&handle) {
+                    eprintln!("[piui] failed to start bundled server: {error}");
+                }
+            });
             Ok(())
         });
 
