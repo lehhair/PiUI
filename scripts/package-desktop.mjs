@@ -51,9 +51,9 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
     "build", join("packages", "pi-worker", "dist", "entry.js"),
     "--compile",
     `--target=${target}`,
-    "--define", `process.env.PIUI_BUNDLED_SDK_VERSION=${JSON.stringify(piPkg.version)}`,
+    "--define", `process.env.PIUI_BUNDLED_SDK_VERSION='${piPkg.version}'`,
     "--outfile", join(runtimePiRoot, workerName),
-  ], { shell: false })
+  ])
   writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
     sdkVersion: piPkg.version,
     worker: workerName,
