@@ -38,70 +38,26 @@ const sdkFamily = {
   "@earendil-works/pi-tui": piPkg.version,
 }
 
-function resolveSourceDependency(fromPackageDir, dependencyName) {
-  const segments = dependencyName.split("/")
-  const candidates = [
-    join(fromPackageDir, "node_modules", ...segments),
-    join(dirname(fromPackageDir), ...segments),
-    join(dirname(dirname(fromPackageDir)), ...segments),
-  ]
-  return candidates.find(candidate => existsSync(join(candidate, "package.json")))
-}
-
-function copyDependencyClosure(sourcePackageDir, targetPackageDir, seen = new Set()) {
-  const packageFile = join(sourcePackageDir, "package.json")
-  if (!existsSync(packageFile)) return
-  const key = `${sourcePackageDir}\0${targetPackageDir}`
-  if (seen.has(key)) return
-  seen.add(key)
-
-  const pkg = JSON.parse(readFileSync(packageFile, "utf8"))
-  const dependencies = {
-    ...(pkg.optionalDependencies ?? {}),
-    ...(pkg.dependencies ?? {}),
-  }
-  for (const dependencyName of Object.keys(dependencies)) {
-    const sourceDependency = resolveSourceDependency(sourcePackageDir, dependencyName)
-    if (!sourceDependency) {
-      if (pkg.optionalDependencies && dependencyName in pkg.optionalDependencies) continue
-      throw new Error(`${pkg.name ?? sourcePackageDir} requires missing dependency ${dependencyName}`)
-    }
-    const targetDependency = join(targetPackageDir, "node_modules", ...dependencyName.split("/"))
-    if (!existsSync(join(targetDependency, "package.json"))) {
-      cpSync(sourceDependency, targetDependency, { recursive: true })
-    }
-    copyDependencyClosure(sourceDependency, targetDependency, seen)
-  }
-}
-
 if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   console.info("[package] --skip-runtime: keeping existing runtime directory")
 } else {
   const runtimePiRoot = join(outDir, "runtime", `pi-${piPkg.version}`)
-  const runtimePi = join(runtimePiRoot, "node_modules")
   rmSync(join(outDir, "runtime"), { recursive: true, force: true })
-  mkdirSync(runtimePi, { recursive: true })
+  mkdirSync(runtimePiRoot, { recursive: true })
 
-  // Copy the exact SDK tree already verified by this repository. Reinstalling
-  // the same semver from the registry can yield a different republished
-  // package and a different internal API surface.
-  console.info(`[package] copying verified pi ${piPkg.version} runtime`)
-  cpSync(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"), { recursive: true })
-  copyDependencyClosure(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"))
-  writeFileSync(join(runtimePiRoot, "package.json"), JSON.stringify({
-    name: "piui-bundled-runtime",
-    private: true,
-    dependencies: sdkFamily,
+  console.info(`[package] compiling self-contained pi worker ${piPkg.version}`)
+  const workerName = target.includes("windows") ? "pi-worker.exe" : "pi-worker"
+  run("bun", [
+    "build", join("packages", "pi-worker", "dist", "entry.js"),
+    "--compile",
+    `--target=${target}`,
+    "--outfile", join(runtimePiRoot, workerName),
+  ])
+  writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
+    sdkVersion: piPkg.version,
+    worker: workerName,
+    sdkFamily,
   }, null, 2))
-  const sdkEntry = join(runtimePi, "@earendil-works", "pi-coding-agent", "dist", "index.js")
-  const partialJson = join(
-    runtimePi,
-    "@earendil-works", "pi-coding-agent", "node_modules",
-    "@earendil-works", "pi-ai", "node_modules", "partial-json", "package.json",
-  )
-  if (!existsSync(sdkEntry) || !existsSync(partialJson)) {
-    throw new Error("npm did not create a complete Pi SDK runtime dependency tree")
-  }
   writeFileSync(
     join(outDir, "runtime", "current.json"),
     JSON.stringify({ dir: `pi-${piPkg.version}`, version: piPkg.version, sdkFamily }, null, 2),

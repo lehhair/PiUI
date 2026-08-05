@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type * as PiSdkModule from "@earendil-works/pi-coding-agent"
@@ -230,8 +230,45 @@ async function importExternalSdk(entry: string): Promise<PiSdk> {
   // Bun enables native import probing by default. In a compiled executable
   // that probe resolves from Bun's virtual B:\~BUN\root path instead of the
   // external runtime directory. Force jiti's filesystem resolver for SDKs.
-  const jiti = createJiti(pathToFileURL(entry).href, { moduleCache: false, tryNative: false })
+  const jiti = createJiti(pathToFileURL(entry).href, {
+    moduleCache: false,
+    tryNative: false,
+    alias: runtimePackageAliases(entry),
+  })
   return await jiti.import(entry) as PiSdk
+}
+
+const runtimeAliasCache = new Map<string, Record<string, string>>()
+
+function runtimePackageAliases(entry: string): Record<string, string> {
+  let packageRoot = dirname(entry)
+  while (packageRoot !== dirname(packageRoot) && packageRoot.endsWith("node_modules") === false) {
+    packageRoot = dirname(packageRoot)
+  }
+  const cachedAliases = runtimeAliasCache.get(packageRoot)
+  if (cachedAliases) return cachedAliases
+
+  const aliases: Record<string, string> = {}
+  const visit = (directory: string) => {
+    const packageJson = join(directory, "package.json")
+    if (existsSync(packageJson)) {
+      try {
+        const metadata = JSON.parse(readFileSync(packageJson, "utf8")) as { name?: unknown }
+        if (typeof metadata.name === "string" && !aliases[metadata.name]) aliases[metadata.name] = directory
+      } catch {
+        // Ignore an unrelated malformed package and keep loading the SDK.
+      }
+    }
+    for (const name of readdirSync(directory, { withFileTypes: true })) {
+      if (!name.isDirectory() || name.name === ".bin") continue
+      const child = join(directory, name.name)
+      if (name.name === "node_modules" || directory.endsWith("node_modules")) visit(child)
+    }
+  }
+
+  if (existsSync(packageRoot)) visit(packageRoot)
+  runtimeAliasCache.set(packageRoot, aliases)
+  return aliases
 }
 
 export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk> {
