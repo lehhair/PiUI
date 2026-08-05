@@ -8,9 +8,16 @@ const { existsSync } = await import("node:fs")
 // 原生/运行时模块（node-pty、jiti）从 exe 旁的 node_modules 按绝对路径加载；
 // 旁边没有（安装目录里只有 zip）时退回 Tauri 壳解压到应用数据目录的位置
 const execDir = dirname(process.execPath)
+const launchDir = process.cwd()
+const localBaseDir = [execDir, launchDir].find(dir => existsSync(join(dir, "runtime", "current.json")))
+if (!process.env.PIUI_RUNTIME_DIR && localBaseDir) {
+  process.env.PIUI_RUNTIME_DIR = join(localBaseDir, "runtime")
+}
 if (!process.env.PIUI_NATIVE_MODULES) {
-  let nativeDir = join(execDir, "node_modules")
-  if (!existsSync(nativeDir)) {
+  let nativeDir = [execDir, launchDir]
+    .map(dir => join(dir, "node_modules"))
+    .find(dir => existsSync(dir))
+  if (!nativeDir) {
     const home = process.platform === "win32" ? process.env.APPDATA : process.env.HOME
     if (home) {
       const appDataNative = process.platform === "win32"
@@ -21,7 +28,7 @@ if (!process.env.PIUI_NATIVE_MODULES) {
       if (existsSync(appDataNative)) nativeDir = appDataNative
     }
   }
-  process.env.PIUI_NATIVE_MODULES = nativeDir
+  if (nativeDir) process.env.PIUI_NATIVE_MODULES = nativeDir
 }
 
 if (process.argv.includes("--pi-worker")) {
