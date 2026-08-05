@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 打包桌面/便携形态：
- *   dist-desktop/piui-server.exe   bun compile 的单文件（server + worker 双模式）
- *   dist-desktop/runtime/pi/…      外挂 pi SDK（node_modules 布局，可热更新）
+ *   dist-desktop/piui-server.exe   Bun 编译的 server 单文件
+ *   dist-desktop/runtime/pi-…/     版本化的自包含 Pi worker（可热更新）
  *   dist-desktop/web/…             Web 客户端构建产物
  *
  * 用法：node scripts/package-desktop.mjs [--skip-build] [--target bun-windows-x64]
@@ -51,6 +51,7 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
     "build", join("packages", "pi-worker", "dist", "entry.js"),
     "--compile",
     `--target=${target}`,
+    "--define", `process.env.PIUI_BUNDLED_SDK_VERSION=${JSON.stringify(piPkg.version)}`,
     "--outfile", join(runtimePiRoot, workerName),
   ])
   writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
