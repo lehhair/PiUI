@@ -48,6 +48,7 @@ import { SessionNavigationContext, type SessionNavigationContextValue } from '..
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { notificationStore } from '../../store/notificationStore'
 import { useServerStore } from '../../hooks/useServerStore'
+import { useManagementEvents } from '../../pi/managementEventStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import {
   getModelVariantPref,
@@ -187,6 +188,7 @@ export function PiChatPane({
   const { currentDirectory, addDirectory } = useDirectory()
   const { registerSession } = useSessionContext()
   const { activeServer } = useServerStore()
+  const { providerRevision } = useManagementEvents()
   const registerSessionRef = useRef(registerSession)
   registerSessionRef.current = registerSession
   const currentDirectoryRef = useRef(currentDirectory)
@@ -198,7 +200,7 @@ export function PiChatPane({
   const { models, isLoading: modelsLoading } = usePiModels()
   useEffect(() => {
     void loadPiModels().catch(() => undefined)
-  }, [])
+  }, [activeServer?.id, activeServer?.url, activeServer?.token, currentDirectory, providerRevision])
 
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)

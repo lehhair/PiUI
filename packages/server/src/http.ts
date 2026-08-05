@@ -313,6 +313,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         await closeHttpServer()
         await watcher.dispose()
         terminals.dispose()
+        sessions.dispose()
         await supervisor.dispose()
       })()
       return disposal
