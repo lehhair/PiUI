@@ -6,6 +6,12 @@ import { useSyncExternalStore, useCallback } from 'react'
 import { serverStore, type ServerConfig, type ServerHealth } from '../store/serverStore'
 export type { ServerConfig, ServerHealth }
 
+function getActiveServerGeneration(): number {
+  return typeof serverStore.getActiveServerGeneration === 'function'
+    ? serverStore.getActiveServerGeneration()
+    : 0
+}
+
 /**
  * 订阅 serverStore 的 React hook
  */
@@ -20,6 +26,12 @@ export function useServerStore() {
     serverStore.subscribe.bind(serverStore),
     () => serverStore.getActiveServer(),
     () => serverStore.getActiveServer(),
+  )
+
+  const activeServerGeneration = useSyncExternalStore(
+    serverStore.subscribe.bind(serverStore),
+    getActiveServerGeneration,
+    getActiveServerGeneration,
   )
 
   const healthMap = useSyncExternalStore(
@@ -62,6 +74,7 @@ export function useServerStore() {
   return {
     servers,
     activeServer,
+    activeServerGeneration,
     healthMap,
     addServer,
     updateServer,
