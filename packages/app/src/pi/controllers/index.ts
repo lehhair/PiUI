@@ -485,8 +485,22 @@ export async function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at
 /**
  * Load available models from the Pi model runtime into the models store.
  */
+const modelFlights = new Map<number, Promise<Model<any>[]>>()
+
 export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> {
   const serverGeneration = serverStore.getActiveServerGeneration()
+  const existing = modelFlights.get(serverGeneration)
+  if (existing) return existing
+
+  const flight = loadPiModelsOnce(serverGeneration, signal)
+  modelFlights.set(serverGeneration, flight)
+  void flight.finally(() => {
+    if (modelFlights.get(serverGeneration) === flight) modelFlights.delete(serverGeneration)
+  }).catch(() => undefined)
+  return flight
+}
+
+async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<any>[]> {
   piModelsStore.setLoading(true)
   try {
     const result = await transport.listPiModels(signal)
