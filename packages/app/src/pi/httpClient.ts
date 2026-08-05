@@ -1,4 +1,5 @@
 import { LOCAL_SERVER_ID, serverStore } from '../store/serverStore'
+import { isTauri } from '../utils/tauri'
 import { PROTOCOL_VERSION } from '@piui/protocol'
 
 const DEFAULT_BASE = 'http://127.0.0.1:8787'
@@ -7,6 +8,7 @@ const rawFetch = globalThis.fetch.bind(globalThis)
 /**
  * HTTP transport base for the PiUI server.
  * Browser dev uses same-origin + Vite proxy (`/api` → :8787) to avoid CORS.
+ * Tauri 壳的同源是 tauri://localhost，不是 API，必须始终用完整 URL。
  * Override with VITE_PIUI_API when needed.
  */
 export function getApiBase(): string {
@@ -14,6 +16,10 @@ export function getApiBase(): string {
   if (envBase) return envBase.replace(/\/$/, '')
   if (typeof window !== 'undefined') {
     const active = serverStore.getActiveServer()
+    if (isTauri()) {
+      if (active?.url) return active.url.replace(/\/$/, '')
+      return DEFAULT_BASE
+    }
     if (active && active.id !== LOCAL_SERVER_ID) return active.url.replace(/\/$/, '')
     const storedLocal = serverStore.getStoredServers().find(server => server.id === LOCAL_SERVER_ID)
     if (active && storedLocal && active.url !== storedLocal.url) return active.url.replace(/\/$/, '')

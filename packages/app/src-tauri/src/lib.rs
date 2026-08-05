@@ -1,344 +1,153 @@
-use serde::Serialize;
-use std::{
-    env,
-    fs::{self, File},
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::Mutex,
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+#[cfg(not(target_os = "android"))]
+mod service;
+
+use tauri::{Manager, WebviewWindowBuilder};
+
+#[cfg(not(target_os = "android"))]
+use tauri::{WebviewUrl, Window};
+
+#[cfg(not(target_os = "android"))]
+use service::{
+    check_piui_service, get_piui_service_started_by_us, start_piui_service, stop_piui_service,
+    ServiceState,
 };
 
 #[cfg(not(target_os = "android"))]
-use std::{
-    fs::{create_dir_all, remove_dir_all, rename},
-    io::Read,
-};
-use tauri::Manager;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
-#[cfg(not(target_os = "android"))]
-use tauri::Window;
-#[cfg(not(target_os = "android"))]
-use zip::ZipArchive;
+fn configure_desktop_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(12.0, 14.0));
 
-struct ServerProcess(Mutex<Option<Child>>);
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalServerConfig {
-    url: String,
-    token: String,
-}
-
-fn resource_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok()
-}
-
-fn resource_root(app: &tauri::AppHandle) -> Option<PathBuf> {
-    let base = resource_dir(app)?;
-    if base.join("piui-runtime.zip").is_file() || base.join("piui-server.exe").is_file() {
-        return Some(base);
-    }
-    let nested = base.join("resources");
-    if nested.join("piui-runtime.zip").is_file() || nested.join("piui-server.exe").is_file() {
-        return Some(nested);
-    }
-    Some(base)
-}
-
-fn server_binary(app: &tauri::AppHandle) -> Option<PathBuf> {
-    if let Ok(path) = env::var("PIUI_SERVER_BIN") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-
-    let names = if cfg!(target_os = "windows") {
-        ["piui-server.exe", "piui-server"]
-    } else {
-        ["piui-server", "piui-server.exe"]
-    };
-    let resource = resource_root(app)?;
-    names
-        .iter()
-        .map(|name| resource.join(name))
-        .find(|path| path.is_file())
-}
-
-#[cfg(not(target_os = "android"))]
-fn unpack_runtime(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
-    let resource =
-        resource_root(app).ok_or_else(|| "resource directory is unavailable".to_string())?;
-    let archive_path = resource.join("piui-runtime.zip");
-    let version_path = resource.join("piui-runtime.version");
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let version = fs::read_to_string(&version_path).unwrap_or_else(|_| "unknown".to_string());
-    let marker = data_dir.join("piui-runtime.version");
-    let runtime_dir = data_dir.join("runtime");
-    let native_dir = data_dir.join("node_modules");
-    if marker.exists()
-        && fs::read_to_string(&marker).ok().as_deref() == Some(version.trim())
-        && runtime_dir.join("current.json").is_file()
-        && native_dir.is_dir()
-    {
-        return Ok((runtime_dir, native_dir));
-    }
-
-    create_dir_all(&data_dir).map_err(|error| error.to_string())?;
-    let staging = data_dir.join(".piui-runtime-staging");
-    if staging.exists() {
-        remove_dir_all(&staging).map_err(|error| error.to_string())?;
-    }
-    create_dir_all(&staging).map_err(|error| error.to_string())?;
-
-    let archive = File::open(&archive_path)
-        .map_err(|error| format!("failed to open bundled Pi runtime: {error}"))?;
-    let mut archive = ZipArchive::new(archive).map_err(|error| error.to_string())?;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
-        let Some(relative) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
-            return Err("Pi runtime archive contains an unsafe path".to_string());
-        };
-        let destination = staging.join(relative);
-        if entry.is_dir() {
-            create_dir_all(&destination).map_err(|error| error.to_string())?;
-            continue;
-        }
-        if let Some(parent) = destination.parent() {
-            create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let mut output = File::create(&destination).map_err(|error| error.to_string())?;
-        let mut bytes = Vec::new();
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        std::io::Write::write_all(&mut output, &bytes).map_err(|error| error.to_string())?;
-    }
-
-    if runtime_dir.exists() {
-        remove_dir_all(&runtime_dir).map_err(|error| error.to_string())?;
-    }
-    if native_dir.exists() {
-        remove_dir_all(&native_dir).map_err(|error| error.to_string())?;
-    }
-    rename(staging.join("runtime"), &runtime_dir).map_err(|error| error.to_string())?;
-    rename(staging.join("node_modules"), &native_dir).map_err(|error| error.to_string())?;
-    fs::write(&marker, version.trim()).map_err(|error| error.to_string())?;
-    Ok((runtime_dir, native_dir))
-}
-
-fn start_server(app: &tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        let _ = app;
-        return Ok(());
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        if env::var("PIUI_DESKTOP_EXTERNAL_SERVER").as_deref() == Ok("1") {
-            return Ok(());
-        }
-        let Some(binary) = server_binary(app) else {
-            if cfg!(debug_assertions) {
-                return Ok(());
-            }
-            return Err("PiUI server binary was not bundled".to_string());
-        };
-
-        let (runtime_dir, native_modules) = unpack_runtime(app)?;
-        let resource = resource_root(app).unwrap_or_else(|| {
-            binary
-                .parent()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
-        let mut command = Command::new(&binary);
-        command
-            .current_dir(&resource)
-            .env("PIUI_HOST", "127.0.0.1")
-            .env("PIUI_PORT", "8787")
-            .env("PIUI_RUNTIME_DIR", runtime_dir)
-            .env("PIUI_NATIVE_MODULES", native_modules)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
-
-        let child = command
-            .spawn()
-            .map_err(|error| format!("failed to start PiUI server: {error}"))?;
-        if let Ok(mut process) = app.state::<ServerProcess>().0.lock() {
-            *process = Some(child);
-        }
-        Ok(())
-    }
-}
-
-fn auth_token_path() -> Option<PathBuf> {
-    let home = if cfg!(target_os = "windows") {
-        env::var_os("USERPROFILE").map(PathBuf::from)
-    } else {
-        env::var_os("HOME").map(PathBuf::from)
-    }?;
-    Some(home.join(".piui").join("auth-token"))
-}
-
-#[tauri::command]
-fn local_server_config() -> Result<LocalServerConfig, String> {
-    let path = auth_token_path().ok_or_else(|| "home directory is unavailable".to_string())?;
-    let address: std::net::SocketAddr = "127.0.0.1:8787"
-        .parse()
-        .map_err(|error| format!("invalid local server address: {error}"))?;
-    for _ in 0..600 {
-        if let Ok(token) = fs::read_to_string(&path) {
-            let token = token.trim().to_string();
-            if !token.is_empty()
-                && std::net::TcpStream::connect_timeout(&address, Duration::from_millis(200))
-                    .is_ok()
-            {
-                return Ok(LocalServerConfig {
-                    url: "http://127.0.0.1:8787".to_string(),
-                    token,
-                });
-            }
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    Err(format!(
-        "PiUI server token was not ready at {}",
-        path.display()
-    ))
+    builder
 }
 
 #[cfg(not(target_os = "android"))]
 fn finish_desktop_window_setup(window: &tauri::WebviewWindow) {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
         use tauri_plugin_decorum::WebviewWindowExt;
-        // 移除系统标题栏并注入自定义标题栏（Windows 含窗口控制按钮）
         let _ = window.create_overlay_titlebar();
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_decorum::WebviewWindowExt;
+        let _ = window.set_traffic_lights_inset(12.0, 14.0);
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, tauri::Error> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .expect("main window config missing");
+
+    configure_desktop_window_builder(tauri::WebviewWindowBuilder::from_config(app, &config)?)
+        .visible(false)
+        .build()
+}
+
+#[cfg(target_os = "android")]
+fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, tauri::Error> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .expect("main window config missing");
+    WebviewWindowBuilder::from_config(app, &config)?.build()
 }
 
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn desktop_window_ready(window: Window) -> Result<(), String> {
-    window.show().map_err(|error| error.to_string())
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(), String> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let label = format!("win-{millis}");
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let label = format!(
+        "win-{}",
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     let title = directory.as_deref().unwrap_or("PiUI");
-    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
-        .title(title)
-        .inner_size(1200.0, 800.0)
-        .visible(false)
-        .build()
-        .map_err(|error| error.to_string())?;
+    let window = configure_desktop_window_builder(WebviewWindowBuilder::new(
+        &app,
+        label,
+        WebviewUrl::App("index.html".into()),
+    ))
+    .title(title)
+    .inner_size(1200.0, 800.0)
+    .visible(false)
+    .build()
+    .map_err(|error| error.to_string())?;
     finish_desktop_window_setup(&window);
     Ok(())
-}
-
-fn stop_server(app: &tauri::AppHandle) {
-    if let Ok(mut process) = app.state::<ServerProcess>().0.lock() {
-        if let Some(child) = process.as_mut() {
-            let _ = child.kill();
-        }
-        *process = None;
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
-    let config = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == "main")
-        .cloned()
-        .ok_or_else(|| "main window config missing".to_string())?;
-    let window = WebviewWindowBuilder::from_config(app, &config)
-        .map_err(|error| error.to_string())?
-        .build()
-        .map_err(|error| error.to_string())?;
-    finish_desktop_window_setup(&window);
-    Ok(window)
-}
-
-#[cfg(target_os = "android")]
-fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
-    let config = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == "main")
-        .cloned()
-        .ok_or_else(|| "main window config missing".to_string())?;
-    WebviewWindowBuilder::from_config(app, &config)
-        .map_err(|error| error.to_string())?
-        .build()
-        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
-        .manage(ServerProcess(Mutex::new(None)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            if let Err(error) = create_main_window(app.handle()) {
-                eprintln!("[piui] failed to create main window: {error}");
-                return Err(error.into());
-            }
-            let handle = app.handle().clone();
-            thread::spawn(move || {
-                if let Err(error) = start_server(&handle) {
-                    eprintln!("[piui] failed to start bundled server: {error}");
-                }
-            });
-            Ok(())
-        });
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(not(target_os = "android"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        local_server_config,
-        desktop_window_ready,
-        open_new_window,
-    ]);
+    let builder = builder
+        .manage(ServiceState::default())
+        .plugin(tauri_plugin_decorum::init())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
+        .setup(|app| {
+            let main_window = create_main_window(app.handle())?;
+            finish_desktop_window_setup(&main_window);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            check_piui_service,
+            start_piui_service,
+            stop_piui_service,
+            get_piui_service_started_by_us,
+            desktop_window_ready,
+            open_new_window,
+        ]);
 
     #[cfg(target_os = "android")]
-    let builder = builder.invoke_handler(tauri::generate_handler![local_server_config]);
-
-    #[cfg(any(windows, target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_decorum::init());
+    let builder = builder.setup(|app| {
+        let _ = create_main_window(app.handle())?;
+        Ok(())
+    });
 
     let app = builder
         .build(tauri::generate_context!())
         .expect("error while building PiUI desktop client");
+
+    #[cfg(not(target_os = "android"))]
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            stop_server(app_handle);
+            service::stop_piui_service_process(&app_handle.state::<ServiceState>());
         }
     });
+
+    #[cfg(target_os = "android")]
+    app.run(|_, _| {});
 }

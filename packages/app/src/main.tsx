@@ -102,28 +102,39 @@ function bootstrap() {
   )
 }
 
+interface StartPiuiServiceResult {
+  started: boolean
+  startedByUs: boolean
+  url?: string | null
+  token?: string | null
+}
+
+async function startNativePiuiService(): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const result = await invoke<StartPiuiServiceResult>('start_piui_service')
+  if (!result.url || !result.token) {
+    throw new Error('PiUI server did not return a usable URL and auth token')
+  }
+  applyLocalServerConfig(result.url, result.token)
+  console.info(`[PiUI] local server ${result.started ? 'started by app' : 'already running'} at ${result.url}`)
+}
+
 async function startApp() {
+  const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
+  installPiBackendServerSwitch()
+  bootstrap()
+
   if (isNativeTauri && !isTauriMobile()) {
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      // 窗口先显示（壳里是 loading UI），server 就绪慢时不白屏
-      void invoke('desktop_window_ready').catch(() => {})
-      const config = await invoke<{ url: string; token: string }>('local_server_config')
-      applyLocalServerConfig(config.url, config.token)
+      await startNativePiuiService()
     } catch (error) {
-      console.warn('[PiUI] native shell could not connect to the bundled server', error)
+      console.warn('[PiUI] native shell could not start the bundled server', error)
     }
   }
 
-  // Do not mount legacy OpenCode consumers before the PiUI backend decision.
-  const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
-  installPiBackendServerSwitch()
   const backend = await initializePiBackend()
-  bootstrap()
-
-  // PiUI never auto-starts OpenCode. Real Pi also never creates a session on launch.
   if (isNativeTauri) {
-    console.info('[PiUI] native shell — opencode auto-start disabled')
+    console.info('[PiUI] native shell — PiUI server lifecycle is managed by Tauri')
   } else if (!backend.available) {
     console.info('[PiUI] browser shell — PiUI server unavailable')
   }
