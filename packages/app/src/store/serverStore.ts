@@ -235,6 +235,10 @@ class ServerStore {
 
   private notifyServerChange(serverId: string, reason: ServerChangeReason): void {
     this.serverChangeGeneration += 1
+    // The visible server fields can stay identical when Tauri re-attaches to
+    // the same local URL. Notify React subscribers after the generation moves
+    // so generation-aware data loaders start a fresh flight.
+    this.listeners.forEach(listener => listener())
     this.serverChangeListeners.forEach(fn => {
       fn(serverId, reason)
     })

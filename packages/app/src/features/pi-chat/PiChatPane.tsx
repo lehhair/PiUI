@@ -187,7 +187,7 @@ export function PiChatPane({
   onNewChatRef.current = onNewChat
   const { currentDirectory, addDirectory } = useDirectory()
   const { registerSession } = useSessionContext()
-  const { activeServer } = useServerStore()
+  const { activeServer, activeServerGeneration } = useServerStore()
   const { providerRevision } = useManagementEvents()
   const registerSessionRef = useRef(registerSession)
   registerSessionRef.current = registerSession
@@ -200,7 +200,7 @@ export function PiChatPane({
   const { models, isLoading: modelsLoading } = usePiModels()
   useEffect(() => {
     void loadPiModels().catch(() => undefined)
-  }, [activeServer?.id, activeServer?.url, activeServer?.token, currentDirectory, providerRevision])
+  }, [activeServerGeneration, activeServer?.id, activeServer?.url, activeServer?.token, currentDirectory, providerRevision])
 
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)
@@ -234,7 +234,7 @@ export function PiChatPane({
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
     return () => piEventStream.disconnect(sessionId)
-  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
+  }, [activeServerGeneration, activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
 
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
