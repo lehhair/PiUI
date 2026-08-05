@@ -27,9 +27,27 @@ cpSync(server, join(target, alternateServerName))
 const archive = join(target, "piui-runtime.zip")
 const archiveName = "piui-runtime.zip"
 rmSync(join(source, archiveName), { force: true })
-const archiveResult = process.platform === "win32"
-  ? spawnSync("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path runtime,node_modules -DestinationPath '${archiveName}' -CompressionLevel Optimal -Force`], { cwd: source, stdio: "inherit" })
-  : spawnSync("zip", ["-qr", archiveName, "runtime", "node_modules"], { cwd: source, stdio: "inherit" })
+let archiveResult
+if (process.platform === "win32") {
+  archiveResult = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `Compress-Archive -Path runtime,node_modules -DestinationPath '${archiveName}' -CompressionLevel Optimal -Force`],
+    { cwd: source, stdio: "inherit" },
+  )
+  // Some Windows installations have PowerShell but omit the Archive module.
+  // GNU tar/bsdtar is enough for the runtime zip and avoids a machine-wide
+  // PowerShell repair just to build the desktop resources.
+  if (archiveResult.status !== 0) {
+    rmSync(join(source, archiveName), { force: true })
+    archiveResult = spawnSync("tar.exe", ["-a", "-c", "-f", archiveName, "runtime", "node_modules"], {
+      cwd: source,
+      stdio: "inherit",
+      shell: true,
+    })
+  }
+} else {
+  archiveResult = spawnSync("zip", ["-qr", archiveName, "runtime", "node_modules"], { cwd: source, stdio: "inherit" })
+}
 if (archiveResult.status !== 0) throw new Error("failed to create piui-runtime.zip")
 cpSync(join(source, archiveName), archive)
 rmSync(join(source, archiveName), { force: true })
