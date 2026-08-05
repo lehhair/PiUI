@@ -4,8 +4,25 @@
  * 起一个自己（见 worker-client.ts 的 PIUI_WORKER_SELF 分支）。
  */
 const { dirname, join } = await import("node:path")
-// 原生/运行时模块（node-pty、jiti）从 exe 旁的 node_modules 按绝对路径加载
-process.env.PIUI_NATIVE_MODULES ??= join(dirname(process.execPath), "node_modules")
+const { existsSync } = await import("node:fs")
+// 原生/运行时模块（node-pty、jiti）从 exe 旁的 node_modules 按绝对路径加载；
+// 旁边没有（安装目录里只有 zip）时退回 Tauri 壳解压到应用数据目录的位置
+const execDir = dirname(process.execPath)
+if (!process.env.PIUI_NATIVE_MODULES) {
+  let nativeDir = join(execDir, "node_modules")
+  if (!existsSync(nativeDir)) {
+    const home = process.platform === "win32" ? process.env.APPDATA : process.env.HOME
+    if (home) {
+      const appDataNative = process.platform === "win32"
+        ? join(home, "com.piui.desktop", "node_modules")
+        : process.platform === "darwin"
+          ? join(home, "Library", "Application Support", "com.piui.desktop", "node_modules")
+          : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, ".config"), "com.piui.desktop", "node_modules")
+      if (existsSync(appDataNative)) nativeDir = appDataNative
+    }
+  }
+  process.env.PIUI_NATIVE_MODULES = nativeDir
+}
 
 if (process.argv.includes("--pi-worker")) {
   await import("@piui/pi-worker/entry")

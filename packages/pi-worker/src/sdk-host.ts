@@ -119,11 +119,28 @@ function defaultNpmRootGlobal(): string | undefined {
 }
 
 /**
+ * Tauri 壳把 runtime 解压到应用数据目录（安装目录里只有 piui-runtime.zip）。
+ * 裸跑安装目录里的 exe 时没有 PIUI_RUNTIME_DIR，按壳的约定位置再猜一次。
+ */
+function appDataRuntimeDir(env: NodeJS.ProcessEnv): string | undefined {
+  if (process.platform === "win32") {
+    const appData = env.APPDATA
+    return appData ? join(appData, "com.piui.desktop", "runtime") : undefined
+  }
+  const home = env.HOME
+  if (!home) return undefined
+  return process.platform === "darwin"
+    ? join(home, "Library", "Application Support", "com.piui.desktop", "runtime")
+    : join(env.XDG_CONFIG_HOME?.trim() || join(home, ".config"), "com.piui.desktop", "runtime")
+}
+
+/**
  * SDK 定位顺序（用户自己的优先，越新越好）：
  *   1. PIUI_SDK_PATH 显式指定
  *   2. 用户全局 npm 安装的 pi
  *   3. 随包分发的 runtime/ 目录（热更新器维护）
- *   4. undefined → 内置 node_modules（开发态兜底）
+ *   4. Tauri 壳解压到应用数据目录的 runtime
+ *   5. undefined → 内置 node_modules（开发态兜底）
  */
 export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
   const explicit = deps.env.PIUI_SDK_PATH?.trim()
@@ -138,6 +155,12 @@ export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
   const runtimeDir = deps.env.PIUI_RUNTIME_DIR?.trim() || join(deps.execDir, "runtime")
   const runtime = runtimeSdkPath(runtimeDir, deps.exists)
   if (runtime) return { sdkPath: runtime, source: "runtime" }
+
+  const appDataDir = appDataRuntimeDir(deps.env)
+  if (appDataDir) {
+    const appDataRuntime = runtimeSdkPath(appDataDir, deps.exists)
+    if (appDataRuntime) return { sdkPath: appDataRuntime, source: "runtime" }
+  }
 
   return { source: "bundled" }
 }
