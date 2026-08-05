@@ -227,7 +227,10 @@ async function importExternalSdk(entry: string): Promise<PiSdk> {
   const createJiti = nativeRoot
     ? (await import(pathToFileURL(join(nativeRoot, "jiti", "lib", "jiti.mjs")).href) as typeof import("jiti")).createJiti
     : (await import("jiti")).createJiti
-  const jiti = createJiti(pathToFileURL(entry).href, { moduleCache: false })
+  // Bun enables native import probing by default. In a compiled executable
+  // that probe resolves from Bun's virtual B:\~BUN\root path instead of the
+  // external runtime directory. Force jiti's filesystem resolver for SDKs.
+  const jiti = createJiti(pathToFileURL(entry).href, { moduleCache: false, tryNative: false })
   return await jiti.import(entry) as PiSdk
 }
 
