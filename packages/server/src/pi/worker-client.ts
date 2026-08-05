@@ -317,9 +317,18 @@ export class WorkerSession {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.removeAbort?.()
-        reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
+        const timeoutError = Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
           code: "WORKER_RESULT_UNKNOWN",
-        }))
+        })
+        reject(timeoutError)
+        // A timed-out IPC request has no cancellation protocol in the worker.
+        // Kill this worker so a stuck SDK call cannot poison every later request.
+        this.handleExit(null, null, timeoutError)
+        try {
+          this.child.kill("SIGKILL")
+        } catch {
+          /* already gone */
+        }
       }, this.options.requestTimeoutMs ?? 10 * 60_000)
       timer.unref()
       let pending: PendingRequest

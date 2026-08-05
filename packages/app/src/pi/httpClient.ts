@@ -3,6 +3,7 @@ import { isTauri } from '../utils/tauri'
 import { PROTOCOL_VERSION } from '@piui/protocol'
 
 const DEFAULT_BASE = 'http://127.0.0.1:8787'
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 const rawFetch = globalThis.fetch.bind(globalThis)
 
 /**
@@ -47,7 +48,9 @@ export function getPiAuthToken(): string | undefined {
 }
 
 export function piFetch(input: string, init?: RequestInit): Promise<Response> {
-  return rawFetch(input, { ...init, headers: piHeaders(init?.headers) })
+  const timeout = AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS)
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+  return rawFetch(input, { ...init, signal, headers: piHeaders(init?.headers) })
 }
 
 export async function isPiServerUp(): Promise<boolean> {

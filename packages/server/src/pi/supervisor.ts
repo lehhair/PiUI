@@ -77,13 +77,13 @@ export class RuntimeSupervisor {
       return await catalog.command(type, params, options.signal)
     } catch (error) {
       const code = errorCode(error)
-      if (code !== "WORKER_RESULT_UNKNOWN") throw error
+      if (code !== "WORKER_RESULT_UNKNOWN" && code !== "REQUEST_ABORTED") throw error
       // 失败的 catalog（握手超时、崩溃）立刻丢弃，下次命令重新孵化——
       // 握不上手的 worker ready 已拒，留着只会无限 500
       if (this.catalog === catalog) this.catalog = undefined
       void catalog.dispose().catch(() => undefined)
       if (this.disposed) throw error
-      if (!options.retry || !options.idempotent) throw error
+      if (code === "REQUEST_ABORTED" || !options.retry || !options.idempotent) throw error
       const replacement = this.catalog ?? (this.catalog = this.createCatalog())
       return replacement.command(type, params)
     }
@@ -225,7 +225,14 @@ export class RuntimeSupervisor {
   }
 
   private createCatalog(): WorkerCatalog {
-    const catalog = WorkerSession.createCatalog(this.workerEntry, this.workerOptions)
+    const configuredTimeout = Number(process.env.PIUI_CATALOG_REQUEST_TIMEOUT_MS)
+    const requestTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 5_000
+      ? configuredTimeout
+      : 30_000
+    const catalog = WorkerSession.createCatalog(this.workerEntry, {
+      ...this.workerOptions,
+      requestTimeoutMs,
+    })
     catalog.onCrash(() => {
       if (this.catalog === catalog) this.catalog = undefined
       void catalog.dispose()
