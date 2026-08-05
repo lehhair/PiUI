@@ -162,3 +162,34 @@ test("SessionExecutor closes a lane by cancelling queued work and interrupting t
     { code: "RUNTIME_CLOSING" },
   )
 })
+
+test("SessionExecutor reports pending work for idle runtime reaping", async () => {
+  const executor = new SessionExecutor()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const pending = executor.submit(envelope("pending", "a", "prompt"), async () => {
+    await gate
+    return undefined
+  })
+
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(executor.hasPendingWork("a"), true)
+  release()
+  await pending.promise
+  assert.equal(executor.hasPendingWork("a"), false)
+})
+
+test("SessionExecutor allows a detached session to be attached again", async () => {
+  const executor = new SessionExecutor()
+  const command = executor.submit(envelope("first", "a", "prompt"), async () => undefined)
+  await command.promise
+  await executor.close("a", { dispose: async () => undefined })
+  assert.throws(
+    () => executor.submit(envelope("blocked", "a", "prompt"), async () => undefined),
+    { code: "RUNTIME_CLOSING" },
+  )
+
+  executor.resetSession("a")
+  const reopened = executor.submit(envelope("reopened", "a", "prompt"), async () => "ok")
+  assert.equal(await reopened.promise, "ok")
+})

@@ -140,6 +140,17 @@ export class SessionExecutor {
     return this.closing.has(sessionId) || this.closed.has(sessionId)
   }
 
+  resetSession(sessionId: string): void {
+    if (this.closing.has(sessionId)) return
+    this.closed.delete(sessionId)
+    this.crashEpochs.delete(sessionId)
+  }
+
+  hasPendingWork(sessionId: string): boolean {
+    return [...this.commands.values()].some(({ record }) =>
+      record.sessionId === sessionId && (record.status === "accepted" || record.status === "running"))
+  }
+
   close(sessionId: string, options: {
     interrupt?: () => Promise<void>
     dispose: () => Promise<void>

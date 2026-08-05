@@ -22,7 +22,8 @@
     "lint": "npm run lint -w @piui/app",
     "validate": "npm run typecheck && npm run lint && npm test && npm run build",
     "package:desktop": "node scripts/package-desktop.mjs",
-    "prepare:tauri-resources": "node scripts/prepare-tauri-resources.mjs"
+    "prepare:tauri-resources": "node scripts/prepare-tauri-resources.mjs",
+    "install:test-extension": "node scripts/install-piui-test-extension.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

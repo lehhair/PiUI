@@ -120,6 +120,10 @@ curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
 - `PIUI_SDK_PATH`: 外部 SDK 路径（目录或入口文件；版本与验证版不同时警告放行）
 - `PIUI_SDK_STRICT=1`: 外部 SDK 版本不匹配时拒绝启动
 - `PIUI_AUTH_TOKEN`: 覆盖本地 token（默认生成并持久化在数据目录）
+- `PIUI_SESSION_IDLE_TTL_MS`: 非活动 Pi session runtime 的回收时间，默认 120000（至少 30000）
+
+开发环境可用 `npm run install:test-extension` 恢复 PiUI 面板测试扩展到
+`~/.pi/agent/extensions/piui-panel-test.ts`。它只用于验证扩展状态、widget、命令和对话框桥接，不会自动装进正式产品。
 
 ## 当前状态
 

@@ -45,10 +45,22 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
   queue: "immediate",
 }]
 
+const DEFAULT_IDLE_RUNTIME_TTL_MS = 2 * 60_000
+const RUNTIME_REAPER_INTERVAL_MS = 30_000
+
+function idleRuntimeTtlMs(): number {
+  const configured = Number(process.env.PIUI_SESSION_IDLE_TTL_MS)
+  return Number.isFinite(configured) && configured >= 30_000
+    ? configured
+    : DEFAULT_IDLE_RUNTIME_TTL_MS
+}
+
 export class SessionHost {
   private readonly runtimes = new SessionRuntimeRegistry()
   private readonly activity = new Map<string, SessionActivityStatus>()
+  private readonly lastAccess = new Map<string, number>()
   private readonly materialized = new Set<string>()
+  private readonly runtimeReaper: NodeJS.Timeout
   readonly executor: SessionExecutor
 
   constructor(
@@ -57,6 +69,10 @@ export class SessionHost {
   ) {
     this.executor = new SessionExecutor(record => this.emitCommandUpdate(record))
     this.supervisor.onEvent(event => this.routeCatalogEvent(event))
+    this.runtimeReaper = setInterval(() => {
+      void this.reapIdleRuntimes()
+    }, RUNTIME_REAPER_INTERVAL_MS)
+    this.runtimeReaper.unref?.()
   }
 
   async openSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<JsonObject> {
@@ -74,6 +90,7 @@ export class SessionHost {
         if (this.executor.isClosing(existing.sessionId)) {
           throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
         }
+        this.touch(existing.sessionId)
         const state = await existing.worker.command("state.get") as JsonObject | undefined
         return {
           sessionId: existing.sessionId,
@@ -107,7 +124,9 @@ export class SessionHost {
   }
 
   private attach(session: AttachedSession): void {
+    this.executor.resetSession(session.sessionId)
     this.runtimes.set(session)
+    this.touch(session.sessionId)
     // A session file that already exists is visible to the disk-scanning
     // session list; only fresh sessions need the materialized broadcast.
     if (session.sessionFile && existsSync(session.sessionFile)) {
@@ -118,6 +137,7 @@ export class SessionHost {
       this.executor.markRuntimeCrashed(session.sessionId)
       this.runtimes.delete(session.sessionId)
       this.activity.delete(session.sessionId)
+      this.lastAccess.delete(session.sessionId)
       // Dispose so the process exits and the supervisor releases the lease —
       // without this a crashed runtime orphans the session (permanent
       // SESSION_BUSY on reattach).
@@ -131,6 +151,7 @@ export class SessionHost {
     session.worker.onClose(() => {
       const wasAttached = this.runtimes.delete(session.sessionId)
       const hadActivity = this.activity.delete(session.sessionId)
+      this.lastAccess.delete(session.sessionId)
       if (!wasAttached && !hadActivity) return
       this.publishActivity()
       this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
@@ -148,6 +169,7 @@ export class SessionHost {
   async closeSession(sessionId: string): Promise<void> {
     const session = this.runtimes.get(sessionId)
     if (!session) throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
+    this.lastAccess.delete(sessionId)
     await this.executor.close(sessionId, {
       interrupt: async () => {
         await session.worker.command("abort").catch(() => undefined)
@@ -183,6 +205,7 @@ export class SessionHost {
   async sessionQuery(sessionId: string, type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
     return withAbort((async () => {
       const session = await this.ensureAttached(sessionId)
+      this.touch(session.sessionId)
       if (this.executor.isClosing(sessionId)) {
         throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
       }
@@ -304,12 +327,14 @@ export class SessionHost {
 
   submitSessionCommand(sessionId: string, envelope: Omit<CommandEnvelope, "sessionId">): SubmittedCommand | Promise<SubmittedCommand> {
     const full: CommandEnvelope = { ...envelope, sessionId }
-    const submit = (session: AttachedSession): SubmittedCommand =>
-      this.executor.submit(full, async () => {
+    const submit = (session: AttachedSession): SubmittedCommand => {
+      this.touch(session.sessionId)
+      return this.executor.submit(full, async () => {
         const data = await session.worker.command(full.type, full.params)
         this.trackReplacement(session, data)
         return data
       })
+    }
     const existing = this.runtimes.get(sessionId)
     if (existing) return submit(existing)
     return this.ensureAttached(sessionId).then(submit)
@@ -331,11 +356,14 @@ export class SessionHost {
   private trackReplacement(session: AttachedSession, data: JsonValue | undefined): void {
     if (!isJsonObject(data) || data.cancelled !== false || typeof data.targetSessionId !== "string") return
     if (data.targetSessionId === session.sessionId) return
+    const previousLastAccess = this.lastAccess.get(session.sessionId)
+    this.lastAccess.delete(session.sessionId)
     this.runtimes.delete(session.sessionId)
     session.sessionId = data.targetSessionId
     session.sessionFile = typeof data.targetSessionFile === "string" ? data.targetSessionFile : session.sessionFile
     session.cwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
     session.worker.updateSessionIdentity(session.sessionId, session.sessionFile, session.cwd)
+    if (previousLastAccess !== undefined) this.lastAccess.set(session.sessionId, previousLastAccess)
     // Swap the lease to the target session — otherwise the source session's
     // ports stay held and it can never be attached again (SESSION_BUSY).
     void this.supervisor.replaceRuntimeLease(session.worker, session.sessionFile, session.sessionId)
@@ -351,6 +379,7 @@ export class SessionHost {
   }
 
   private routeSessionEvent(session: AttachedSession, event: WorkerEvent): void {
+    this.touch(session.sessionId)
     if (event.channel === "pi.event") {
       this.hub.publish({ kind: "session", id: session.sessionId }, "pi.event", {
         event: event.event,
@@ -413,6 +442,7 @@ export class SessionHost {
     const status = isJsonObject(event) && isJsonObject(event.status) ? event.status : null
     const previous = this.activity.get(sessionId)
     const next = status as SessionActivityStatus | null
+    if (next) this.touch(sessionId)
 
     const changed = next === null
       ? previous !== undefined
@@ -428,6 +458,32 @@ export class SessionHost {
 
   private publishActivity(): void {
     this.hub.publish({ kind: "server", id: "server" }, "sessions.activity", this.getActivitySnapshot() as unknown as JsonValue)
+  }
+
+  dispose(): void {
+    clearInterval(this.runtimeReaper)
+    this.lastAccess.clear()
+    this.activity.clear()
+    this.materialized.clear()
+  }
+
+  private touch(sessionId: string): void {
+    this.lastAccess.set(sessionId, Date.now())
+  }
+
+  private async reapIdleRuntimes(): Promise<void> {
+    const cutoff = Date.now() - idleRuntimeTtlMs()
+    const candidates = [...this.runtimes.values()].filter(session => {
+      const last = this.lastAccess.get(session.sessionId) ?? 0
+      return last < cutoff
+        && !this.activity.has(session.sessionId)
+        && !this.executor.hasPendingWork(session.sessionId)
+        && !this.executor.isClosing(session.sessionId)
+    })
+
+    for (const session of candidates) {
+      await this.closeSession(session.sessionId).catch(() => undefined)
+    }
   }
 
   private emitCommandUpdate(record: CommandRecord): void {

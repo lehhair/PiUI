@@ -42,7 +42,10 @@ export class RuntimeSupervisor {
     this.workerEntry = options.workerEntry ?? getPiWorkerEntryUrl()
     this.workerOptions = options.worker
     this.leases = options.leases ?? new SessionLeaseManager()
-    this.standbySize = Math.max(1, options.standbySize ?? 2)
+    // A standby worker is expensive: the compiled server starts another copy
+    // of itself for every worker. Create session workers on demand instead of
+    // keeping two idle Pi runtimes alive from server startup.
+    this.standbySize = Math.max(0, options.standbySize ?? 0)
     this.catalog = this.createCatalog()
     this.replenishStandby()
   }
