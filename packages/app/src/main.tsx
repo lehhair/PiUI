@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, useEffect, useState } from 'react'
+import { StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'katex/dist/katex.min.css'
 import './index.css'
@@ -10,6 +10,7 @@ import { themeStore } from './store/themeStore'
 import { applyLocalServerConfig, applyUrlTokenParam } from './store/serverStore'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { globalErrorHandler } from './utils/errorHandling'
+import { serviceStore } from './store/serviceStore'
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
 // 统一补齐，避免业务层 scattered fallback。
@@ -104,46 +105,6 @@ function bootstrap() {
   )
 }
 
-function NativeServiceGate({ onReady }: { onReady: () => Promise<void> }) {
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    let active = true
-    setError(null)
-    void startNativePiuiService()
-      .then(() => onReady())
-      .catch(reason => {
-        if (!active) return
-        setError(reason instanceof Error ? reason.message : String(reason))
-      })
-    return () => {
-      active = false
-    }
-  }, [attempt, onReady])
-
-  return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg-100 px-6 text-text-100">
-      <div className="w-full max-w-md text-center">
-        <div className="mx-auto mb-4 h-7 w-7 animate-spin rounded-full border-2 border-border-200 border-t-accent-main-100" />
-        <h1 className="text-lg font-semibold">{error ? 'PiUI 服务启动失败' : '正在连接 PiUI 服务'}</h1>
-        <p className="mt-2 break-words text-sm text-text-400">
-          {error ?? '正在等待本地后端就绪，连接成功后继续加载工作区'}
-        </p>
-        {error && (
-          <button
-            type="button"
-            className="mt-5 rounded-md bg-accent-main-100 px-4 py-2 text-sm text-white hover:opacity-90"
-            onClick={() => setAttempt(value => value + 1)}
-          >
-            重试连接
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
 interface StartPiuiServiceResult {
   started: boolean
   startedByUs: boolean
@@ -152,29 +113,35 @@ interface StartPiuiServiceResult {
 }
 
 async function startNativePiuiService(): Promise<void> {
+  if (!isNativeTauri || isTauriMobile() || !serviceStore.autoStart) return
   const { invoke } = await import('@tauri-apps/api/core')
-  const result = await invoke<StartPiuiServiceResult>('start_piui_service')
-  if (!result.url || !result.token) {
-    throw new Error('PiUI server did not return a usable URL and auth token')
+  serviceStore.setStarting(true)
+  try {
+    const result = await invoke<StartPiuiServiceResult>('start_piui_service', {
+      envVars: serviceStore.envVarsRecord,
+    })
+    if (!result.url || !result.token) {
+      throw new Error('PiUI server did not return a usable URL and auth token')
+    }
+    applyLocalServerConfig(result.url, result.token)
+    serviceStore.setStartedByUs(result.startedByUs)
+    serviceStore.setRunning(true)
+    console.info(`[PiUI] local server ${result.started ? 'started by app' : 'already running'} at ${result.url}`)
+  } finally {
+    serviceStore.setStarting(false)
   }
-  applyLocalServerConfig(result.url, result.token)
-  console.info(`[PiUI] local server ${result.started ? 'started by app' : 'already running'} at ${result.url}`)
 }
 
 async function startApp() {
   const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
   installPiBackendServerSwitch()
 
-  if (isNativeTauri && !isTauriMobile()) {
-    const onReady = async () => {
-      bootstrap()
-      await initializePiBackend()
-    }
-    root.render(<NativeServiceGate onReady={onReady} />)
-    return
-  }
-
   bootstrap()
+  if (isNativeTauri && !isTauriMobile()) {
+    void startNativePiuiService().catch(error => {
+      console.error('[PiUI] auto-start local server failed:', error)
+    })
+  }
   const backend = await initializePiBackend()
   if (isNativeTauri) {
     console.info('[PiUI] native shell — PiUI server lifecycle is managed by Tauri')

@@ -29,6 +29,7 @@ pub struct ServiceState {
     pub allow_close: AtomicBool,
     pub starting: AtomicBool,
     pub service_url: Mutex<Option<String>>,
+    pub env_vars: Mutex<BTreeMap<String, String>>,
     marker_path: Mutex<Option<PathBuf>>,
     output: Arc<Mutex<VecDeque<String>>>,
 }
@@ -42,6 +43,7 @@ impl Default for ServiceState {
             allow_close: AtomicBool::new(false),
             starting: AtomicBool::new(false),
             service_url: Mutex::new(None),
+            env_vars: Mutex::new(BTreeMap::new()),
             marker_path: Mutex::new(None),
             output: Arc::new(Mutex::new(VecDeque::new())),
         }
@@ -142,6 +144,7 @@ fn read_service_marker(app: &AppHandle, state: &ServiceState) -> Option<ServiceM
 fn service_environment(
     runtime_dir: Option<&PathBuf>,
     native_modules: Option<&PathBuf>,
+    custom: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
     let mut environment = BTreeMap::from([
         ("PIUI_HOST".to_string(), "127.0.0.1".to_string()),
@@ -157,6 +160,7 @@ fn service_environment(
             path.display().to_string(),
         );
     }
+    environment.extend(custom.iter().map(|(key, value)| (key.clone(), value.clone())));
     environment
 }
 
@@ -318,6 +322,7 @@ where
 fn spawn_server(
     prepared: PreparedServer,
     output: Arc<Mutex<VecDeque<String>>>,
+    env_vars: &BTreeMap<String, String>,
 ) -> Result<SpawnedServer, String> {
     let mut command = Command::new(&prepared.binary);
     command
@@ -329,6 +334,10 @@ fn spawn_server(
         .env("PIUI_NATIVE_MODULES", prepared.native_modules)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    for (key, value) in env_vars {
+        command.env(key, value);
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -413,6 +422,19 @@ async fn service_process_id(url: &str, token: Option<&str>) -> Option<u32> {
     service_health(url, token).await?.process_id
 }
 
+fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
+    let port = env_vars
+        .get("PIUI_PORT")
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(8787);
+    let host = env_vars
+        .get("PIUI_HOST")
+        .map(String::as_str)
+        .filter(|value| !value.is_empty() && *value != "0.0.0.0" && *value != "::")
+        .unwrap_or("127.0.0.1");
+    format!("http://{host}:{port}")
+}
+
 async fn adopt_persisted_service(
     app: &AppHandle,
     state: &ServiceState,
@@ -442,12 +464,13 @@ pub async fn check_piui_service(url: String, token: Option<String>) -> Result<bo
 pub async fn start_piui_service(
     app: AppHandle,
     state: State<'_, ServiceState>,
+    env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
     if state.starting.swap(true, Ordering::SeqCst) {
         return Err("PiUI server is already starting".to_string());
     }
 
-    let result = start_piui_service_inner(&app, &state).await;
+    let result = start_piui_service_inner(&app, &state, env_vars).await;
     state.starting.store(false, Ordering::SeqCst);
     result
 }
@@ -455,8 +478,10 @@ pub async fn start_piui_service(
 async fn start_piui_service_inner(
     app: &AppHandle,
     state: &State<'_, ServiceState>,
+    env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
     let token = read_token().ok();
+    let service_url = configured_service_url(&env_vars);
 
     if adopt_persisted_service(app, state, token.as_deref()).await {
         let url = state
@@ -490,16 +515,16 @@ async fn start_piui_service_inner(
         }
     }
 
-    if is_service_running(DEFAULT_SERVER_URL, token.as_deref()).await {
+    if is_service_running(&service_url, token.as_deref()).await {
         state.started_by_us.store(false, Ordering::SeqCst);
         *state
             .service_url
             .lock()
-            .map_err(|error| error.to_string())? = Some(DEFAULT_SERVER_URL.to_string());
+            .map_err(|error| error.to_string())? = Some(service_url.clone());
         return Ok(StartServiceResult {
             started: false,
             started_by_us: false,
-            url: Some(DEFAULT_SERVER_URL.to_string()),
+            url: Some(service_url),
             token,
         });
     }
@@ -512,7 +537,7 @@ async fn start_piui_service_inner(
     if let Ok(mut output) = state.output.lock() {
         output.clear();
     }
-    let spawned = spawn_server(prepared, state.output.clone())?;
+    let spawned = spawn_server(prepared, state.output.clone(), &env_vars)?;
     let pid = spawned.child.id();
     {
         let mut child = state.child.lock().map_err(|error| error.to_string())?;
@@ -523,8 +548,12 @@ async fn start_piui_service_inner(
     *state
         .service_url
         .lock()
-        .map_err(|error| error.to_string())? = Some(DEFAULT_SERVER_URL.to_string());
-    if let Err(error) = persist_service_marker(app, state, pid, DEFAULT_SERVER_URL) {
+        .map_err(|error| error.to_string())? = Some(service_url.clone());
+    *state
+        .env_vars
+        .lock()
+        .map_err(|error| error.to_string())? = env_vars.clone();
+    if let Err(error) = persist_service_marker(app, state, pid, &service_url) {
         stop_piui_service_process(state);
         return Err(format!("failed to persist PiUI service ownership: {error}"));
     }
@@ -553,11 +582,11 @@ async fn start_piui_service_inner(
         }
 
         let current_token = read_token().ok().or_else(|| token.clone());
-        if is_service_running(DEFAULT_SERVER_URL, current_token.as_deref()).await {
+        if is_service_running(&service_url, current_token.as_deref()).await {
             return Ok(StartServiceResult {
                 started: true,
                 started_by_us: true,
-                url: Some(DEFAULT_SERVER_URL.to_string()),
+                url: Some(service_url.clone()),
                 token: current_token,
             });
         }
@@ -599,6 +628,9 @@ pub fn stop_piui_service_process(state: &ServiceState) {
     if let Ok(mut url) = state.service_url.lock() {
         *url = None;
     }
+    if let Ok(mut env_vars) = state.env_vars.lock() {
+        env_vars.clear();
+    }
     if pid > 0 {
         kill_process_tree(pid);
     }
@@ -621,9 +653,10 @@ pub async fn stop_piui_service(state: State<'_, ServiceState>) -> Result<(), Str
 pub async fn restart_piui_service(
     app: AppHandle,
     state: State<'_, ServiceState>,
+    env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
     stop_piui_service_process(&state);
-    start_piui_service_inner(&app, &state).await
+    start_piui_service_inner(&app, &state, env_vars).await
 }
 
 #[tauri::command]
@@ -657,12 +690,21 @@ pub async fn get_piui_service_status(
         .map_err(|error| error.to_string())?;
     let runtime_dir = data_dir.join("runtime");
     let native_modules = data_dir.join("node_modules");
+    let custom_environment = state
+        .env_vars
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     Ok(ServiceStatusResult {
         running,
         started_by_us: running && state.started_by_us.load(Ordering::SeqCst),
         pid,
         url: running.then_some(url),
-        environment: service_environment(Some(&runtime_dir), Some(&native_modules)),
+        environment: service_environment(
+            Some(&runtime_dir),
+            Some(&native_modules),
+            &custom_environment,
+        ),
     })
 }
 
