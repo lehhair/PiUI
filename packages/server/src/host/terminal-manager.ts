@@ -12,14 +12,20 @@ let ptyModule: PtyModule | undefined
  * 编译形态（PIUI_NATIVE_MODULES 指向 exe 旁的 node_modules）按绝对路径
  * 直接加载平台包——Bun 编译产物的 require 不会为磁盘上的外部模块做
  * node_modules 上溯解析，node-pty 的包装包在里面会找不到平台二进制，
- * 所以绕过包装层。开发态走正常解析。
+ * 所以从平台包的绝对入口绕过包装层。开发态走正常解析。
  */
 function loadPty(): PtyModule {
   if (ptyModule) return ptyModule
   const nativeRoot = process.env.PIUI_NATIVE_MODULES?.trim()
   if (nativeRoot) {
-    const platformEntry = join(nativeRoot, "@lydell", `node-pty-${process.platform}-${process.arch}`, "package.json")
-    ptyModule = createRequire(platformEntry)(`@lydell/node-pty-${process.platform}-${process.arch}`) as PtyModule
+    const platformEntry = join(
+      nativeRoot,
+      "@lydell",
+      `node-pty-${process.platform}-${process.arch}`,
+      "lib",
+      "index.js",
+    )
+    ptyModule = createRequire(platformEntry)(platformEntry) as PtyModule
   } else {
     ptyModule = createRequire(import.meta.url)("@lydell/node-pty") as PtyModule
   }
