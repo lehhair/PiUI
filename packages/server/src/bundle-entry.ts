@@ -42,7 +42,10 @@ if (!process.env.PIUI_WORKER_BIN) {
         const workerPath = join(runtimeDir, pointer.dir, workerName)
         if (existsSync(workerPath)) {
           process.env.PIUI_WORKER_BIN = workerPath
-          process.env.PIUI_BUNDLED_SDK = "1"
+          const externalSdkRequested = Boolean(
+            process.env.PIUI_SDK_PATH?.trim() || process.env.PIUI_USE_SYSTEM_PI === "1",
+          )
+          if (!externalSdkRequested) process.env.PIUI_BUNDLED_SDK = "1"
         }
       }
     } catch {
