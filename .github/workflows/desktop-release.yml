@@ -13,6 +13,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  portable:
+    name: portable ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, target: bun-windows-x64 }
+          - { name: linux-x64, os: ubuntu-latest, target: bun-linux-x64 }
+          - { name: macos-arm64, os: macos-latest, target: bun-darwin-arm64 }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: oven-sh/setup-bun@v2
+
+      # win32 专属补丁在非 Windows 上会让 patch-package 直接报错（包不存在）
+      - name: drop windows-only patch
+        if: runner.os != 'Windows'
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - run: npm ci
+
+      # 全量验证：typecheck + lint + 三个包的测试 + 构建
+      - run: npm run validate
+
+      - name: package desktop bundle
+        run: node scripts/package-desktop.mjs --skip-build --target ${{ matrix.target }}
+
+      - name: archive bundle
+        shell: bash
+        run: |
+          cd dist-desktop
+          if [ "${{ matrix.name }}" = "windows-x64" ]; then
+            7z a -tzip "../piui-${{ matrix.name }}.zip" .
+          else
+            tar -czf "../piui-${{ matrix.name }}.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piui-${{ matrix.name }}
+          path: |
+            piui-${{ matrix.name }}.zip
+            piui-${{ matrix.name }}.tar.gz
+          if-no-files-found: ignore
+
   desktop:
     name: desktop ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -163,8 +215,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: publish desktop and Android assets
-    needs: [desktop, android]
+    name: publish release assets
+    needs: [portable, desktop, android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
