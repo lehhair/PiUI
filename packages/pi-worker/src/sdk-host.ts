@@ -4,8 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type * as PiSdkModule from "@earendil-works/pi-coding-agent"
-
-const embeddedBundledSdkVersion = process.env.PIUI_BUNDLED_SDK_VERSION?.trim() || undefined
+import { BUNDLED_PI_SDK_VERSION } from "./bundled-sdk-version.js"
 
 export type PiSdk = typeof PiSdkModule
 
@@ -286,7 +285,7 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
     : await import("@earendil-works/pi-coding-agent") as PiSdk
   const version = external
     ? (typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown")
-    : (embeddedBundledSdkVersion ?? (typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown"))
+    : BUNDLED_PI_SDK_VERSION
   const runtimeContract = sdk as PiSdk & {
     ModelRuntime?: { create?: unknown }
     SettingsManager?: unknown

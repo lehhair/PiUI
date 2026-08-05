@@ -46,12 +46,15 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   mkdirSync(runtimePiRoot, { recursive: true })
 
   console.info(`[package] compiling self-contained pi worker ${piPkg.version}`)
+  writeFileSync(
+    join(repoRoot, "packages", "pi-worker", "dist", "bundled-sdk-version.js"),
+    `export const BUNDLED_PI_SDK_VERSION = ${JSON.stringify(piPkg.version)};\n`,
+  )
   const workerName = target.includes("windows") ? "pi-worker.exe" : "pi-worker"
   run("bun", [
     "build", join("packages", "pi-worker", "dist", "entry.js"),
     "--compile",
     `--target=${target}`,
-    "--define", `process.env.PIUI_BUNDLED_SDK_VERSION='${piPkg.version}'`,
     "--outfile", join(runtimePiRoot, workerName),
   ])
   writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
