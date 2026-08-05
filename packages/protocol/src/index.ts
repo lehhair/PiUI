@@ -16,6 +16,7 @@ export type HealthResponse = {
   protocolVersion: typeof import("./version.js").PROTOCOL_VERSION
   service: "piui-server"
   piSdkVersion: string
+  processId?: number
 }
 
 /**

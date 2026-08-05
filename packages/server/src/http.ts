@@ -228,6 +228,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
           protocolVersion: PROTOCOL_VERSION,
           service: "piui-server",
           piSdkVersion: PI_PARITY_SDK_VERSION,
+          processId: process.pid,
         }
         return sendJson(res, 200, body)
       }

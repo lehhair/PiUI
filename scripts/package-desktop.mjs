@@ -42,6 +42,19 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   // 安装形态），把它和包本体一起整树复制即可，无需重新解析依赖
   console.info(`[package] copying pi ${piPkg.version} runtime closure (this is ~150MB)`)
   cpSync(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"), { recursive: true })
+  // pi-ai imports this package at runtime. Keep it inside the SDK closure even
+  // when npm flattens the transitive dependency in a clean install.
+  const partialJsonSources = [
+    join(piPackageDir, "node_modules", "partial-json"),
+    join(repoRoot, "node_modules", "partial-json"),
+  ]
+  const partialJsonSource = partialJsonSources.find(path => existsSync(path))
+  if (!partialJsonSource) throw new Error("partial-json is missing from the installed Pi SDK closure")
+  const partialJsonTarget = join(runtimePi, "@earendil-works", "pi-coding-agent", "node_modules", "partial-json")
+  cpSync(partialJsonSource, partialJsonTarget, { recursive: true })
+  if (!existsSync(join(partialJsonTarget, "package.json"))) {
+    throw new Error("partial-json was not copied into the Pi SDK runtime closure")
+  }
   writeFileSync(
     join(outDir, "runtime", "current.json"),
     JSON.stringify({ dir: "pi", version: piPkg.version }, null, 2),

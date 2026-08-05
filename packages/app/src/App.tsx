@@ -35,10 +35,12 @@ import { usePiCapabilities } from './pi/capabilities'
 import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
+import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 import { loadPiSessionData, openPiSession } from './pi/controllers/index.js'
 import { trackPiSession } from './pi/piSessionIndex'
 import { useSessionContext } from './contexts/useSessionContext'
+import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 
 const SettingsDialog = lazy(() =>
   import('./features/settings/SettingsDialog').then(module => ({ default: module.SettingsDialog })),
@@ -54,6 +56,7 @@ type MobilePagerPage = 'left' | 'chat' | 'right'
 
 function App() {
   const { t } = useTranslation(['commands', 'chat', 'common', 'components'])
+  const { showCloseDialog, confirmClose, cancelClose } = useCloseServiceDialog()
   const router = useRouter()
   const {
     sessionId: routeSessionId,
@@ -1032,6 +1035,7 @@ function App() {
 
         <Suspense fallback={null}>
           <SettingsDialog isOpen={settingsDialogOpen} onClose={closeSettings} initialTab={settingsInitialTab} />
+          <CloseServiceDialog isOpen={showCloseDialog} onConfirm={confirmClose} onCancel={cancelClose} />
           <CommandPalette
             isOpen={commandPaletteOpen}
             onClose={() => setCommandPaletteOpen(false)}

@@ -1,15 +1,15 @@
 #[cfg(not(target_os = "android"))]
 mod service;
 
-use tauri::{Manager, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewWindowBuilder};
 
 #[cfg(not(target_os = "android"))]
 use tauri::{WebviewUrl, Window};
 
 #[cfg(not(target_os = "android"))]
 use service::{
-    check_piui_service, get_piui_service_started_by_us, start_piui_service, stop_piui_service,
-    ServiceState,
+    check_piui_service, confirm_close_app, get_piui_service_started_by_us, get_piui_service_status,
+    restart_piui_service, start_piui_service, stop_piui_service, ServiceState,
 };
 
 #[cfg(not(target_os = "android"))]
@@ -117,6 +117,23 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let is_last = window.app_handle().webview_windows().len() <= 1;
+                let state = window.state::<ServiceState>();
+                if is_last
+                    && state
+                        .started_by_us
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                    && !state
+                        .allow_close
+                        .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    api.prevent_close();
+                    let _ = window.emit("close-requested", ());
+                }
+            }
+        })
         .setup(|app| {
             let main_window = create_main_window(app.handle())?;
             finish_desktop_window_setup(&main_window);
@@ -126,7 +143,10 @@ pub fn run() {
             check_piui_service,
             start_piui_service,
             stop_piui_service,
+            restart_piui_service,
+            get_piui_service_status,
             get_piui_service_started_by_us,
+            confirm_close_app,
             desktop_window_ready,
             open_new_window,
         ]);
@@ -142,11 +162,7 @@ pub fn run() {
         .expect("error while building PiUI desktop client");
 
     #[cfg(not(target_os = "android"))]
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            service::stop_piui_service_process(&app_handle.state::<ServiceState>());
-        }
-    });
+    app.run(|_, _| {});
 
     #[cfg(target_os = "android")]
     app.run(|_, _| {});

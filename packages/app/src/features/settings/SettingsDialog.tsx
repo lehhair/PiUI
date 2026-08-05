@@ -25,6 +25,7 @@ import { NotificationSettings } from './components/NotificationSettings'
 import { ServersSettings } from './components/ServersSettings'
 import { WorkspaceSettings } from './components/WorkspaceSettings'
 import { PiManagementSettings } from './components/PiManagementSettings'
+import { ServiceSettings } from './components/ServiceSettings'
 import { SettingsSearch } from './SettingsSearch'
 import { SETTINGS_SEARCH_DEFINITIONS, type SettingsSearchItem } from './settingsSearchCatalog'
 import { usePiCapabilities } from '../../pi/capabilities'
@@ -41,6 +42,7 @@ export type SettingsTab =
   | 'notifications'
   | 'config'
   | 'servers'
+  | 'service'
   | 'keybindings'
   | 'workspace'
   | 'about'
@@ -57,6 +59,7 @@ interface SettingsDialogProps {
 
 const TAB_ICONS: Record<SettingsTab, React.ReactNode> = {
   servers: <GlobeIcon size={15} />,
+  service: <GlobeIcon size={15} />,
   agent: <AgentIcon size={15} />,
   chat: <MessageSquareIcon size={15} />,
   models: <CpuIcon size={15} />,
@@ -70,6 +73,7 @@ const TAB_ICONS: Record<SettingsTab, React.ReactNode> = {
 
 const TAB_IDS: SettingsTab[] = [
   'servers',
+  'service',
   'models',
   'agent',
   'chat',
@@ -83,6 +87,7 @@ const TAB_IDS: SettingsTab[] = [
 
 const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
   servers: 'tabs.servers',
+  service: 'tabs.service',
   agent: 'tabs.agent',
   chat: 'tabs.chat',
   models: 'tabs.models',
@@ -95,7 +100,7 @@ const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 }
 
 const GROUP_DEFS: { labelKey: string; tabs: SettingsTab[] }[] = [
-  { labelKey: 'groups.core', tabs: ['servers', 'models', 'agent', 'chat', 'workspace', 'appearance', 'notifications'] },
+  { labelKey: 'groups.core', tabs: ['servers', 'service', 'models', 'agent', 'chat', 'workspace', 'appearance', 'notifications'] },
   { labelKey: 'groups.advanced', tabs: ['config', 'keybindings', 'about'] },
 ]
 
@@ -119,6 +124,8 @@ function TabContent({ tab }: { tab: SettingsTab }) {
       return <PiManagementSettings />
     case 'servers':
       return <ServersSettings />
+    case 'service':
+      return <ServiceSettings />
     case 'keybindings':
       return <KeybindingsSection />
     case 'workspace':

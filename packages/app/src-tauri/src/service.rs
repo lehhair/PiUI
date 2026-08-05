@@ -1,5 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     collections::VecDeque,
     env,
     fs::{self, create_dir_all, remove_dir_all, rename, File},
@@ -25,8 +26,10 @@ pub struct ServiceState {
     pub child: Mutex<Option<Child>>,
     pub child_pid: AtomicU32,
     pub started_by_us: AtomicBool,
+    pub allow_close: AtomicBool,
     pub starting: AtomicBool,
     pub service_url: Mutex<Option<String>>,
+    marker_path: Mutex<Option<PathBuf>>,
     output: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -36,8 +39,10 @@ impl Default for ServiceState {
             child: Mutex::new(None),
             child_pid: AtomicU32::new(0),
             started_by_us: AtomicBool::new(false),
+            allow_close: AtomicBool::new(false),
             starting: AtomicBool::new(false),
             service_url: Mutex::new(None),
+            marker_path: Mutex::new(None),
             output: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
@@ -52,6 +57,29 @@ pub struct StartServiceResult {
     pub token: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceStatusResult {
+    pub running: bool,
+    pub started_by_us: bool,
+    pub pid: Option<u32>,
+    pub url: Option<String>,
+    pub environment: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthResponse {
+    process_id: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceMarker {
+    pid: u32,
+    url: String,
+}
+
 struct PreparedServer {
     binary: PathBuf,
     resource: PathBuf,
@@ -61,6 +89,75 @@ struct PreparedServer {
 
 struct SpawnedServer {
     child: Child,
+}
+
+fn marker_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("piui-service.json"))
+}
+
+fn remember_marker_path(app: &AppHandle, state: &ServiceState) -> Result<PathBuf, String> {
+    let path = marker_path(app)?;
+    *state
+        .marker_path
+        .lock()
+        .map_err(|error| error.to_string())? = Some(path.clone());
+    Ok(path)
+}
+
+fn persist_service_marker(
+    app: &AppHandle,
+    state: &ServiceState,
+    pid: u32,
+    url: &str,
+) -> Result<(), String> {
+    let path = remember_marker_path(app, state)?;
+    if let Some(parent) = path.parent() {
+        create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let marker = ServiceMarker {
+        pid,
+        url: url.to_string(),
+    };
+    let bytes = serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?;
+    fs::write(path, bytes).map_err(|error| error.to_string())
+}
+
+fn clear_service_marker(state: &ServiceState) {
+    let path = state.marker_path.lock().ok().and_then(|path| path.clone());
+    if let Some(path) = path {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn read_service_marker(app: &AppHandle, state: &ServiceState) -> Option<ServiceMarker> {
+    let path = remember_marker_path(app, state).ok()?;
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn service_environment(
+    runtime_dir: Option<&PathBuf>,
+    native_modules: Option<&PathBuf>,
+) -> BTreeMap<String, String> {
+    let mut environment = BTreeMap::from([
+        ("PIUI_HOST".to_string(), "127.0.0.1".to_string()),
+        ("PIUI_PORT".to_string(), DEFAULT_PORT.to_string()),
+        ("PIUI_DRIVER".to_string(), "pi".to_string()),
+    ]);
+    if let Some(path) = runtime_dir {
+        environment.insert("PIUI_RUNTIME_DIR".to_string(), path.display().to_string());
+    }
+    if let Some(path) = native_modules {
+        environment.insert(
+            "PIUI_NATIVE_MODULES".to_string(),
+            path.display().to_string(),
+        );
+    }
+    environment
 }
 
 fn resource_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -117,11 +214,20 @@ fn unpack_runtime(app: &AppHandle, resource: &PathBuf) -> Result<(PathBuf, PathB
     let marker = data_dir.join("piui-runtime.version");
     let runtime_dir = data_dir.join("runtime");
     let native_dir = data_dir.join("node_modules");
+    let partial_json = runtime_dir
+        .join("pi")
+        .join("node_modules")
+        .join("@earendil-works")
+        .join("pi-coding-agent")
+        .join("node_modules")
+        .join("partial-json")
+        .join("package.json");
 
     if marker.exists()
         && fs::read_to_string(&marker).ok().as_deref() == Some(version.trim())
         && runtime_dir.join("current.json").is_file()
         && native_dir.is_dir()
+        && partial_json.is_file()
     {
         return Ok((runtime_dir, native_dir));
     }
@@ -266,13 +372,13 @@ fn recent_output(state: &ServiceState) -> String {
         .unwrap_or_default()
 }
 
-pub async fn is_service_running(url: &str, token: Option<&str>) -> bool {
+async fn service_health(url: &str, token: Option<&str>) -> Option<HealthResponse> {
     let client = match Client::builder()
         .connect_timeout(Duration::from_secs(1))
         .build()
     {
         Ok(client) => client,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let mut request = client
         .get(format!("{}/api/v1/host/health", url.trim_end_matches('/')))
@@ -280,11 +386,39 @@ pub async fn is_service_running(url: &str, token: Option<&str>) -> bool {
     if let Some(token) = token.filter(|value| !value.is_empty()) {
         request = request.bearer_auth(token);
     }
-    request
-        .send()
-        .await
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<HealthResponse>().await.ok()
+}
+
+pub async fn is_service_running(url: &str, token: Option<&str>) -> bool {
+    service_health(url, token).await.is_some()
+}
+
+async fn service_process_id(url: &str, token: Option<&str>) -> Option<u32> {
+    service_health(url, token).await?.process_id
+}
+
+async fn adopt_persisted_service(
+    app: &AppHandle,
+    state: &ServiceState,
+    token: Option<&str>,
+) -> bool {
+    let Some(marker) = read_service_marker(app, state) else {
+        return false;
+    };
+    if service_process_id(&marker.url, token).await == Some(marker.pid) {
+        state.child_pid.store(marker.pid, Ordering::SeqCst);
+        state.started_by_us.store(true, Ordering::SeqCst);
+        if let Ok(mut url) = state.service_url.lock() {
+            *url = Some(marker.url);
+        }
+        return true;
+    }
+    clear_service_marker(state);
+    false
 }
 
 #[tauri::command]
@@ -311,6 +445,21 @@ async fn start_piui_service_inner(
     state: &State<'_, ServiceState>,
 ) -> Result<StartServiceResult, String> {
     let token = read_token().ok();
+
+    if adopt_persisted_service(app, state, token.as_deref()).await {
+        let url = state
+            .service_url
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone()
+            .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
+        return Ok(StartServiceResult {
+            started: false,
+            started_by_us: true,
+            url: Some(url),
+            token,
+        });
+    }
 
     if state.started_by_us.load(Ordering::SeqCst) {
         let url = state
@@ -363,6 +512,10 @@ async fn start_piui_service_inner(
         .service_url
         .lock()
         .map_err(|error| error.to_string())? = Some(DEFAULT_SERVER_URL.to_string());
+    if let Err(error) = persist_service_marker(app, state, pid, DEFAULT_SERVER_URL) {
+        stop_piui_service_process(state);
+        return Err(format!("failed to persist PiUI service ownership: {error}"));
+    }
 
     for _ in 0..120 {
         let exited = {
@@ -377,6 +530,7 @@ async fn start_piui_service_inner(
         if let Some(status) = exited {
             state.started_by_us.store(false, Ordering::SeqCst);
             state.child_pid.store(0, Ordering::SeqCst);
+            clear_service_marker(state);
             if let Ok(mut child) = state.child.lock() {
                 *child = None;
             }
@@ -429,6 +583,7 @@ fn kill_process_tree(pid: u32) {
 pub fn stop_piui_service_process(state: &ServiceState) {
     let pid = state.child_pid.swap(0, Ordering::SeqCst);
     state.started_by_us.store(false, Ordering::SeqCst);
+    clear_service_marker(state);
     if let Ok(mut url) = state.service_url.lock() {
         *url = None;
     }
@@ -448,6 +603,68 @@ pub fn stop_piui_service_process(state: &ServiceState) {
 pub async fn stop_piui_service(state: State<'_, ServiceState>) -> Result<(), String> {
     stop_piui_service_process(&state);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn restart_piui_service(
+    app: AppHandle,
+    state: State<'_, ServiceState>,
+) -> Result<StartServiceResult, String> {
+    stop_piui_service_process(&state);
+    start_piui_service_inner(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn get_piui_service_status(
+    app: AppHandle,
+    state: State<'_, ServiceState>,
+) -> Result<ServiceStatusResult, String> {
+    let token = read_token().ok();
+    let _ = adopt_persisted_service(&app, &state, token.as_deref()).await;
+    let url = state
+        .service_url
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
+    let health = service_health(&url, token.as_deref()).await;
+    let running = health.is_some();
+    if !running && state.started_by_us.load(Ordering::SeqCst) {
+        stop_piui_service_process(&state);
+    }
+    let pid = health
+        .as_ref()
+        .and_then(|health| health.process_id)
+        .or_else(|| {
+            let pid = state.child_pid.load(Ordering::SeqCst);
+            (pid > 0).then_some(pid)
+        });
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let runtime_dir = data_dir.join("runtime");
+    let native_modules = data_dir.join("node_modules");
+    Ok(ServiceStatusResult {
+        running,
+        started_by_us: running && state.started_by_us.load(Ordering::SeqCst),
+        pid,
+        url: running.then_some(url),
+        environment: service_environment(Some(&runtime_dir), Some(&native_modules)),
+    })
+}
+
+#[tauri::command]
+pub async fn confirm_close_app(
+    window: tauri::Window,
+    state: State<'_, ServiceState>,
+    stop_service: bool,
+) -> Result<(), String> {
+    if stop_service {
+        stop_piui_service_process(&state);
+    }
+    state.allow_close.store(true, Ordering::SeqCst);
+    window.destroy().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -301,6 +301,12 @@
     "tryAgain": "重试",
     "reload": "重新加载"
   },
+  "closeService": {
+    "title": "关闭 PiUI",
+    "description": "PiUI 启动的后端服务正在运行，要同时停止它吗？",
+    "closeAndStop": "关闭并停止后端",
+    "closeKeepRunning": "关闭但保留后端"
+  },
   "markdown": {
     "mermaidRenderFailed": "Mermaid 渲染失败",
     "mermaidRenderError": "无法渲染 Mermaid 图表",

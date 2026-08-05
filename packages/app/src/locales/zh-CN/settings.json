@@ -11,6 +11,8 @@
   "tabs": {
     "servers": "服务器",
     "serversDesc": "后端连接和快速切换活跃端点",
+    "service": "本地服务",
+    "serviceDesc": "查看、停止和重启 PiUI 后端服务",
     "models": "模型",
     "modelsDesc": "控制哪些模型保留在选择器里",
     "agent": "Agent",
@@ -66,6 +68,18 @@
     "editServer": "编辑服务器",
     "deleteServer": "删除服务器",
     "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。"
+  },
+  "service": {
+    "title": "本地 PiUI 服务",
+    "description": "管理桌面端启动的后端进程。保留服务后，下次打开 PiUI 仍会识别它并允许停止或重启。",
+    "desktopOnly": "本地服务管理只在桌面端可用。",
+    "running": "运行中",
+    "stopped": "未运行",
+    "startedByApp": "由此 PiUI 桌面应用启动",
+    "startedExternally": "由其他进程启动",
+    "notRunning": "后端服务当前未运行",
+    "restart": "重启服务",
+    "environment": "启动环境"
   },
   "chat": {
     "pathsFormatting": "路径和格式",
