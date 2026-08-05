@@ -1,4 +1,4 @@
-import { StrictMode, Suspense } from 'react'
+import { StrictMode, Suspense, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'katex/dist/katex.min.css'
 import './index.css'
@@ -86,8 +86,10 @@ window.addEventListener('unhandledrejection', event => {
   event.preventDefault()
 })
 
+const root = createRoot(document.getElementById('root')!)
+
 function bootstrap() {
-  createRoot(document.getElementById('root')!).render(
+  root.render(
     <StrictMode>
       <Suspense fallback={null}>
         <DirectoryProvider>
@@ -99,6 +101,46 @@ function bootstrap() {
         </DirectoryProvider>
       </Suspense>
     </StrictMode>,
+  )
+}
+
+function NativeServiceGate({ onReady }: { onReady: () => Promise<void> }) {
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    setError(null)
+    void startNativePiuiService()
+      .then(() => onReady())
+      .catch(reason => {
+        if (!active) return
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      active = false
+    }
+  }, [attempt, onReady])
+
+  return (
+    <div className="flex h-screen w-screen items-center justify-center bg-bg-100 px-6 text-text-100">
+      <div className="w-full max-w-md text-center">
+        <div className="mx-auto mb-4 h-7 w-7 animate-spin rounded-full border-2 border-border-200 border-t-accent-main-100" />
+        <h1 className="text-lg font-semibold">{error ? 'PiUI 服务启动失败' : '正在连接 PiUI 服务'}</h1>
+        <p className="mt-2 break-words text-sm text-text-400">
+          {error ?? '正在等待本地后端就绪，连接成功后继续加载工作区'}
+        </p>
+        {error && (
+          <button
+            type="button"
+            className="mt-5 rounded-md bg-accent-main-100 px-4 py-2 text-sm text-white hover:opacity-90"
+            onClick={() => setAttempt(value => value + 1)}
+          >
+            重试连接
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -122,16 +164,17 @@ async function startNativePiuiService(): Promise<void> {
 async function startApp() {
   const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
   installPiBackendServerSwitch()
-  bootstrap()
 
   if (isNativeTauri && !isTauriMobile()) {
-    try {
-      await startNativePiuiService()
-    } catch (error) {
-      console.warn('[PiUI] native shell could not start the bundled server', error)
+    const onReady = async () => {
+      bootstrap()
+      await initializePiBackend()
     }
+    root.render(<NativeServiceGate onReady={onReady} />)
+    return
   }
 
+  bootstrap()
   const backend = await initializePiBackend()
   if (isNativeTauri) {
     console.info('[PiUI] native shell — PiUI server lifecycle is managed by Tauri')

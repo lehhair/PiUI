@@ -52,6 +52,10 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   if (!partialJsonSource) throw new Error("partial-json is missing from the installed Pi SDK closure")
   const partialJsonTarget = join(runtimePi, "@earendil-works", "pi-coding-agent", "node_modules", "partial-json")
   cpSync(partialJsonSource, partialJsonTarget, { recursive: true })
+  // Bun/jiti can resolve the SDK from an external entry point and skip the
+  // parent package's nested node_modules. Keep the dependency at the runtime
+  // root as well so both Node and Bun resolution find the same package.
+  cpSync(partialJsonSource, join(runtimePi, "partial-json"), { recursive: true })
   if (!existsSync(join(partialJsonTarget, "package.json"))) {
     throw new Error("partial-json was not copied into the Pi SDK runtime closure")
   }
@@ -81,6 +85,13 @@ for (const name of lydellPackages) {
   externalPackages.push(`@lydell/${name}`)
 }
 cpSync(join(repoRoot, "node_modules", "jiti"), join(nativeOut, "jiti"), { recursive: true })
+const nativePartialJsonSources = [
+  join(repoRoot, "node_modules", "partial-json"),
+  join(piPackageDir, "node_modules", "partial-json"),
+]
+const nativePartialJsonSource = nativePartialJsonSources.find(path => existsSync(path))
+if (!nativePartialJsonSource) throw new Error("partial-json is missing from the native runtime closure")
+cpSync(nativePartialJsonSource, join(nativeOut, "partial-json"), { recursive: true })
 
 // ---- 3. bun compile ----
 // pi SDK 只是运行时动态 import 的外部路径，不进 bundle；node-pty 原生包
