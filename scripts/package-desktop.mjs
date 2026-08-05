@@ -38,6 +38,42 @@ const sdkFamily = {
   "@earendil-works/pi-tui": piPkg.version,
 }
 
+function resolveSourceDependency(fromPackageDir, dependencyName) {
+  const segments = dependencyName.split("/")
+  const candidates = [
+    join(fromPackageDir, "node_modules", ...segments),
+    join(dirname(fromPackageDir), ...segments),
+    join(dirname(dirname(fromPackageDir)), ...segments),
+  ]
+  return candidates.find(candidate => existsSync(join(candidate, "package.json")))
+}
+
+function copyDependencyClosure(sourcePackageDir, targetPackageDir, seen = new Set()) {
+  const packageFile = join(sourcePackageDir, "package.json")
+  if (!existsSync(packageFile)) return
+  const key = `${sourcePackageDir}\0${targetPackageDir}`
+  if (seen.has(key)) return
+  seen.add(key)
+
+  const pkg = JSON.parse(readFileSync(packageFile, "utf8"))
+  const dependencies = {
+    ...(pkg.optionalDependencies ?? {}),
+    ...(pkg.dependencies ?? {}),
+  }
+  for (const dependencyName of Object.keys(dependencies)) {
+    const sourceDependency = resolveSourceDependency(sourcePackageDir, dependencyName)
+    if (!sourceDependency) {
+      if (pkg.optionalDependencies && dependencyName in pkg.optionalDependencies) continue
+      throw new Error(`${pkg.name ?? sourcePackageDir} requires missing dependency ${dependencyName}`)
+    }
+    const targetDependency = join(targetPackageDir, "node_modules", ...dependencyName.split("/"))
+    if (!existsSync(join(targetDependency, "package.json"))) {
+      cpSync(sourceDependency, targetDependency, { recursive: true })
+    }
+    copyDependencyClosure(sourceDependency, targetDependency, seen)
+  }
+}
+
 if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   console.info("[package] --skip-runtime: keeping existing runtime directory")
 } else {
@@ -46,46 +82,17 @@ if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   rmSync(join(outDir, "runtime"), { recursive: true, force: true })
   mkdirSync(runtimePi, { recursive: true })
 
-  // Let npm construct the actual dependency tree. The SDK is loaded from disk
-  // through jiti, so its direct dependencies must live under their owning
-  // package rather than relying on workspace hoisting.
-  console.info(`[package] installing pi ${piPkg.version} runtime dependencies`)
+  // Copy the exact SDK tree already verified by this repository. Reinstalling
+  // the same semver from the registry can yield a different republished
+  // package and a different internal API surface.
+  console.info(`[package] copying verified pi ${piPkg.version} runtime`)
+  cpSync(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"), { recursive: true })
+  copyDependencyClosure(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"))
   writeFileSync(join(runtimePiRoot, "package.json"), JSON.stringify({
     name: "piui-bundled-runtime",
     private: true,
     dependencies: sdkFamily,
-    overrides: sdkFamily,
   }, null, 2))
-  run(process.platform === "win32" ? "npm.cmd" : "npm", [
-    "install",
-    "--prefix", runtimePiRoot,
-    "--legacy-bundling",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    `@earendil-works/pi-coding-agent@${piPkg.version}`,
-  ])
-  const sdkScopedRoot = join(
-    runtimePi,
-    "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works",
-  )
-  for (const packageName of readdirSync(sdkScopedRoot)) {
-    const packageDir = join(sdkScopedRoot, packageName)
-    if (!existsSync(join(packageDir, "package.json"))) continue
-    console.info(`[package] nesting dependencies for @earendil-works/${packageName}`)
-    const nestedPackageJsonPath = join(packageDir, "package.json")
-    const nestedPackageJson = JSON.parse(readFileSync(nestedPackageJsonPath, "utf8"))
-    nestedPackageJson.overrides = sdkFamily
-    writeFileSync(nestedPackageJsonPath, JSON.stringify(nestedPackageJson, null, 2))
-    run(process.platform === "win32" ? "npm.cmd" : "npm", [
-      "install",
-      "--prefix", packageDir,
-      "--ignore-scripts",
-      "--no-package-lock",
-      "--no-audit",
-      "--no-fund",
-    ])
-  }
   const sdkEntry = join(runtimePi, "@earendil-works", "pi-coding-agent", "dist", "index.js")
   const partialJson = join(
     runtimePi,
