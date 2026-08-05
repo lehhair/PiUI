@@ -15,8 +15,9 @@ use std::{
     io::Read,
 };
 use tauri::Manager;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 #[cfg(not(target_os = "android"))]
-use tauri::{WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::Window;
 #[cfg(not(target_os = "android"))]
 use zip::ZipArchive;
 
@@ -219,6 +220,16 @@ fn local_server_config() -> Result<LocalServerConfig, String> {
 }
 
 #[cfg(not(target_os = "android"))]
+fn finish_desktop_window_setup(window: &tauri::WebviewWindow) {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        use tauri_plugin_decorum::WebviewWindowExt;
+        // 移除系统标题栏并注入自定义标题栏（Windows 含窗口控制按钮）
+        let _ = window.create_overlay_titlebar();
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn desktop_window_ready(window: Window) -> Result<(), String> {
     window.show().map_err(|error| error.to_string())
@@ -231,14 +242,16 @@ fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let label = format!("window-{millis}");
+    let label = format!("win-{millis}");
     let title = directory.as_deref().unwrap_or("PiUI");
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
         .title(title)
         .inner_size(1200.0, 800.0)
+        .visible(false)
         .build()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    finish_desktop_window_setup(&window);
+    Ok(())
 }
 
 fn stop_server(app: &tauri::AppHandle) {
@@ -248,6 +261,40 @@ fn stop_server(app: &tauri::AppHandle) {
         }
         *process = None;
     }
+}
+
+#[cfg(not(target_os = "android"))]
+fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or_else(|| "main window config missing".to_string())?;
+    let window = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|error| error.to_string())?
+        .build()
+        .map_err(|error| error.to_string())?;
+    finish_desktop_window_setup(&window);
+    Ok(window)
+}
+
+#[cfg(target_os = "android")]
+fn create_main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or_else(|| "main window config missing".to_string())?;
+    WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|error| error.to_string())?
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -260,6 +307,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            if let Err(error) = create_main_window(app.handle()) {
+                eprintln!("[piui] failed to create main window: {error}");
+                return Err(error.into());
+            }
             let handle = app.handle().clone();
             thread::spawn(move || {
                 if let Err(error) = start_server(&handle) {
