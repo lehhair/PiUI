@@ -35,6 +35,7 @@ cpSync(join(source, archiveName), archive)
 rmSync(join(source, archiveName), { force: true })
 
 const current = JSON.parse(readFileSync(join(source, "runtime", "current.json"), "utf8"))
-writeFileSync(join(target, "piui-runtime.version"), String(current.version ?? "unknown"))
+const buildId = process.env.GITHUB_SHA ?? process.env.PIUI_RUNTIME_BUILD_ID ?? `local-${Date.now()}`
+writeFileSync(join(target, "piui-runtime.version"), `${current.version ?? "unknown"}|${buildId}`)
 
 console.info(`[tauri] resources prepared at ${target}`)
