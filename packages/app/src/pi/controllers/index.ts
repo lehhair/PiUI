@@ -28,7 +28,7 @@ export async function loadPiSessionTools(sessionId: string, signal?: AbortSignal
  */
 export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
   const serverGeneration = serverStore.getActiveServerGeneration()
-  const sessions = await transport.listAllPiSessions(signal)
+  const sessions = await retryUnavailable(() => transport.listAllPiSessions(signal), signal)
   if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
   piSessionInfoStore.replaceAll(sessions)
   return sessions
@@ -39,7 +39,7 @@ export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[
  */
 export async function loadPiSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<SessionInfo[]> {
   const serverGeneration = serverStore.getActiveServerGeneration()
-  const sessions = await transport.listPiSessions({ cwd }, signal)
+  const sessions = await retryUnavailable(() => transport.listPiSessions({ cwd }, signal), signal)
   if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
   piSessionInfoStore.replaceForCwd(cwd, sessions)
   return sessions
@@ -92,10 +92,10 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       // Load both in parallel
-      const [state, branch] = await Promise.all([
+      const [state, branch] = await retryUnavailable(() => Promise.all([
         transport.getPiSessionState(sessionId, signal),
         transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
-      ])
+      ]), signal)
 
       if (serverStore.getActiveServerGeneration() !== serverGeneration) return
       piSessionStateStore.setState(sessionId, state as JsonObject)
@@ -103,8 +103,9 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
       return
     } catch (error) {
       lastError = error
-      if (!isSessionBusyError(error) || attempt === 2) break
-      await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)))
+      if (!isSessionBusyError(error) && !isTransientServerError(error)) break
+      if (attempt === 2) break
+      await waitForRetry(150 * (attempt + 1), undefined)
     }
   }
 
@@ -117,6 +118,40 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
 
 function isSessionBusyError(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'SESSION_BUSY')
+}
+
+function isTransientServerError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { status?: unknown; code?: unknown }
+  return candidate.status === 502 || candidate.status === 503 || candidate.status === 504
+    || candidate.code === 'BACKEND_UNAVAILABLE'
+    || candidate.code === 'WORKER_RESULT_UNKNOWN'
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function retryUnavailable<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (!isTransientServerError(error) || attempt === 2) throw error
+      await waitForRetry(250 * 2 ** attempt, signal)
+    }
+  }
+  throw lastError
 }
 
 /**
@@ -503,7 +538,7 @@ export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> 
 async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<any>[]> {
   piModelsStore.setLoading(true)
   try {
-    const result = await transport.listPiModels(signal)
+    const result = await retryUnavailable(() => transport.listPiModels(signal), signal)
     const models = (Array.isArray(result) ? result : []) as unknown as Model<any>[]
     if (serverStore.getActiveServerGeneration() !== serverGeneration) return models
     piModelsStore.setModels(models)
