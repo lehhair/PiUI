@@ -28,33 +28,76 @@ if (!skipBuild) {
   run("npm", ["run", "build"])
 }
 
-// ---- 1. 组装 runtime/pi：从仓库 node_modules 复制 pi 的依赖闭包 ----
+// ---- 1. 组装独立的、可切换的 Pi SDK runtime ----
 const piPackageDir = join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent")
 const piPkg = JSON.parse(readFileSync(join(piPackageDir, "package.json"), "utf8"))
+const sdkFamily = {
+  "@earendil-works/pi-coding-agent": piPkg.version,
+  "@earendil-works/pi-ai": piPkg.version,
+  "@earendil-works/pi-agent-core": piPkg.version,
+  "@earendil-works/pi-tui": piPkg.version,
+}
+
 if (skipRuntime && existsSync(join(outDir, "runtime", "current.json"))) {
   console.info("[package] --skip-runtime: keeping existing runtime directory")
 } else {
-  const runtimePi = join(outDir, "runtime", "pi", "node_modules")
+  const runtimePiRoot = join(outDir, "runtime", `pi-${piPkg.version}`)
+  const runtimePi = join(runtimePiRoot, "node_modules")
   rmSync(join(outDir, "runtime"), { recursive: true, force: true })
   mkdirSync(runtimePi, { recursive: true })
 
-  // pi 的完整闭包恰好嵌套在它自己的 node_modules 里（npm workspaces 的
-  // 安装形态），把它和包本体一起整树复制即可，无需重新解析依赖
-  console.info(`[package] copying pi ${piPkg.version} runtime closure (this is ~150MB)`)
-  cpSync(piPackageDir, join(runtimePi, "@earendil-works", "pi-coding-agent"), { recursive: true })
-  // Bun/jiti can resolve the SDK from an external entry point and skip the
-  // parent package's nested node_modules. Promote the complete SDK dependency
-  // tree to the runtime root so every package uses one stable lookup root.
-  const sdkNodeModules = join(piPackageDir, "node_modules")
-  for (const entry of readdirSync(sdkNodeModules)) {
-    cpSync(join(sdkNodeModules, entry), join(runtimePi, entry), { recursive: true })
+  // Let npm construct the actual dependency tree. The SDK is loaded from disk
+  // through jiti, so its direct dependencies must live under their owning
+  // package rather than relying on workspace hoisting.
+  console.info(`[package] installing pi ${piPkg.version} runtime dependencies`)
+  writeFileSync(join(runtimePiRoot, "package.json"), JSON.stringify({
+    name: "piui-bundled-runtime",
+    private: true,
+    dependencies: sdkFamily,
+    overrides: sdkFamily,
+  }, null, 2))
+  run(process.platform === "win32" ? "npm.cmd" : "npm", [
+    "install",
+    "--prefix", runtimePiRoot,
+    "--legacy-bundling",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    `@earendil-works/pi-coding-agent@${piPkg.version}`,
+  ])
+  const sdkScopedRoot = join(
+    runtimePi,
+    "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works",
+  )
+  for (const packageName of readdirSync(sdkScopedRoot)) {
+    const packageDir = join(sdkScopedRoot, packageName)
+    if (!existsSync(join(packageDir, "package.json"))) continue
+    console.info(`[package] nesting dependencies for @earendil-works/${packageName}`)
+    const nestedPackageJsonPath = join(packageDir, "package.json")
+    const nestedPackageJson = JSON.parse(readFileSync(nestedPackageJsonPath, "utf8"))
+    nestedPackageJson.overrides = sdkFamily
+    writeFileSync(nestedPackageJsonPath, JSON.stringify(nestedPackageJson, null, 2))
+    run(process.platform === "win32" ? "npm.cmd" : "npm", [
+      "install",
+      "--prefix", packageDir,
+      "--ignore-scripts",
+      "--no-package-lock",
+      "--no-audit",
+      "--no-fund",
+    ])
   }
-  if (!existsSync(join(runtimePi, "partial-json", "package.json"))) {
-    throw new Error("partial-json was not copied into the Pi runtime root")
+  const sdkEntry = join(runtimePi, "@earendil-works", "pi-coding-agent", "dist", "index.js")
+  const partialJson = join(
+    runtimePi,
+    "@earendil-works", "pi-coding-agent", "node_modules",
+    "@earendil-works", "pi-ai", "node_modules", "partial-json", "package.json",
+  )
+  if (!existsSync(sdkEntry) || !existsSync(partialJson)) {
+    throw new Error("npm did not create a complete Pi SDK runtime dependency tree")
   }
   writeFileSync(
     join(outDir, "runtime", "current.json"),
-    JSON.stringify({ dir: "pi", version: piPkg.version }, null, 2),
+    JSON.stringify({ dir: `pi-${piPkg.version}`, version: piPkg.version, sdkFamily }, null, 2),
   )
 }
 
