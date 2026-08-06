@@ -213,7 +213,7 @@ function App() {
       }
       enterSession(session.id)
     },
-    [paneLayout.focusedPaneId, navigatePaneToSession, sessions],
+    [paneLayout.focusedPaneId, paneLayout.focusedSessionId, navigatePaneToSession, sessions],
   )
 
   const handleNewSession = useCallback(() => {
