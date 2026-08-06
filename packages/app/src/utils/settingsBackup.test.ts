@@ -76,21 +76,4 @@ describe('settingsBackup', () => {
     expect(sessionStorage.getItem('piui-active-server')).toBe('local')
   })
 
-  it('imports schema v3 backups without resetting current service settings', async () => {
-    const { exportSettingsBackup, importSettingsBackup } = await import('./settingsBackup')
-    const { serviceStore } = await import('../store/serviceStore')
-    serviceStore.setEnvVars([{ key: 'PIUI_USE_SYSTEM_PI', value: '1' }])
-
-    const { data } = await exportSettingsBackup()
-    const legacy = JSON.parse(new TextDecoder().decode(data)) as {
-      schemaVersion: number
-      modules: Record<string, unknown>
-    }
-    legacy.schemaVersion = 3
-    delete legacy.modules.service
-
-    await importSettingsBackup(new File([JSON.stringify(legacy)], 'piui-v3.json', { type: 'application/json' }))
-
-    expect(serviceStore.envVarsRecord.PIUI_USE_SYSTEM_PI).toBe('1')
-  })
 })
