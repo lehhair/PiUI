@@ -487,9 +487,21 @@ mod tests {
             ]),
         );
 
-        assert_eq!(environment.get("PIUI_HOST").map(String::as_str), Some("127.0.0.1"));
-        assert_eq!(environment.get("PIUI_PORT").map(String::as_str), Some("9000"));
-        assert_eq!(environment.get("PIUI_DRIVER").map(String::as_str), Some("pi"));
-        assert_eq!(environment.get("PIUI_USE_SYSTEM_PI").map(String::as_str), Some("1"));
+        assert_eq!(
+            environment.get("PIUI_HOST").map(String::as_str),
+            Some("127.0.0.1")
+        );
+        assert_eq!(
+            environment.get("PIUI_PORT").map(String::as_str),
+            Some("9000")
+        );
+        assert_eq!(
+            environment.get("PIUI_DRIVER").map(String::as_str),
+            Some("pi")
+        );
+        assert_eq!(
+            environment.get("PIUI_USE_SYSTEM_PI").map(String::as_str),
+            Some("1")
+        );
     }
 }
