@@ -47,6 +47,8 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [{
 
 const DEFAULT_IDLE_RUNTIME_TTL_MS = 2 * 60_000
 const RUNTIME_REAPER_INTERVAL_MS = 30_000
+const ATTACH_BUSY_RETRIES = 12
+const ATTACH_BUSY_DELAY_MS = 100
 
 function idleRuntimeTtlMs(): number {
   const configured = Number(process.env.PIUI_SESSION_IDLE_TTL_MS)
@@ -205,7 +207,7 @@ export class SessionHost {
 
   async sessionQuery(sessionId: string, type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
     return withAbort((async () => {
-      const session = await this.ensureAttached(sessionId)
+      const session = await this.ensureAttached(sessionId, signal)
       this.touch(session.sessionId)
       if (this.executor.isClosing(sessionId)) {
         throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
@@ -223,7 +225,7 @@ export class SessionHost {
    * restart, or a client deep-linking to a session id), locate it on disk
    * via the global session list and attach it before failing.
    */
-  private async ensureAttached(sessionId: string): Promise<AttachedSession> {
+  private async ensureAttached(sessionId: string, signal?: AbortSignal): Promise<AttachedSession> {
     const existing = this.runtimes.get(sessionId)
     if (existing) return existing
     // Single-flight: concurrent queries (state.get + branch.get fire together)
@@ -234,8 +236,20 @@ export class SessionHost {
       if (!found) {
         throw Object.assign(new Error("session is not attached"), { code: "SESSION_NOT_FOUND" })
       }
-      await this.openSession(found.cwd, found.sessionFile)
-      return this.requireAttached(sessionId)
+      let lastError: unknown
+      for (let attempt = 0; attempt <= ATTACH_BUSY_RETRIES; attempt += 1) {
+        try {
+          await this.openSession(found.cwd, found.sessionFile, signal)
+          return this.requireAttached(sessionId)
+        } catch (error) {
+          lastError = error
+          if (!isSessionBusyError(error) || attempt === ATTACH_BUSY_RETRIES) throw error
+          await waitForRetry(ATTACH_BUSY_DELAY_MS, signal)
+          const attached = this.runtimes.get(sessionId)
+          if (attached) return attached
+        }
+      }
+      throw lastError
     })
   }
 
@@ -593,4 +607,30 @@ function withAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
 
 function abortError(): Error {
   return Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" })
+}
+
+function isSessionBusyError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "SESSION_BUSY")
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason ?? abortError()
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }, delayMs)
+    const cleanup = () => signal?.removeEventListener("abort", onAbort)
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      cleanup()
+      reject(signal?.reason ?? abortError())
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 }
