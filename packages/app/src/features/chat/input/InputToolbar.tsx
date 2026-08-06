@@ -495,8 +495,8 @@ export function InputToolbar({
           </div>
         </AnimatedPresence>
 
-        {isStreaming && (canSteer || canFollowUp) ? (
-          <div className="relative min-w-0 max-w-32">
+        <AnimatedPresence show={isStreaming && (canSteer || canFollowUp)} className={isCompact ? 'shrink-0' : ''}>
+          <div className="relative">
             <button
               type="button"
               disabled={controlsDisabled || !canToggleDeliveryMode}
@@ -512,7 +512,7 @@ export function InputToolbar({
               <span className="text-[length:var(--fs-sm)] text-text-300 truncate">{deliveryLabel}</span>
             </button>
           </div>
-        ) : null}
+        </AnimatedPresence>
       </div>
 
       {/* Action Buttons */}
