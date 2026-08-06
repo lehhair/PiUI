@@ -833,11 +833,10 @@ export function SessionListItem({
               <>
                 <span className="opacity-30 shrink-0">·</span>
                 <span
-                  className="flex min-w-0 max-w-24 shrink items-center gap-0.5 opacity-60"
+                  className="flex shrink-0 items-center opacity-60"
                   title={`Forked from ${session.forkParentTitle || session.parentSessionPath}`}
                 >
                   <GitBranchIcon size={10} className="shrink-0" aria-hidden="true" />
-                  <span className="truncate">{session.forkParentTitle || 'Fork'}</span>
                 </span>
               </>
             )}
