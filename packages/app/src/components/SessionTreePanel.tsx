@@ -5,12 +5,14 @@ import type { SessionEntry } from '../pi/domain'
 import {
   CheckIcon,
   CloseIcon,
+  GitBranchIcon,
+  PencilIcon,
+  ReturnIcon,
   StopIcon,
   TrashIcon,
   UploadIcon,
 } from './Icons'
 import { IconButton } from './ui/IconButton'
-import { Button } from './ui/Button'
 import { SegmentedControl, SettingField, SettingRow, SettingsDisclosure, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
 import { usePiCapabilities } from '../pi/capabilities'
 import { stashForkText } from '../pi/pendingForkText'
@@ -731,8 +733,8 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               <span className={`h-1 w-8 rounded-full transition-colors ${isResizing ? 'bg-accent-main-100' : 'bg-border-200 group-hover/sep:bg-border-300'}`} aria-hidden="true" />
             </div>
             <section className="flex min-h-0 flex-1 flex-col bg-bg-100" style={{ minHeight: 160 }} aria-label={t('sessionTree.selectedEntry')}>
-              <div className="flex h-9 shrink-0 items-center gap-2 px-4">
-                <span className="truncate text-[length:var(--fs-sm)] font-medium text-text-100">
+              <div className="flex min-h-9 shrink-0 items-center gap-2 px-4">
+                <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">
                   {selectedNode.label || t(selectedRole ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}` : `sessionTree.entryTypes.${selectedEntryType}`)}
                 </span>
                 {selectedIsLeaf ? (
@@ -741,6 +743,45 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                   </span>
                 ) : null}
                 <div className="ml-auto flex shrink-0 items-center gap-1">
+                  {editingEntryId !== selectedEntryId ? (
+                    <>
+                      <div className="flex items-center gap-0.5">
+                        {capabilities.sessionNavigate && !selectedIsLeaf ? (
+                          <IconButton
+                            size="sm"
+                            variant="solid"
+                            disabled={pendingEntryId !== null}
+                            aria-label={t('sessionTree.navigate')}
+                            title={t('sessionTree.navigate')}
+                            onClick={() => handleNavigate(selectedEntryId)}
+                          >
+                            <ReturnIcon size={13} />
+                          </IconButton>
+                        ) : null}
+                        <IconButton
+                          size="sm"
+                          disabled={pendingEntryId !== null}
+                          aria-label={t('sessionTree.label')}
+                          title={t('sessionTree.label')}
+                          onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}
+                        >
+                          <PencilIcon size={13} />
+                        </IconButton>
+                        {capabilities.fork && selectedRole === 'user' ? (
+                          <IconButton
+                            size="sm"
+                            disabled={pendingEntryId !== null}
+                            aria-label={t('sessionTree.fork')}
+                            title={t('sessionTree.fork')}
+                            onClick={() => handleFork(selectedEntryId)}
+                          >
+                            <GitBranchIcon size={13} />
+                          </IconButton>
+                        ) : null}
+                      </div>
+                      <span className="mx-0.5 h-4 w-px bg-border-200/50" aria-hidden="true" />
+                    </>
+                  ) : null}
                   <IconButton aria-label={t('sessionTree.closeDetail')} title={t('sessionTree.closeDetail')} size="sm" onClick={() => { setDetailOpen(false); resetSplitHeight() }}>
                     <CloseIcon size={12} />
                   </IconButton>
@@ -799,33 +840,6 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {capabilities.sessionNavigate && !selectedIsLeaf ? (
-                      <Button
-                        size="sm"
-                        disabled={pendingEntryId !== null}
-                        onClick={() => handleNavigate(selectedEntryId)}
-                      >
-                        {t('sessionTree.navigate')}
-                      </Button>
-                    ) : null}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={pendingEntryId !== null}
-                      onClick={() => handleStartLabel(selectedEntryId, selectedNode.label)}
-                    >
-                      {t('sessionTree.label')}
-                    </Button>
-                    {capabilities.fork && selectedRole === 'user' ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={pendingEntryId !== null}
-                        onClick={() => handleFork(selectedEntryId)}
-                      >
-                        {t('sessionTree.fork')}
-                      </Button>
-                    ) : null}
                     {capabilities.sessionNavigate && capabilities.compactionManage && !selectedIsLeaf ? (
                       <SettingsDisclosure title={t('sessionTree.navigationOptions')} className="w-full">
                         <div className="space-y-2 text-[length:var(--fs-xs)] text-text-300">
