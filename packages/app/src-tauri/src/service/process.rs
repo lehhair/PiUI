@@ -154,6 +154,21 @@ pub(super) fn kill_process_tree(pid: u32) {
     let _ = command.status();
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn is_process_alive(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    let mut command = Command::new("tasklist");
+    command
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(0x08000000);
+    command
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&format!("\",\"{pid}\",")))
+        .unwrap_or(false)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(super) fn kill_process_tree(pid: u32) {
     let _ = Command::new("kill")
@@ -161,4 +176,15 @@ pub(super) fn kill_process_tree(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(super) fn is_process_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
