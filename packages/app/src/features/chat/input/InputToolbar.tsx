@@ -496,20 +496,22 @@ export function InputToolbar({
         </AnimatedPresence>
 
         {isStreaming && (canSteer || canFollowUp) ? (
-          <button
-            type="button"
-            disabled={controlsDisabled || !canToggleDeliveryMode}
-            aria-label={`${t('inputToolbar.deliveryMode')}: ${deliveryLabel}`}
-            aria-pressed={activeDeliveryMode === 'steer'}
-            title={deliveryHint}
-            onClick={() => {
-              if (!canToggleDeliveryMode) return
-              onDeliveryModeChange?.(activeDeliveryMode === 'steer' ? 'followUp' : 'steer')
-            }}
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[length:var(--fs-base)] transition-all duration-150 hover:bg-bg-200 active:scale-95 cursor-pointer min-w-0 overflow-hidden disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <span className="text-[length:var(--fs-sm)] text-text-300 truncate">{deliveryLabel}</span>
-          </button>
+          <div className="relative min-w-0 max-w-32">
+            <button
+              type="button"
+              disabled={controlsDisabled || !canToggleDeliveryMode}
+              aria-label={`${t('inputToolbar.deliveryMode')}: ${deliveryLabel}`}
+              aria-pressed={activeDeliveryMode === 'steer'}
+              title={deliveryHint}
+              onClick={() => {
+                if (!canToggleDeliveryMode) return
+                onDeliveryModeChange?.(activeDeliveryMode === 'steer' ? 'followUp' : 'steer')
+              }}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-all duration-150 hover:bg-bg-200 active:scale-95 cursor-pointer min-w-0 overflow-hidden w-full disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span className="text-[length:var(--fs-sm)] text-text-300 truncate">{deliveryLabel}</span>
+            </button>
+          </div>
         ) : null}
       </div>
 
