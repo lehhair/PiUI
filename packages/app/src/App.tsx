@@ -75,6 +75,8 @@ function App() {
   })
   const splitPaneEnabled = canUseSplitPane(chatViewport)
   const paneLayout = usePaneLayout()
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
+  const openingSessionRequestRef = useRef(0)
   const focusedController = usePaneController(paneLayout.focusedPaneId)
   const paneControllers = usePaneControllers()
   const syncingFromRouteRef = useRef(false)
@@ -188,6 +190,7 @@ function App() {
     (session: { id: string; directory?: string }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
       const sourceSessionId = paneLayout.focusedSessionId
+      const requestId = ++openingSessionRequestRef.current
       const listed = sessions.find(item => item.id === session.id)
       const directory = listed?.directory ?? session.directory
       if (!paneId || !directory) return
@@ -198,10 +201,15 @@ function App() {
       // 列表选择和会话加载解耦：先发起后台 attach/switch，再立即切换当前 pane，
       // runtime、state 和首屏 branch 不阻塞侧边栏响应。
       if (listed?.path) {
+        setOpeningSessionId(session.id)
         void openPiSession(directory, listed.path, undefined, sourceSessionId ?? undefined).catch(error => {
           if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') return
           uiErrorHandler('open Pi session', error)
+        }).finally(() => {
+          if (openingSessionRequestRef.current === requestId) setOpeningSessionId(null)
         })
+      } else {
+        setOpeningSessionId(null)
       }
       enterSession(session.id)
     },
@@ -509,6 +517,7 @@ function App() {
         key={paneId}
         paneId={paneId}
         sessionId={paneSessionId}
+        isSessionLoading={paneId === paneLayout.focusedPaneId && paneSessionId === openingSessionId}
         isFocused={paneLayout.focusedPaneId === paneId}
         paneCount={paneLayout.paneCount}
         displayMode={paneLayout.isSplit && paneLayout.fullscreenPaneId !== paneId ? 'split' : 'single'}
@@ -531,6 +540,7 @@ function App() {
       splitPaneEnabled,
       handleSplitPane,
       paneLayout.focusedPaneId,
+      openingSessionId,
       paneLayout.paneCount,
       paneLayout.isSplit,
       paneLayout.fullscreenPaneId,
@@ -977,7 +987,7 @@ function App() {
             <>
               <Sidebar
                 isOpen={sidebarExpanded}
-                selectedSessionId={paneLayout.focusedSessionId}
+                    selectedSessionId={paneLayout.focusedSessionId}
                 onSelectSession={handleSelectSession}
                 onNewSession={handleNewSession}
                 onOpen={handleOpenSidebar}
