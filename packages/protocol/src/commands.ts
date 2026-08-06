@@ -91,7 +91,8 @@ export type SwitchSessionParams = {
 
 export type ForkParams = {
   entryId: string
-  position: "before" | "at"
+  /** 缺省 "at"（worker 侧补默认值） */
+  position?: "before" | "at"
 }
 
 export type ImportSessionParams = {

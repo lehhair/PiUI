@@ -1,4 +1,5 @@
 import type { JsonObject } from "./json.js"
+import type { CoreCommandParams } from "./commands.js"
 import type { PiCapability, PiCapabilityQueue, PiCapabilityScope, PiCapabilitySource } from "./registry.js"
 import {
   ANY_JSON,
@@ -134,3 +135,56 @@ export const PI_COMMAND_SPECS: readonly PiCommandSpec[] = [
 ]
 
 export type PiCommandName = (typeof PI_COMMAND_SPECS)[number]["name"]
+
+export type PiPageParams = {
+  cursor?: string | null
+  limit?: number
+  maxBytes?: number
+}
+
+/**
+ * 每条命令的 TS 入参类型——与上面的 paramsSchema 住在同一文件，
+ * 改 schema 时类型就在旁边，漂移一眼可见。core 38 条的参数类型
+ * 复用 commands.ts 的 CoreCommandParams。
+ */
+export type PiCommandParams = CoreCommandParams & {
+  "state.get": Record<string, never>
+  "entries.get": PiPageParams
+  "branch.get": PiPageParams
+  "tree.get": Record<string, never>
+  "registry.get": Record<string, never>
+  "skills.list": Record<string, never>
+  "attachment.get": { entryId: string; blockIndex: number }
+  "session.list": { cwd: string }
+  "session.listAll": Record<string, never>
+  "session.delete": { cwd: string; sessionFile: string }
+  "models.list": Record<string, never>
+  "settings.get": { cwd: string }
+  "settings.patch": { cwd: string; patch: JsonObject }
+  "trust.get": { cwd: string }
+  "trust.set": { cwd: string; decision: boolean | null }
+  "providers.list": Record<string, never>
+  "providers.startAuth": { providerId: string; authType?: "api_key" | "oauth" }
+  "providers.respondAuth": { flowId: string; promptId: string; value: string }
+  "providers.cancelAuth": { flowId: string }
+  "providers.logout": { providerId: string }
+  "modelRuntime.inspect": Record<string, never>
+  "modelRuntime.setApiKey": { providerId: string; apiKey: string }
+  "modelRuntime.removeApiKey": { providerId: string }
+  "modelRuntime.reload": Record<string, never>
+  "modelRuntime.refresh": { options?: JsonObject }
+  "packages.list": { cwd: string }
+  "packages.manage": { cwd: string; commandId: string; action?: "install" | "remove" | "update"; source?: string; local?: boolean; persist?: boolean }
+  "packages.resolve": { cwd: string; missingAction?: "install" | "skip" | "error" }
+  "packages.resolveSources": { cwd: string; sources: string[]; local?: boolean; temporary?: boolean }
+  "packages.changeSource": { cwd: string; source: string; operation?: "add" | "remove"; local?: boolean }
+  "packages.installedPath": { cwd: string; source: string; scope?: "user" | "project" }
+  "packages.checkUpdates": { cwd: string }
+}
+
+/** server 适配层额外暴露的全局命令（不经 worker 命令表） */
+export type PiServerGlobalCommandName = "session.open" | "session.attached" | "registry.describe"
+export type PiGlobalCommandName = PiCommandName | PiServerGlobalCommandName
+
+/** 命令名对应的入参类型；不在表里的 server 命令回退到通用 JsonObject */
+export type PiParamsFor<K extends string> = K extends keyof PiCommandParams ? PiCommandParams[K] : JsonObject

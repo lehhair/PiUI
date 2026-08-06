@@ -1,7 +1,12 @@
 import type {
   JsonObject,
   JsonValue,
+  ExtensionUiDialogResponse,
   HealthResponse,
+  HostCommandParams,
+  PiCommandName,
+  PiGlobalCommandName,
+  PiParamsFor,
   ShareInfo,
   PiRegistrySnapshot,
   CommandRecord,
@@ -80,9 +85,9 @@ export async function fetchPiRegistry(signal?: AbortSignal): Promise<PiRegistryS
   return readJson<PiRegistrySnapshot>(`${getApiBase()}/api/v1/pi/registry`, { signal })
 }
 
-export async function postPiGlobalCommand<T = JsonValue | undefined>(
-  name: string,
-  params?: JsonObject,
+export async function postPiGlobalCommand<T = JsonValue | undefined, K extends PiGlobalCommandName = PiGlobalCommandName>(
+  name: K,
+  params?: PiParamsFor<K>,
   signal?: AbortSignal,
 ): Promise<T extends undefined ? null : T> {
   const body = params ? JSON.stringify(params) : '{}'
@@ -96,10 +101,10 @@ export async function postPiGlobalCommand<T = JsonValue | undefined>(
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
-export async function postPiSessionCommand<T = JsonValue | undefined>(
+export async function postPiSessionCommand<T = JsonValue | undefined, K extends PiCommandName = PiCommandName>(
   sessionId: string,
-  name: string,
-  params?: JsonObject,
+  name: K,
+  params?: PiParamsFor<K>,
   signal?: AbortSignal,
 ): Promise<T extends undefined ? null : T> {
   const body = params ? JSON.stringify(params) : '{}'
@@ -117,9 +122,9 @@ export async function postPiSessionCommand<T = JsonValue | undefined>(
 }
 
 // Host commands (workspaces / files / git), POST /api/v1/host/commands/:name
-export async function postHostCommand<T = JsonValue | undefined>(
-  name: string,
-  params?: JsonObject,
+export async function postHostCommand<T = JsonValue | undefined, K extends keyof HostCommandParams = keyof HostCommandParams>(
+  name: K,
+  params?: HostCommandParams[K],
   signal?: AbortSignal,
 ): Promise<T> {
   const response = await readJson<{ data: T }>(
@@ -304,7 +309,7 @@ export function listPiPackages(cwd: string, signal?: AbortSignal): Promise<PiCon
 
 export function managePiPackage(
   cwd: string,
-  params: { commandId?: string; action: 'install' | 'remove' | 'update'; source?: string; local?: boolean; persist?: boolean },
+  params: { commandId: string; action: 'install' | 'remove' | 'update'; source?: string; local?: boolean; persist?: boolean },
   signal?: AbortSignal,
 ): Promise<PiConfiguredPackage[]> {
   return postPiGlobalCommand('packages.manage', { cwd, ...params }, signal)
@@ -443,7 +448,7 @@ export function sendPiCustomMessage(
   },
   signal?: AbortSignal,
 ): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'sendCustomMessage', params as unknown as JsonObject, signal)
+  return postPiSessionCommand(sessionId, 'sendCustomMessage', params, signal)
 }
 
 export function appendPiCustomEntry(sessionId: string, customType: string, data: JsonValue, signal?: AbortSignal): Promise<CommandRecord> {
@@ -457,7 +462,7 @@ export function sendPiUserMessage(
   params: SendUserMessageParams,
   signal?: AbortSignal,
 ): Promise<JsonValue> {
-  return postPiSessionCommand(sessionId, 'sendUserMessage', params as unknown as JsonObject, signal)
+  return postPiSessionCommand(sessionId, 'sendUserMessage', params, signal)
 }
 
 export function setPiSessionName(sessionId: string, name: string, signal?: AbortSignal): Promise<CommandRecord> {
@@ -467,7 +472,7 @@ export function setPiSessionName(sessionId: string, name: string, signal?: Abort
 export function respondPiExtensionUi(
   sessionId: string,
   requestId: string,
-  response: JsonObject,
+  response: ExtensionUiDialogResponse,
   signal?: AbortSignal,
 ): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'respondExtensionUi', { requestId, response }, signal)
@@ -492,7 +497,7 @@ export function forkPiSession(
   params: { entryId: string; position?: 'before' | 'at' },
   signal?: AbortSignal,
 ): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'fork', params as unknown as JsonObject, signal)
+  return postPiSessionCommand(sessionId, 'fork', params, signal)
 }
 
 export type PiNavigateTreeParams = {
@@ -510,7 +515,7 @@ export type PiNavigateTreeResult = {
 }
 
 export function navigatePiTree(sessionId: string, params: PiNavigateTreeParams, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'navigateTree', params as unknown as JsonObject, signal)
+  return postPiSessionCommand(sessionId, 'navigateTree', params, signal)
 }
 
 

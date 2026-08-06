@@ -1,5 +1,8 @@
 import type { JsonObject } from "./json.js"
+import type { GitDiffMode } from "./git.js"
 import type { HostCapability, HostCapabilityDomain, HostCapabilityQueue } from "./registry.js"
+import type { TerminalCreateParams, TerminalUpdateParams } from "./terminal.js"
+import type { FileCreateRequest, FileMoveRequest } from "./workspace.js"
 import { BOOLEAN, EMPTY_PARAMS, STRING, objectSchema } from "./json-schema.js"
 
 /**
@@ -228,3 +231,32 @@ export const HOST_COMMAND_SPECS: readonly HostCommandSpec[] = [
 ]
 
 export type HostCommandName = (typeof HOST_COMMAND_SPECS)[number]["name"]
+
+/** 每条 host 命令的 TS 入参类型——与上面的 paramsSchema 同文件维护 */
+export type HostCommandParams = {
+  "commands.get": { id: string }
+  "terminals.list": { workspacePath: string }
+  "terminals.create": { workspacePath: string } & TerminalCreateParams
+  "terminals.get": { workspacePath: string; terminalId: string }
+  "terminals.connectToken": { workspacePath: string; terminalId: string }
+  "terminals.update": { workspacePath: string; terminalId: string } & TerminalUpdateParams
+  "terminals.remove": { workspacePath: string; terminalId: string }
+  "workspaces.list": Record<string, never>
+  "workspaces.open": { rootPath: string; displayName?: string }
+  "workspaces.close": { workspacePath: string }
+  "workspaces.watch": { workspacePath: string }
+  "files.list": { workspacePath: string; path?: string; limit?: number; cursor?: string }
+  "files.read": { workspacePath: string; path: string }
+  "files.write": { workspacePath: string; path: string; content: string; encoding?: "utf-8" | "base64"; ifMatch?: string }
+  "files.create": { workspacePath: string } & FileCreateRequest
+  "files.move": { workspacePath: string } & FileMoveRequest
+  "files.delete": { workspacePath: string; path: string; recursive?: boolean }
+  "files.searchName": { workspacePath: string; query: string; type?: "file" | "directory"; limit?: number }
+  "files.searchText": { workspacePath: string; query: string; limit?: number }
+  "git.info": { workspacePath: string }
+  "git.status": { workspacePath: string }
+  "git.diff": { workspacePath: string; mode?: GitDiffMode }
+  "git.fileDiff": { workspacePath: string; path: string; mode?: GitDiffMode }
+  "pi-runtime.status": Record<string, never>
+  "pi-runtime.update": Record<string, never>
+}
