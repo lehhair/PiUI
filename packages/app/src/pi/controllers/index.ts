@@ -1,4 +1,4 @@
-import type { CommandRecord, JsonObject, JsonValue, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
+import type { CommandRecord, ExtensionUiDialogResponse, JsonObject, JsonValue, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import type { Model } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
@@ -409,7 +409,7 @@ export async function renamePiSession(sessionId: string, name: string, signal?: 
 export async function respondPiExtensionUi(
   sessionId: string,
   requestId: string,
-  response: JsonObject,
+  response: ExtensionUiDialogResponse,
   signal?: AbortSignal,
 ): Promise<void> {
   await transport.respondPiExtensionUi(sessionId, requestId, response, signal)
