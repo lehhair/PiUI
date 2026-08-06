@@ -73,6 +73,10 @@ export async function openPiSession(
   return result
 }
 
+export function createPiSession(cwd: string, signal?: AbortSignal): Promise<transport.PiSessionCreateResult> {
+  return transport.createPiSession(cwd, signal)
+}
+
 /**
  * Load session data (state + branch) for active session.
  */
@@ -98,15 +102,15 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-        // Load both in parallel
-        const [state, branch] = await retryUnavailable(() => Promise.all([
-          transport.getPiSessionState(sessionId, signal),
-          transport.getPiBranchPage(sessionId, { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES }, signal),
-      ]), signal)
+        const preview = await retryUnavailable(() => transport.previewPiSession(
+          sessionId,
+          { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
+          signal,
+        ), signal)
 
       if (serverStore.getActiveServerGeneration() !== serverGeneration) return
-      piSessionStateStore.setState(sessionId, state as JsonObject)
-      piBranchStore.setData(sessionId, branch)
+      piSessionStateStore.setState(sessionId, preview.state)
+      piBranchStore.setData(sessionId, preview.branch)
       return
     } catch (error) {
       lastError = error

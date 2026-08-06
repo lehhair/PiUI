@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import i18n from '../i18n'
 import type { UiSession } from '../types/session'
-import { loadPiSessions, loadPiSessionsForCwd, openPiSession, deletePiSession } from '../pi/controllers/index.js'
+import { createPiSession, loadPiSessions, loadPiSessionsForCwd, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -110,16 +110,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
     const directory = currentDirectory?.trim() || (await resolveWorkspacePath()) || ''
     if (!directory) throw new Error('Choose a project directory before creating a session')
-    const opened = await openPiSession(directory)
+    const created = await createPiSession(directory)
     const now = Date.now()
     const session: UiSession = {
-      id: opened.sessionId,
+      id: created.sessionId,
       directory,
       title: title?.trim() || i18n.t('chat:sidebar.newChat'),
       createdAt: now,
       updatedAt: now,
     }
-    trackPiSession(opened.sessionId, directory)
+    trackPiSession(created.sessionId, directory)
     registerSession(session)
     return session
   }, [currentDirectory, registerSession])

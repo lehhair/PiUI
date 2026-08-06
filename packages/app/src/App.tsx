@@ -29,7 +29,7 @@ import {
   canUseSplitPane,
   useChatViewportController,
 } from './features/chat/chatViewport'
-import { uiErrorHandler, isSameDirectory, collectActiveDirectories } from './utils'
+import { isSameDirectory, collectActiveDirectories } from './utils'
 import { initNotificationSound } from './utils/notificationSoundBridge'
 import { usePiCapabilities } from './pi/capabilities'
 import type { SettingsTab } from './features/settings/SettingsDialog'
@@ -37,7 +37,6 @@ import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
 import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
-import { openPiSession } from './pi/controllers/index.js'
 import { trackPiSession } from './pi/piSessionIndex'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
@@ -75,8 +74,6 @@ function App() {
   })
   const splitPaneEnabled = canUseSplitPane(chatViewport)
   const paneLayout = usePaneLayout()
-  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
-  const openingSessionRequestRef = useRef(0)
   const focusedController = usePaneController(paneLayout.focusedPaneId)
   const paneControllers = usePaneControllers()
   const syncingFromRouteRef = useRef(false)
@@ -189,8 +186,6 @@ function App() {
   const handleSelectSession = useCallback(
     (session: { id: string; directory?: string }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-      const sourceSessionId = paneLayout.focusedSessionId
-      const requestId = ++openingSessionRequestRef.current
       const listed = sessions.find(item => item.id === session.id)
       const directory = listed?.directory ?? session.directory
       if (!paneId || !directory) return
@@ -198,22 +193,10 @@ function App() {
         trackPiSession(sessionId, directory)
         navigatePaneToSession(paneId, sessionId, directory)
       }
-      // 列表选择和会话加载解耦：先发起后台 attach/switch，再立即切换当前 pane，
-      // runtime、state 和首屏 branch 不阻塞侧边栏响应。
-      if (listed?.path) {
-        setOpeningSessionId(session.id)
-        void openPiSession(directory, listed.path, undefined, sourceSessionId ?? undefined).catch(error => {
-          if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') return
-          uiErrorHandler('open Pi session', error)
-        }).finally(() => {
-          if (openingSessionRequestRef.current === requestId) setOpeningSessionId(null)
-        })
-      } else {
-        setOpeningSessionId(null)
-      }
+      // SessionManager preview 负责读取历史；Agent runtime 只在发送消息时创建。
       enterSession(session.id)
     },
-    [paneLayout.focusedPaneId, paneLayout.focusedSessionId, navigatePaneToSession, sessions],
+    [paneLayout.focusedPaneId, navigatePaneToSession, sessions],
   )
 
   const handleNewSession = useCallback(() => {
@@ -517,7 +500,6 @@ function App() {
         key={paneId}
         paneId={paneId}
         sessionId={paneSessionId}
-        isSessionLoading={paneId === paneLayout.focusedPaneId && paneSessionId === openingSessionId}
         isFocused={paneLayout.focusedPaneId === paneId}
         paneCount={paneLayout.paneCount}
         displayMode={paneLayout.isSplit && paneLayout.fullscreenPaneId !== paneId ? 'split' : 'single'}
@@ -540,7 +522,6 @@ function App() {
       splitPaneEnabled,
       handleSplitPane,
       paneLayout.focusedPaneId,
-      openingSessionId,
       paneLayout.paneCount,
       paneLayout.isSplit,
       paneLayout.fullscreenPaneId,

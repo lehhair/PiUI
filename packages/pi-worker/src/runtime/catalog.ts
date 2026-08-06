@@ -3,11 +3,12 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { JsonObject, JsonValue } from "@piui/protocol"
-import { requireJsonValue } from "@piui/protocol"
+import { isJsonObject, requireJsonValue } from "@piui/protocol"
 import type { SettingsManager } from "@earendil-works/pi-coding-agent"
 import { getLoadedSdk } from "../sdk-host.js"
 import type { CatalogProvider } from "../runtime.js"
 import type { PackagesGateway } from "../command-table.js"
+import { entriesPageFromEntries, sessionHeadFromParts } from "./pagination.js"
 
 /**
  * Windows callers hand us backslash paths, but pi encodes the cwd into the
@@ -104,6 +105,100 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
       ? await SessionManager.listAll()
       : await SessionManager.listAll(configured)
     return requireJsonValue(sessions, "SESSION_LIST_NOT_JSON")
+  }
+
+  async createSession(cwd: string): Promise<JsonValue> {
+    const { SessionManager } = getLoadedSdk().sdk
+    const manager = SessionManager.create(normalizeCwd(cwd), configuredSessionDir(cwd, this.dir()))
+    return requireJsonValue({
+      sessionId: manager.getSessionId(),
+      sessionFile: manager.getSessionFile(),
+      cwd: manager.getCwd(),
+    })
+  }
+
+  async previewSession(
+    cwd: string,
+    sessionFile: string,
+    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+  ): Promise<JsonValue> {
+    const target = resolveUserPath(sessionFile)
+    const root = path.resolve(configuredSessionDir(cwd, this.dir()))
+    const targetKey = process.platform === "win32" ? target.toLowerCase() : target
+    const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+    if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
+      throw Object.assign(new Error("session file is outside the Pi session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+    }
+
+    const { SessionManager } = getLoadedSdk().sdk
+    const manager = SessionManager.open(target, undefined, normalizeCwd(cwd))
+    const header = toJsonObject(manager.getHeader())
+    const entries = manager.getEntries()
+    const head = sessionHeadFromParts({
+      sdkVersion: getLoadedSdk().version,
+      revision: 0,
+      sessionFormatVersion: typeof header.version === "number" ? header.version : undefined,
+      header,
+      leafId: manager.getLeafId() ?? null,
+      entryCount: entries.length,
+    }, [manager.getSessionId(), header, entries.length])
+    const branch = entriesPageFromEntries(head, manager.getBranch(), {
+      cursor: params.cursor,
+      limit: params.limit ?? 100,
+      maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
+    }, toJsonObject)
+    const context = manager.buildSessionContext() as {
+      model?: { provider?: string; modelId?: string }
+      thinkingLevel?: string
+    }
+    const model = context.model?.provider && context.model.modelId
+      ? { provider: context.model.provider, modelId: context.model.modelId }
+      : null
+    const state = requireJsonValue({
+      sessionId: manager.getSessionId(),
+      sessionFile: manager.getSessionFile() ?? target,
+      sessionName: manager.getSessionName() ?? null,
+      cwd: manager.getCwd(),
+      model,
+      thinkingLevel: context.thinkingLevel ?? "off",
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode: "one-at-a-time",
+      followUpMode: "one-at-a-time",
+      autoCompactionEnabled: true,
+      autoRetryEnabled: true,
+      messageCount: entries.length,
+      pendingMessageCount: 0,
+      availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      isIdle: true,
+      isBashRunning: false,
+      hasPendingBashMessages: false,
+      isRetrying: false,
+      retryAttempt: 0,
+      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      supportsThinking: true,
+      activeTools: [],
+      scopedModels: [],
+      contextUsage: null,
+      sessionStats: null,
+      retry: null,
+      compaction: null,
+      head,
+    })
+    return { state, branch }
+  }
+
+  async previewSessionById(
+    sessionId: string,
+    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+  ): Promise<JsonValue> {
+    const sessions = await this.listAllSessions()
+    if (!Array.isArray(sessions)) throw Object.assign(new Error("session list is not an array"), { code: "NATIVE_DATA_NOT_JSON" })
+    const match = sessions.find(item => isJsonObject(item) && item.id === sessionId)
+    if (!isJsonObject(match) || typeof match.path !== "string" || typeof match.cwd !== "string") {
+      throw Object.assign(new Error(`session not found: ${sessionId}`), { code: "SESSION_NOT_FOUND" })
+    }
+    return this.previewSession(match.cwd, match.path, params)
   }
 
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {
@@ -220,6 +315,18 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
   async checkUpdates(cwd: string): Promise<JsonValue> {
     return requireJsonValue(await packageManagerForWorkspace(cwd, this.dir()).checkForAvailableUpdates())
   }
+}
+
+function toJsonObject(value: unknown): JsonObject {
+  const json = JSON.parse(JSON.stringify(value, (_key, item) => {
+    if (typeof item === "bigint") return item.toString()
+    if (typeof item === "function" || typeof item === "symbol") return undefined
+    return item
+  })) as unknown
+  if (!json || typeof json !== "object" || Array.isArray(json)) {
+    throw Object.assign(new Error("Pi session data is not a JSON object"), { code: "NATIVE_DATA_NOT_JSON" })
+  }
+  return json as JsonObject
 }
 
 function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): JsonValue {

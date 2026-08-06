@@ -59,6 +59,12 @@ const PROMPT_PARAMS = objectSchema(
 const TEXT_IMAGES_PARAMS = objectSchema({ text: STRING, images: IMAGES }, ["text"])
 const OUTPUT_PATH_PARAMS = objectSchema({ outputPath: STRING }, ["outputPath"])
 const CWD_PARAMS = objectSchema({ cwd: STRING }, ["cwd"])
+const SESSION_PREVIEW_PARAMS = objectSchema({
+  sessionId: STRING,
+  cursor: nullable(STRING),
+  limit: { type: "integer", minimum: 1 },
+  maxBytes: { type: "integer", minimum: 1 },
+}, ["sessionId"])
 
 export const PI_COMMAND_SPECS = [
   { name: "prompt", scope: "session", description: "Send a user prompt to the current Pi session", paramsSchema: PROMPT_PARAMS, queue: "serialized", streaming: true, cancellable: true },
@@ -109,6 +115,8 @@ export const PI_COMMAND_SPECS = [
   { name: "attachment.get", scope: "session", description: "Read an attachment from a Pi entry", paramsSchema: objectSchema({ entryId: STRING, blockIndex: { type: "integer", minimum: 0 } }, ["entryId", "blockIndex"]), queue: "immediate", idempotent: true },
   { name: "session.list", scope: "global", description: "List Pi sessions for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
   { name: "session.listAll", scope: "global", description: "List all Pi sessions", queue: "immediate", idempotent: true },
+  { name: "session.create", scope: "global", description: "Create a Pi session without opening an agent runtime", paramsSchema: CWD_PARAMS, queue: "serialized" },
+  { name: "session.preview", scope: "global", description: "Read a Pi session without opening an agent runtime", paramsSchema: SESSION_PREVIEW_PARAMS, queue: "immediate", idempotent: true },
   { name: "session.delete", scope: "global", description: "Delete a Pi session file", paramsSchema: objectSchema({ cwd: STRING, sessionFile: STRING }, ["cwd", "sessionFile"]), queue: "serialized" },
   { name: "models.list", scope: "global", description: "List Pi models", queue: "immediate", idempotent: true },
   { name: "settings.get", scope: "global", description: "Read Pi settings for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
@@ -157,6 +165,8 @@ export type PiCommandParams = CoreCommandParams & {
   "attachment.get": { entryId: string; blockIndex: number }
   "session.list": { cwd: string }
   "session.listAll": Record<string, never>
+  "session.create": { cwd: string }
+  "session.preview": { sessionId: string } & PiPageParams
   "session.delete": { cwd: string; sessionFile: string }
   "models.list": Record<string, never>
   "settings.get": { cwd: string }

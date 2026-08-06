@@ -186,6 +186,11 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
 
   "session.list": async (ctx, p) => ctx.catalog.listSessions(P.reqString(p, "cwd")),
   "session.listAll": async (ctx) => ctx.catalog.listAllSessions(),
+  "session.create": async (ctx, p) => ctx.catalog.createSession(P.reqString(p, "cwd")),
+  "session.preview": async (ctx, p) => ctx.catalog.previewSessionById(
+    P.reqString(p, "sessionId"),
+    { cursor: P.optString(p, "cursor"), limit: P.optNumber(p, "limit"), maxBytes: P.optNumber(p, "maxBytes") },
+  ),
   "session.delete": async (ctx, p) => {
     await ctx.catalog.deleteSession(P.reqString(p, "cwd"), P.reqString(p, "sessionFile"))
   },
