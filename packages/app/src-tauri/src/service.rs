@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     collections::VecDeque,
     env,
-    fs::{self, create_dir_all, remove_dir_all, rename, File},
+    fs::{self, create_dir_all},
     io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -17,7 +17,6 @@ use std::{
 
 use reqwest::Client;
 use tauri::{AppHandle, Manager, State};
-use zip::ZipArchive;
 
 const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8787";
 const DEFAULT_PORT: &str = "8787";
@@ -165,18 +164,9 @@ fn service_environment(
 }
 
 fn resource_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app
-        .path()
+    app.path()
         .resource_dir()
-        .map_err(|error| error.to_string())?;
-    if base.join("piui-runtime.zip").is_file() || base.join("piui-server.exe").is_file() {
-        return Ok(base);
-    }
-    let nested = base.join("resources");
-    if nested.join("piui-runtime.zip").is_file() || nested.join("piui-server.exe").is_file() {
-        return Ok(nested);
-    }
-    Ok(base)
+        .map_err(|error| error.to_string())
 }
 
 fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String> {
@@ -207,94 +197,23 @@ fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String>
         })
 }
 
-fn unpack_runtime(app: &AppHandle, resource: &PathBuf) -> Result<(PathBuf, PathBuf), String> {
-    let archive_path = resource.join("piui-runtime.zip");
-    let version_path = resource.join("piui-runtime.version");
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let version = fs::read_to_string(&version_path).unwrap_or_else(|_| "unknown".to_string());
-    let marker = data_dir.join("piui-runtime.version");
-    let runtime_dir = data_dir.join("runtime");
-    let native_dir = data_dir.join("node_modules");
-    let active_runtime = current_runtime_dir(&runtime_dir);
-    let worker_binary = active_runtime.join(if cfg!(target_os = "windows") {
-        "pi-worker.exe"
-    } else {
-        "pi-worker"
-    });
-
-    if marker.exists()
-        && fs::read_to_string(&marker).ok().as_deref() == Some(version.trim())
-        && runtime_dir.join("current.json").is_file()
-        && native_dir.is_dir()
-        && worker_binary.is_file()
-    {
-        return Ok((runtime_dir, native_dir));
-    }
-
-    create_dir_all(&data_dir).map_err(|error| error.to_string())?;
-    let staging = data_dir.join(".piui-runtime-staging");
-    if staging.exists() {
-        remove_dir_all(&staging).map_err(|error| error.to_string())?;
-    }
-    create_dir_all(&staging).map_err(|error| error.to_string())?;
-
-    let archive = File::open(&archive_path)
-        .map_err(|error| format!("failed to open bundled Pi runtime: {error}"))?;
-    let mut archive = ZipArchive::new(archive).map_err(|error| error.to_string())?;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
-        let Some(relative) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
-            return Err("Pi runtime archive contains an unsafe path".to_string());
-        };
-        let destination = staging.join(relative);
-        if entry.is_dir() {
-            create_dir_all(&destination).map_err(|error| error.to_string())?;
-            continue;
-        }
-        if let Some(parent) = destination.parent() {
-            create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let mut output = File::create(&destination).map_err(|error| error.to_string())?;
-        let mut bytes = Vec::new();
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        std::io::Write::write_all(&mut output, &bytes).map_err(|error| error.to_string())?;
-    }
-
-    if runtime_dir.exists() {
-        remove_dir_all(&runtime_dir).map_err(|error| error.to_string())?;
-    }
-    if native_dir.exists() {
-        remove_dir_all(&native_dir).map_err(|error| error.to_string())?;
-    }
-    rename(staging.join("runtime"), &runtime_dir).map_err(|error| error.to_string())?;
-    rename(staging.join("node_modules"), &native_dir).map_err(|error| error.to_string())?;
-    fs::write(&marker, version.trim()).map_err(|error| error.to_string())?;
-    Ok((runtime_dir, native_dir))
-}
-
-fn current_runtime_dir(runtime_dir: &PathBuf) -> PathBuf {
-    let pointer = runtime_dir.join("current.json");
-    if let Ok(bytes) = fs::read(&pointer) {
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            if let Some(dir) = value.get("dir").and_then(|dir| dir.as_str()) {
-                if !dir.is_empty() && !dir.contains("..") && !PathBuf::from(dir).is_absolute() {
-                    return runtime_dir.join(dir);
-                }
-            }
-        }
-    }
-    runtime_dir.join("pi")
-}
-
 fn prepare_server(app: &AppHandle) -> Result<PreparedServer, String> {
     let resource = resource_root(app)?;
     let binary = server_binary(app, &resource)?;
-    let (runtime_dir, native_modules) = unpack_runtime(app, &resource)?;
+    let runtime_dir = resource.join("runtime");
+    let native_modules = resource.join("node_modules");
+    if !runtime_dir.join("current.json").is_file() {
+        return Err(format!(
+            "Pi worker runtime was not bundled in {}",
+            runtime_dir.display()
+        ));
+    }
+    if !native_modules.join("bun-pty").is_dir() {
+        return Err(format!(
+            "bun-pty was not bundled in {}",
+            native_modules.display()
+        ));
+    }
     Ok(PreparedServer {
         binary,
         resource,
@@ -684,12 +603,9 @@ pub async fn get_piui_service_status(
             let pid = state.child_pid.load(Ordering::SeqCst);
             (pid > 0).then_some(pid)
         });
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let runtime_dir = data_dir.join("runtime");
-    let native_modules = data_dir.join("node_modules");
+    let resource = resource_root(&app)?;
+    let runtime_dir = resource.join("runtime");
+    let native_modules = resource.join("node_modules");
     let custom_environment = state
         .env_vars
         .lock()
