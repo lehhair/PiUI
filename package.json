@@ -14,6 +14,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev -w @piui/server",
     "dev:server:pi": "node scripts/dev-server-pi.mjs",
+    "pi-worker": "npm run pi-worker -w @piui/server --",
     "dev:host": "npm run dev -w @piui/server",
     "dev:app": "npm run dev -w @piui/app",
     "build": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker && npm run build -w @piui/server && npm run build -w @piui/app",

@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "pi-worker": "dist/bundle-entry.js"
+  },
   "scripts": {
     "predev": "npm run build -w @piui/protocol && npm run build -w @piui/pi-worker",
     "dev": "node --import tsx --watch --watch-preserve-output src/index.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node dist/bundle-entry.js web",
+    "pi-worker": "node --import tsx src/bundle-entry.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts"
   },
