@@ -1,4 +1,4 @@
-import { HOST_COMMAND_SPECS, PROTOCOL_VERSION, hostSpecToCapability, requireJsonValue, type HostCapability, type HostRegistrySnapshot, type JsonObject, type JsonValue } from "@piui/protocol"
+import { HOST_COMMAND_SPECS, PROTOCOL_VERSION, hostSpecToCapability, requireJsonValue, validateParams, type HostCapability, type HostRegistrySnapshot, type JsonObject, type JsonValue } from "@piui/protocol"
 import type { SessionHost } from "../pi/session-host.ts"
 import {
   createWorkspaceEntry,
@@ -49,6 +49,8 @@ export class HostRuntime {
   async execute(name: string, params: JsonObject = {}, options: { signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
     const registered = HOST_CAPABILITIES.find(item => item.capability.name === name)
     if (!registered) throw Object.assign(new Error(`unknown host command: ${name}`), { code: "UNKNOWN_COMMAND" })
+    // HTTP 边缘先用声明的 schema 挡畸形入参，handler 内的解析是第二道
+    validateParams(registered.capability.paramsSchema, params)
     return registered.handler({ ...this.ctx, signal: options.signal }, params)
   }
 }
