@@ -89,6 +89,22 @@ describe('SessionListItem', () => {
     expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
   })
 
+  it('shows only the fork icon while keeping the source in the tooltip', () => {
+    render(
+      <SessionListItem
+        session={{ ...session, parentSessionPath: '/workspace/parent.jsonl', forkParentTitle: 'Parent session' }}
+        isSelected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        preferTouchUi={false}
+      />,
+    )
+
+    expect(screen.getByTitle('Forked from Parent session')).toBeInTheDocument()
+    expect(screen.queryByText('Parent session')).not.toBeInTheDocument()
+  })
+
   it('shows durable delete only when the Pi capability is enabled', () => {
     const onDelete = vi.fn()
     piNativeStatusForTest({ sessionCommands: [{ name: 'session.delete', scope: 'session', source: 'pi-sdk' }] })
