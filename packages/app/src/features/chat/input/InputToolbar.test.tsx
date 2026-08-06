@@ -238,7 +238,7 @@ describe('InputToolbar file selection', () => {
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Chat input' })).toHaveFocus())
   })
 
-  it('requires an explicit delivery mode while streaming', () => {
+  it('toggles the delivery mode inside the composer while streaming', () => {
     const onDeliveryModeChange = vi.fn()
     render(
       <InputToolbar
@@ -255,10 +255,9 @@ describe('InputToolbar file selection', () => {
       />,
     )
 
-    expect(screen.getByRole('group', { name: 'Running message timing' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Next turn' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: 'Next turn' })).toHaveAttribute('title', 'Send this message as the next turn after the current response finishes')
-    fireEvent.click(screen.getByRole('button', { name: 'Current turn' }))
+    const trigger = screen.getByRole('button', { name: 'Running message timing: Follow-up' })
+    expect(trigger).toHaveAttribute('title', 'Send this message as the next turn after the current response finishes')
+    fireEvent.click(trigger)
     expect(onDeliveryModeChange).toHaveBeenCalledWith('steer')
   })
 })

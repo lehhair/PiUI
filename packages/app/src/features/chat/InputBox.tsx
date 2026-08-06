@@ -249,6 +249,13 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deliveryMode, setDeliveryMode] = useState<'steer' | 'followUp'>('followUp')
   const piCapabilities = usePiCapabilities()
+  const effectiveDeliveryMode = deliveryMode === 'steer' && piCapabilities.promptSteer
+    ? 'steer'
+    : piCapabilities.promptFollowUp
+      ? 'followUp'
+      : piCapabilities.promptSteer
+        ? 'steer'
+        : undefined
 
   // @ Mention 状态
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -563,7 +570,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         onSend(text, attachments, {
           agent: mentionedAgent || selectedAgent,
           variant: selectedVariant,
-          ...(isStreaming ? { delivery: deliveryMode } : {}),
+          ...(isStreaming && effectiveDeliveryMode ? { delivery: effectiveDeliveryMode } : {}),
         }),
       () => {
         resetDraft()
@@ -582,7 +589,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     selectedAgent,
     selectedVariant,
     isStreaming,
-    deliveryMode,
+    effectiveDeliveryMode,
     submitCommandOptimistically,
     text,
   ])
