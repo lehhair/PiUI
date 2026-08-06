@@ -14,7 +14,7 @@ export interface PiSocket {
   readonly readyState: number
   onopen: (() => void) | null
   onmessage: ((event: { data: unknown }) => void) | null
-  onclose: ((event: { code: number }) => void) | null
+  onclose: ((event: { code: number; reason?: string }) => void) | null
   onerror: (() => void) | null
   send(data: string): void
   close(code?: number, reason?: string): void
@@ -31,7 +31,7 @@ type TauriInvoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T
 class TauriBridgeSocket implements PiSocket {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
-  onclose: ((event: { code: number }) => void) | null = null
+  onclose: ((event: { code: number; reason?: string }) => void) | null = null
   onerror: (() => void) | null = null
   readyState = 0
 
@@ -78,12 +78,13 @@ class TauriBridgeSocket implements PiSocket {
       return
     }
     if (event.type === 'error') {
+      if (import.meta.env.DEV) console.debug('[PiSocket] bridge error:', event.message)
       this.onerror?.()
       return
     }
     if (this.readyState === PI_SOCKET_CLOSED) return
     this.readyState = PI_SOCKET_CLOSED
-    this.onclose?.({ code: event.code ?? 1006 })
+    this.onclose?.({ code: event.code ?? 1006, reason: event.reason })
   }
 
   send(data: string): void {
