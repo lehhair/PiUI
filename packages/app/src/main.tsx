@@ -133,24 +133,20 @@ async function startNativePiuiService(): Promise<void> {
 }
 
 async function startApp() {
+  // Match the desktop shell behavior: render immediately, then bring the
+  // managed service up in the background. Backend bootstrap retries while the
+  // service starts and server changes trigger an immediate reconnect.
+  bootstrap()
+
   const { initializePiBackend, installPiBackendServerSwitch } = await import('./pi/bootstrapMockChat')
   installPiBackendServerSwitch()
 
-  // Tauri 桌面端：先等本地 server ready（有界等待）再渲染 UI，
-  // 否则组件挂载时的首批请求会全部打在还没起来的服务上。
-  // 启动失败或超时也要照常渲染——服务设置页需要 UI 来做手动操作。
   if (isNativeTauri && !isTauriMobile()) {
-    try {
-      await Promise.race([
-        startNativePiuiService(),
-        new Promise<void>(resolve => setTimeout(resolve, 10_000)),
-      ])
-    } catch (error) {
+    void startNativePiuiService().catch(error => {
       console.error('[PiUI] auto-start local server failed:', error)
-    }
+    })
   }
 
-  bootstrap()
   const backend = await initializePiBackend()
   if (isNativeTauri) {
     console.info('[PiUI] native shell — PiUI server lifecycle is managed by Tauri')
