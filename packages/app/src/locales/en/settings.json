@@ -11,7 +11,7 @@
   "tabs": {
     "servers": "Servers",
     "serversDesc": "Backend connections and fast active endpoint switching",
-    "service": "Local Service",
+    "service": "Service",
     "serviceDesc": "Inspect, stop, and restart the PiUI backend",
     "models": "Models",
     "modelsDesc": "Choose which models stay available in the selector",
