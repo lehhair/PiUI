@@ -68,6 +68,7 @@ export type PiSessionListParams = {
 export type PiSessionOpenParams = {
   cwd: string
   sessionFile?: string
+  reuseFromSessionId?: string
 }
 
 // Command result types

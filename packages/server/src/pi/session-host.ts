@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject, validateParams } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
@@ -22,7 +22,7 @@ const SERVER_GLOBAL_CAPABILITIES: PiCapability[] = [
       type: "object",
       additionalProperties: true,
       required: ["cwd"],
-      properties: { cwd: { type: "string" }, sessionFile: { type: "string" } },
+      properties: { cwd: { type: "string" }, sessionFile: { type: "string" }, reuseFromSessionId: { type: "string" } },
     },
     queue: "immediate",
   },
@@ -77,9 +77,38 @@ export class SessionHost {
     this.runtimeReaper.unref?.()
   }
 
-  async openSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<JsonObject> {
+  async openSession(cwd: string, sessionFile?: string, signal?: AbortSignal, reuseFromSessionId?: string): Promise<JsonObject> {
+    if (sessionFile && reuseFromSessionId) {
+      const switched = await this.switchAttachedSession(reuseFromSessionId, cwd, sessionFile, signal)
+      if (switched) return switched
+    }
     if (!sessionFile) return this.openSessionOnce(cwd, sessionFile, signal)
     return this.runtimes.openFlight(sessionFile, openSignal => this.openSessionOnce(cwd, sessionFile, openSignal), signal)
+  }
+
+  private async switchAttachedSession(
+    sourceSessionId: string,
+    cwd: string,
+    sessionFile: string,
+    signal?: AbortSignal,
+  ): Promise<JsonObject | undefined> {
+    const source = this.runtimes.get(sourceSessionId)
+    if (!source || (source.sessionFile && pathKey(source.sessionFile) === pathKey(sessionFile))) return undefined
+    if (this.activity.has(sourceSessionId) || this.executor.hasPendingWork(sourceSessionId) || this.executor.isClosing(sourceSessionId)) {
+      return undefined
+    }
+    if (!source.sessionFile || pathKey(dirname(source.sessionFile)) !== pathKey(dirname(sessionFile))) return undefined
+
+    const result = await source.worker.command("switchSession", { sessionPath: sessionFile, cwdOverride: cwd }, signal)
+    await this.trackReplacement(source, result)
+    const target = this.requireAttached(source.sessionId)
+    const state = await target.worker.command("state.get", undefined, signal) as JsonObject | undefined
+    return {
+      sessionId: target.sessionId,
+      sessionFile: target.sessionFile ?? null,
+      cwd: target.cwd,
+      state: state ?? null,
+    }
   }
 
   private async openSessionOnce(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<JsonObject> {
@@ -309,7 +338,8 @@ export class SessionHost {
       const cwd = typeof params?.cwd === "string" ? params.cwd : undefined
       if (!cwd) throw Object.assign(new Error("params.cwd must be a non-empty string"), { code: "INVALID_REQUEST" })
       const sessionFile = typeof params?.sessionFile === "string" ? params.sessionFile : undefined
-      return this.openSession(cwd, sessionFile, options.signal)
+      const reuseFromSessionId = typeof params?.reuseFromSessionId === "string" ? params.reuseFromSessionId : undefined
+      return this.openSession(cwd, sessionFile, options.signal, reuseFromSessionId)
     }
     if (type === "session.attached") return this.listAttachedIds()
     if (type === "session.delete") {
@@ -607,6 +637,11 @@ function withAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
 
 function abortError(): Error {
   return Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" })
+}
+
+function pathKey(path: string): string {
+  const resolved = resolve(path)
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved
 }
 
 function isSessionBusyError(error: unknown): boolean {

@@ -187,6 +187,7 @@ function App() {
   const handleSelectSession = useCallback(
     (session: { id: string; directory?: string }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
+      const sourceSessionId = paneLayout.focusedSessionId
       const listed = sessions.find(item => item.id === session.id)
       const directory = listed?.directory ?? session.directory
       if (!paneId || !directory) return
@@ -194,14 +195,15 @@ function App() {
         trackPiSession(sessionId, directory)
         navigatePaneToSession(paneId, sessionId, directory)
       }
-      // 列表选择和会话加载解耦：先切换当前 pane，让侧边栏立即响应，
-      // runtime、state 和首屏 branch 由内容区在后台加载。
+      // 列表选择和会话加载解耦：先发起后台 attach/switch，再立即切换当前 pane，
+      // runtime、state 和首屏 branch 不阻塞侧边栏响应。
+      if (listed?.path) {
+        void openPiSession(directory, listed.path, undefined, sourceSessionId ?? undefined).catch(error => {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') return
+          uiErrorHandler('open Pi session', error)
+        })
+      }
       enterSession(session.id)
-      if (!listed?.path) return
-      void openPiSession(directory, listed.path).catch(error => {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') return
-        uiErrorHandler('open Pi session', error)
-      })
     },
     [paneLayout.focusedPaneId, navigatePaneToSession, sessions],
   )
