@@ -506,7 +506,7 @@ export function InputToolbar({
               if (!canToggleDeliveryMode) return
               onDeliveryModeChange?.(activeDeliveryMode === 'steer' ? 'followUp' : 'steer')
             }}
-            className="flex h-7 w-20 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-[length:var(--fs-sm)] text-text-300 transition-all duration-150 hover:bg-bg-200 hover:text-text-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[length:var(--fs-sm)] text-text-300 transition-all duration-150 hover:bg-bg-200 hover:text-text-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <span className="truncate">{deliveryLabel}</span>
           </button>
