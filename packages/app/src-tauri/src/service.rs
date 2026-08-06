@@ -84,7 +84,6 @@ struct ServiceMarker {
 struct PreparedServer {
     binary: PathBuf,
     resource: PathBuf,
-    runtime_dir: PathBuf,
     native_modules: PathBuf,
 }
 
@@ -141,7 +140,6 @@ fn read_service_marker(app: &AppHandle, state: &ServiceState) -> Option<ServiceM
 }
 
 fn service_environment(
-    runtime_dir: Option<&PathBuf>,
     native_modules: Option<&PathBuf>,
     custom: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
@@ -150,9 +148,6 @@ fn service_environment(
         ("PIUI_PORT".to_string(), DEFAULT_PORT.to_string()),
         ("PIUI_DRIVER".to_string(), "pi".to_string()),
     ]);
-    if let Some(path) = runtime_dir {
-        environment.insert("PIUI_RUNTIME_DIR".to_string(), path.display().to_string());
-    }
     if let Some(path) = native_modules {
         environment.insert(
             "PIUI_NATIVE_MODULES".to_string(),
@@ -191,9 +186,9 @@ fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String>
     }
 
     let names = if cfg!(target_os = "windows") {
-        ["piui-server.exe", "piui-server"]
+        ["pi-worker.exe", "piui-server.exe"]
     } else {
-        ["piui-server", "piui-server.exe"]
+        ["pi-worker", "piui-server"]
     };
     names
         .iter()
@@ -213,14 +208,7 @@ fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String>
 fn prepare_server(app: &AppHandle) -> Result<PreparedServer, String> {
     let resource = resource_root(app)?;
     let binary = server_binary(app, &resource)?;
-    let runtime_dir = resource.join("runtime");
     let native_modules = resource.join("node_modules");
-    if !runtime_dir.join("current.json").is_file() {
-        return Err(format!(
-            "Pi worker runtime was not bundled in {}",
-            runtime_dir.display()
-        ));
-    }
     if !native_modules.join("bun-pty").is_dir() {
         return Err(format!(
             "bun-pty was not bundled in {}",
@@ -230,7 +218,6 @@ fn prepare_server(app: &AppHandle) -> Result<PreparedServer, String> {
     Ok(PreparedServer {
         binary,
         resource,
-        runtime_dir,
         native_modules,
     })
 }
@@ -258,11 +245,11 @@ fn spawn_server(
 ) -> Result<SpawnedServer, String> {
     let mut command = Command::new(&prepared.binary);
     command
+        .arg("web")
         .current_dir(&prepared.resource)
         .env("PIUI_HOST", "127.0.0.1")
         .env("PIUI_PORT", DEFAULT_PORT)
         .env("PIUI_DRIVER", "pi")
-        .env("PIUI_RUNTIME_DIR", prepared.runtime_dir)
         .env("PIUI_NATIVE_MODULES", prepared.native_modules)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -289,14 +276,33 @@ fn spawn_server(
     Ok(SpawnedServer { child })
 }
 
-fn read_token() -> Result<String, String> {
+fn read_token(env_vars: &BTreeMap<String, String>) -> Result<String, String> {
+    if let Some(token) = env_vars.get("PIUI_AUTH_TOKEN") {
+        let token = token.trim();
+        return if token.is_empty() {
+            Err("PIUI_AUTH_TOKEN is empty".to_string())
+        } else {
+            Ok(token.to_string())
+        };
+    }
+    if let Ok(token) = env::var("PIUI_AUTH_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            return Ok(token.to_string());
+        }
+    }
     let home = if cfg!(target_os = "windows") {
         env::var_os("USERPROFILE").map(PathBuf::from)
     } else {
         env::var_os("HOME").map(PathBuf::from)
     }
     .ok_or_else(|| "home directory is unavailable".to_string())?;
-    let path = home.join(".piui").join("auth-token");
+    let data_dir = env_vars
+        .get("PIUI_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("PIUI_DATA_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| home.join(".piui"));
+    let path = data_dir.join("auth-token");
     fs::read_to_string(&path)
         .map(|token| token.trim().to_string())
         .map_err(|error| {
@@ -412,7 +418,7 @@ async fn start_piui_service_inner(
     state: &State<'_, ServiceState>,
     env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
-    let token = read_token().ok();
+    let token = read_token(&env_vars).ok();
     let service_url = configured_service_url(&env_vars);
 
     if adopt_persisted_service(app, state, token.as_deref()).await {
@@ -513,7 +519,7 @@ async fn start_piui_service_inner(
             ));
         }
 
-        let current_token = read_token().ok().or_else(|| token.clone());
+        let current_token = read_token(&env_vars).ok().or_else(|| token.clone());
         if is_service_running(&service_url, current_token.as_deref()).await {
             return Ok(StartServiceResult {
                 started: true,
@@ -596,7 +602,12 @@ pub async fn get_piui_service_status(
     app: AppHandle,
     state: State<'_, ServiceState>,
 ) -> Result<ServiceStatusResult, String> {
-    let token = read_token().ok();
+    let custom_environment = state
+        .env_vars
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let token = read_token(&custom_environment).ok();
     let _ = adopt_persisted_service(&app, &state, token.as_deref()).await;
     let url = state
         .service_url
@@ -615,25 +626,15 @@ pub async fn get_piui_service_status(
         .or_else(|| {
             let pid = state.child_pid.load(Ordering::SeqCst);
             (pid > 0).then_some(pid)
-        });
+    });
     let resource = resource_root(&app)?;
-    let runtime_dir = resource.join("runtime");
     let native_modules = resource.join("node_modules");
-    let custom_environment = state
-        .env_vars
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
     Ok(ServiceStatusResult {
         running,
         started_by_us: running && state.started_by_us.load(Ordering::SeqCst),
         pid,
         url: running.then_some(url),
-        environment: service_environment(
-            Some(&runtime_dir),
-            Some(&native_modules),
-            &custom_environment,
-        ),
+        environment: service_environment(Some(&native_modules), &custom_environment),
     })
 }
 

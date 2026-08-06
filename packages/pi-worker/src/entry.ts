@@ -31,17 +31,19 @@ const runtimeUnsubs: Array<() => void> = []
 
 const driver = getDriverMode()
 
-const catalog = driver === "pi" ? new PiCatalog() : new MockCatalog()
+function send(message: WorkerMessage): void {
+  process.send?.(message)
+}
+
+const catalog = driver === "pi"
+  ? new PiCatalog(undefined, event => send({ kind: "event", generation: workerGeneration, channel: "packages.progress", event }))
+  : new MockCatalog()
 const providerAuth = new ProviderAuthHost(() => {
   const sessionRuntime = runtime as RealPiSession | undefined
   const fromSession = sessionRuntime instanceof RealPiSession ? sessionRuntime.getModelRuntime() : undefined
   if (fromSession) return Promise.resolve(fromSession)
   return import("./sdk-host.js").then(m => m.getLoadedSdk().sdk.ModelRuntime.create())
 })
-
-function send(message: WorkerMessage): void {
-  process.send?.(message)
-}
 
 const pendingHostCalls = new Map<string, {
   resolve: () => void
