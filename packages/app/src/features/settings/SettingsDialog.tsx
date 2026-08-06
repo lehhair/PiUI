@@ -101,8 +101,8 @@ const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 }
 
 const GROUP_DEFS: { labelKey: string; tabs: SettingsTab[] }[] = [
-  { labelKey: 'groups.core', tabs: ['servers', 'service', 'models', 'agent', 'chat', 'workspace', 'appearance', 'notifications'] },
-  { labelKey: 'groups.advanced', tabs: ['config', 'keybindings', 'about'] },
+  { labelKey: 'groups.core', tabs: ['servers', 'models', 'agent', 'chat', 'workspace', 'appearance', 'notifications'] },
+  { labelKey: 'groups.advanced', tabs: ['service', 'config', 'keybindings', 'about'] },
 ]
 
 // ============================================

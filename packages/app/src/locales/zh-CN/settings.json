@@ -11,7 +11,7 @@
   "tabs": {
     "servers": "服务器",
     "serversDesc": "后端连接和快速切换活跃端点",
-    "service": "本地服务",
+    "service": "服务",
     "serviceDesc": "查看、停止和重启 PiUI 后端服务",
     "models": "模型",
     "modelsDesc": "控制哪些模型保留在选择器里",

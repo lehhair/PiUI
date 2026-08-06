@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../../i18n'
 import { SettingsDialog } from './SettingsDialog'
@@ -79,6 +79,16 @@ describe('SettingsDialog search', () => {
     expect(screen.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Color control').parentElement).toHaveClass('settings-search-highlight')
     expect(screen.getByRole('button', { name: 'Color control' })).toHaveFocus()
+  })
+
+  it('places the service tab under Advanced', async () => {
+    render(<SettingsDialog isOpen onClose={vi.fn()} />)
+    await act(async () => vi.advanceTimersByTime(1))
+
+    const advancedGroup = screen.getByText('Advanced').parentElement
+    expect(advancedGroup).not.toBeNull()
+    expect(within(advancedGroup!).getByRole('tab', { name: 'Service' })).toBeInTheDocument()
+    expect(within(screen.getByText('Core').parentElement!).queryByRole('tab', { name: 'Service' })).not.toBeInTheDocument()
   })
 
   it('hides desktop service controls in the Android shell', async () => {
