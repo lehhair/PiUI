@@ -72,6 +72,8 @@ export async function openPiSession(cwd: string, sessionFile?: string, signal?: 
  * Load session data (state + branch) for active session.
  */
 const sessionDataFlights = new Map<string, Promise<void>>()
+const BRANCH_PAGE_LIMIT = 100
+const BRANCH_PAGE_MAX_BYTES = 2 * 1024 * 1024
 
 export async function loadPiSessionData(sessionId: string, signal?: AbortSignal): Promise<void> {
   const generation = serverStore.getActiveServerGeneration()
@@ -91,10 +93,10 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      // Load both in parallel
-      const [state, branch] = await retryUnavailable(() => Promise.all([
-        transport.getPiSessionState(sessionId, signal),
-        transport.getPiBranchPage(sessionId, { limit: 200 }, signal),
+        // Load both in parallel
+        const [state, branch] = await retryUnavailable(() => Promise.all([
+          transport.getPiSessionState(sessionId, signal),
+          transport.getPiBranchPage(sessionId, { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES }, signal),
       ]), signal)
 
       if (serverStore.getActiveServerGeneration() !== serverGeneration) return
@@ -174,7 +176,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
   try {
     const olderPage = await transport.getPiBranchPage(
       sessionId,
-      { cursor: currentBranch.beforeCursor, limit: 200 },
+      { cursor: currentBranch.beforeCursor, limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
       signal,
     )
 
@@ -198,7 +200,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
  */
 export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): Promise<void> {
   const serverGeneration = serverStore.getActiveServerGeneration()
-  const latest = await transport.getPiBranchPage(sessionId, { limit: 200 }, signal)
+  const latest = await transport.getPiBranchPage(sessionId, { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES }, signal)
   if (serverStore.getActiveServerGeneration() !== serverGeneration) return
   piBranchStore.setData(sessionId, mergeLatestBranchPage(piBranchStore.getData(sessionId), latest))
 }

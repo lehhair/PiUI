@@ -37,7 +37,7 @@ import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
 import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
-import { loadPiSessionData, openPiSession } from './pi/controllers/index.js'
+import { openPiSession } from './pi/controllers/index.js'
 import { trackPiSession } from './pi/piSessionIndex'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
@@ -75,7 +75,6 @@ function App() {
   })
   const splitPaneEnabled = canUseSplitPane(chatViewport)
   const paneLayout = usePaneLayout()
-  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const focusedController = usePaneController(paneLayout.focusedPaneId)
   const paneControllers = usePaneControllers()
   const syncingFromRouteRef = useRef(false)
@@ -190,37 +189,21 @@ function App() {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
       const listed = sessions.find(item => item.id === session.id)
       const directory = listed?.directory ?? session.directory
-      if (!paneId || !directory || openingSessionId) return
+      if (!paneId || !directory) return
       const enterSession = (sessionId: string) => {
         trackPiSession(sessionId, directory)
         navigatePaneToSession(paneId, sessionId, directory)
       }
-      const attachById = () => {
-        // 列表里还没有的会话（刚克隆/刚 fork，磁盘扫描没跟上）：
-        // 按 id 直连，ensureAttached 会在服务端认领或从磁盘恢复。
-        // 绝不能没有 sessionFile 就 open——那会开一个全新的空会话
-        void loadPiSessionData(session.id).catch(() => undefined)
-        enterSession(session.id)
-      }
-      if (!listed?.path) {
-        attachById()
-        return
-      }
-      setOpeningSessionId(session.id)
-      void openPiSession(directory, listed.path)
-        .then(opened => {
-          enterSession(opened.sessionId)
-        })
-        .catch(error => {
-          if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') {
-            attachById()
-            return
-          }
-          uiErrorHandler('open Pi session', error)
-        })
-        .finally(() => setOpeningSessionId(null))
+      // 列表选择和会话加载解耦：先切换当前 pane，让侧边栏立即响应，
+      // runtime、state 和首屏 branch 由内容区在后台加载。
+      enterSession(session.id)
+      if (!listed?.path) return
+      void openPiSession(directory, listed.path).catch(error => {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'SESSION_BUSY') return
+        uiErrorHandler('open Pi session', error)
+      })
     },
-    [paneLayout.focusedPaneId, navigatePaneToSession, openingSessionId, sessions],
+    [paneLayout.focusedPaneId, navigatePaneToSession, sessions],
   )
 
   const handleNewSession = useCallback(() => {
@@ -905,7 +888,7 @@ function App() {
                 >
                   <Sidebar
                     isOpen={sidebarExpanded}
-                    selectedSessionId={openingSessionId ?? paneLayout.focusedSessionId}
+                    selectedSessionId={paneLayout.focusedSessionId}
                     onSelectSession={handleSelectSession}
                     onNewSession={handleNewSession}
                     onOpen={handleOpenSidebar}
@@ -992,7 +975,7 @@ function App() {
             <>
               <Sidebar
                 isOpen={sidebarExpanded}
-                selectedSessionId={openingSessionId ?? paneLayout.focusedSessionId}
+                selectedSessionId={paneLayout.focusedSessionId}
                 onSelectSession={handleSelectSession}
                 onNewSession={handleNewSession}
                 onOpen={handleOpenSidebar}

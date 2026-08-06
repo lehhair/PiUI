@@ -495,7 +495,7 @@ export function InputToolbar({
           </div>
         </AnimatedPresence>
 
-        <AnimatedPresence show={isStreaming && (canSteer || canFollowUp)} className={isCompact ? 'shrink-0' : ''}>
+        <AnimatedPresence show={Boolean(isStreaming && (canSteer || canFollowUp))} className={isCompact ? 'shrink-0' : ''}>
           <div className="relative">
             <button
               type="button"
