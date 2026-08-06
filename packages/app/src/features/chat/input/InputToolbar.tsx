@@ -315,6 +315,10 @@ export function InputToolbar({
 
   const selectableAgents = agents.filter(a => a.mode !== 'subagent' && !a.hidden)
   const currentAgent = agents.find(a => a.name === selectedAgent)
+  const activeDeliveryMode = deliveryMode === 'steer' && canSteer ? 'steer' : canFollowUp ? 'followUp' : 'steer'
+  const deliveryLabel = activeDeliveryMode === 'steer' ? 'Steer' : 'Follow-up'
+  const deliveryHint = activeDeliveryMode === 'steer' ? t('inputToolbar.steerHint') : t('inputToolbar.followUpHint')
+  const canToggleDeliveryMode = canSteer && canFollowUp
 
   return (
     <div className="flex items-center justify-between px-3 pb-3 relative">
@@ -490,44 +494,27 @@ export function InputToolbar({
             </DropdownMenu>
           </div>
         </AnimatedPresence>
+
+        {isStreaming && (canSteer || canFollowUp) ? (
+          <button
+            type="button"
+            disabled={controlsDisabled || !canToggleDeliveryMode}
+            aria-label={`${t('inputToolbar.deliveryMode')}: ${deliveryLabel}`}
+            aria-pressed={activeDeliveryMode === 'steer'}
+            title={deliveryHint}
+            onClick={() => {
+              if (!canToggleDeliveryMode) return
+              onDeliveryModeChange?.(activeDeliveryMode === 'steer' ? 'followUp' : 'steer')
+            }}
+            className="flex h-7 w-20 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-[length:var(--fs-sm)] text-text-300 transition-all duration-150 hover:bg-bg-200 hover:text-text-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <span className="truncate">{deliveryLabel}</span>
+          </button>
+        ) : null}
       </div>
 
       {/* Action Buttons */}
       <div className="flex items-center gap-1">
-        {isStreaming && (canSteer || canFollowUp) ? (
-          <div
-            role="group"
-            aria-label={t('inputToolbar.deliveryMode')}
-            className="flex h-7 items-center rounded border border-border-200 bg-bg-100 p-0.5"
-          >
-            {canSteer ? (
-              <button
-                type="button"
-                className={`h-6 px-2 text-[length:var(--fs-xs)] ${
-                  deliveryMode === 'steer' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
-                }`}
-                aria-pressed={deliveryMode === 'steer'}
-                title={t('inputToolbar.steerHint')}
-                onClick={() => onDeliveryModeChange?.('steer')}
-              >
-                {t('inputToolbar.steer')}
-              </button>
-            ) : null}
-            {canFollowUp ? (
-              <button
-                type="button"
-                className={`h-6 px-2 text-[length:var(--fs-xs)] ${
-                  deliveryMode === 'followUp' ? 'bg-bg-300 text-text-100' : 'text-text-400 hover:text-text-200'
-                }`}
-                aria-pressed={deliveryMode === 'followUp'}
-                title={t('inputToolbar.followUpHint')}
-                onClick={() => onDeliveryModeChange?.('followUp')}
-              >
-                {t('inputToolbar.followUp')}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
         <AnimatedPresence show={supportsAnyFile}>
           <>
             {/* 浏览器模式下的隐藏文件输入 */}
