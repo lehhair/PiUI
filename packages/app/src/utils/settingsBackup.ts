@@ -32,7 +32,6 @@ import {
 
 const BACKUP_KIND = 'settings-backup'
 const BACKUP_SCHEMA_VERSION = 4
-const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set([3, BACKUP_SCHEMA_VERSION])
 
 export interface NotificationBackup {
   browserNotificationsEnabled: boolean
@@ -88,11 +87,7 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
   }
 
   const parsed = raw as Record<string, unknown>
-  if (
-    parsed.app !== 'PiUI' ||
-    parsed.kind !== BACKUP_KIND ||
-    !SUPPORTED_BACKUP_SCHEMA_VERSIONS.has(Number(parsed.schemaVersion))
-  ) {
+  if (parsed.app !== 'PiUI' || parsed.kind !== BACKUP_KIND || parsed.schemaVersion !== BACKUP_SCHEMA_VERSION) {
     throw new Error('Unsupported backup format')
   }
 
@@ -106,6 +101,7 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
     'layout',
     'servers',
     'perServerStorage',
+    'service',
     'keybindings',
     'notifications',
     'sound',
@@ -118,19 +114,12 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
     }
   }
 
-  if (Number(parsed.schemaVersion) >= 4 && !('service' in modules)) {
-    throw new Error('Missing backup module: service')
-  }
-
   return {
     app: 'PiUI',
     kind: BACKUP_KIND,
     schemaVersion: BACKUP_SCHEMA_VERSION,
     createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-    modules: {
-      ...(modules as unknown as SettingsBackupModules),
-      service: 'service' in modules ? (modules.service as ServiceSettingsBackup) : exportServiceSettingsBackup(),
-    },
+    modules: modules as unknown as SettingsBackupModules,
   }
 }
 
