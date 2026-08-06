@@ -3,30 +3,21 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
 import { RetryIcon, SpinnerIcon, StopIcon, TrashIcon, WifiIcon, WifiOffIcon } from '../../../components/Icons'
 import { isTauri, isTauriMobile } from '../../../utils/tauri'
-import { applyLocalServerConfig } from '../../../store/serverStore'
 import { SERVICE_ENV_EXAMPLES, serviceStore, useServiceStore } from '../../../store/serviceStore'
+import {
+  refreshDesktopServiceStatus,
+  restartDesktopService,
+  startDesktopService,
+  stopDesktopService,
+  type DesktopServiceStatus,
+} from '../../../services/desktopService'
 import { settingsFieldClass, SettingField, SettingRow, SettingsSection, Toggle } from './SettingsUI'
-
-interface ServiceStatus {
-  running: boolean
-  startedByUs: boolean
-  pid?: number | null
-  url?: string | null
-  environment: Record<string, string>
-}
-
-interface StartServiceResult {
-  started: boolean
-  startedByUs: boolean
-  url?: string | null
-  token?: string | null
-}
 
 export function ServiceSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const desktop = isTauri() && !isTauriMobile()
   const { autoStart, useSystemPiSdk, envVars, running, startedByUs, starting } = useServiceStore()
-  const [status, setStatus] = useState<ServiceStatus | null>(null)
+  const [status, setStatus] = useState<DesktopServiceStatus | null>(null)
   const [busy, setBusy] = useState<'refresh' | 'stop' | 'start' | 'restart' | null>(null)
   const [error, setError] = useState('')
 
@@ -35,13 +26,8 @@ export function ServiceSettings() {
     setBusy('refresh')
     setError('')
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const next = await invoke<ServiceStatus>('get_piui_service_status', {
-        envVars: serviceStore.envVarsRecord,
-      })
+      const next = await refreshDesktopServiceStatus()
       setStatus(next)
-      serviceStore.setRunning(next.running)
-      serviceStore.setStartedByUs(next.startedByUs)
     } catch (reason) {
       setError(String(reason))
     } finally {
@@ -53,44 +39,29 @@ export function ServiceSettings() {
     async (operation: 'start' | 'restart') => {
       setBusy(operation)
       setError('')
-      serviceStore.setStarting(true)
       try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const result = await invoke<StartServiceResult>(
-          operation === 'start' ? 'start_piui_service' : 'restart_piui_service',
-          {
-            envVars: serviceStore.envVarsRecord,
-          },
-        )
-        if (result.url && result.token) applyLocalServerConfig(result.url, result.token)
-        serviceStore.setRunning(true)
-        serviceStore.setStartedByUs(result.startedByUs)
-        await refresh()
+        const outcome = await (operation === 'start' ? startDesktopService() : restartDesktopService())
+        setStatus(outcome.status)
       } catch (reason) {
         setError(String(reason))
       } finally {
-        serviceStore.setStarting(false)
         setBusy(null)
       }
     },
-    [refresh],
+    [],
   )
 
   const stop = useCallback(async () => {
     setBusy('stop')
     setError('')
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('stop_piui_service')
-      serviceStore.setRunning(false)
-      serviceStore.setStartedByUs(false)
-      await refresh()
+      setStatus(await stopDesktopService())
     } catch (reason) {
       setError(String(reason))
     } finally {
       setBusy(null)
     }
-  }, [refresh])
+  }, [])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0)

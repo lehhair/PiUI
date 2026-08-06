@@ -7,7 +7,7 @@ import { initOverlayScrollbars } from './lib/overlayScrollbar'
 import App from './App.tsx'
 import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contexts'
 import { themeStore } from './store/themeStore'
-import { applyLocalServerConfig, applyUrlTokenParam } from './store/serverStore'
+import { applyUrlTokenParam } from './store/serverStore'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { globalErrorHandler } from './utils/errorHandling'
 import { serviceStore } from './store/serviceStore'
@@ -105,31 +105,11 @@ function bootstrap() {
   )
 }
 
-interface StartPiuiServiceResult {
-  started: boolean
-  startedByUs: boolean
-  url?: string | null
-  token?: string | null
-}
-
 async function startNativePiuiService(): Promise<void> {
   if (!isNativeTauri || isTauriMobile() || !serviceStore.autoStart) return
-  const { invoke } = await import('@tauri-apps/api/core')
-  serviceStore.setStarting(true)
-  try {
-    const result = await invoke<StartPiuiServiceResult>('start_piui_service', {
-      envVars: serviceStore.envVarsRecord,
-    })
-    if (!result.url || !result.token) {
-      throw new Error('PiUI server did not return a usable URL and auth token')
-    }
-    applyLocalServerConfig(result.url, result.token)
-    serviceStore.setStartedByUs(result.startedByUs)
-    serviceStore.setRunning(true)
-    console.info(`[PiUI] local server ${result.started ? 'started by app' : 'already running'} at ${result.url}`)
-  } finally {
-    serviceStore.setStarting(false)
-  }
+  const { startDesktopService } = await import('./services/desktopService')
+  const { result } = await startDesktopService()
+  console.info(`[PiUI] local server ${result.started ? 'started by app' : 'already running'} at ${result.url}`)
 }
 
 async function startApp() {
