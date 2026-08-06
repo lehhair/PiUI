@@ -10,8 +10,8 @@ use tauri::{WebviewUrl, Window};
 
 #[cfg(not(target_os = "android"))]
 use service::{
-    check_piui_service, confirm_close_app, get_piui_service_started_by_us, get_piui_service_status,
-    restart_piui_service, start_piui_service, stop_piui_service, ServiceState,
+    confirm_close_app, get_piui_service_status, restart_piui_service, start_piui_service,
+    stop_piui_service, ServiceState,
 };
 
 #[cfg(not(target_os = "android"))]
@@ -156,12 +156,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            check_piui_service,
             start_piui_service,
             stop_piui_service,
             restart_piui_service,
             get_piui_service_status,
-            get_piui_service_started_by_us,
             confirm_close_app,
             desktop_window_ready,
             open_new_window,
@@ -180,9 +178,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building PiUI desktop client");
 
-    #[cfg(not(target_os = "android"))]
-    app.run(|_, _| {});
-
-    #[cfg(target_os = "android")]
     app.run(|_, _| {});
 }
