@@ -35,23 +35,24 @@ function isAbortError(error: unknown): boolean {
  * HTTP transport base for the PiUI server.
  * Browser dev uses same-origin + Vite proxy (`/api` → :8787) to avoid CORS.
  * Tauri 壳的同源是 tauri://localhost，不是 API，必须始终用完整 URL。
- * Override with VITE_PIUI_API when needed.
+ * Browser builds can use VITE_PIUI_API. Tauri always follows serverStore so
+ * switching servers in Settings cannot be pinned to a build-time endpoint.
  */
 export function getApiBase(): string {
   const envBase = (import.meta as ImportMeta & { env?: { VITE_PIUI_API?: string } }).env?.VITE_PIUI_API
-  if (envBase) return envBase.replace(/\/$/, '')
   if (typeof window !== 'undefined') {
     const active = serverStore.getActiveServer()
     if (isTauri()) {
       if (active?.url) return active.url.replace(/\/$/, '')
-      return DEFAULT_BASE
+      return envBase?.replace(/\/$/, '') || DEFAULT_BASE
     }
+    if (envBase) return envBase.replace(/\/$/, '')
     if (active && active.id !== LOCAL_SERVER_ID) return active.url.replace(/\/$/, '')
     const storedLocal = serverStore.getStoredServers().find(server => server.id === LOCAL_SERVER_ID)
     if (active && storedLocal && active.url !== storedLocal.url) return active.url.replace(/\/$/, '')
     return ''
   }
-  return DEFAULT_BASE
+  return envBase?.replace(/\/$/, '') || DEFAULT_BASE
 }
 
 function piHeaders(init?: HeadersInit): Headers {

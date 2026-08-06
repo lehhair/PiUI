@@ -75,13 +75,21 @@ pub async fn ws_bridge_connect(
                 }
                 Ok(Message::Binary(bytes)) => {
                     let data = String::from_utf8_lossy(&bytes).to_string();
-                    if on_event.send(json!({ "type": "message", "data": data })).is_err() {
+                    if on_event
+                        .send(json!({ "type": "message", "data": data }))
+                        .is_err()
+                    {
                         return;
                     }
                 }
                 Ok(Message::Close(frame)) => {
-                    let code = frame.as_ref().map(|frame| u16::from(frame.code) as u32).unwrap_or(1005);
-                    let reason = frame.map(|frame| frame.reason.to_string()).unwrap_or_default();
+                    let code = frame
+                        .as_ref()
+                        .map(|frame| u16::from(frame.code) as u32)
+                        .unwrap_or(1005);
+                    let reason = frame
+                        .map(|frame| frame.reason.to_string())
+                        .unwrap_or_default();
                     close_payload = json!({ "type": "close", "code": code, "reason": reason });
                     break;
                 }
