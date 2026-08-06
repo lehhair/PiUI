@@ -5,7 +5,7 @@ import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
 import { join } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
-import { isJsonObject } from "@piui/protocol"
+import { isJsonObject, validateParams } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
@@ -311,6 +311,7 @@ export class SessionHost {
     if (SERVER_SESSION_CAPABILITIES.some(item => item.name === type) || capability?.scope === "session") {
       throw Object.assign(new Error(`unknown global command: ${type}`), { code: "UNKNOWN_COMMAND" })
     }
+    validateParams(capability?.paramsSchema, params ?? {})
     const idempotent = type === "registry.describe" || capability?.idempotent === true
     return this.catalogCommand(type, params, { retry: idempotent, idempotent, signal: options.signal })
   }
@@ -321,6 +322,7 @@ export class SessionHost {
     }
     const capability = this.getSessionCapability(type)
     if (!capability) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    validateParams(capability.paramsSchema, params ?? {})
     if (capability.queue === "immediate") return this.sessionQuery(sessionId, type, params, options.signal)
     return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
