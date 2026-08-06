@@ -137,14 +137,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let is_last = window.app_handle().webview_windows().len() <= 1;
                 let state = window.state::<ServiceState>();
-                if is_last
-                    && state
-                        .started_by_us
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    && !state
-                        .allow_close
-                        .swap(false, std::sync::atomic::Ordering::SeqCst)
-                {
+                if is_last && state.should_confirm_close() {
                     api.prevent_close();
                     let _ = window.emit("close-requested", ());
                 }
