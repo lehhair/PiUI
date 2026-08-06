@@ -29,8 +29,7 @@ pub struct ServiceState {
     started_by_us: AtomicBool,
     allow_close: AtomicBool,
     lifecycle: tokio::sync::Mutex<()>,
-    pub service_url: Mutex<Option<String>>,
-    pub env_vars: Mutex<BTreeMap<String, String>>,
+    service_url: Mutex<Option<String>>,
     output: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -49,7 +48,6 @@ impl Default for ServiceState {
             allow_close: AtomicBool::new(false),
             lifecycle: tokio::sync::Mutex::new(()),
             service_url: Mutex::new(None),
-            env_vars: Mutex::new(BTreeMap::new()),
             output: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
@@ -220,9 +218,6 @@ async fn adopt_persisted_service(
             if let Ok(mut url) = state.service_url.lock() {
                 *url = Some(marker.url);
             }
-            if let Ok(mut env_vars) = state.env_vars.lock() {
-                *env_vars = config.environment.clone();
-            }
             return Ok(true);
         }
         Ok(_) | Err(HealthFailure::Unreachable) => {
@@ -319,7 +314,6 @@ async fn start_piui_service_inner(
         .service_url
         .lock()
         .map_err(|error| error.to_string())? = Some(config.url.clone());
-    *state.env_vars.lock().map_err(|error| error.to_string())? = config.environment.clone();
     if let Err(error) = marker::persist(app, pid, &config.url) {
         stop_piui_service_process(app, state);
         return Err(format!("failed to persist PiUI service ownership: {error}"));
@@ -373,9 +367,6 @@ fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
     marker::clear(app);
     if let Ok(mut url) = state.service_url.lock() {
         *url = None;
-    }
-    if let Ok(mut env_vars) = state.env_vars.lock() {
-        env_vars.clear();
     }
     if pid > 0 {
         kill_process_tree(pid);
