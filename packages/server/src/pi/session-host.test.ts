@@ -39,3 +39,31 @@ test("SessionHost rejects reopening a runtime while it is closing", async () => 
   await host.openSession(".", "session-1.jsonl")
   assert.equal(opens, 2)
 })
+
+test("SessionHost retries a busy self-heal attach", async () => {
+  let opens = 0
+  const worker = {
+    command: async (type: string) => type === "tree.get" ? [{ id: "root" }] : {},
+    getSessionId: () => "session-1",
+    getSessionFile: () => "session-1.jsonl",
+    getCwd: () => ".",
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    catalogCommand: async () => [{ id: "session-1", path: "session-1.jsonl", cwd: "." }],
+    open: async () => {
+      opens += 1
+      if (opens === 1) throw Object.assign(new Error("lock is busy"), { code: "SESSION_BUSY" })
+      return worker
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+
+  assert.deepEqual(await host.sessionQuery("session-1", "tree.get"), [{ id: "root" }])
+  assert.equal(opens, 2)
+  host.dispose()
+})
