@@ -55,8 +55,13 @@ export async function deletePiSession(cwd: string, sessionFile: string, signal?:
 /**
  * Open a Pi session and load its initial data.
  */
-export async function openPiSession(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<transport.PiSessionOpenResult> {
-  const result = await transport.openPiSession({ cwd, sessionFile }, signal)
+export async function openPiSession(
+  cwd: string,
+  sessionFile?: string,
+  signal?: AbortSignal,
+  reuseFromSessionId?: string,
+): Promise<transport.PiSessionOpenResult> {
+  const result = await transport.openPiSession({ cwd, sessionFile, reuseFromSessionId }, signal)
 
   if (!result.sessionId) {
     throw new Error('Session open failed: no sessionId returned')

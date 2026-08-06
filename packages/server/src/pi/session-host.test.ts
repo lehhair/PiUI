@@ -16,6 +16,7 @@ test("SessionHost rejects reopening a runtime while it is closing", async () => 
     getSessionId: () => "session-1",
     getSessionFile: () => "session-1.jsonl",
     getCwd: () => ".",
+    updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
     onClose: () => () => {},
@@ -47,6 +48,7 @@ test("SessionHost retries a busy self-heal attach", async () => {
     getSessionId: () => "session-1",
     getSessionFile: () => "session-1.jsonl",
     getCwd: () => ".",
+    updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
     onClose: () => () => {},
@@ -65,5 +67,51 @@ test("SessionHost retries a busy self-heal attach", async () => {
 
   assert.deepEqual(await host.sessionQuery("session-1", "tree.get"), [{ id: "root" }])
   assert.equal(opens, 2)
+  host.dispose()
+})
+
+test("SessionHost reuses an idle runtime for a session switch", async () => {
+  let opens = 0
+  const worker = {
+    command: async (type: string) => {
+      if (type === "switchSession") {
+        return {
+          operation: "switch",
+          sourceSessionId: "session-1",
+          targetSessionId: "session-2",
+          targetSessionFile: "session-2.jsonl",
+          targetCwd: ".",
+          cancelled: false,
+        }
+      }
+      if (type === "state.get") return { sessionId: "session-2" }
+      return {}
+    },
+    getSessionId: () => "session-1",
+    getSessionFile: () => "session-1.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => {
+      opens += 1
+      return worker
+    },
+    replaceRuntimeLease: async () => {},
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+
+  await host.openSession(".", "session-1.jsonl")
+  const opened = await host.openSession(".", "session-2.jsonl", undefined, "session-1")
+
+  assert.equal(opens, 1)
+  assert.equal(opened.sessionId, "session-2")
+  assert.equal(host.getAttached("session-1"), undefined)
+  assert.equal(host.getAttached("session-2")?.sessionFile, "session-2.jsonl")
   host.dispose()
 })
