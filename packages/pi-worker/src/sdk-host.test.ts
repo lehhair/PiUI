@@ -1,8 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { dirname, join } from "node:path"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { resolvePiSdkPath, shouldRequireVerifiedSdk } from "./sdk-host.ts"
 
 test("external SDK verification is strict unless explicitly disabled", () => {
@@ -11,118 +9,34 @@ test("external SDK verification is strict unless explicitly disabled", () => {
   assert.equal(shouldRequireVerifiedSdk({ PIUI_SDK_STRICT: "0" }), false)
 })
 
-function fakeFs(paths: string[]) {
-  const set = new Set(paths.map(path => path.replace(/\//g, "\\")))
-  return (path: string) => set.has(path.replace(/\//g, "\\"))
+const globalRoot = join("C:\\npm-global")
+const globalSdk = join(globalRoot, "@earendil-works", "pi-coding-agent")
+
+function resolve(env: NodeJS.ProcessEnv, paths: string[] = []) {
+  const existing = new Set(paths.map(path => path.replace(/\//g, "\\")))
+  return resolvePiSdkPath({
+    env,
+    exists: path => existing.has(path.replace(/\//g, "\\")),
+    npmRootGlobal: () => globalRoot,
+  })
 }
 
-const GLOBAL_ROOT = join("C:\\npm-global")
-const GLOBAL_SDK = join(GLOBAL_ROOT, "@earendil-works", "pi-coding-agent")
-const EXEC_DIR = join("C:\\PiUI")
-
-function resolveDeps(overrides: Partial<Parameters<typeof resolvePiSdkPath>[0]> = {}) {
-  return {
-    env: {} as NodeJS.ProcessEnv,
-    execDir: EXEC_DIR,
-    exists: fakeFs([]),
-    npmRootGlobal: () => GLOBAL_ROOT,
-    ...overrides,
-  }
-}
-
-test("explicit PIUI_SDK_PATH wins over every other source", () => {
-  const result = resolvePiSdkPath(resolveDeps({
-    env: { PIUI_SDK_PATH: "D:\\custom-pi" } as NodeJS.ProcessEnv,
-    exists: fakeFs([join(GLOBAL_SDK, "dist", "index.js")]),
-  }))
-  assert.deepEqual(result, { sdkPath: "D:\\custom-pi", source: "env" })
+test("explicit PIUI_SDK_PATH selects an external SDK", () => {
+  assert.deepEqual(resolve({ PIUI_SDK_PATH: "D:\\custom-pi" }), {
+    sdkPath: "D:\\custom-pi",
+    source: "env",
+  })
 })
 
-test("user global npm install is preferred over the bundled runtime", () => {
-  const result = resolvePiSdkPath(resolveDeps({
-    env: { PIUI_USE_SYSTEM_PI: "1" } as NodeJS.ProcessEnv,
-    exists: fakeFs([
-      join(GLOBAL_SDK, "dist", "index.js"),
-      join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
-    ]),
-  }))
-  assert.deepEqual(result, { sdkPath: GLOBAL_SDK, source: "global" })
+test("system Pi is used only when explicitly requested", () => {
+  const entry = join(globalSdk, "dist", "index.js")
+  assert.deepEqual(resolve({ PIUI_USE_SYSTEM_PI: "1" }, [entry]), {
+    sdkPath: globalSdk,
+    source: "global",
+  })
+  assert.deepEqual(resolve({}, [entry]), { source: "bundled" })
 })
 
-test("bundled runtime wins over a system Pi unless explicitly opted in", () => {
-  const sdk = join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent")
-  const result = resolvePiSdkPath(resolveDeps({
-    exists: fakeFs([
-      join(GLOBAL_SDK, "dist", "index.js"),
-      join(sdk, "dist", "index.js"),
-    ]),
-  }))
-  assert.deepEqual(result, { sdkPath: sdk, source: "runtime" })
-})
-
-test("skips a global SDK when its Pi package family versions disagree", () => {
-  const root = mkdtempSync(join(tmpdir(), "piui-sdk-global-"))
-  try {
-    const globalSdk = join(root, "@earendil-works", "pi-coding-agent")
-    const runtimeSdk = join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent")
-    for (const [dir, version] of [
-      [globalSdk, "0.82.0"],
-      [join(root, "@earendil-works", "pi-ai"), "0.81.1"],
-      [join(root, "@earendil-works", "pi-agent-core"), "0.82.0"],
-      [join(root, "@earendil-works", "pi-tui"), "0.82.0"],
-    ] as const) {
-      mkdirSync(join(dir, "dist"), { recursive: true })
-      writeFileSync(join(dir, "package.json"), JSON.stringify({ version }))
-      writeFileSync(join(dir, "dist", "index.js"), "export {}")
-    }
-
-    const result = resolvePiSdkPath(resolveDeps({
-      npmRootGlobal: () => root,
-      exists: path => existsSync(path) || fakeFs([join(runtimeSdk, "dist", "index.js")])(path),
-    }))
-    assert.deepEqual(result, { sdkPath: runtimeSdk, source: "runtime" })
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("legacy @mariozechner package name is accepted as a global install", () => {
-  const legacy = join(GLOBAL_ROOT, "@mariozechner", "pi-coding-agent")
-  const result = resolvePiSdkPath(resolveDeps({
-    exists: fakeFs([join(legacy, "dist", "index.js")]),
-  }))
-  assert.deepEqual(result, { sdkPath: legacy, source: "global" })
-})
-
-test("bundled runtime is used when no global install exists", () => {
-  const sdk = join(EXEC_DIR, "runtime", "pi", "node_modules", "@earendil-works", "pi-coding-agent")
-  const result = resolvePiSdkPath(resolveDeps({
-    exists: fakeFs([join(sdk, "dist", "index.js")]),
-  }))
-  assert.deepEqual(result, { sdkPath: sdk, source: "runtime" })
-})
-
-test("updater pointer current.json selects the hot-updated runtime copy", () => {
-  const root = mkdtempSync(join(tmpdir(), "piui-sdk-"))
-  try {
-    const execDir = join(root, "app")
-    const runtimeDir = join(execDir, "runtime")
-    const updated = join(runtimeDir, "pi-0.82.0", "node_modules", "@earendil-works", "pi-coding-agent", "dist")
-    mkdirSync(updated, { recursive: true })
-    writeFileSync(join(updated, "index.js"), "export {}")
-    writeFileSync(join(runtimeDir, "current.json"), JSON.stringify({ dir: "pi-0.82.0" }))
-    const result = resolvePiSdkPath(resolveDeps({
-      execDir,
-      exists: existsSync,
-      npmRootGlobal: () => undefined,
-    }))
-    assert.deepEqual(result, { sdkPath: dirname(updated), source: "runtime" })
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("missing runtime pointer and directories fall back to the bundled SDK", () => {
-  const result = resolvePiSdkPath(resolveDeps({ npmRootGlobal: () => undefined }))
-  assert.deepEqual(result, { source: "bundled" })
+test("an explicitly requested system Pi must be installed", () => {
+  assert.throws(() => resolve({ PIUI_USE_SYSTEM_PI: "1" }), /not installed globally/)
 })

@@ -17,12 +17,10 @@
     "@piui/protocol": "0.1.0",
     "bun-pty": "^0.4.8",
     "chokidar": "^4.0.3",
-    "semver": "^6.3.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "@types/semver": "^7.8.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3"

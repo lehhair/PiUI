@@ -20,7 +20,6 @@ import { resolveAuthToken } from "./host/auth-token.ts"
 import { PathSafetyError } from "./host/path-safety.ts"
 import { HostRuntime } from "./host/command-table.ts"
 import { TerminalManager } from "./host/terminal-manager.ts"
-import { createPiRuntimeUpdater } from "./pi/pi-runtime-updater.ts"
 import { createStaticServer } from "./static.ts"
 
 const CORS_HEADERS: Record<string, string> = {
@@ -177,7 +176,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       hub.publish({ kind: "workspace", id: workspacePath }, channel, payload)
     },
   })
-  const host = new HostRuntime({ store, watcher, sessions, terminals, piRuntime: createPiRuntimeUpdater() })
+  const host = new HostRuntime({ store, watcher, sessions, terminals })
   const authToken = options.authToken === undefined ? resolveAuthToken() : options.authToken
   const staticServer = options.staticRoot ? createStaticServer(options.staticRoot) : undefined
   let disposal: Promise<void> | undefined

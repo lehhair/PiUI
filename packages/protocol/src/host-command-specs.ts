@@ -217,17 +217,6 @@ export const HOST_COMMAND_SPECS = [
     paramsSchema: objectSchema({ ...WORKSPACE_PATH, ...RELATIVE_PATH, mode: GIT_MODE }, ["workspacePath", "path"]),
     idempotent: true,
   },
-  {
-    name: "pi-runtime.status",
-    domain: "server",
-    description: "Read the hot-updatable Pi runtime status (current vs latest)",
-    idempotent: true,
-  },
-  {
-    name: "pi-runtime.update",
-    domain: "server",
-    description: "Download the latest Pi runtime and switch the pointer (takes effect on restart)",
-  },
 ] as const satisfies readonly HostCommandSpec[]
 
 export type HostCommandName = (typeof HOST_COMMAND_SPECS)[number]["name"]
@@ -257,8 +246,6 @@ export type HostCommandParams = {
   "git.status": { workspacePath: string }
   "git.diff": { workspacePath: string; mode?: GitDiffMode }
   "git.fileDiff": { workspacePath: string; path: string; mode?: GitDiffMode }
-  "pi-runtime.status": Record<string, never>
-  "pi-runtime.update": Record<string, never>
 }
 
 // 编译期防漂移：参数映射表的键必须与声明表的命令名完全一致
