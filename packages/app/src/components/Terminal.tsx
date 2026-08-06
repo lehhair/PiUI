@@ -653,7 +653,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       }
     }
 
-    const handleDisconnected = ({ socket, code }: { socket?: PiSocket; code?: number }) => {
+    const handleDisconnected = ({ socket, code, reason }: { socket?: PiSocket; code?: number; reason?: string }) => {
       if (!effectActive) return
       if (socket && socketRef.current !== socket) return
       resetTransport()
@@ -669,9 +669,12 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
         return
       }
 
+      // 断开原因带进终端和 console——诊断断连必须知道是谁、以什么码关的
+      const detail = `code=${code ?? 'unknown'}${reason ? ` reason=${reason}` : ''}`
+      console.info(`[Terminal] disconnected (${detail})`)
       reconnectAttempt++
       const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempt - 1), MAX_RECONNECT_DELAY)
-      terminal.write(`\r\n\x1b[90m[Disconnected, reconnecting in ${(delay / 1000).toFixed(0)}s...]\x1b[0m\r\n`)
+      terminal.write(`\r\n\x1b[90m[Disconnected (${detail}), reconnecting in ${(delay / 1000).toFixed(0)}s...]\x1b[0m\r\n`)
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null
         if (mountedRef.current) {
@@ -763,7 +766,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
         }
 
         socket.onclose = e => {
-          handleDisconnected({ socket, code: e.code })
+          handleDisconnected({ socket, code: e.code, reason: e.reason })
         }
 
         socket.onerror = () => {
