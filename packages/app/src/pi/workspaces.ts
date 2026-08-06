@@ -42,8 +42,8 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
   if (!defaultWorkspacePromise) {
     defaultWorkspacePromise = (async () => {
       try {
-        const first = (await listHostWorkspaces())[0]
-        if (first) return first.path
+        // 全局（未选目录）的默认工作区：服务器默认目录（桌面安装目录），
+        // 与终端的全局语义保持一致。
         const fallback = await openHostWorkspace()
         await watchHostWorkspace(fallback.path)
         return fallback.path

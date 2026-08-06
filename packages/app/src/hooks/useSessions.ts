@@ -5,6 +5,7 @@ import { autoDetectPathStyle, isSameDirectory } from '../utils'
 import { loadPiSessions, loadPiSessionsForCwd, openPiSession, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
+import { resolveWorkspacePath } from '../pi/workspaces.js'
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -218,14 +219,16 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 创建新会话
   const create = useCallback(
     async (title?: string) => {
-      if (!normalizedDirectory) throw new Error('A project directory is required')
-      const opened = await openPiSession(normalizedDirectory)
+      // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
+      const directory = normalizedDirectory || (await resolveWorkspacePath())
+      if (!directory) throw new Error('A project directory is required')
+      const opened = await openPiSession(directory)
       if (!opened.sessionFile) throw new Error('Pi did not return a session file')
       const now = Date.now()
       const newSession: UiSession = {
         id: opened.sessionId,
         path: opened.sessionFile,
-        directory: opened.cwd ?? normalizedDirectory,
+        directory: opened.cwd ?? directory,
         title: title?.trim() || 'New chat',
         createdAt: now,
         updatedAt: now,
