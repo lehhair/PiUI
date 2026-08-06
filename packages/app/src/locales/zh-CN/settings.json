@@ -81,6 +81,8 @@
     "notRunning": "后端服务当前未运行",
     "autoStart": "自动启动服务",
     "autoStartDesc": "打开桌面应用时自动启动本地 PiUI 服务。",
+    "useSystemPiSdk": "使用宿主机 Pi SDK",
+    "useSystemPiSdkDesc": "从全局安装的 Pi 加载 SDK，而不是使用随 PiUI 打包的版本。PIUI_SDK_PATH 仍具有更高优先级，修改后需重启服务。",
     "serviceStatus": "服务状态",
     "starting": "正在启动后端服务",
     "restart": "重启服务",
@@ -88,6 +90,7 @@
     "environmentDesc": "下次启动服务时会传入的固定变量和自定义变量。",
     "envVars": "环境变量",
     "envVarsDesc": "传给本地 PiUI 服务的额外变量，修改后重新启动或重启服务才会生效。",
+    "addExample": "添加示例变量",
     "keyPlaceholder": "变量名",
     "valuePlaceholder": "变量值"
   },

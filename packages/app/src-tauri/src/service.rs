@@ -154,7 +154,11 @@ fn service_environment(
             path.display().to_string(),
         );
     }
-    environment.extend(custom.iter().map(|(key, value)| (key.clone(), value.clone())));
+    environment.extend(
+        custom
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
     environment
 }
 
@@ -377,6 +381,7 @@ async fn adopt_persisted_service(
     app: &AppHandle,
     state: &ServiceState,
     token: Option<&str>,
+    environment: &BTreeMap<String, String>,
 ) -> bool {
     let Some(marker) = read_service_marker(app, state) else {
         return false;
@@ -386,6 +391,9 @@ async fn adopt_persisted_service(
         state.started_by_us.store(true, Ordering::SeqCst);
         if let Ok(mut url) = state.service_url.lock() {
             *url = Some(marker.url);
+        }
+        if let Ok(mut env_vars) = state.env_vars.lock() {
+            *env_vars = environment.clone();
         }
         return true;
     }
@@ -421,7 +429,7 @@ async fn start_piui_service_inner(
     let token = read_token(&env_vars).ok();
     let service_url = configured_service_url(&env_vars);
 
-    if adopt_persisted_service(app, state, token.as_deref()).await {
+    if adopt_persisted_service(app, state, token.as_deref(), &env_vars).await {
         let url = state
             .service_url
             .lock()
@@ -487,10 +495,7 @@ async fn start_piui_service_inner(
         .service_url
         .lock()
         .map_err(|error| error.to_string())? = Some(service_url.clone());
-    *state
-        .env_vars
-        .lock()
-        .map_err(|error| error.to_string())? = env_vars.clone();
+    *state.env_vars.lock().map_err(|error| error.to_string())? = env_vars.clone();
     if let Err(error) = persist_service_marker(app, state, pid, &service_url) {
         stop_piui_service_process(state);
         return Err(format!("failed to persist PiUI service ownership: {error}"));
@@ -608,7 +613,7 @@ pub async fn get_piui_service_status(
         .map_err(|error| error.to_string())?
         .clone();
     let token = read_token(&custom_environment).ok();
-    let _ = adopt_persisted_service(&app, &state, token.as_deref()).await;
+    let _ = adopt_persisted_service(&app, &state, token.as_deref(), &custom_environment).await;
     let url = state
         .service_url
         .lock()
@@ -626,7 +631,7 @@ pub async fn get_piui_service_status(
         .or_else(|| {
             let pid = state.child_pid.load(Ordering::SeqCst);
             (pid > 0).then_some(pid)
-    });
+        });
     let resource = resource_root(&app)?;
     let native_modules = resource.join("node_modules");
     Ok(ServiceStatusResult {

@@ -28,7 +28,7 @@ const definitions = (tab: SettingsTab, labelKeys: string[]): SettingsSearchDefin
 
 export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
   ...definitions('servers', ['servers.connections']),
-  ...definitions('service', ['service.title', 'service.environment']),
+  ...definitions('service', ['service.title', 'service.useSystemPiSdk', 'service.envVars', 'service.environment']),
   ...definitions('models', ['models.visibility']),
   ...definitions('agent', [
     'agent.behavior',
@@ -159,7 +159,10 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'cancelMessage',
     'copyLastResponse',
     'toggleFullAuto',
-  ].map(label => ({ tab: 'keybindings' as const, labelKey: `commands:${label}` })),
+  ].map(label => ({
+    tab: 'keybindings' as const,
+    labelKey: `commands:${label}`,
+  })),
   ...definitions('about', ['about.versionCardTitle', 'about.backupCardTitle']),
 ]
 
@@ -177,7 +180,20 @@ export function filterSettingsSearchItems<T extends SearchMenuItem>(items: T[], 
       const tabLabel = normalizeSearchText(item.tabLabel)
       const description = normalizeSearchText(item.description ?? '')
       const extra = normalizeSearchText(item.searchText ?? '')
-      const rank = label === normalizedQuery ? 0 : label.startsWith(normalizedQuery) ? 1 : label.includes(normalizedQuery) ? 2 : tabLabel.includes(normalizedQuery) ? 3 : description.includes(normalizedQuery) ? 4 : extra.includes(normalizedQuery) ? 5 : -1
+      const rank =
+        label === normalizedQuery
+          ? 0
+          : label.startsWith(normalizedQuery)
+            ? 1
+            : label.includes(normalizedQuery)
+              ? 2
+              : tabLabel.includes(normalizedQuery)
+                ? 3
+                : description.includes(normalizedQuery)
+                  ? 4
+                  : extra.includes(normalizedQuery)
+                    ? 5
+                    : -1
       return { item, index, rank }
     })
     .filter(result => result.rank >= 0)

@@ -4,18 +4,21 @@ import {
   exportNotificationEventSettingsBackup,
   exportNotificationPreferencesBackup,
   exportServerSettingsBackup,
+  exportServiceSettingsBackup,
   exportThemeBackup,
   exportUpdateSettingsBackup,
   importLayoutBackup,
   importNotificationEventSettingsBackup,
   importNotificationPreferencesBackup,
   importServerSettingsBackup,
+  importServiceSettingsBackup,
   importThemeBackup,
   importUpdateSettingsBackup,
   type LayoutBackup,
   type NotificationEventSettingsBackup,
   type NotificationPreferencesBackup,
   type ServerSettingsBackup,
+  type ServiceSettingsBackup,
   type ThemeBackup,
   type UpdateSettingsBackup,
 } from '../store'
@@ -28,7 +31,8 @@ import {
 } from './perServerStorage'
 
 const BACKUP_KIND = 'settings-backup'
-const BACKUP_SCHEMA_VERSION = 3
+const BACKUP_SCHEMA_VERSION = 4
+const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set([3, BACKUP_SCHEMA_VERSION])
 
 export interface NotificationBackup {
   browserNotificationsEnabled: boolean
@@ -41,6 +45,7 @@ export interface SettingsBackupModules {
   layout: LayoutBackup
   servers: ServerSettingsBackup
   perServerStorage: PerServerStorageBackup
+  service: ServiceSettingsBackup
   keybindings: KeybindingBackup
   notifications: NotificationBackup
   sound: SoundBackup
@@ -83,7 +88,11 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
   }
 
   const parsed = raw as Record<string, unknown>
-  if (parsed.app !== 'PiUI' || parsed.kind !== BACKUP_KIND || parsed.schemaVersion !== BACKUP_SCHEMA_VERSION) {
+  if (
+    parsed.app !== 'PiUI' ||
+    parsed.kind !== BACKUP_KIND ||
+    !SUPPORTED_BACKUP_SCHEMA_VERSIONS.has(Number(parsed.schemaVersion))
+  ) {
     throw new Error('Unsupported backup format')
   }
 
@@ -109,12 +118,19 @@ function normalizeBackupFile(raw: unknown): SettingsBackupFile {
     }
   }
 
+  if (Number(parsed.schemaVersion) >= 4 && !('service' in modules)) {
+    throw new Error('Missing backup module: service')
+  }
+
   return {
     app: 'PiUI',
     kind: BACKUP_KIND,
     schemaVersion: BACKUP_SCHEMA_VERSION,
     createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-    modules: modules as unknown as SettingsBackupModules,
+    modules: {
+      ...(modules as unknown as SettingsBackupModules),
+      service: 'service' in modules ? (modules.service as ServiceSettingsBackup) : exportServiceSettingsBackup(),
+    },
   }
 }
 
@@ -123,7 +139,10 @@ function buildBackupFileName(createdAt: string): string {
   return `piui-settings-backup-${safeTimestamp}.json`
 }
 
-export async function exportSettingsBackup(): Promise<{ fileName: string; data: Uint8Array }> {
+export async function exportSettingsBackup(): Promise<{
+  fileName: string
+  data: Uint8Array
+}> {
   const createdAt = new Date().toISOString()
   const backup: SettingsBackupFile = {
     app: 'PiUI',
@@ -135,6 +154,7 @@ export async function exportSettingsBackup(): Promise<{ fileName: string; data: 
       layout: exportLayoutBackup(),
       servers: exportServerSettingsBackup(),
       perServerStorage: exportPerServerStorageBackup(),
+      service: exportServiceSettingsBackup(),
       keybindings: exportKeybindingBackup(),
       notifications: exportNotificationBackup(),
       sound: await exportSoundBackup(),
@@ -164,6 +184,7 @@ export async function importSettingsBackup(file: File): Promise<void> {
   importLayoutBackup(backup.modules.layout)
   importServerSettingsBackup(backup.modules.servers)
   importPerServerStorageBackup(backup.modules.perServerStorage)
+  importServiceSettingsBackup(backup.modules.service)
   importKeybindingBackup(backup.modules.keybindings)
   importNotificationBackup(backup.modules.notifications)
   await importSoundBackup(backup.modules.sound)
@@ -174,7 +195,9 @@ export function previewBackupMeta(file: File): Promise<{ createdAt: string | nul
   return file.text().then(text => {
     try {
       const parsed = JSON.parse(text) as Record<string, unknown>
-      return { createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : null }
+      return {
+        createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : null,
+      }
     } catch {
       return { createdAt: null }
     }
