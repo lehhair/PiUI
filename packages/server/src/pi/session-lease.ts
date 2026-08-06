@@ -6,13 +6,13 @@ import { acquireDirectoryLock, type DirectoryLock } from "./directory-lock.ts"
 export interface SessionLease {
   key: string
   refresh(sessionFile?: string, sessionId?: string): Promise<void>
-  replace(sessionFile?: string, sessionId?: string): Promise<void>
+  replace(sessionFile?: string | null, sessionId?: string): Promise<void>
   reserveReplacement?(targetSessionFile?: string): Promise<SessionReplacementReservation>
   release(): void
 }
 
 export interface SessionReplacementReservation {
-  commit(sessionFile?: string, sessionId?: string): Promise<void>
+  commit(sessionFile?: string | null, sessionId?: string): Promise<void>
   rollback(): void
 }
 
@@ -44,7 +44,10 @@ export class SessionLeaseManager {
       addedKeys: string[]
     } | undefined
 
-    const acquireKeys = async (nextSessionFile = currentSessionFile, nextSessionId = currentSessionId): Promise<string[]> => {
+    const acquireKeys = async (
+      nextSessionFile: string | null | undefined = currentSessionFile,
+      nextSessionId = currentSessionId,
+    ): Promise<string[]> => {
       const added: string[] = []
       try {
         for (const key of leaseKeys(nextSessionFile, nextSessionId)) {
@@ -93,14 +96,16 @@ export class SessionLeaseManager {
         if (released) throw new Error("Session lease is released")
         const allocation = await acquireDirectoryLock(this.namespace, "allocation")
         try {
-          await acquireKeys(nextSessionFile, nextSessionId)
-          const target = new Set(leaseKeys(nextSessionFile, nextSessionId))
+          const effectiveSessionFile = nextSessionFile === undefined ? currentSessionFile : nextSessionFile
+          const effectiveSessionId = nextSessionId === undefined ? currentSessionId : nextSessionId
+          await acquireKeys(effectiveSessionFile, effectiveSessionId)
+          const target = new Set(leaseKeys(effectiveSessionFile, effectiveSessionId))
           for (const [key, lock] of locks) {
             if (target.has(key)) continue
             lock.release()
             locks.delete(key)
           }
-          currentSessionFile = nextSessionFile ?? currentSessionFile
+          if (nextSessionFile !== undefined) currentSessionFile = nextSessionFile ?? undefined
           currentSessionId = nextSessionId ?? currentSessionId
         } finally {
           allocation.release()
@@ -122,14 +127,16 @@ export class SessionLeaseManager {
         return {
           commit: async (nextSessionFile, nextSessionId) => {
             if (settled || replacementReservation?.allocation !== allocation) throw new Error("Replacement reservation is settled")
-            await acquireKeys(nextSessionFile, nextSessionId)
-            const target = new Set(leaseKeys(nextSessionFile, nextSessionId))
+            const effectiveSessionFile = nextSessionFile === undefined ? currentSessionFile : nextSessionFile
+            const effectiveSessionId = nextSessionId === undefined ? currentSessionId : nextSessionId
+            await acquireKeys(effectiveSessionFile, effectiveSessionId)
+            const target = new Set(leaseKeys(effectiveSessionFile, effectiveSessionId))
             for (const [key, lock] of locks) {
               if (target.has(key)) continue
               lock.release()
               locks.delete(key)
             }
-            currentSessionFile = nextSessionFile ?? currentSessionFile
+            if (nextSessionFile !== undefined) currentSessionFile = nextSessionFile ?? undefined
             currentSessionId = nextSessionId ?? currentSessionId
             settled = true
             replacementReservation = undefined
@@ -164,7 +171,7 @@ export class SessionLeaseManager {
   }
 }
 
-function leaseKeys(sessionFile?: string, sessionId?: string): string[] {
+function leaseKeys(sessionFile?: string | null, sessionId?: string): string[] {
   const keys = sessionFile ? canonicalFileKeys(sessionFile) : []
   if (sessionId) keys.push(`session:${sessionId}`)
   if (keys.length === 0) keys.push("session:unknown")

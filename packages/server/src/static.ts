@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from "node:fs"
+import { createReadStream, existsSync, realpathSync, statSync } from "node:fs"
 import { extname, join, normalize, resolve, sep } from "node:path"
 import type { IncomingMessage, ServerResponse } from "node:http"
 
@@ -55,6 +55,15 @@ export interface StaticServer {
 export function createStaticServer(root: string): StaticServer | undefined {
   const indexHtml = join(root, "index.html")
   if (!existsSync(indexHtml)) return undefined
+  const canonicalRoot = realpathSync(root)
+  const canonicalIndex = realpathSync(indexHtml)
+
+  const isInsideRoot = (candidate: string): boolean => {
+    const rootWithSep = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep
+    return candidate === canonicalRoot || candidate.startsWith(rootWithSep)
+  }
+
+  if (!isInsideRoot(canonicalIndex)) return undefined
 
   const sendFile = (res: ServerResponse, path: string, headOnly: boolean, cache: boolean): boolean => {
     res.writeHead(200, {
@@ -76,12 +85,19 @@ export function createStaticServer(root: string): StaticServer | undefined {
       const headOnly = req.method === "HEAD"
       const resolved = resolveStaticPath(root, urlPath)
       if (resolved && existsSync(resolved) && statSync(resolved).isFile()) {
-        const fingerprinted = /[.-][0-9a-zA-Z_-]{8,}\.(js|css|woff2?|png|jpg|svg|webp)$/.test(resolved)
-        return sendFile(res, resolved, headOnly, fingerprinted)
+        let physicalPath: string
+        try {
+          physicalPath = realpathSync(resolved)
+        } catch {
+          return false
+        }
+        if (!isInsideRoot(physicalPath)) return false
+        const fingerprinted = /[.-][0-9a-zA-Z_-]{8,}\.(js|css|woff2?|png|jpg|svg|webp)$/.test(physicalPath)
+        return sendFile(res, physicalPath, headOnly, fingerprinted)
       }
       // SPA fallback：客户端路由的路径都回 index.html
       if (!extname(urlPath)) {
-        return sendFile(res, indexHtml, headOnly, false)
+        return sendFile(res, canonicalIndex, headOnly, false)
       }
       return false
     },

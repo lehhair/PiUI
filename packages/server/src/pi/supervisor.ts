@@ -148,11 +148,23 @@ export class RuntimeSupervisor {
           return
         }
         if (call.type === "extensionReplacement.commit") {
+          if (call.replacement.sourceSessionId !== runtime.getSessionId()) {
+            throw Object.assign(new Error("Extension replacement source no longer owns the runtime"), {
+              code: "RUNTIME_REPLACED",
+            })
+          }
           const reservation = reservations.get(call.reservationId)
           if (!reservation) throw Object.assign(new Error("Replacement reservation not found"), { code: "INTERNAL" })
-          const replacement = call.replacement as { targetSessionFile?: string; targetSessionId?: string }
-          await reservation.commit(replacement.targetSessionFile, replacement.targetSessionId)
-          reservations.delete(call.reservationId)
+          const replacement = call.replacement as { targetSessionFile?: string | null; targetSessionId?: string }
+          try {
+            await reservation.commit(replacement.targetSessionFile, replacement.targetSessionId)
+            reservations.delete(call.reservationId)
+          } catch (error) {
+            reservation.rollback()
+            reservations.delete(call.reservationId)
+            setImmediate(() => { void runtime.dispose() })
+            throw error
+          }
           return
         }
         if (call.type === "extensionReplacement.abort") {
@@ -192,7 +204,7 @@ export class RuntimeSupervisor {
    * session's lease ports stay held forever and the source can never be
    * attached again (SESSION_BUSY).
    */
-  async replaceRuntimeLease(runtime: WorkerSession, sessionFile?: string, sessionId?: string): Promise<void> {
+  async replaceRuntimeLease(runtime: WorkerSession, sessionFile?: string | null, sessionId?: string): Promise<void> {
     const lease = this.runtimeLeases.get(runtime)
     if (!lease) return
     await lease.replace(sessionFile, sessionId)

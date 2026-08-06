@@ -113,6 +113,16 @@ function readJsonlFile(file: string): { header: JsonObject | null; entries: Json
   return { header, entries }
 }
 
+async function assertMockSessionFileInside(sessionFile: string): Promise<void> {
+  const root = await realpath(sessionsDir())
+  const target = await realpath(sessionFile)
+  const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+  const targetKey = process.platform === "win32" ? target.toLowerCase() : target
+  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
+    throw Object.assign(new Error("Mock session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+  }
+}
+
 function lastTimestamp(entries: JsonObject[]): string | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const ts = entries[index]?.timestamp
@@ -593,18 +603,20 @@ export class MockPiSession implements SessionRuntime {
   async switchSession(sessionPath: string): Promise<JsonObject> {
     const sourceSessionId = this.getSessionId()
     const store = new MockStore()
-    if (!existsSync(sessionPath)) throw Object.assign(new Error("mock session file not found"), { code: "SESSION_NOT_FOUND" })
-    const { header, entries } = store.open(sessionPath)
+    const targetPath = path.resolve(sessionPath)
+    await assertMockSessionFileInside(targetPath)
+    if (!existsSync(targetPath)) throw Object.assign(new Error("mock session file not found"), { code: "SESSION_NOT_FOUND" })
+    const { header, entries } = store.open(targetPath)
     this.header = header
     this.entries = entries
-    this.sessionFileReplace(sessionPath)
+    this.sessionFileReplace(targetPath)
     this.resetLive()
     this.emitHead()
     return {
       operation: "switch",
       sourceSessionId,
       targetSessionId: this.getSessionId(),
-      targetSessionFile: sessionPath,
+      targetSessionFile: targetPath,
       targetCwd: this.cwd,
       cancelled: false,
     }

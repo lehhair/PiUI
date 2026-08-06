@@ -54,6 +54,7 @@ export class WorkerSession {
   private readonly eventListeners = new Set<(event: WorkerEvent) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
   private readonly closeListeners = new Set<() => void>()
+  private readonly replacementListeners = new Set<(replacement: JsonObject) => void | Promise<void>>()
   private hostCallHandler?: (call: WorkerHostCall) => void | Promise<void>
   private child: ChildProcess
   private sessionId?: string
@@ -189,6 +190,9 @@ export class WorkerSession {
     }
     try {
       await this.hostCallHandler(call)
+      if (call.type === "extensionReplacement.commit" && call.replacement.cancelled === false) {
+        for (const listener of this.replacementListeners) await listener(call.replacement)
+      }
       this.child.send({ kind: "hostReply", id, generation, ok: true })
     } catch (error) {
       this.child.send({
@@ -287,9 +291,9 @@ export class WorkerSession {
   /** After a runtime replacement (fork/clone/new/import), the worker owns a
    * different session — requests must carry the new id or the worker
    * rejects them as RUNTIME_REPLACED. */
-  updateSessionIdentity(sessionId: string, sessionFile?: string, cwd?: string): void {
+  updateSessionIdentity(sessionId: string, sessionFile?: string | null, cwd?: string): void {
     this.sessionId = sessionId
-    if (sessionFile !== undefined) this.sessionFile = sessionFile
+    if (sessionFile !== undefined) this.sessionFile = sessionFile ?? undefined
     if (cwd !== undefined) this.cwd = cwd
   }
 
@@ -305,7 +309,11 @@ export class WorkerSession {
     return this.request({ type, params }, signal)
   }
 
-  private request(command: { type: string; params?: JsonObject }, signal?: AbortSignal): Promise<JsonValue | undefined> {
+  private request(
+    command: { type: string; params?: JsonObject },
+    signal?: AbortSignal,
+    includeSessionId = true,
+  ): Promise<JsonValue | undefined> {
     if (this.exitHandled) return Promise.reject(this.exitError ?? new Error("Pi worker is not available"))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
@@ -357,7 +365,7 @@ export class WorkerSession {
           kind: "request",
           id,
           generation: helloMessage.generation,
-          sessionId: this.sessionId,
+          sessionId: includeSessionId ? this.sessionId : undefined,
           command,
         }, error => {
           if (!error) return
@@ -395,6 +403,11 @@ export class WorkerSession {
     this.hostCallHandler = handler
   }
 
+  onReplacementCommitted(listener: (replacement: JsonObject) => void | Promise<void>): () => void {
+    this.replacementListeners.add(listener)
+    return () => this.replacementListeners.delete(listener)
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
@@ -408,7 +421,7 @@ export class WorkerSession {
         timer.unref()
       })
       await Promise.race([
-        this.request({ type: "dispose" }).then(() => this.exited, () => this.exited),
+        this.request({ type: "dispose" }, undefined, false).then(() => this.exited, () => this.exited),
         this.exited,
         timeout,
       ])

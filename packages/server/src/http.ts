@@ -200,7 +200,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 
       // Web 客户端静态托管：/api 之外的 GET/HEAD 不走 token——页面本身必须
       // 公开可达，鉴权由 API 层把守（token 通过分享链接带进客户端）
-      if (staticServer && (method === "GET" || method === "HEAD") && !p.startsWith("/api/")) {
+       if (staticServer && (method === "GET" || method === "HEAD") && p !== "/api" && !p.startsWith("/api/")) {
         if (staticServer.serve(req, res, p)) return
         return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
       }

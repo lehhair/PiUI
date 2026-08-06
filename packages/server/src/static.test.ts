@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
@@ -66,6 +66,21 @@ test("fingerprinted assets get immutable caching, missing files return false", a
     assert.equal(server.serve(fakeRequest("GET"), fakeResponse() as never, "/missing.js"), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("static hosting rejects directory links that leave the web root", () => {
+  const root = mkdtempSync(join(tmpdir(), "piui-static-root-"))
+  const outside = mkdtempSync(join(tmpdir(), "piui-static-outside-"))
+  try {
+    writeFileSync(join(root, "index.html"), "<html>app</html>")
+    writeFileSync(join(outside, "secret.txt"), "secret")
+    symlinkSync(outside, join(root, "linked"), process.platform === "win32" ? "junction" : "dir")
+    const server = createStaticServer(root)!
+    assert.equal(server.serve(fakeRequest("GET"), fakeResponse() as never, "/linked/secret.txt"), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
   }
 })
 
