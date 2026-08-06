@@ -30,6 +30,7 @@ import type {
   SetThinkingLevelParams,
   SteerParams,
   TerminalCreateParams,
+  TerminalShell,
   TerminalInfo,
   TerminalUpdateParams,
 } from '@piui/protocol'
@@ -205,6 +206,10 @@ export function searchHostFilesText(workspacePath: string, query: string, limit?
 }
 
 // Host terminal commands. Terminal output itself uses a dedicated WebSocket stream.
+export function listHostShells(signal?: AbortSignal): Promise<{ shells: TerminalShell[] }> {
+  return postHostCommand('terminals.shells', {}, signal)
+}
+
 export function listHostTerminals(workspacePath: string, signal?: AbortSignal): Promise<{ terminals: TerminalInfo[] }> {
   return postHostCommand('terminals.list', { workspacePath }, signal)
 }

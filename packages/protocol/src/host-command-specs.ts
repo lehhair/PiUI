@@ -57,6 +57,12 @@ export const HOST_COMMAND_SPECS = [
     idempotent: true,
   },
   {
+    name: "terminals.shells",
+    domain: "terminals",
+    description: "List available shells on the PiUI server host",
+    idempotent: true,
+  },
+  {
     name: "terminals.list",
     domain: "terminals",
     description: "List terminal sessions owned by a workspace",
@@ -224,6 +230,7 @@ export type HostCommandName = (typeof HOST_COMMAND_SPECS)[number]["name"]
 /** 每条 host 命令的 TS 入参类型——与上面的 paramsSchema 同文件维护 */
 export type HostCommandParams = {
   "commands.get": { id: string }
+  "terminals.shells": Record<string, never>
   "terminals.list": { workspacePath: string }
   "terminals.create": { workspacePath: string } & TerminalCreateParams
   "terminals.get": { workspacePath: string; terminalId: string }

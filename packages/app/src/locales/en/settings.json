@@ -69,11 +69,17 @@
     "deleteServer": "Delete Server",
     "deleteServerConfirm": "Remove \"{{name}}\" from the server list? This cannot be undone."
   },
-  "service": {
-    "title": "Local PiUI Service",
+    "service": {
+      "title": "Local PiUI Service",
     "description": "Manage the backend process started by the desktop app. A kept service remains identifiable after restarting PiUI.",
     "desktopOnly": "Local service management is available on desktop only.",
-    "webModeDesc": "The local service is managed by the desktop shell. Browser mode connects to an existing PiUI server.",
+      "webModeDesc": "The local service is managed by the desktop shell. Browser mode connects to an existing PiUI server.",
+      "terminalTitle": "Terminal",
+      "terminalTitleDesc": "Choose the shell used to create PTY sessions. The list comes from the device running PiUI.",
+      "terminalShell": "Terminal shell",
+      "terminalShellDesc": "Choose the shell used to create PTY sessions. The choice is stored per server.",
+      "terminalShellAuto": "Auto",
+      "terminalShellOnly": "terminal only",
     "running": "Running",
     "stopped": "Stopped",
     "startedByApp": "Started by this PiUI desktop app",
