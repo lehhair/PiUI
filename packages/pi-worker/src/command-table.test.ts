@@ -1,8 +1,15 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { PI_COMMAND_SPECS } from "@piui/protocol"
 import { COMMAND_HANDLERS, getCommandCapability, listCommandCapabilities, listCommandTypes } from "./command-table.ts"
 
 describe("Pi capability registry", () => {
+  it("binds exactly the commands declared in the protocol package", () => {
+    const declared = PI_COMMAND_SPECS.map(spec => spec.name).sort()
+    assert.deepEqual(Object.keys(COMMAND_HANDLERS).sort(), declared)
+    assert.deepEqual(listCommandCapabilities().map(capability => capability.name).sort(), declared)
+  })
+
   it("is the source of truth for command handlers", () => {
     const global = listCommandCapabilities("global")
     const session = listCommandCapabilities("session")
