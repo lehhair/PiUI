@@ -1,7 +1,7 @@
 {
   "name": "@piui/app",
-  "version": "0.6.34",
-  "description": "Pi coding agent client UI (OpenCodeUI visual shell)",
+  "version": "0.1.0",
+  "description": "Pi coding agent client UI",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
