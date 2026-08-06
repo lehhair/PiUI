@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { getHttpFetch } from '../utils/tauri'
 
 export interface UpdateRelease {
   version: string
@@ -199,9 +200,15 @@ export class UpdateStore {
 
     this.inflightCheck = (async () => {
       try {
-        const response = await fetch(RELEASES_API_URL, {
+        const fetchImpl = await getHttpFetch()
+        const response = await fetchImpl(RELEASES_API_URL, {
           headers: { Accept: 'application/vnd.github+json' },
         })
+        if (response.status === 404) {
+          // 仓库还没有发布过 release——不是错误，静默记为已检查
+          this.setState({ ...this.state, checking: false, lastCheckedAt: now, error: null })
+          return
+        }
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
         }

@@ -15,6 +15,23 @@ export function isTauriMobile(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 }
 
+// Tauri 下 HTTP 请求统一走 plugin-http（Rust reqwest）：WebView 的 fetch 会被系统
+// 代理劫持，本地 127.0.0.1 服务在代理拦截下表现为 ERR_CONNECTION_REFUSED，
+// 且浏览器会把每次网络失败打进控制台。加载结果缓存，避免重复 dynamic import。
+let _tauriFetch: typeof globalThis.fetch | null = null
+let _tauriFetchLoading: Promise<typeof globalThis.fetch> | null = null
+
+export function getHttpFetch(): Promise<typeof globalThis.fetch> {
+  if (!isTauri()) return Promise.resolve(globalThis.fetch.bind(globalThis))
+  if (_tauriFetch) return Promise.resolve(_tauriFetch)
+  if (_tauriFetchLoading) return _tauriFetchLoading
+  _tauriFetchLoading = import('@tauri-apps/plugin-http').then(mod => {
+    _tauriFetch = mod.fetch as unknown as typeof globalThis.fetch
+    return _tauriFetch
+  })
+  return _tauriFetchLoading
+}
+
 export type DesktopPlatform = 'windows' | 'macos' | 'linux' | 'other'
 
 export function getDesktopPlatform(): DesktopPlatform {

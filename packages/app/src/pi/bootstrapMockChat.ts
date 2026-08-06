@@ -10,6 +10,7 @@ import { clearAllWorkspaceFileCaches } from "./files"
 import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
+import { abortInFlightPiRequests } from "./httpClient"
 import { activeSessionStore } from "../store/activeSessionStore"
 import { PROTOCOL_VERSION } from "@piui/protocol"
 
@@ -63,9 +64,9 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
       error: message,
       checkedAt: Date.now(),
     })
-    console.info("[PiUI] server not up — run npm run dev:server or npm run dev:server:pi")
-    if (import.meta.env.DEV && error instanceof Error) {
-      console.info("[PiUI] backend bootstrap:", error.message)
+    if (import.meta.env.DEV) {
+      console.info("[PiUI] server not up — run npm run dev:server or npm run dev:server:pi")
+      if (error instanceof Error) console.info("[PiUI] backend bootstrap:", error.message)
     }
     scheduleBackendRetry()
     return { available: false }
@@ -76,6 +77,7 @@ export function installPiBackendServerSwitch(): void {
   if (serverSwitchInstalled) return
   serverSwitchInstalled = true
   serverStore.onServerChange(() => {
+    abortInFlightPiRequests()
     clearPiSessionIndex()
     piBranchStore.clearAll()
     piSessionStateStore.clearAll()
