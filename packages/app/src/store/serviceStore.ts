@@ -8,8 +8,23 @@ export interface EnvVar {
   value: string
 }
 
+export interface ServiceSettingsBackup {
+  autoStart: boolean
+  envVars: EnvVar[]
+}
+
+export const SERVICE_ENV_EXAMPLES: EnvVar[] = [
+  { key: 'PIUI_SDK_PATH', value: '/path/to/pi-coding-agent' },
+  { key: 'PI_CODING_AGENT_DIR', value: '~/.pi/agent' },
+  { key: 'PI_CODING_AGENT_SESSION_DIR', value: '~/.pi/agent/sessions' },
+  { key: 'HTTPS_PROXY', value: 'http://127.0.0.1:7890' },
+  { key: 'PIUI_HOST', value: '0.0.0.0' },
+  { key: 'PIUI_PORT', value: '8787' },
+]
+
 interface ServiceStoreSnapshot {
   autoStart: boolean
+  useSystemPiSdk: boolean
   envVars: EnvVar[]
   running: boolean
   startedByUs: boolean
@@ -52,11 +67,15 @@ class ServiceStore {
     return this._envVars
   }
 
+  get useSystemPiSdk() {
+    return this._envVars.some(
+      item => item.key.trim().toUpperCase() === 'PIUI_USE_SYSTEM_PI' && item.value.trim() === '1',
+    )
+  }
+
   get envVarsRecord(): Record<string, string> {
     return Object.fromEntries(
-      this._envVars
-        .map(item => [item.key.trim(), item.value] as const)
-        .filter(([key]) => key.length > 0),
+      this._envVars.map(item => [item.key.trim(), item.value] as const).filter(([key]) => key.length > 0),
     )
   }
 
@@ -78,6 +97,21 @@ class ServiceStore {
       // Storage can be unavailable in restricted webviews.
     }
     this.notify()
+  }
+
+  setUseSystemPiSdk(value: boolean) {
+    const envVars = this._envVars.filter(item => item.key.trim().toUpperCase() !== 'PIUI_USE_SYSTEM_PI')
+    if (value) envVars.push({ key: 'PIUI_USE_SYSTEM_PI', value: '1' })
+    this.setEnvVars(envVars)
+  }
+
+  upsertEnvVar(key: string, value: string) {
+    const normalized = key.trim().toUpperCase()
+    const index = this._envVars.findIndex(item => item.key.trim().toUpperCase() === normalized)
+    const envVars = [...this._envVars]
+    if (index >= 0) envVars[index] = { key, value }
+    else envVars.push({ key, value })
+    this.setEnvVars(envVars)
   }
 
   setRunning(value: boolean) {
@@ -105,6 +139,7 @@ class ServiceStore {
   private buildSnapshot(): ServiceStoreSnapshot {
     return {
       autoStart: this._autoStart,
+      useSystemPiSdk: this.useSystemPiSdk,
       envVars: this._envVars,
       running: this._running,
       startedByUs: this._startedByUs,
@@ -119,6 +154,31 @@ class ServiceStore {
 }
 
 export const serviceStore = new ServiceStore()
+
+export function exportServiceSettingsBackup(): ServiceSettingsBackup {
+  return {
+    autoStart: serviceStore.autoStart,
+    envVars: serviceStore.envVars.map(item => ({ ...item })),
+  }
+}
+
+export function importServiceSettingsBackup(raw: unknown): void {
+  const parsed = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
+  const envVars = Array.isArray(parsed?.envVars)
+    ? parsed.envVars
+        .filter(
+          (item): item is EnvVar =>
+            !!item &&
+            typeof item === 'object' &&
+            typeof (item as Record<string, unknown>).key === 'string' &&
+            typeof (item as Record<string, unknown>).value === 'string',
+        )
+        .map(item => ({ key: item.key, value: item.value }))
+    : []
+
+  serviceStore.setAutoStart(parsed?.autoStart !== false)
+  serviceStore.setEnvVars(envVars)
+}
 
 export function useServiceStore() {
   return useSyncExternalStore(serviceStore.subscribe, serviceStore.getSnapshot)

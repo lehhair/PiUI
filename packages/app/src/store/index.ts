@@ -20,6 +20,9 @@ export type { AutoApproveRule } from './autoApproveStore'
 export { serverStore, exportServerSettingsBackup, importServerSettingsBackup } from './serverStore'
 export type { ServerConfig, ServerHealth, ServerSettingsBackup } from './serverStore'
 
+export { serviceStore, exportServiceSettingsBackup, importServiceSettingsBackup } from './serviceStore'
+export type { EnvVar, ServiceSettingsBackup } from './serviceStore'
+
 export {
   keybindingStore,
   exportKeybindingBackup,

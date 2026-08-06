@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { RetryIcon, SpinnerIcon, StopIcon, TrashIcon, WifiIcon, WifiOffIcon } from '../../../components/Icons'
 import { isTauri, isTauriMobile } from '../../../utils/tauri'
 import { applyLocalServerConfig } from '../../../store/serverStore'
-import { serviceStore, useServiceStore } from '../../../store/serviceStore'
+import { SERVICE_ENV_EXAMPLES, serviceStore, useServiceStore } from '../../../store/serviceStore'
 import { settingsFieldClass, SettingField, SettingRow, SettingsSection, Toggle } from './SettingsUI'
 
 interface ServiceStatus {
@@ -25,7 +25,7 @@ interface StartServiceResult {
 export function ServiceSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const desktop = isTauri() && !isTauriMobile()
-  const { autoStart, envVars, running, startedByUs, starting } = useServiceStore()
+  const { autoStart, useSystemPiSdk, envVars, running, startedByUs, starting } = useServiceStore()
   const [status, setStatus] = useState<ServiceStatus | null>(null)
   const [busy, setBusy] = useState<'refresh' | 'stop' | 'start' | 'restart' | null>(null)
   const [error, setError] = useState('')
@@ -47,26 +47,32 @@ export function ServiceSettings() {
     }
   }, [desktop])
 
-  const start = useCallback(async (operation: 'start' | 'restart') => {
-    setBusy(operation)
-    setError('')
-    serviceStore.setStarting(true)
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const result = await invoke<StartServiceResult>(operation === 'start' ? 'start_piui_service' : 'restart_piui_service', {
-        envVars: serviceStore.envVarsRecord,
-      })
-      if (result.url && result.token) applyLocalServerConfig(result.url, result.token)
-      serviceStore.setRunning(true)
-      serviceStore.setStartedByUs(result.startedByUs)
-      await refresh()
-    } catch (reason) {
-      setError(String(reason))
-    } finally {
-      serviceStore.setStarting(false)
-      setBusy(null)
-    }
-  }, [refresh])
+  const start = useCallback(
+    async (operation: 'start' | 'restart') => {
+      setBusy(operation)
+      setError('')
+      serviceStore.setStarting(true)
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const result = await invoke<StartServiceResult>(
+          operation === 'start' ? 'start_piui_service' : 'restart_piui_service',
+          {
+            envVars: serviceStore.envVarsRecord,
+          },
+        )
+        if (result.url && result.token) applyLocalServerConfig(result.url, result.token)
+        serviceStore.setRunning(true)
+        serviceStore.setStartedByUs(result.startedByUs)
+        await refresh()
+      } catch (reason) {
+        setError(String(reason))
+      } finally {
+        serviceStore.setStarting(false)
+        setBusy(null)
+      }
+    },
+    [refresh],
+  )
 
   const stop = useCallback(async () => {
     setBusy('stop')
@@ -85,7 +91,8 @@ export function ServiceSettings() {
   }, [refresh])
 
   useEffect(() => {
-    void refresh()
+    const timer = window.setTimeout(() => void refresh(), 0)
+    return () => window.clearTimeout(timer)
   }, [refresh])
 
   if (!desktop) {
@@ -125,6 +132,14 @@ export function ServiceSettings() {
       </SettingRow>
 
       <SettingRow
+        label={t('service.useSystemPiSdk')}
+        description={t('service.useSystemPiSdkDesc')}
+        onClick={() => serviceStore.setUseSystemPiSdk(!useSystemPiSdk)}
+      >
+        <Toggle enabled={useSystemPiSdk} onChange={() => serviceStore.setUseSystemPiSdk(!useSystemPiSdk)} />
+      </SettingRow>
+
+      <SettingRow
         label={t('service.serviceStatus')}
         description={
           starting
@@ -157,7 +172,12 @@ export function ServiceSettings() {
               {t('common:stop')}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => void start('restart')} disabled={isBusy || (running && !startedByUs)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void start('restart')}
+            disabled={isBusy || (running && !startedByUs)}
+          >
             <RetryIcon size={12} className="mr-1" />
             {t('service.restart')}
           </Button>
@@ -166,7 +186,8 @@ export function ServiceSettings() {
 
       {status?.url && (
         <div className="break-all font-mono text-[length:var(--fs-xs)] text-text-500">
-          {status.url}{status.pid ? ` · PID ${status.pid}` : ''}
+          {status.url}
+          {status.pid ? ` · PID ${status.pid}` : ''}
         </div>
       )}
 
@@ -174,19 +195,40 @@ export function ServiceSettings() {
         label={t('service.envVars')}
         description={t('service.envVarsDesc')}
         actions={
-          <button
-            type="button"
-            className="h-7 rounded-md px-2 text-[length:var(--fs-xs)] font-medium text-accent-main-100 transition-colors hover:bg-accent-main-100/10"
-            onClick={() => serviceStore.setEnvVars([...envVars, { key: '', value: '' }])}
-          >
-            + {t('common:add')}
-          </button>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <select
+              value=""
+              onChange={event => {
+                const example = SERVICE_ENV_EXAMPLES.find(item => item.key === event.target.value)
+                if (example) serviceStore.upsertEnvVar(example.key, example.value)
+              }}
+              className={`${settingsFieldClass} h-7 max-w-44 py-0 font-mono text-[length:var(--fs-xxs)]`}
+              aria-label={t('service.addExample')}
+            >
+              <option value="">{t('service.addExample')}</option>
+              {SERVICE_ENV_EXAMPLES.map(example => (
+                <option key={example.key} value={example.key}>
+                  {example.key}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="h-7 shrink-0 rounded-md px-2 text-[length:var(--fs-xs)] font-medium text-accent-main-100 transition-colors hover:bg-accent-main-100/10"
+              onClick={() => serviceStore.setEnvVars([...envVars, { key: '', value: '' }])}
+            >
+              + {t('common:add')}
+            </button>
+          </div>
         }
       >
         {envVars.length > 0 && (
           <div className="flex flex-col gap-1.5">
             {envVars.map((env, index) => (
-              <div key={`${index}-${env.key}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1.5fr)_auto] items-center gap-1.5">
+              <div
+                key={`${index}-${env.key}`}
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1.5fr)_auto] items-center gap-1.5"
+              >
                 <input
                   value={env.key}
                   onChange={event => {
@@ -226,9 +268,14 @@ export function ServiceSettings() {
       <SettingField label={t('service.environment')} description={t('service.environmentDesc')}>
         <div className="grid gap-1 rounded-lg border border-border-200/50 bg-bg-100 p-2">
           {Object.entries(serviceEnvironment).map(([key, value]) => (
-            <div key={key} className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-2 font-mono text-[length:var(--fs-xxs)]">
+            <div
+              key={key}
+              className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-2 font-mono text-[length:var(--fs-xxs)]"
+            >
               <span className="text-text-300">{key}</span>
-              <span className="min-w-0 truncate text-text-500" title={value}>{value}</span>
+              <span className="min-w-0 truncate text-text-500" title={value}>
+                {value}
+              </span>
             </div>
           ))}
         </div>

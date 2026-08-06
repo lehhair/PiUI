@@ -81,6 +81,8 @@
     "notRunning": "The backend service is not running",
     "autoStart": "Start service automatically",
     "autoStartDesc": "Start the local PiUI server when the desktop app opens.",
+    "useSystemPiSdk": "Use host Pi SDK",
+    "useSystemPiSdkDesc": "Load Pi from the globally installed SDK instead of the version bundled with PiUI. PIUI_SDK_PATH still takes precedence. Restart the service after changing this.",
     "serviceStatus": "Service status",
     "starting": "Starting the backend service",
     "restart": "Restart service",
@@ -88,6 +90,7 @@
     "environmentDesc": "The fixed and custom variables passed to the next server process.",
     "envVars": "Environment variables",
     "envVarsDesc": "Additional variables for the local PiUI server. Changes apply after starting or restarting it.",
+    "addExample": "Add example variable",
     "keyPlaceholder": "NAME",
     "valuePlaceholder": "value"
   },

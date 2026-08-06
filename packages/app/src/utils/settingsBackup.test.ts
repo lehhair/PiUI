@@ -16,6 +16,7 @@ describe('settingsBackup', () => {
     localStorage.setItem('piui:toast-enabled', 'false')
     localStorage.setItem('piui-srv:local:last-directory', '/workspace/project')
     localStorage.setItem('piui-srv:local:opencode-auto-approve-enabled', 'true')
+    localStorage.setItem('piui-service-env-vars', JSON.stringify([{ key: 'PIUI_USE_SYSTEM_PI', value: '1' }]))
 
     const { exportSettingsBackup } = await import('./settingsBackup')
     const { data } = await exportSettingsBackup()
@@ -24,7 +25,7 @@ describe('settingsBackup', () => {
       modules: Record<string, unknown>
     }
 
-    expect(backup.schemaVersion).toBe(3)
+    expect(backup.schemaVersion).toBe(4)
     expect((backup.modules.theme as { presetId: string }).presetId).toBe('claude')
     expect((backup.modules.layout as { rightPanelWidth: number }).rightPanelWidth).toBe(512)
     expect((backup.modules.notifications as { browserNotificationsEnabled: boolean }).browserNotificationsEnabled).toBe(
@@ -33,6 +34,7 @@ describe('settingsBackup', () => {
     expect(
       (backup.modules.perServerStorage as { entries: Record<string, string> }).entries['piui-srv:local:last-directory'],
     ).toBe('/workspace/project')
+    expect((backup.modules.service as { envVars: Array<{ key: string }> }).envVars[0]?.key).toBe('PIUI_USE_SYSTEM_PI')
   })
 
   it('restores settings from module snapshots', async () => {
@@ -44,10 +46,16 @@ describe('settingsBackup', () => {
     localStorage.setItem('piui:toast-enabled', 'false')
     localStorage.setItem('piui-srv:local:last-directory', '/workspace/project')
     localStorage.setItem('piui-srv:local:opencode-auto-approve-enabled', 'true')
+    localStorage.setItem(
+      'piui-service-env-vars',
+      JSON.stringify([{ key: 'HTTPS_PROXY', value: 'http://127.0.0.1:7890' }]),
+    )
 
     const { exportSettingsBackup, importSettingsBackup } = await import('./settingsBackup')
     const { data, fileName } = await exportSettingsBackup()
-    const file = new File([new TextDecoder().decode(data)], fileName, { type: 'application/json' })
+    const file = new File([new TextDecoder().decode(data)], fileName, {
+      type: 'application/json',
+    })
 
     localStorage.clear()
     sessionStorage.clear()
@@ -62,6 +70,27 @@ describe('settingsBackup', () => {
     expect(localStorage.getItem('piui-srv:local:last-directory')).toBe('/workspace/project')
     expect(localStorage.getItem('piui-srv:local:opencode-auto-approve-enabled')).toBe('true')
     expect(localStorage.getItem('piui:toast-enabled')).toBe('false')
+    expect(localStorage.getItem('piui-service-env-vars')).toBe(
+      JSON.stringify([{ key: 'HTTPS_PROXY', value: 'http://127.0.0.1:7890' }]),
+    )
     expect(sessionStorage.getItem('piui-active-server')).toBe('local')
+  })
+
+  it('imports schema v3 backups without resetting current service settings', async () => {
+    const { exportSettingsBackup, importSettingsBackup } = await import('./settingsBackup')
+    const { serviceStore } = await import('../store/serviceStore')
+    serviceStore.setEnvVars([{ key: 'PIUI_USE_SYSTEM_PI', value: '1' }])
+
+    const { data } = await exportSettingsBackup()
+    const legacy = JSON.parse(new TextDecoder().decode(data)) as {
+      schemaVersion: number
+      modules: Record<string, unknown>
+    }
+    legacy.schemaVersion = 3
+    delete legacy.modules.service
+
+    await importSettingsBackup(new File([JSON.stringify(legacy)], 'piui-v3.json', { type: 'application/json' }))
+
+    expect(serviceStore.envVarsRecord.PIUI_USE_SYSTEM_PI).toBe('1')
   })
 })
