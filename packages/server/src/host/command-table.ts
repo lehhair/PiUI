@@ -1,4 +1,5 @@
 import { HOST_COMMAND_SPECS, PROTOCOL_VERSION, hostSpecToCapability, requireJsonValue, validateParams, type HostCapability, type HostRegistrySnapshot, type JsonObject, type JsonValue } from "@piui/protocol"
+import { homedir } from "node:os"
 import type { SessionHost } from "../pi/session-host.ts"
 import {
   createWorkspaceEntry,
@@ -178,7 +179,7 @@ const HOST_COMMAND_HANDLERS: Record<string, HostCommandHandler> = {
     return { ok: true }
   },
   "workspaces.list": ctx => ({ workspaces: ctx.store.list() }),
-  "workspaces.open": (ctx, params) => ({ workspace: workspaceDto(ctx.store.resolve(reqString(params, "rootPath"), optString(params, "displayName"))) }),
+  "workspaces.open": (ctx, params) => ({ workspace: workspaceDto(ctx.store.resolve(optString(params, "rootPath") ?? homedir(), optString(params, "displayName"))) }),
   "workspaces.close": (ctx, params) => {
     const record = workspace(ctx, params)
     ctx.terminals.closeWorkspace(record.canonicalRoot)

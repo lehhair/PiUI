@@ -43,6 +43,7 @@
     "restoringSessions": "Restoring sessions...",
     "noTerminals": "No terminals",
     "createTerminal": "Create Terminal",
+    "createTerminalFailed": "Failed to create terminal",
     "closeTerminal": "Close terminal"
   },
   "diffViewer": {

@@ -43,6 +43,7 @@
     "restoringSessions": "恢复会话中...",
     "noTerminals": "没有终端",
     "createTerminal": "创建终端",
+    "createTerminalFailed": "创建终端失败",
     "closeTerminal": "关闭终端"
   },
   "diffViewer": {
