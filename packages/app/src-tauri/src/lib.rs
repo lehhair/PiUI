@@ -103,19 +103,6 @@ fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebView2 的 fetch/WebSocket 默认走系统代理。代理软件（Clash 等）不转发
-    // 本地回环连接时，ws://127.0.0.1 的事件流会被直接拒绝（net::ERR_CONNECTION_REFUSED）。
-    // 应用自身是自包含的，唯一的外部请求（GitHub 更新检查）走 Rust reqwest，
-    // 所以让 webview 整体绕过代理是安全的。必须在创建任何 webview 之前设置。
-    #[cfg(target_os = "windows")]
-    {
-        const KEY: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-        let existing = std::env::var(KEY).unwrap_or_default();
-        if !existing.contains("--no-proxy-server") {
-            std::env::set_var(KEY, format!("{existing} --no-proxy-server").trim());
-        }
-    }
-
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
