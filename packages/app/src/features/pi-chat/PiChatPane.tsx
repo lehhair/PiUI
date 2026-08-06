@@ -38,6 +38,7 @@ import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
+import { resolveWorkspacePath } from '../../pi/workspaces.js'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
 import { clearSessionEditorDraft, configureSessionEditorDraftSync, setSessionEditorDraft, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
 import { isSessionBusyError, isSessionNotFoundError, uiErrorHandler } from '../../utils'
@@ -642,8 +643,9 @@ export function PiChatPane({
 
       let targetSessionId = sessionId
       if (!targetSessionId) {
-        // Home: create the session on first send, then enter it
-        const directory = currentDirectoryRef.current
+        // Home: create the session on first send, then enter it. 全局（未选
+        // 目录）时落到服务器默认工作区（桌面安装目录），与终端的全局语义一致。
+        const directory = currentDirectoryRef.current || (await resolveWorkspacePath())
         if (!directory) return false
         const opened = await openPiSession(directory)
         if (!opened.sessionId) return false

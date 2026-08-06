@@ -8,6 +8,7 @@ import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { paneLayoutStore } from '../store/paneLayoutStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { useDirectory } from './useDirectory'
+import { resolveWorkspacePath } from '../pi/workspaces.js'
 import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
@@ -106,7 +107,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createSession = useCallback(async (title?: string) => {
-    const directory = currentDirectory?.trim()
+    // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
+    const directory = currentDirectory?.trim() || (await resolveWorkspacePath()) || ''
     if (!directory) throw new Error('Choose a project directory before creating a session')
     const opened = await openPiSession(directory)
     const now = Date.now()
