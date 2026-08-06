@@ -13,7 +13,6 @@ import { getGitDiff, getGitFileDiff, getGitInfo, getGitStatus } from "./git.ts"
 import type { WorkspaceStore, WorkspaceRecord } from "./workspace-store.ts"
 import type { WorkspaceWatcher } from "./workspace-watcher.ts"
 import type { TerminalManager } from "./terminal-manager.ts"
-import type { PiRuntimeUpdater } from "../pi/pi-runtime-updater.ts"
 
 type HostCommandHandler = (ctx: HostCommandContext, params: JsonObject) => JsonValue | undefined | Promise<JsonValue | undefined>
 
@@ -27,8 +26,6 @@ export type HostCommandContext = {
   watcher: WorkspaceWatcher
   sessions: SessionHost
   terminals: TerminalManager
-  /** 打包形态下才有；开发态为 undefined，相关命令报 CAPABILITY_DISABLED */
-  piRuntime?: PiRuntimeUpdater
   signal?: AbortSignal
 }
 
@@ -225,14 +222,6 @@ const HOST_COMMAND_HANDLERS: Record<string, HostCommandHandler> = {
   "git.status": (ctx, params) => getGitStatus(workspace(ctx, params).canonicalRoot, ctx.signal) as Promise<JsonValue>,
   "git.diff": (ctx, params) => getGitDiff(workspace(ctx, params).canonicalRoot, gitMode(params), ctx.signal) as Promise<JsonValue>,
   "git.fileDiff": (ctx, params) => getGitFileDiff(workspace(ctx, params).canonicalRoot, gitMode(params), reqString(params, "path"), ctx.signal) as Promise<JsonValue>,
-  "pi-runtime.status": async ctx => {
-    const updater = requirePiRuntime(ctx)
-    return requireJsonValue(await updater.status() as unknown as JsonObject)
-  },
-  "pi-runtime.update": async ctx => {
-    const updater = requirePiRuntime(ctx)
-    return requireJsonValue(await updater.update() as unknown as JsonObject)
-  },
 }
 
 export const HOST_CAPABILITIES: RegisteredHostCapability[] = HOST_COMMAND_SPECS.map(spec => {
@@ -245,11 +234,4 @@ for (const name of Object.keys(HOST_COMMAND_HANDLERS)) {
   if (!HOST_COMMAND_SPECS.some(spec => spec.name === name)) {
     throw new Error(`unregistered host command implementation: ${name}`)
   }
-}
-
-function requirePiRuntime(ctx: HostCommandContext): PiRuntimeUpdater {
-  if (!ctx.piRuntime) {
-    throw Object.assign(new Error("Pi runtime updates are unavailable in this environment"), { code: "CAPABILITY_DISABLED" })
-  }
-  return ctx.piRuntime
 }

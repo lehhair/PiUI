@@ -424,16 +424,13 @@ process.on("disconnect", () => {
   })()
 })
 
-const resolution = process.env.PIUI_BUNDLED_SDK === "1"
-  ? { source: "bundled" as const, sdkPath: undefined }
-  : defaultSdkResolution()
+const resolution = defaultSdkResolution()
 if (resolution.source !== "bundled") {
   console.info(`[piui-worker] pi sdk source=${resolution.source} path=${resolution.sdkPath}`)
 }
 const loaded = await loadPiSdk({
   sdkPath: resolution.sdkPath,
-  // 自动定位到的 SDK 版本漂移是常态（用户自己升级的 / 热更新的），警告即可；
-  // 只有显式 PIUI_SDK_PATH 才默认严格校验
+  // 系统 SDK 是显式 opt-in；路径 SDK 默认要求与验证版本一致
   strict: resolution.source === "env" && shouldRequireVerifiedSdk(),
 })
 loadedSdkInfo = loaded
