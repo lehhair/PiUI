@@ -36,7 +36,9 @@ export function ServiceSettings() {
     setError('')
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      const next = await invoke<ServiceStatus>('get_piui_service_status')
+      const next = await invoke<ServiceStatus>('get_piui_service_status', {
+        envVars: serviceStore.envVarsRecord,
+      })
       setStatus(next)
       serviceStore.setRunning(next.running)
       serviceStore.setStartedByUs(next.startedByUs)

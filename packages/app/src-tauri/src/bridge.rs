@@ -70,7 +70,7 @@ pub async fn ws_bridge_connect(
                         .send(json!({ "type": "message", "data": text.to_string() }))
                         .is_err()
                     {
-                        return;
+                        break;
                     }
                 }
                 Ok(Message::Binary(bytes)) => {
@@ -79,7 +79,7 @@ pub async fn ws_bridge_connect(
                         .send(json!({ "type": "message", "data": data }))
                         .is_err()
                     {
-                        return;
+                        break;
                     }
                 }
                 Ok(Message::Close(frame)) => {

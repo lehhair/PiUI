@@ -26,7 +26,7 @@ pub struct ServiceState {
     pub child_pid: AtomicU32,
     pub started_by_us: AtomicBool,
     pub allow_close: AtomicBool,
-    pub starting: AtomicBool,
+    lifecycle: tokio::sync::Mutex<()>,
     pub service_url: Mutex<Option<String>>,
     pub env_vars: Mutex<BTreeMap<String, String>>,
     marker_path: Mutex<Option<PathBuf>>,
@@ -40,7 +40,7 @@ impl Default for ServiceState {
             child_pid: AtomicU32::new(0),
             started_by_us: AtomicBool::new(false),
             allow_close: AtomicBool::new(false),
-            starting: AtomicBool::new(false),
+            lifecycle: tokio::sync::Mutex::new(()),
             service_url: Mutex::new(None),
             env_vars: Mutex::new(BTreeMap::new()),
             marker_path: Mutex::new(None),
@@ -58,7 +58,7 @@ pub struct StartServiceResult {
     pub token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceStatusResult {
     pub running: bool,
@@ -74,6 +74,11 @@ struct HealthResponse {
     process_id: Option<u32>,
 }
 
+enum HealthFailure {
+    Unreachable,
+    Rejected(String),
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ServiceMarker {
@@ -85,10 +90,6 @@ struct PreparedServer {
     binary: PathBuf,
     resource: PathBuf,
     native_modules: PathBuf,
-}
-
-struct SpawnedServer {
-    child: Child,
 }
 
 fn marker_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -189,24 +190,20 @@ fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String>
         }
     }
 
-    let names = if cfg!(target_os = "windows") {
-        ["pi-worker.exe", "piui-server.exe"]
+    let binary = resource.join(if cfg!(target_os = "windows") {
+        "pi-worker.exe"
     } else {
-        ["pi-worker", "piui-server"]
-    };
-    names
-        .iter()
-        .map(|name| resource.join(name))
-        .find(|path| path.is_file())
-        .ok_or_else(|| {
-            format!(
-                "PiUI server binary was not bundled in {}",
-                app.path()
-                    .resource_dir()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| "the resource directory".to_string())
-            )
-        })
+        "pi-worker"
+    });
+    binary.is_file().then_some(binary).ok_or_else(|| {
+        format!(
+            "PiUI server binary was not bundled in {}",
+            app.path()
+                .resource_dir()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|_| "the resource directory".to_string())
+        )
+    })
 }
 
 fn prepare_server(app: &AppHandle) -> Result<PreparedServer, String> {
@@ -246,7 +243,7 @@ fn spawn_server(
     prepared: PreparedServer,
     output: Arc<Mutex<VecDeque<String>>>,
     env_vars: &BTreeMap<String, String>,
-) -> Result<SpawnedServer, String> {
+) -> Result<Child, String> {
     let mut command = Command::new(&prepared.binary);
     command
         .arg("web")
@@ -277,7 +274,7 @@ fn spawn_server(
     if let Some(stderr) = child.stderr.take() {
         spawn_output_reader(stderr, output.clone());
     }
-    Ok(SpawnedServer { child })
+    Ok(child)
 }
 
 fn read_token(env_vars: &BTreeMap<String, String>) -> Result<String, String> {
@@ -335,33 +332,32 @@ fn recent_output(state: &ServiceState) -> String {
         .unwrap_or_default()
 }
 
-async fn service_health(url: &str, token: Option<&str>) -> Option<HealthResponse> {
-    let client = match Client::builder()
+async fn service_health(url: &str, token: Option<&str>) -> Result<HealthResponse, HealthFailure> {
+    let client = Client::builder()
         .connect_timeout(Duration::from_secs(1))
         .build()
-    {
-        Ok(client) => client,
-        Err(_) => return None,
-    };
+        .map_err(|_| HealthFailure::Unreachable)?;
     let mut request = client
         .get(format!("{}/api/v1/host/health", url.trim_end_matches('/')))
         .timeout(Duration::from_secs(2));
     if let Some(token) = token.filter(|value| !value.is_empty()) {
         request = request.bearer_auth(token);
     }
-    let response = request.send().await.ok()?;
+    let response = request
+        .send()
+        .await
+        .map_err(|_| HealthFailure::Unreachable)?;
     if !response.status().is_success() {
-        return None;
+        return Err(HealthFailure::Rejected(response.status().to_string()));
     }
-    response.json::<HealthResponse>().await.ok()
+    response
+        .json::<HealthResponse>()
+        .await
+        .map_err(|error| HealthFailure::Rejected(error.to_string()))
 }
 
 pub async fn is_service_running(url: &str, token: Option<&str>) -> bool {
-    service_health(url, token).await.is_some()
-}
-
-async fn service_process_id(url: &str, token: Option<&str>) -> Option<u32> {
-    service_health(url, token).await?.process_id
+    service_health(url, token).await.is_ok()
 }
 
 fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
@@ -382,28 +378,31 @@ async fn adopt_persisted_service(
     state: &ServiceState,
     token: Option<&str>,
     environment: &BTreeMap<String, String>,
-) -> bool {
+) -> Result<bool, String> {
     let Some(marker) = read_service_marker(app, state) else {
-        return false;
+        return Ok(false);
     };
-    if service_process_id(&marker.url, token).await == Some(marker.pid) {
-        state.child_pid.store(marker.pid, Ordering::SeqCst);
-        state.started_by_us.store(true, Ordering::SeqCst);
-        if let Ok(mut url) = state.service_url.lock() {
-            *url = Some(marker.url);
+    match service_health(&marker.url, token).await {
+        Ok(health) if health.process_id == Some(marker.pid) => {
+            state.child_pid.store(marker.pid, Ordering::SeqCst);
+            state.started_by_us.store(true, Ordering::SeqCst);
+            if let Ok(mut url) = state.service_url.lock() {
+                *url = Some(marker.url);
+            }
+            if let Ok(mut env_vars) = state.env_vars.lock() {
+                *env_vars = environment.clone();
+            }
+            return Ok(true);
         }
-        if let Ok(mut env_vars) = state.env_vars.lock() {
-            *env_vars = environment.clone();
+        Ok(_) | Err(HealthFailure::Unreachable) => {
+            clear_service_marker(state);
+            Ok(false)
         }
-        return true;
+        Err(HealthFailure::Rejected(reason)) => Err(format!(
+            "A retained PiUI service at {} rejected its health check ({reason}); check its token and environment before starting another service",
+            marker.url
+        )),
     }
-    clear_service_marker(state);
-    false
-}
-
-#[tauri::command]
-pub async fn check_piui_service(url: String, token: Option<String>) -> Result<bool, String> {
-    Ok(is_service_running(&url, token.as_deref()).await)
 }
 
 #[tauri::command]
@@ -412,13 +411,8 @@ pub async fn start_piui_service(
     state: State<'_, ServiceState>,
     env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
-    if state.starting.swap(true, Ordering::SeqCst) {
-        return Err("PiUI server is already starting".to_string());
-    }
-
-    let result = start_piui_service_inner(&app, &state, env_vars).await;
-    state.starting.store(false, Ordering::SeqCst);
-    result
+    let _lifecycle = state.lifecycle.lock().await;
+    start_piui_service_inner(&app, &state, env_vars).await
 }
 
 async fn start_piui_service_inner(
@@ -429,7 +423,7 @@ async fn start_piui_service_inner(
     let token = read_token(&env_vars).ok();
     let service_url = configured_service_url(&env_vars);
 
-    if adopt_persisted_service(app, state, token.as_deref(), &env_vars).await {
+    if adopt_persisted_service(app, state, token.as_deref(), &env_vars).await? {
         let url = state
             .service_url
             .lock()
@@ -484,10 +478,10 @@ async fn start_piui_service_inner(
         output.clear();
     }
     let spawned = spawn_server(prepared, state.output.clone(), &env_vars)?;
-    let pid = spawned.child.id();
+    let pid = spawned.id();
     {
         let mut child = state.child.lock().map_err(|error| error.to_string())?;
-        *child = Some(spawned.child);
+        *child = Some(spawned);
     }
     state.child_pid.store(pid, Ordering::SeqCst);
     state.started_by_us.store(true, Ordering::SeqCst);
@@ -588,6 +582,7 @@ pub fn stop_piui_service_process(state: &ServiceState) {
 
 #[tauri::command]
 pub async fn stop_piui_service(state: State<'_, ServiceState>) -> Result<(), String> {
+    let _lifecycle = state.lifecycle.lock().await;
     stop_piui_service_process(&state);
     Ok(())
 }
@@ -598,6 +593,7 @@ pub async fn restart_piui_service(
     state: State<'_, ServiceState>,
     env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
+    let _lifecycle = state.lifecycle.lock().await;
     stop_piui_service_process(&state);
     start_piui_service_inner(&app, &state, env_vars).await
 }
@@ -606,25 +602,19 @@ pub async fn restart_piui_service(
 pub async fn get_piui_service_status(
     app: AppHandle,
     state: State<'_, ServiceState>,
+    env_vars: BTreeMap<String, String>,
 ) -> Result<ServiceStatusResult, String> {
-    let custom_environment = state
-        .env_vars
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let token = read_token(&custom_environment).ok();
-    let _ = adopt_persisted_service(&app, &state, token.as_deref(), &custom_environment).await;
+    let _lifecycle = state.lifecycle.lock().await;
+    let token = read_token(&env_vars).ok();
+    let _ = adopt_persisted_service(&app, &state, token.as_deref(), &env_vars).await;
     let url = state
         .service_url
         .lock()
         .map_err(|error| error.to_string())?
         .clone()
-        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
-    let health = service_health(&url, token.as_deref()).await;
+        .unwrap_or_else(|| configured_service_url(&env_vars));
+    let health = service_health(&url, token.as_deref()).await.ok();
     let running = health.is_some();
-    if !running && state.started_by_us.load(Ordering::SeqCst) {
-        stop_piui_service_process(&state);
-    }
     let pid = health
         .as_ref()
         .and_then(|health| health.process_id)
@@ -639,7 +629,7 @@ pub async fn get_piui_service_status(
         started_by_us: running && state.started_by_us.load(Ordering::SeqCst),
         pid,
         url: running.then_some(url),
-        environment: service_environment(Some(&native_modules), &custom_environment),
+        environment: service_environment(Some(&native_modules), &env_vars),
     })
 }
 
@@ -650,15 +640,9 @@ pub async fn confirm_close_app(
     stop_service: bool,
 ) -> Result<(), String> {
     if stop_service {
+        let _lifecycle = state.lifecycle.lock().await;
         stop_piui_service_process(&state);
     }
     state.allow_close.store(true, Ordering::SeqCst);
     window.destroy().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn get_piui_service_started_by_us(
-    state: State<'_, ServiceState>,
-) -> Result<bool, String> {
-    Ok(state.started_by_us.load(Ordering::SeqCst))
 }
