@@ -137,6 +137,7 @@ function cancelPendingSplitSessionNavigation() {
 interface PiChatPaneProps {
   paneId: string
   sessionId: string | null
+  isSessionLoading?: boolean
   isFocused?: boolean
   paneCount?: number
   displayMode?: 'single' | 'split'
@@ -168,6 +169,7 @@ function attachmentToImage(attachment: Attachment): PiImageInput | null {
 export function PiChatPane({
   paneId,
   sessionId,
+  isSessionLoading = false,
   isFocused = false,
   paneCount = 1,
   displayMode = 'single',
@@ -1001,7 +1003,7 @@ export function PiChatPane({
               )}
             </div>
           </div>
-        ) : chatAreaMountKey == null ? (
+        ) : isSessionLoading || chatAreaMountKey == null ? (
           <div className="h-full flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-text-400 session-loading-indicator">
               <span className="w-5 h-5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
