@@ -1,6 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLayoutStore, layoutStore, type PanelTab } from '../store/layoutStore'
+import { notificationStore } from '../store/notificationStore'
 import { PanelContainer } from './PanelContainer'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
@@ -58,10 +59,9 @@ export const RightPanel = memo(function RightPanel({
   const { isRestoring, normalizedDirectory } = useTerminalSessionRestore(directory)
 
   const handleNewTerminal = useCallback(async () => {
-    if (!normalizedDirectory) return
     try {
       const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      if (!workspacePath) return
+      if (!workspacePath) throw new Error('no workspace available')
       const terminal = await createHostTerminal(workspacePath)
       layoutStore.addTerminalTab(
         {
@@ -76,8 +76,14 @@ export const RightPanel = memo(function RightPanel({
       )
     } catch (error) {
       uiErrorHandler('create terminal', error)
+      notificationStore.push(
+        'error',
+        t('terminal.createTerminalFailed'),
+        error instanceof Error ? error.message : String(error),
+        ''
+      )
     }
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, t])
 
   const handleCloseTerminal = useCallback(
     async (terminalId: string) => {

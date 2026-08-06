@@ -18,10 +18,13 @@ export async function listHostWorkspaces(signal?: AbortSignal): Promise<HostWork
   return data.workspaces
 }
 
-export async function openHostWorkspace(rootPath: string, displayName?: string, signal?: AbortSignal): Promise<HostWorkspace> {
+export async function openHostWorkspace(rootPath?: string, displayName?: string, signal?: AbortSignal): Promise<HostWorkspace> {
+  const params: { rootPath?: string; displayName?: string } = {}
+  if (rootPath) params.rootPath = rootPath
+  if (displayName) params.displayName = displayName
   const data = await postHostCommand<{ workspace: HostWorkspace }>(
     'workspaces.open',
-    displayName ? { rootPath, displayName } : { rootPath },
+    params,
     signal,
   )
   trackPiWorkspace(data.workspace.path)
@@ -40,7 +43,10 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
     defaultWorkspacePromise = (async () => {
       try {
         const first = (await listHostWorkspaces())[0]
-        return first?.path ?? null
+        if (first) return first.path
+        const fallback = await openHostWorkspace()
+        await watchHostWorkspace(fallback.path)
+        return fallback.path
       } catch {
         return null
       }

@@ -106,8 +106,8 @@ export const HOST_COMMAND_SPECS = [
   {
     name: "workspaces.open",
     domain: "workspaces",
-    description: "Validate and remember a host directory as a workspace",
-    paramsSchema: objectSchema({ rootPath: STRING, displayName: STRING }, ["rootPath"]),
+    description: "Validate and remember a host directory as a workspace; rootPath defaults to the server home directory",
+    paramsSchema: objectSchema({ rootPath: STRING, displayName: STRING }),
     mutatesWorkspace: true,
     emits: ["sessions.updated"],
   },
@@ -231,7 +231,7 @@ export type HostCommandParams = {
   "terminals.update": { workspacePath: string; terminalId: string } & TerminalUpdateParams
   "terminals.remove": { workspacePath: string; terminalId: string }
   "workspaces.list": Record<string, never>
-  "workspaces.open": { rootPath: string; displayName?: string }
+  "workspaces.open": { rootPath?: string; displayName?: string }
   "workspaces.close": { workspacePath: string }
   "workspaces.watch": { workspacePath: string }
   "files.list": { workspacePath: string; path?: string; limit?: number; cursor?: string }
