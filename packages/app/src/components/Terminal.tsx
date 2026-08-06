@@ -12,6 +12,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalStreamServerFrame } from '@piui/protocol'
 import { getHostTerminalWebSocketUrl, issueHostTerminalToken } from '../pi/transport/index.js'
+import { openPiSocket, PI_SOCKET_OPEN, type PiSocket } from '../pi/piSocket'
 import { useTheme } from '../hooks'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
@@ -363,7 +364,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
   const cursorRef = useRef(0)
   const transportSendRef = useRef<((data: string) => void) | null>(null)
   const transportDisconnectRef = useRef<(() => void) | null>(null)
-  const socketRef = useRef<WebSocket | null>(null)
+  const socketRef = useRef<PiSocket | null>(null)
   const pendingInputRef = useRef<string[]>([])
   const resizeTimeoutRef = useRef<number | null>(null)
   const mountedRef = useRef(true)
@@ -621,7 +622,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
 
     const sendResize = () => {
       const socket = socketRef.current
-      if (socket && socket.readyState === WebSocket.OPEN) {
+      if (socket && socket.readyState === PI_SOCKET_OPEN) {
         socket.send(
           JSON.stringify({
             type: 'resize',
@@ -636,13 +637,13 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       })
     }
 
-    const handleConnected = (socket: WebSocket) => {
+    const handleConnected = (socket: PiSocket) => {
       if (!mountedRef.current || !effectActive) return
       if (socketRef.current !== socket) return
       reconnectAttempt = 0
       layoutStore.updateTerminalTab(terminalId, { status: 'connected' })
       transportSendRef.current = data => {
-        if (socket.readyState === WebSocket.OPEN) {
+        if (socket.readyState === PI_SOCKET_OPEN) {
           socket.send(JSON.stringify({ type: 'input', data }))
         }
       }
@@ -652,7 +653,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       }
     }
 
-    const handleDisconnected = ({ socket, code }: { socket?: WebSocket; code?: number }) => {
+    const handleDisconnected = ({ socket, code }: { socket?: PiSocket; code?: number }) => {
       if (!effectActive) return
       if (socket && socketRef.current !== socket) return
       resetTransport()
@@ -691,7 +692,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       try {
         const ticket = await issueHostTerminalToken(terminalWorkspacePath, terminalId)
         if (!mountedRef.current || !effectActive) return
-        const socket = new WebSocket(getHostTerminalWebSocketUrl(terminalId, ticket.token, cursor))
+        const socket = openPiSocket(getHostTerminalWebSocketUrl(terminalId, ticket.token, cursor))
         socketRef.current = socket
         transportDisconnectRef.current = () => socket.close()
 
@@ -732,7 +733,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
               status: 'exited',
               cursor: frame.cursor
             })
-            if (socketRef.current?.readyState === WebSocket.OPEN) {
+            if (socketRef.current?.readyState === PI_SOCKET_OPEN) {
               socketRef.current.close(1000, 'terminal exited')
             }
           } else if (frame.type === 'problem') {
@@ -953,7 +954,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           fitAddonRef.current.fit()
           const terminal = terminalRef.current
           const socket = socketRef.current
-          if (socket && socket.readyState === WebSocket.OPEN) {
+          if (socket && socket.readyState === PI_SOCKET_OPEN) {
             socket.send(
               JSON.stringify({
                 type: 'resize',
@@ -1051,7 +1052,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           fitAddonRef.current.fit()
           const terminal = terminalRef.current
           const socket = socketRef.current
-          if (socket && socket.readyState === WebSocket.OPEN) {
+          if (socket && socket.readyState === PI_SOCKET_OPEN) {
             socket.send(
               JSON.stringify({
                 type: 'resize',
