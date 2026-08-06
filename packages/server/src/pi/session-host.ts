@@ -132,6 +132,7 @@ export class SessionHost {
     if (session.sessionFile && existsSync(session.sessionFile)) {
       this.materialized.add(session.sessionId)
     }
+    session.worker.onReplacementCommitted?.(replacement => this.trackReplacement(session, replacement, { leaseCommitted: true }))
     session.worker.onEvent(event => this.routeSessionEvent(session, event))
     session.worker.onCrash(() => {
       this.executor.markRuntimeCrashed(session.sessionId)
@@ -333,7 +334,7 @@ export class SessionHost {
       this.touch(session.sessionId)
       return this.executor.submit(full, async () => {
         const data = await session.worker.command(full.type, full.params)
-        this.trackReplacement(session, data)
+        await this.trackReplacement(session, data)
         return data
       })
     }
@@ -355,29 +356,62 @@ export class SessionHost {
     return capability?.scope === "session" ? capability : undefined
   }
 
-  private trackReplacement(session: AttachedSession, data: JsonValue | undefined): void {
+  private async trackReplacement(
+    session: AttachedSession,
+    data: JsonValue | undefined,
+    options: { leaseCommitted?: boolean } = {},
+  ): Promise<void> {
     if (!isJsonObject(data) || data.cancelled !== false || typeof data.targetSessionId !== "string") return
     if (data.targetSessionId === session.sessionId) return
-    const previousLastAccess = this.lastAccess.get(session.sessionId)
-    this.lastAccess.delete(session.sessionId)
-    this.runtimes.delete(session.sessionId)
-    session.sessionId = data.targetSessionId
-    session.sessionFile = typeof data.targetSessionFile === "string" ? data.targetSessionFile : session.sessionFile
-    session.cwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
-    session.worker.updateSessionIdentity(session.sessionId, session.sessionFile, session.cwd)
-    if (previousLastAccess !== undefined) this.lastAccess.set(session.sessionId, previousLastAccess)
-    // Swap the lease to the target session — otherwise the source session's
-    // ports stay held and it can never be attached again (SESSION_BUSY).
-    void this.supervisor.replaceRuntimeLease(session.worker, session.sessionFile, session.sessionId)
-      .catch(() => undefined)
-    this.runtimes.set(session)
-    this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
-      replaced: true,
-      sourceSessionId: typeof data.sourceSessionId === "string" ? data.sourceSessionId : undefined,
-      targetSessionId: session.sessionId,
-      targetSessionFile: session.sessionFile,
-      targetCwd: session.cwd,
-    })
+    const sourceSessionId = session.sessionId
+    const targetSessionId = data.targetSessionId
+    const target = this.runtimes.get(targetSessionId)
+    if (target && target !== session) {
+      const error = Object.assign(new Error("replacement target session is already attached"), { code: "SESSION_BUSY" })
+      setImmediate(() => { void session.worker.dispose() })
+      throw error
+    }
+    const targetSessionFile = Object.prototype.hasOwnProperty.call(data, "targetSessionFile")
+      ? (typeof data.targetSessionFile === "string" ? data.targetSessionFile : null)
+      : session.sessionFile
+    const targetCwd = typeof data.targetCwd === "string" ? data.targetCwd : session.cwd
+
+    try {
+      // Extension replacements have already committed their reservation in
+      // supervisor.ts. Ordinary commands still need to move the lease here.
+      if (!options.leaseCommitted) {
+        await this.supervisor.replaceRuntimeLease(session.worker, targetSessionFile, targetSessionId)
+      }
+
+      const previousLastAccess = this.lastAccess.get(sourceSessionId)
+      const previousActivity = this.activity.get(sourceSessionId)
+      const wasMaterialized = this.materialized.delete(sourceSessionId)
+      this.lastAccess.delete(sourceSessionId)
+      this.activity.delete(sourceSessionId)
+      this.runtimes.delete(sourceSessionId)
+      this.executor.resetSession(targetSessionId)
+
+      session.sessionId = targetSessionId
+      session.sessionFile = targetSessionFile ?? undefined
+      session.cwd = targetCwd
+      session.worker.updateSessionIdentity(session.sessionId, session.sessionFile, session.cwd)
+      if (previousLastAccess !== undefined) this.lastAccess.set(targetSessionId, previousLastAccess)
+      if (previousActivity !== undefined) this.activity.set(targetSessionId, previousActivity)
+      if (wasMaterialized) this.materialized.add(targetSessionId)
+      this.runtimes.set(session)
+      this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
+        replaced: true,
+        sourceSessionId: typeof data.sourceSessionId === "string" ? data.sourceSessionId : sourceSessionId,
+        targetSessionId,
+        targetSessionFile: session.sessionFile,
+        targetCwd: session.cwd,
+      })
+    } catch (error) {
+      // The SDK has already changed identity. A failed parent-side commit
+      // cannot be rolled back safely, so stop this worker before it can write.
+      setImmediate(() => { void session.worker.dispose() })
+      throw error
+    }
   }
 
   private routeSessionEvent(session: AttachedSession, event: WorkerEvent): void {

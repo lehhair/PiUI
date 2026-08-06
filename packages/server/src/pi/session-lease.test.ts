@@ -168,6 +168,30 @@ describe("SessionLeaseManager", () => {
     }
   })
 
+  it("clears the source file identity when a replacement has no target file", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-memory-replacement-test-"))
+    roots.push(root)
+    const sourceFile = path.join(root, "source.jsonl")
+    const otherFile = path.join(root, "other.jsonl")
+    const first = new SessionLeaseManager(root)
+    const second = new SessionLeaseManager(root)
+    try {
+      const lease = await first.acquire(sourceFile, "source-id")
+      await lease.replace(null, "target-id")
+
+      const sourceLease = await second.acquire(sourceFile, "source-id")
+      sourceLease.release()
+      await assert.rejects(second.acquire(otherFile, "target-id"), error => {
+        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        return true
+      })
+      lease.release()
+    } finally {
+      first.dispose()
+      second.dispose()
+    }
+  })
+
   it("rolls a replacement reservation back without dropping the source", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-lease-rollback-test-"))
     roots.push(root)

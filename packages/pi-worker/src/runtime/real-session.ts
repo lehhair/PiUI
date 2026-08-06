@@ -109,6 +109,9 @@ async function runExtensionReplacement(
 ): Promise<{ cancelled: boolean }> {
   if (!hostActions) return unsupportedExtensionHostAction(operation)
   const sourceSessionId = runtime.session.sessionManager.getSessionId()
+  if (operation === "switch" && targetSessionFile) {
+    await assertSessionFileInside(runtime.session.sessionManager.getSessionDir(), resolveUserPath(targetSessionFile))
+  }
   const reservationId = randomUUID()
   await hostActions.reserveReplacement({ reservationId, sourceSessionId, operation, targetSessionFile })
   try {
@@ -790,7 +793,9 @@ export class RealPiSession implements SessionRuntime {
   async switchSession(sessionPath: string, cwdOverride?: string): Promise<JsonObject> {
     await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
-    const result = await this.runtime.switchSession(resolveUserPath(sessionPath), { cwdOverride })
+    const targetPath = resolveUserPath(sessionPath)
+    await assertSessionFileInside(this.runtime.session.sessionManager.getSessionDir(), targetPath)
+    const result = await this.runtime.switchSession(targetPath, { cwdOverride })
     if (!result.cancelled) this.emitHeadIfChanged()
     return {
       operation: "switch",
