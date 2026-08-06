@@ -29,6 +29,7 @@ import { ServiceSettings } from './components/ServiceSettings'
 import { SettingsSearch } from './SettingsSearch'
 import { SETTINGS_SEARCH_DEFINITIONS, type SettingsSearchItem } from './settingsSearchCatalog'
 import { usePiCapabilities } from '../../pi/capabilities'
+import { isTauriMobile } from '../../utils/tauri'
 
 // ============================================
 // Types
@@ -144,6 +145,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
 export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: SettingsDialogProps) {
   const { t } = useTranslation(['settings', 'commands'])
   const isMobile = useIsMobile()
+  const nativeMobile = isTauriMobile()
   const capabilities = usePiCapabilities()
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightFrameRef = useRef<number | null>(null)
@@ -155,8 +157,8 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
   const [tab, setTab] = useState<SettingsTab>(normalizeTab(initialTab))
 
   const visibleTabIds = useMemo(
-    () => TAB_IDS.filter(id => capabilities.config || id !== 'config'),
-    [capabilities.config],
+    () => TAB_IDS.filter(id => (capabilities.config || id !== 'config') && (!nativeMobile || id !== 'service')),
+    [capabilities.config, nativeMobile],
   )
 
   const visibleTabs = useMemo(
