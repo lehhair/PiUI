@@ -106,7 +106,7 @@ export const HOST_COMMAND_SPECS = [
   {
     name: "workspaces.open",
     domain: "workspaces",
-    description: "Validate and remember a host directory as a workspace; rootPath defaults to the server home directory",
+    description: "Validate and remember a host directory as a workspace; rootPath defaults to the server install directory",
     paramsSchema: objectSchema({ rootPath: STRING, displayName: STRING }),
     mutatesWorkspace: true,
     emits: ["sessions.updated"],

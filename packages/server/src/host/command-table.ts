@@ -1,5 +1,5 @@
 import { HOST_COMMAND_SPECS, PROTOCOL_VERSION, hostSpecToCapability, requireJsonValue, validateParams, type HostCapability, type HostRegistrySnapshot, type JsonObject, type JsonValue } from "@piui/protocol"
-import { homedir } from "node:os"
+import path from "node:path"
 import type { SessionHost } from "../pi/session-host.ts"
 import {
   createWorkspaceEntry,
@@ -92,6 +92,19 @@ function optLimit(params: JsonObject, key: string, fallback: number, maximum: nu
   return value
 }
 
+/**
+ * 全局工作区的默认根目录：服务器可执行文件所在目录（桌面安装目录）。
+ * 独立运行服务器时同样成立——execPath 就是服务器自身的位置。
+ */
+function defaultWorkspaceRoot(): string {
+  const exe = process.execPath
+  if (exe) {
+    const dir = path.dirname(exe)
+    if (dir && dir !== ".") return dir
+  }
+  return process.cwd()
+}
+
 function workspace(ctx: HostCommandContext, params: JsonObject): WorkspaceRecord {
   const workspacePath = reqString(params, "workspacePath")
   // Host commands may arrive after a server restart, when the in-memory
@@ -179,7 +192,7 @@ const HOST_COMMAND_HANDLERS: Record<string, HostCommandHandler> = {
     return { ok: true }
   },
   "workspaces.list": ctx => ({ workspaces: ctx.store.list() }),
-  "workspaces.open": (ctx, params) => ({ workspace: workspaceDto(ctx.store.resolve(optString(params, "rootPath") ?? homedir(), optString(params, "displayName"))) }),
+  "workspaces.open": (ctx, params) => ({ workspace: workspaceDto(ctx.store.resolve(optString(params, "rootPath") ?? defaultWorkspaceRoot(), optString(params, "displayName"))) }),
   "workspaces.close": (ctx, params) => {
     const record = workspace(ctx, params)
     ctx.terminals.closeWorkspace(record.canonicalRoot)
