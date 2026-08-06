@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PiUI",
   "version": "0.1.0",
-  "identifier": "com.piui.desktop",
+  "identifier": "com.piui.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",

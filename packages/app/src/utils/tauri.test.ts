@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { isTauri, isTauriMobile, extToMime } from './tauri'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 需要动态修改 window 属性做测试
@@ -7,6 +7,7 @@ const win = window as any
 describe('isTauri', () => {
   afterEach(() => {
     delete win.__TAURI_INTERNALS__
+    vi.restoreAllMocks()
   })
 
   it('returns false in browser environment (no __TAURI_INTERNALS__)', () => {
@@ -32,6 +33,12 @@ describe('isTauriMobile', () => {
     win.__TAURI_INTERNALS__ = {}
     // jsdom 默认 userAgent 不含移动端标识
     expect(isTauriMobile()).toBe(false)
+  })
+
+  it('returns true in a Tauri Android WebView', () => {
+    win.__TAURI_INTERNALS__ = {}
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Linux; Android 15)')
+    expect(isTauriMobile()).toBe(true)
   })
 })
 

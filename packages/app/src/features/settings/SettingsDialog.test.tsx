@@ -4,13 +4,14 @@ import i18n from '../../i18n'
 import { SettingsDialog } from './SettingsDialog'
 
 const notificationTargets = vi.hoisted(() => ({ mode: 'both' as 'both' | 'system' | 'sound' }))
+const tauriState = vi.hoisted(() => ({ mobile: false }))
 
 vi.mock('../../components/ui/Dialog', () => ({
   Dialog: ({ isOpen, children, ariaLabel }: { isOpen: boolean; children: React.ReactNode; ariaLabel: string }) =>
     isOpen ? <div role="dialog" aria-label={ariaLabel}>{children}</div> : null,
 }))
 vi.mock('../../hooks', () => ({ useIsMobile: () => false }))
-vi.mock('../../utils/tauri', () => ({ isTauri: () => true }))
+vi.mock('../../utils/tauri', () => ({ isTauri: () => true, isTauriMobile: () => tauriState.mobile }))
 vi.mock('./KeybindingsSection', () => ({ KeybindingsSection: () => <div>Shortcuts content</div> }))
 vi.mock('./components/AgentSettings', () => ({ AgentSettings: () => <div>Agent content</div> }))
 vi.mock('./components/AppearanceSettings', () => ({
@@ -47,6 +48,7 @@ describe('SettingsDialog search', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('en')
     notificationTargets.mode = 'both'
+    tauriState.mobile = false
     vi.stubGlobal('__APP_VERSION__', 'test')
     vi.useFakeTimers()
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => window.setTimeout(() => callback(0), 0))
@@ -77,6 +79,16 @@ describe('SettingsDialog search', () => {
     expect(screen.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Color control').parentElement).toHaveClass('settings-search-highlight')
     expect(screen.getByRole('button', { name: 'Color control' })).toHaveFocus()
+  })
+
+  it('hides desktop service controls in the Android shell', async () => {
+    tauriState.mobile = true
+    render(<SettingsDialog isOpen onClose={vi.fn()} initialTab="service" />)
+    await act(async () => vi.advanceTimersByTime(1))
+
+    expect(screen.queryByRole('tab', { name: 'Service' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Service content')).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Servers' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('distinguishes duplicate setting labels by their subgroup', async () => {

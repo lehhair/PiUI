@@ -1,4 +1,3 @@
-#[cfg(not(target_os = "android"))]
 mod bridge;
 #[cfg(not(target_os = "android"))]
 mod service;
@@ -104,6 +103,7 @@ fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .manage(bridge::BridgeState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -113,7 +113,6 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let builder = builder
         .manage(ServiceState::default())
-        .manage(bridge::BridgeState::default())
         .plugin(tauri_plugin_decorum::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -149,10 +148,16 @@ pub fn run() {
         ]);
 
     #[cfg(target_os = "android")]
-    let builder = builder.setup(|app| {
-        let _ = create_main_window(app.handle())?;
-        Ok(())
-    });
+    let builder = builder
+        .setup(|app| {
+            let _ = create_main_window(app.handle())?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            bridge::ws_bridge_connect,
+            bridge::ws_bridge_send,
+            bridge::ws_bridge_close,
+        ]);
 
     let app = builder
         .build(tauri::generate_context!())
