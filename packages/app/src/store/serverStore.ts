@@ -3,23 +3,8 @@
 // ============================================
 
 import { API_BASE_URL } from '../constants'
-import { isTauri } from '../utils/tauri'
+import { getHttpFetch, isTauri } from '../utils/tauri'
 import { PROTOCOL_VERSION } from '@piui/protocol'
-
-// Tauri plugin-http fetch 缓存（避免重复 dynamic import）
-let _tauriFetch: typeof globalThis.fetch | null = null
-let _tauriFetchLoading: Promise<typeof globalThis.fetch> | null = null
-
-async function getUnifiedFetch(): Promise<typeof globalThis.fetch> {
-  if (!isTauri()) return globalThis.fetch
-  if (_tauriFetch) return _tauriFetch
-  if (_tauriFetchLoading) return _tauriFetchLoading
-  _tauriFetchLoading = import('@tauri-apps/plugin-http').then(mod => {
-    _tauriFetch = mod.fetch as unknown as typeof globalThis.fetch
-    return _tauriFetch
-  })
-  return _tauriFetchLoading
-}
 
 /**
  * 服务器配置
@@ -526,7 +511,7 @@ class ServerStore {
         headers['Authorization'] = `Bearer ${server.token}`
       }
 
-      const f = await getUnifiedFetch()
+      const f = await getHttpFetch()
       const response = await f(healthUrl, {
         method: 'GET',
         signal: controller.signal,

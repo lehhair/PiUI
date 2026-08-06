@@ -57,6 +57,14 @@ const eventServer = attachEventWebSocket(app.server, {
     }
   },
 })
+app.server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`[piui-server] ${HOST}:${PORT} is already in use — another PiUI server may be running; stop it or set PIUI_PORT`)
+  } else {
+    console.error("[piui-server] server error", error)
+  }
+  process.exit(1)
+})
 app.server.listen(PORT, HOST, () => {
   console.info(`[piui-server] listening http://${HOST}:${PORT} (base ${DEFAULT_HTTP_BASE})`)
   console.info(`[piui-server] events ws://${HOST}:${PORT}/api/v1/events`)
