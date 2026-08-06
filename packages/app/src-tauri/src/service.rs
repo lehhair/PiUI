@@ -164,9 +164,22 @@ fn service_environment(
 }
 
 fn resource_root(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
+    let path = app
+        .path()
         .resource_dir()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        // Tauri's path API may return the \\?\ extended-length prefix, which
+        // the Bun runtime cannot resolve inside import() when the server loads
+        // bun-pty from the resource directory. Strip it so every derived path
+        // (binary, runtime, native modules, cwd) is plain.
+        let text = path.to_string_lossy();
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            return Ok(PathBuf::from(stripped));
+        }
+    }
+    Ok(path)
 }
 
 fn server_binary(app: &AppHandle, resource: &PathBuf) -> Result<PathBuf, String> {
