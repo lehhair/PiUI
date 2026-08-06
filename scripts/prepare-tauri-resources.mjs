@@ -11,14 +11,21 @@ if (!existsSync(source)) {
   throw new Error("dist-desktop does not exist; run npm run package:desktop first")
 }
 
-const serverName = process.platform === "win32" ? "piui-server.exe" : "piui-server"
+const serverName = process.platform === "win32" ? "pi-worker.exe" : "pi-worker"
 const server = join(source, serverName)
 if (!existsSync(server)) throw new Error(`desktop server binary not found: ${server}`)
 
 rmSync(target, { recursive: true, force: true })
 mkdirSync(target, { recursive: true })
 cpSync(server, join(target, serverName))
-cpSync(join(source, "runtime"), join(target, "runtime"), { recursive: true })
 cpSync(join(source, "node_modules"), join(target, "node_modules"), { recursive: true })
+for (const name of ["web", "theme", "assets", "export-html", "docs", "examples"]) {
+  const path = join(source, name)
+  if (existsSync(path)) cpSync(path, join(target, name), { recursive: true })
+}
+for (const name of ["package.json", "README.md", "CHANGELOG.md", "photon_rs_bg.wasm"]) {
+  const path = join(source, name)
+  if (existsSync(path)) cpSync(path, join(target, name))
+}
 
 console.info(`[tauri] resources prepared at ${target}`)

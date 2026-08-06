@@ -9,3 +9,7 @@ test("getDriverMode accepts the native Pi driver aliases", () => {
   assert.equal(getDriverMode({ PIUI_DRIVER: "mock" }), "mock")
   assert.equal(getDriverMode({}), "mock")
 })
+
+test("getDriverMode rejects unknown configuration instead of silently using mock", () => {
+  assert.throws(() => getDriverMode({ PIUI_DRIVER: "typo" }), /PIUI_DRIVER/)
+})

@@ -79,7 +79,10 @@ function packageManagerForWorkspace(cwd: string, agentDir?: string) {
 }
 
 export class PiCatalog implements CatalogProvider, PackagesGateway {
-  constructor(private readonly agentDir?: string) {}
+  constructor(
+    private readonly agentDir?: string,
+    private readonly onProgress?: (event: JsonObject) => void,
+  ) {}
 
   private dir(): string | undefined {
     return this.agentDir
@@ -169,7 +172,14 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     const { DefaultPackageManager, getAgentDir } = getLoadedSdk().sdk
     const { manager } = settingsForWorkspace(cwd, this.dir())
     const packages = new DefaultPackageManager({ cwd, agentDir: this.dir() ?? getAgentDir(), settingsManager: manager })
-    packages.setProgressCallback(() => undefined)
+    packages.setProgressCallback(event => {
+      this.onProgress?.({
+        type: event.type,
+        action: event.action,
+        source: event.source,
+        ...(event.message ? { message: event.message } : {}),
+      })
+    })
     if (action === "install") {
       if (!source) throw Object.assign(new Error("package source required"), { code: "INVALID_REQUEST" })
       await (persist ? packages.installAndPersist(source, { local }) : packages.install(source, { local }))

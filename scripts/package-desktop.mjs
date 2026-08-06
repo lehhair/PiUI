@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
  * 打包桌面/便携形态：
- *   dist-desktop/piui-server.exe   Bun 编译的 server 单文件
- *   dist-desktop/runtime/pi-…/     自包含 Pi worker
+ *   dist-desktop/pi-worker.exe     Bun 编译的统一 server/worker/CLI 文件
  *   dist-desktop/web/…             Web 客户端构建产物
  *
  * 用法：node scripts/package-desktop.mjs [--skip-build] [--target bun-windows-x64]
  */
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -26,42 +25,29 @@ const run = (command, cmdArgs, options = {}) => {
 if (!skipBuild) {
   run("npm", ["run", "build"])
 }
+mkdirSync(outDir, { recursive: true })
+rmSync(join(outDir, "runtime"), { recursive: true, force: true })
+rmSync(join(outDir, "piui-server.exe"), { force: true })
+rmSync(join(outDir, "piui-server"), { force: true })
 
-// ---- 1. 组装独立的 Pi worker runtime ----
+// ---- 1. 读取 Pi SDK 版本并准备公开 CLI 资源 ----
 const piPackageDir = join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent")
 const piPkg = JSON.parse(readFileSync(join(piPackageDir, "package.json"), "utf8"))
-const sdkFamily = {
-  "@earendil-works/pi-coding-agent": piPkg.version,
-  "@earendil-works/pi-ai": piPkg.version,
-  "@earendil-works/pi-agent-core": piPkg.version,
-  "@earendil-works/pi-tui": piPkg.version,
+console.info(`[package] preparing Pi CLI resources ${piPkg.version}`)
+cpSync(join(piPackageDir, "package.json"), join(outDir, "package.json"))
+for (const [source, destination] of [
+  [join(piPackageDir, "dist", "modes", "interactive", "theme"), join(outDir, "theme")],
+  [join(piPackageDir, "dist", "modes", "interactive", "assets"), join(outDir, "assets")],
+  [join(piPackageDir, "dist", "core", "export-html"), join(outDir, "export-html")],
+  [join(piPackageDir, "README.md"), join(outDir, "README.md")],
+  [join(piPackageDir, "CHANGELOG.md"), join(outDir, "CHANGELOG.md")],
+  [join(piPackageDir, "docs"), join(outDir, "docs")],
+  [join(piPackageDir, "examples"), join(outDir, "examples")],
+]) {
+  cpSync(source, destination, { recursive: true })
 }
-
-const runtimePiRoot = join(outDir, "runtime", `pi-${piPkg.version}`)
-rmSync(join(outDir, "runtime"), { recursive: true, force: true })
-mkdirSync(runtimePiRoot, { recursive: true })
-
-console.info(`[package] compiling self-contained pi worker ${piPkg.version}`)
-writeFileSync(
-  join(repoRoot, "packages", "pi-worker", "dist", "bundled-sdk-version.js"),
-  `export const BUNDLED_PI_SDK_VERSION = ${JSON.stringify(piPkg.version)};\n`,
-)
-const workerName = target.includes("windows") ? "pi-worker.exe" : "pi-worker"
-run("bun", [
-  "build", join("packages", "pi-worker", "dist", "entry.js"),
-  "--compile",
-  `--target=${target}`,
-  "--outfile", join(runtimePiRoot, workerName),
-])
-writeFileSync(join(runtimePiRoot, "manifest.json"), JSON.stringify({
-  sdkVersion: piPkg.version,
-  worker: workerName,
-  sdkFamily,
-}, null, 2))
-writeFileSync(
-  join(outDir, "runtime", "current.json"),
-  JSON.stringify({ dir: `pi-${piPkg.version}`, version: piPkg.version, sdkFamily }, null, 2),
-)
+const photonWasm = join(repoRoot, "node_modules", "@silvia-odwyer", "photon-node", "photon_rs_bg.wasm")
+if (existsSync(photonWasm)) cpSync(photonWasm, join(outDir, "photon_rs_bg.wasm"))
 
 // ---- 2. Web 客户端 ----
 console.info("[package] copying web client")
@@ -93,7 +79,7 @@ if (!existsSync(nativeLibraryPath)) throw new Error(`bun-pty native library is m
 cpSync(nativeLibraryPath, join(bunPtyOut, "rust-pty", "target", "release", nativeLibrary))
 
 // ---- 3. bun compile ----
-const outfile = join(outDir, target.includes("windows") ? "piui-server.exe" : "piui-server")
+const outfile = join(outDir, target.includes("windows") ? "pi-worker.exe" : "pi-worker")
 run("bun", [
   "build", join("packages", "server", "dist", "bundle-entry.js"),
   "--compile",
@@ -104,10 +90,22 @@ run("bun", [
   "--outfile", outfile,
 ])
 
+const requiredFiles = [
+  outfile,
+  join(outDir, "web", "index.html"),
+  join(outDir, "package.json"),
+  join(outDir, "theme"),
+  join(outDir, "export-html"),
+  join(outDir, "node_modules", "bun-pty", "src", "index.ts"),
+  join(outDir, "node_modules", "bun-pty", "rust-pty", "target", "release", nativeLibrary),
+]
+for (const file of requiredFiles) {
+  if (!existsSync(file)) throw new Error(`desktop package is missing required resource: ${file}`)
+}
+
 console.info(`
 [package] done → ${outDir}
-  piui-server  服务端可执行文件
-  runtime/     自包含 Pi worker ${piPkg.version}
+  pi-worker    Web/API 服务、Pi worker 和原生 CLI
   web/         Web 客户端，server 同端口托管
-局域网/手机访问：PIUI_HOST=0.0.0.0 启动后，用控制台打印的带 token 链接打开
+局域网/手机访问：pi-worker.exe web --host 0.0.0.0
 `)

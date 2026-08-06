@@ -25,6 +25,7 @@ export interface PackagesGateway {
     source?: string,
     local?: boolean,
     persist?: boolean,
+    onProgress?: (event: JsonObject) => void,
   ): Promise<JsonValue>
   resolve(cwd: string, missingAction?: "install" | "skip" | "error"): Promise<JsonValue>
   resolveSources(cwd: string, sources: string[], local?: boolean, temporary?: boolean): Promise<JsonValue>

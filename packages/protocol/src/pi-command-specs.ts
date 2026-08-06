@@ -114,7 +114,7 @@ export const PI_COMMAND_SPECS = [
   { name: "settings.get", scope: "global", description: "Read Pi settings for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
   { name: "settings.patch", scope: "global", description: "Patch Pi settings for a workspace", paramsSchema: objectSchema({ cwd: STRING, patch: objectSchema({}, [], true) }, ["cwd"]), queue: "serialized" },
   { name: "trust.get", scope: "global", description: "Read Pi project trust state", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
-  { name: "trust.set", scope: "global", description: "Set Pi project trust state", paramsSchema: objectSchema({ cwd: STRING, decision: nullable(BOOLEAN) }, ["cwd"]), queue: "serialized" },
+  { name: "trust.set", scope: "global", description: "Set Pi project trust state", paramsSchema: objectSchema({ cwd: STRING, decision: nullable(BOOLEAN) }, ["cwd", "decision"]), queue: "serialized" },
   { name: "providers.list", scope: "global", description: "List Pi providers", queue: "immediate", idempotent: true },
   { name: "providers.startAuth", scope: "global", description: "Start provider authentication", paramsSchema: objectSchema({ providerId: STRING, authType: { enum: ["api_key", "oauth"] } }, ["providerId"]), queue: "serialized" },
   { name: "providers.respondAuth", scope: "global", description: "Respond to provider authentication prompt", paramsSchema: objectSchema({ flowId: STRING, promptId: STRING, value: STRING }, ["flowId", "promptId", "value"]), queue: "immediate" },
