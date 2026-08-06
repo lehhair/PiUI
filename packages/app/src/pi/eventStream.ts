@@ -14,6 +14,7 @@ import {
 import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/index.js'
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase, getPiAuthToken } from './httpClient.js'
+import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
 import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
@@ -79,7 +80,7 @@ class PiEventStream {
     queueMicrotask(() => this.ensureManagementWatch())
   }
 
-  private ws: WebSocket | null = null
+  private ws: PiSocket | null = null
   private refCounts = new Map<string, number>()
   private workspaceRefCounts = new Map<string, number>()
   private cursors = new Map<string, EventCursor>()
@@ -93,7 +94,7 @@ class PiEventStream {
     this.refCounts.set(sessionId, (this.refCounts.get(sessionId) ?? 0) + 1)
     if (this.refCounts.get(sessionId) === 1) {
       this.ensureSocket()
-      if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+      if (this.ws?.readyState === PI_SOCKET_OPEN) this.sendSubscribe()
     }
   }
 
@@ -110,7 +111,7 @@ class PiEventStream {
     }
     if (!this.hasSubscriptions()) {
       this.closeSocket()
-    } else if (this.ws?.readyState === WebSocket.OPEN) {
+    } else if (this.ws?.readyState === PI_SOCKET_OPEN) {
       this.sendSubscribe()
     }
   }
@@ -120,7 +121,7 @@ class PiEventStream {
     this.workspaceRefCounts.set(workspacePath, count)
     if (count === 1) {
       this.ensureSocket()
-      if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+      if (this.ws?.readyState === PI_SOCKET_OPEN) this.sendSubscribe()
     }
   }
 
@@ -129,7 +130,7 @@ class PiEventStream {
     if (count <= 1) this.workspaceRefCounts.delete(workspacePath)
     else this.workspaceRefCounts.set(workspacePath, count - 1)
     if (!this.hasSubscriptions()) this.closeSocket()
-    else if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+    else if (this.ws?.readyState === PI_SOCKET_OPEN) this.sendSubscribe()
   }
 
   private managementWatched = false
@@ -144,7 +145,7 @@ class PiEventStream {
     subscribeManagementStreams(() => {
       if (getTrackedManagementProviders().length > 0) {
         this.ensureSocket()
-        if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+        if (this.ws?.readyState === PI_SOCKET_OPEN) this.sendSubscribe()
       } else if (!this.hasSubscriptions()) {
         this.closeSocket()
       }
@@ -166,7 +167,7 @@ class PiEventStream {
     this.disconnectAll()
     if (getTrackedManagementProviders().length > 0) {
       this.ensureSocket()
-      if (this.ws?.readyState === WebSocket.OPEN) this.sendSubscribe()
+      if (this.ws?.readyState === PI_SOCKET_OPEN) this.sendSubscribe()
     }
   }
 
@@ -184,7 +185,7 @@ class PiEventStream {
   }
 
   private ensureSocket(): void {
-    if (this.ws && this.ws.readyState !== WebSocket.CLOSED && this.ws.readyState !== WebSocket.CLOSING) return
+    if (this.ws && this.ws.readyState !== PI_SOCKET_CLOSED && this.ws.readyState !== PI_SOCKET_CLOSING) return
     this.openSocket()
   }
 
@@ -196,7 +197,7 @@ class PiEventStream {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+    if (ws && ws.readyState !== PI_SOCKET_CLOSED && ws.readyState !== PI_SOCKET_CLOSING) {
       ws.close()
     }
   }
@@ -206,7 +207,7 @@ class PiEventStream {
     const token = getPiAuthToken()
     if (token) url.searchParams.set('token', token)
 
-    const ws = new WebSocket(url)
+    const ws = openPiSocket(url.toString())
     this.ws = ws
 
     ws.onopen = () => {
@@ -270,7 +271,7 @@ class PiEventStream {
   }
 
   private send(message: unknown): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === PI_SOCKET_OPEN) {
       this.ws.send(JSON.stringify(message))
     }
   }

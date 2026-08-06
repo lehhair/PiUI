@@ -1,4 +1,6 @@
 #[cfg(not(target_os = "android"))]
+mod bridge;
+#[cfg(not(target_os = "android"))]
 mod service;
 
 use tauri::{Emitter, Manager, WebviewWindowBuilder};
@@ -124,6 +126,7 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let builder = builder
         .manage(ServiceState::default())
+        .manage(bridge::BridgeState::default())
         .plugin(tauri_plugin_decorum::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -162,6 +165,9 @@ pub fn run() {
             confirm_close_app,
             desktop_window_ready,
             open_new_window,
+            bridge::ws_bridge_connect,
+            bridge::ws_bridge_send,
+            bridge::ws_bridge_close,
         ]);
 
     #[cfg(target_os = "android")]
