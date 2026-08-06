@@ -3,21 +3,43 @@ import path from "node:path"
 import { lstat } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { join } from "node:path"
-import type { IPty } from "@lydell/node-pty"
 
-type PtyModule = { spawn: (file: string, args: string[], options: object) => IPty }
+/** node-pty 与 bun-pty 共同的最小接口面（两者 API 本来就兼容） */
+type PtyProcess = {
+  readonly pid: number
+  readonly cols: number
+  readonly rows: number
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(signal?: string): void
+  onData(listener: (data: string) => void): { dispose(): void }
+  onExit(listener: (event: { exitCode: number; signal?: number | string }) => void): { dispose(): void }
+}
+type PtyModule = { spawn: (file: string, args: string[], options: object) => PtyProcess }
 let ptyModule: PtyModule | undefined
 
+const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined"
+
 /**
- * 编译形态（PIUI_NATIVE_MODULES 指向 exe 旁的 node_modules）按绝对路径
- * 直接加载平台包——Bun 编译产物的 require 不会为磁盘上的外部模块做
- * node_modules 上溯解析，node-pty 的包装包在里面会找不到平台二进制，
- * 所以从平台包的绝对入口绕过包装层。开发态走正常解析。
+ * PTY 库按运行时二选一（与 opencode 的 #pty 条件 imports 同一个思路）：
+ * - Bun（含 bun --compile）→ bun-pty：纯 FFI 原生库，不碰 Node socket API。
+ *   node-pty 的 ConPTY 走 Windows 命名管道 + net.Socket，Bun 兼容层会在
+ *   写入时同步抛 ERR_SOCKET_CLOSED 并带走整个进程。
+ * - Node（开发/测试）→ @lydell/node-pty。
+ * 编译形态下两者都从 PIUI_NATIVE_MODULES 按绝对路径加载——Bun 编译产物的
+ * require 不会为磁盘上的外部模块做 node_modules 上溯解析。
  */
 function loadPty(): PtyModule {
   if (ptyModule) return ptyModule
   const nativeRoot = process.env.PIUI_NATIVE_MODULES?.trim()
-  if (nativeRoot) {
+  if (isBunRuntime) {
+    if (nativeRoot && process.platform === "win32") {
+      // 显式指定 DLL 路径，跳过包内的探测逻辑
+      process.env.BUN_PTY_LIB ??= join(nativeRoot, "bun-pty", "rust-pty", "target", "release", "rust_pty.dll")
+    }
+    const entry = nativeRoot ? join(nativeRoot, "bun-pty", "src", "index.ts") : "bun-pty"
+    ptyModule = createRequire(nativeRoot ? entry : import.meta.url)(entry) as PtyModule
+  } else if (nativeRoot) {
     const platformEntry = join(
       nativeRoot,
       "@lydell",
@@ -60,7 +82,7 @@ type Subscriber = {
 type ActiveTerminal = {
   workspacePath: string
   info: TerminalInfo
-  process: IPty
+  process: PtyProcess
   customTitle?: string
   titleBuffer: string
   output: string
@@ -92,7 +114,7 @@ export class TerminalManager {
   private readonly exitedOrder: string[] = []
   private readonly tickets = new Map<string, TerminalTicket>()
   /** Processes whose kill failed and whose handle must be retried at dispose. */
-  private readonly staleProcesses: IPty[] = []
+  private readonly staleProcesses: PtyProcess[] = []
   /** Creates still awaiting async cwd resolution; counts toward the limit. */
   private pendingCreates = 0
 
@@ -136,7 +158,7 @@ export class TerminalManager {
       PIUI_TERMINAL: "1",
     }
 
-    let child: IPty
+    let child: PtyProcess
     try {
       child = loadPty().spawn(shell, shellArgs(shell), {
         name: "xterm-256color",

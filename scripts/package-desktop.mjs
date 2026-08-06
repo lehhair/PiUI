@@ -76,7 +76,7 @@ cpSync(join(repoRoot, "packages", "app", "dist"), join(outDir, "web"), { recursi
 // ---- 2.5 原生/运行时依赖外挂：node-pty 的平台二进制无法打进 bundle；
 // jiti 内部相对引用自己的 babel.cjs，进 bundle 路径就断——都放 exe 旁的
 // node_modules，构建期声明 external 的运行时模块从这里解析 ----
-console.info("[package] copying native node-pty packages")
+console.info("[package] copying native pty packages")
 const nativeOut = join(outDir, "node_modules")
 rmSync(nativeOut, { recursive: true, force: true })
 mkdirSync(nativeOut, { recursive: true })
@@ -86,6 +86,13 @@ const externalPackages = ["jiti"]
 for (const name of lydellPackages) {
   cpSync(join(lydellDir, name), join(nativeOut, "@lydell", name), { recursive: true })
   externalPackages.push(`@lydell/${name}`)
+}
+// bun-pty：Bun 运行时的 PTY 实现（FFI + 预编译 rust_pty.dll），整包拷出，
+// 运行时经 PIUI_NATIVE_MODULES 按绝对路径加载
+const bunPtyDir = join(repoRoot, "node_modules", "bun-pty")
+if (existsSync(bunPtyDir)) {
+  cpSync(bunPtyDir, join(nativeOut, "bun-pty"), { recursive: true })
+  externalPackages.push("bun-pty")
 }
 cpSync(join(repoRoot, "node_modules", "jiti"), join(nativeOut, "jiti"), { recursive: true })
 
