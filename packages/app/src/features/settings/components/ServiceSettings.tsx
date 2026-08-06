@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TerminalShell } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
 import { RetryIcon, SpinnerIcon, StopIcon, TrashIcon, WifiIcon, WifiOffIcon } from '../../../components/Icons'
 import { isTauri, isTauriMobile } from '../../../utils/tauri'
@@ -11,13 +12,22 @@ import {
   stopDesktopService,
   type DesktopServiceStatus,
 } from '../../../services/desktopService'
-import { settingsFieldClass, SettingField, SettingRow, SettingsSection, Toggle } from './SettingsUI'
+import { listHostShells } from '../../../pi/transport/index.js'
+import { serverStorage } from '../../../utils'
+import { useServerStore } from '../../../hooks'
+import { settingsFieldClass, SettingField, SettingRow, SettingsSection, SettingsSelect, Toggle } from './SettingsUI'
+
+const TERMINAL_SHELL_STORAGE_KEY = 'piui-terminal-shell'
 
 export function ServiceSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const desktop = isTauri() && !isTauriMobile()
+  const { activeServerGeneration } = useServerStore()
   const { autoStart, useSystemPiSdk, envVars, running, startedByUs, starting } = useServiceStore()
   const [status, setStatus] = useState<DesktopServiceStatus | null>(null)
+  const [shells, setShells] = useState<TerminalShell[]>([])
+  const [selectedShell, setSelectedShell] = useState('')
+  const [shellsLoading, setShellsLoading] = useState(false)
   const [busy, setBusy] = useState<'refresh' | 'stop' | 'start' | 'restart' | null>(null)
   const [error, setError] = useState('')
 
@@ -68,11 +78,67 @@ export function ServiceSettings() {
     return () => window.clearTimeout(timer)
   }, [refresh])
 
+  useEffect(() => {
+    let cancelled = false
+    setSelectedShell(serverStorage.get(TERMINAL_SHELL_STORAGE_KEY) ?? '')
+    setShellsLoading(true)
+    void listHostShells()
+      .then(result => {
+        if (!cancelled) setShells(result.shells)
+      })
+      .catch(() => {
+        if (!cancelled) setShells([])
+      })
+      .finally(() => {
+        if (!cancelled) setShellsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeServerGeneration, desktop, running])
+
+  const shellOptions = useMemo(() => {
+    const nameCounts = new Map<string, number>()
+    for (const shell of shells) nameCounts.set(shell.name, (nameCounts.get(shell.name) ?? 0) + 1)
+    const options = [
+      { value: '', label: t('service.terminalShellAuto') },
+      ...shells.map(shell => ({
+        value: shell.path,
+        label: `${nameCounts.get(shell.name) === 1 ? shell.name : shell.path}${shell.acceptable ? '' : ` (${t('service.terminalShellOnly')})`}`,
+      })),
+    ]
+    if (selectedShell && !options.some(option => option.value === selectedShell)) {
+      options.push({ value: selectedShell, label: selectedShell })
+    }
+    return options
+  }, [selectedShell, shells, t])
+
+  const terminalShell = (
+    <SettingField label={t('service.terminalShell')} description={t('service.terminalShellDesc')}>
+      <SettingsSelect
+        ariaLabel={t('service.terminalShell')}
+        value={selectedShell}
+        options={shellOptions}
+        disabled={shellsLoading || shellOptions.length <= 1}
+        onChange={value => {
+          setSelectedShell(value)
+          if (value) serverStorage.set(TERMINAL_SHELL_STORAGE_KEY, value)
+          else serverStorage.remove(TERMINAL_SHELL_STORAGE_KEY)
+        }}
+      />
+    </SettingField>
+  )
+
   if (!desktop) {
     return (
-      <SettingsSection title={t('service.title')} description={t('service.desktopOnly')}>
-        <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-300">{t('service.webModeDesc')}</div>
-      </SettingsSection>
+      <>
+        <SettingsSection title={t('service.title')} description={t('service.desktopOnly')}>
+          <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-300">{t('service.webModeDesc')}</div>
+        </SettingsSection>
+        <SettingsSection title={t('service.terminalTitle')} description={t('service.terminalTitleDesc')}>
+          {terminalShell}
+        </SettingsSection>
+      </>
     )
   }
 
@@ -96,6 +162,8 @@ export function ServiceSettings() {
         </button>
       }
     >
+      {terminalShell}
+
       <SettingRow
         label={t('service.autoStart')}
         description={t('service.autoStartDesc')}

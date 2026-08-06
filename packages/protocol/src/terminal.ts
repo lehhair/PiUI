@@ -4,6 +4,12 @@ export const TERMINAL_STREAM_PROTOCOL_VERSION = 1 as const
 
 export type TerminalStatus = "running" | "exited"
 
+export type TerminalShell = {
+  path: string
+  name: string
+  acceptable: boolean
+}
+
 export type TerminalInfo = {
   id: string
   title: string

@@ -69,11 +69,17 @@
     "deleteServer": "删除服务器",
     "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。"
   },
-  "service": {
-    "title": "本地 PiUI 服务",
+    "service": {
+      "title": "本地 PiUI 服务",
     "description": "管理桌面端启动的后端进程。保留服务后，下次打开 PiUI 仍会识别它并允许停止或重启。",
     "desktopOnly": "本地服务管理只在桌面端可用。",
-    "webModeDesc": "本地服务由桌面壳子管理，浏览器模式连接已经运行的 PiUI 服务。",
+      "webModeDesc": "本地服务由桌面壳子管理，浏览器模式连接已经运行的 PiUI 服务。",
+      "terminalTitle": "终端",
+      "terminalTitleDesc": "选择创建 PTY 时使用的 Shell。列表来自当前 PiUI 服务所在设备。",
+      "terminalShell": "终端 Shell",
+      "terminalShellDesc": "选择创建 PTY 时使用的 Shell。选择会按服务器分别保存。",
+      "terminalShellAuto": "自动",
+      "terminalShellOnly": "仅终端",
     "running": "运行中",
     "stopped": "未运行",
     "startedByApp": "由此 PiUI 桌面应用启动",

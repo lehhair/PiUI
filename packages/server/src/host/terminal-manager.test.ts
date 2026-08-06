@@ -36,6 +36,18 @@ test("TerminalManager creates, streams, replays, and removes a terminal", async 
   }
 })
 
+test("lists available shells on the PTY host", async () => {
+  const manager = new TerminalManager()
+  try {
+    const shells = await manager.listShells()
+    assert.ok(shells.length > 0)
+    assert.ok(shells.every(shell => shell.path && shell.name && typeof shell.acceptable === "boolean"))
+    if (process.platform === "win32") assert.ok(shells.some(shell => shell.name === "bash"))
+  } finally {
+    manager.dispose()
+  }
+})
+
 test("extractTerminalTitle reads OSC 0 and OSC 2 titles", () => {
   assert.equal(extractTerminalTitle("\u001b]0;cmd.exe\u0007"), "cmd.exe")
   assert.equal(extractTerminalTitle("\u001b]2;PiUI project\u001b\\"), "PiUI project")

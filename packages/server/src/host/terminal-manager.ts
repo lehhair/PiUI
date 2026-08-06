@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto"
 import path from "node:path"
-import { lstat } from "node:fs/promises"
+import { lstat, readFile } from "node:fs/promises"
+import { statSync } from "node:fs"
+import { execFile } from "node:child_process"
 import { createRequire } from "node:module"
 import { join } from "node:path"
+import { promisify } from "node:util"
 
 /** node-pty 与 bun-pty 共同的最小接口面（两者 API 本来就兼容） */
 type PtyProcess = {
@@ -56,6 +59,7 @@ function loadPty(): PtyModule {
 import type {
   EventChannel,
   TerminalCreateParams,
+  TerminalShell,
   TerminalInfo,
   TerminalUpdateParams,
 } from "@piui/protocol"
@@ -66,6 +70,7 @@ const OUTPUT_BUFFER_LIMIT = 2 * 1024 * 1024
 const EXITED_SESSION_LIMIT = 25
 const TERMINAL_LIMIT = 32
 const TICKET_TTL_MS = 60_000
+const execFileAsync = promisify(execFile)
 
 type TerminalEventChannel = Extract<EventChannel, `terminal.${string}`>
 
@@ -124,6 +129,19 @@ export class TerminalManager {
     return Array.from(this.terminals.values())
       .filter(terminal => workspacePathKey(terminal.workspacePath) === workspacePathKey(workspacePath))
       .map(terminal => ({ ...terminal.info }))
+  }
+
+  async listShells(): Promise<TerminalShell[]> {
+    const candidates = process.platform === "win32" ? await windowsShells() : await unixShells()
+    const seen = new Set<string>()
+    const shells: TerminalShell[] = []
+    for (const candidate of candidates) {
+      const shell = candidate.trim()
+      if (!shell || seen.has(shell) || !isFile(shell)) continue
+      seen.add(shell)
+      shells.push({ path: shell, name: shellName(shell), acceptable: isAcceptableShell(shell) })
+    }
+    return shells
   }
 
   get(workspacePath: string, id: string): TerminalInfo {
@@ -500,6 +518,66 @@ function resolveShell(requested?: string): string {
   if (requested?.trim()) return requested.trim()
   if (process.platform === "win32") return process.env.ComSpec || "cmd.exe"
   return process.env.SHELL || "/bin/sh"
+}
+
+async function unixShells(): Promise<string[]> {
+  try {
+    const text = await readFile("/etc/shells", "utf8")
+    const listed = text
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"))
+    if (listed.length > 0) return listed
+  } catch {
+    // Use the standard fallbacks below when /etc/shells is unavailable.
+  }
+  return ["/bin/bash", "/bin/zsh", "/bin/sh"]
+}
+
+async function windowsShells(): Promise<string[]> {
+  const shells = await Promise.all([commandPath("pwsh"), commandPath("powershell")])
+  const gitPaths = await commandPaths("git")
+  for (const git of gitPaths) {
+    const bash = [
+      path.join(git, "..", "..", "bin", "bash.exe"),
+      path.join(git, "..", "..", "..", "bin", "bash.exe"),
+    ].find(isFile)
+    if (bash) {
+      shells.push(bash)
+      break
+    }
+  }
+  shells.push(process.env.ComSpec || "cmd.exe")
+  return shells.filter((shell): shell is string => Boolean(shell))
+}
+
+async function commandPath(command: string): Promise<string | undefined> {
+  return (await commandPaths(command))[0]
+}
+
+async function commandPaths(command: string): Promise<string[]> {
+  try {
+    const result = await execFileAsync(process.platform === "win32" ? "where.exe" : "which", [command], { windowsHide: true })
+    return String(result.stdout).split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function isFile(file: string): boolean {
+  try {
+    return statSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
+function shellName(shell: string): string {
+  return path.basename(shell).replace(/\.exe$/i, "").toLowerCase()
+}
+
+function isAcceptableShell(shell: string): boolean {
+  return !new Set(["fish", "nu"]).has(shellName(shell))
 }
 
 function shellArgs(shell: string): string[] {

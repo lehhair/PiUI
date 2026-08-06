@@ -172,6 +172,7 @@ const HOST_COMMAND_HANDLERS: Record<string, HostCommandHandler> = {
     if (!record) throw Object.assign(new Error("command not found"), { code: "NOT_FOUND" })
     return requireJsonValue({ command: record })
   },
+  "terminals.shells": ctx => ctx.terminals.listShells().then(shells => ({ shells })),
   "terminals.list": (ctx, params) => ({ terminals: ctx.terminals.list(workspace(ctx, params).canonicalRoot) }),
   "terminals.create": (ctx, params) => ctx.terminals.create(workspace(ctx, params).canonicalRoot, {
     cwd: optString(params, "cwd"),

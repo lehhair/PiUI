@@ -9,7 +9,7 @@ import { useChatViewport } from '../features/chat/chatViewport'
 import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
 import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
 import { resolveWorkspacePath } from '../pi/workspaces'
-import { uiErrorHandler } from '../utils'
+import { serverStorage, uiErrorHandler } from '../utils'
 import { TerminalIcon } from './Icons'
 
 const SessionChangesPanel = lazy(() =>
@@ -68,7 +68,8 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
     try {
       const workspacePath = await resolveWorkspacePath(normalizedDirectory)
       if (!workspacePath) throw new Error('no workspace available')
-      const terminal = await createHostTerminal(workspacePath)
+      const shell = serverStorage.get('piui-terminal-shell') || undefined
+      const terminal = await createHostTerminal(workspacePath, { shell })
       layoutStore.addTerminalTab({
         id: terminal.id,
         title: terminal.title,
