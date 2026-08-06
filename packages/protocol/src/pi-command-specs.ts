@@ -60,7 +60,7 @@ const TEXT_IMAGES_PARAMS = objectSchema({ text: STRING, images: IMAGES }, ["text
 const OUTPUT_PATH_PARAMS = objectSchema({ outputPath: STRING }, ["outputPath"])
 const CWD_PARAMS = objectSchema({ cwd: STRING }, ["cwd"])
 
-export const PI_COMMAND_SPECS: readonly PiCommandSpec[] = [
+export const PI_COMMAND_SPECS = [
   { name: "prompt", scope: "session", description: "Send a user prompt to the current Pi session", paramsSchema: PROMPT_PARAMS, queue: "serialized", streaming: true, cancellable: true },
   { name: "steer", scope: "session", description: "Queue steering text for the current Pi session", paramsSchema: TEXT_IMAGES_PARAMS, queue: "immediate" },
   { name: "followUp", scope: "session", description: "Queue a follow-up message for the current Pi session", paramsSchema: TEXT_IMAGES_PARAMS, queue: "immediate" },
@@ -132,7 +132,7 @@ export const PI_COMMAND_SPECS: readonly PiCommandSpec[] = [
   { name: "packages.changeSource", scope: "global", description: "Add or remove a Pi package source", paramsSchema: objectSchema({ cwd: STRING, source: STRING, operation: { enum: ["add", "remove"] }, local: BOOLEAN }, ["cwd", "source"]), queue: "serialized" },
   { name: "packages.installedPath", scope: "global", description: "Read installed Pi package path", paramsSchema: objectSchema({ cwd: STRING, source: STRING, scope: { enum: ["user", "project"] } }, ["cwd", "source"]), queue: "immediate", idempotent: true },
   { name: "packages.checkUpdates", scope: "global", description: "Check Pi package updates", paramsSchema: CWD_PARAMS, queue: "serialized" },
-]
+] as const satisfies readonly PiCommandSpec[]
 
 export type PiCommandName = (typeof PI_COMMAND_SPECS)[number]["name"]
 
@@ -188,3 +188,9 @@ export type PiGlobalCommandName = PiCommandName | PiServerGlobalCommandName
 
 /** 命令名对应的入参类型；不在表里的 server 命令回退到通用 JsonObject */
 export type PiParamsFor<K extends string> = K extends keyof PiCommandParams ? PiCommandParams[K] : JsonObject
+
+// 编译期防漂移：参数映射表的键必须与声明表的命令名完全一致，
+// 加了命令忘了补类型（或反过来）会直接 typecheck 失败。
+type Assert<Condition extends true> = Condition
+type _PiParamsCoverAllSpecs = Assert<PiCommandName extends keyof PiCommandParams ? true : false>
+type _PiParamsHaveNoExtras = Assert<Exclude<keyof PiCommandParams, PiCommandName> extends never ? true : false>

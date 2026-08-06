@@ -48,7 +48,7 @@ const TERMINAL_SIZE = {
 }
 const FILE_ENCODING: JsonObject = { enum: ["utf-8", "base64"] }
 
-export const HOST_COMMAND_SPECS: readonly HostCommandSpec[] = [
+export const HOST_COMMAND_SPECS = [
   {
     name: "commands.get",
     domain: "commands",
@@ -228,7 +228,7 @@ export const HOST_COMMAND_SPECS: readonly HostCommandSpec[] = [
     domain: "server",
     description: "Download the latest Pi runtime and switch the pointer (takes effect on restart)",
   },
-]
+] as const satisfies readonly HostCommandSpec[]
 
 export type HostCommandName = (typeof HOST_COMMAND_SPECS)[number]["name"]
 
@@ -260,3 +260,8 @@ export type HostCommandParams = {
   "pi-runtime.status": Record<string, never>
   "pi-runtime.update": Record<string, never>
 }
+
+// 编译期防漂移：参数映射表的键必须与声明表的命令名完全一致
+type Assert<Condition extends true> = Condition
+type _HostParamsCoverAllSpecs = Assert<HostCommandName extends keyof HostCommandParams ? true : false>
+type _HostParamsHaveNoExtras = Assert<Exclude<keyof HostCommandParams, HostCommandName> extends never ? true : false>
