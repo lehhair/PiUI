@@ -71,8 +71,19 @@ export type PiSessionOpenParams = {
   reuseFromSessionId?: string
 }
 
+export type PiSessionPreviewResult = {
+  state: JsonObject
+  branch: PiBranchPage
+}
+
 // Command result types
 export type PiSessionListResult = SessionInfo[]
+
+export type PiSessionCreateResult = {
+  sessionId: string
+  sessionFile?: string | null
+  cwd: string
+}
 
 // Transport layer - raw API calls
 export async function fetchHostHealth(signal?: AbortSignal): Promise<HealthResponse> {
@@ -351,6 +362,14 @@ export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal
 
 export function listAllPiSessions(signal?: AbortSignal): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.listAll', undefined, signal)
+}
+
+export function createPiSession(cwd: string, signal?: AbortSignal): Promise<PiSessionCreateResult> {
+  return postPiGlobalCommand<PiSessionCreateResult>('session.create', { cwd }, signal)
+}
+
+export function previewPiSession(sessionId: string, params: PiBranchGetParams = {}, signal?: AbortSignal): Promise<PiSessionPreviewResult> {
+  return postPiGlobalCommand<PiSessionPreviewResult>('session.preview', { sessionId, ...params }, signal)
 }
 
 export function openPiSession(params: PiSessionOpenParams, signal?: AbortSignal): Promise<PiSessionOpenResult> {

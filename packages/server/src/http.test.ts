@@ -212,6 +212,11 @@ describe("http api", () => {
     assert.equal(allSessions.status, 200)
     assert.ok(allSessions.json.data.some((session: any) => session.id === sessionId))
 
+    const preview = await request(port, "POST", "/api/v1/pi/commands/session.preview", { body: { sessionId } })
+    assert.equal(preview.status, 200)
+    assert.equal(preview.json.data.state.sessionId, sessionId)
+    assert.ok(Array.isArray(preview.json.data.branch.items))
+
     for (const type of [
       "models.list",
       "settings.patch",

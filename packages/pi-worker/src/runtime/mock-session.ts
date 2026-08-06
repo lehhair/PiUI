@@ -151,6 +151,70 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
     return this.store.list()
   }
 
+  async createSession(cwd: string): Promise<JsonValue> {
+    return { ...this.store.create(cwd), cwd }
+  }
+
+  async previewSession(cwd: string, sessionFile: string, params: { cursor?: string; limit?: number; maxBytes?: number } = {}): Promise<JsonValue> {
+    const info = this.store.list().find(item => item.path === sessionFile)
+    if (!info) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
+    const sessionId = typeof info.id === "string" ? info.id : "mock-session"
+    const head = sessionHeadFromParts({
+      sdkVersion: MOCK_SDK_VERSION,
+      revision: 0,
+      header: null,
+      leafId: null,
+      entryCount: 0,
+    }, sessionId)
+    const branch = entriesPageFromEntries(head, [], {
+      cursor: params.cursor,
+      limit: params.limit ?? 100,
+      maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
+    }, entry => entry)
+    return {
+      state: {
+        sessionId,
+        sessionFile,
+        sessionName: null,
+        cwd,
+        model: null,
+        thinkingLevel: "off",
+        isStreaming: false,
+        isCompacting: false,
+        steeringMode: "one-at-a-time",
+        followUpMode: "one-at-a-time",
+        autoCompactionEnabled: true,
+        autoRetryEnabled: true,
+        messageCount: 0,
+        pendingMessageCount: 0,
+        availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        isIdle: true,
+        isBashRunning: false,
+        hasPendingBashMessages: false,
+        isRetrying: false,
+        retryAttempt: 0,
+        queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+        supportsThinking: true,
+        activeTools: [],
+        scopedModels: [],
+        contextUsage: null,
+        sessionStats: null,
+        retry: null,
+        compaction: null,
+        head,
+      },
+      branch,
+    }
+  }
+
+  async previewSessionById(sessionId: string, params: { cursor?: string; limit?: number; maxBytes?: number } = {}): Promise<JsonValue> {
+    const info = this.store.list().find(item => item.id === sessionId)
+    if (!info || typeof info.path !== "string" || typeof info.cwd !== "string") {
+      throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
+    }
+    return this.previewSession(info.cwd, info.path, params)
+  }
+
   async deleteSession(_cwd: string, sessionFile: string): Promise<void> {
     const root = path.resolve(sessionsDir())
     const resolved = path.resolve(sessionFile)
