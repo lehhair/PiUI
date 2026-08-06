@@ -18,7 +18,8 @@ mod marker;
 mod process;
 
 use process::{
-    kill_process_tree, prepare_server, resource_root, service_environment, spawn_server,
+    is_process_alive, kill_process_tree, prepare_server, resource_root, service_environment,
+    spawn_server,
 };
 
 const DEFAULT_PORT: &str = "8787";
@@ -220,10 +221,20 @@ async fn adopt_persisted_service(
             }
             return Ok(true);
         }
-        Ok(_) | Err(HealthFailure::Unreachable) => {
+        Ok(_) => {
             marker::clear(app);
+            clear_service_ownership(state);
             Ok(false)
         }
+        Err(HealthFailure::Unreachable) if !is_process_alive(marker.pid) => {
+            marker::clear(app);
+            clear_service_ownership(state);
+            Ok(false)
+        }
+        Err(HealthFailure::Unreachable) => Err(format!(
+            "A retained PiUI service process {} is still running at {}, but its health endpoint is unreachable",
+            marker.pid, marker.url
+        )),
         Err(HealthFailure::Rejected(reason)) => Err(format!(
             "A retained PiUI service at {} rejected its health check ({reason}); check its token and environment before starting another service",
             marker.url
@@ -278,6 +289,14 @@ async fn start_piui_service_inner(
                 token: config.initial_token,
             });
         }
+        let pid = state.child_pid.load(Ordering::SeqCst);
+        if pid > 0 && is_process_alive(pid) {
+            return Err(format!(
+                "The PiUI service process {pid} is still running at {url}, but its health endpoint is unreachable"
+            ));
+        }
+        marker::clear(app);
+        clear_service_ownership(state);
     }
 
     if is_service_running(&config.url, config.initial_token.as_deref()).await {
@@ -377,6 +396,24 @@ fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
             let _ = process.wait();
         }
         *child = None;
+    }
+}
+
+fn clear_service_ownership(state: &ServiceState) {
+    state.child_pid.store(0, Ordering::SeqCst);
+    state.started_by_us.store(false, Ordering::SeqCst);
+    if let Ok(mut url) = state.service_url.lock() {
+        *url = None;
+    }
+    if let Ok(mut child) = state.child.lock() {
+        let exited = child
+            .as_mut()
+            .and_then(|process| process.try_wait().ok())
+            .flatten()
+            .is_some();
+        if exited {
+            *child = None;
+        }
     }
 }
 
@@ -494,5 +531,11 @@ mod tests {
             environment.get("PIUI_USE_SYSTEM_PI").map(String::as_str),
             Some("1")
         );
+    }
+
+    #[test]
+    fn process_liveness_distinguishes_current_and_missing_processes() {
+        assert!(is_process_alive(std::process::id()));
+        assert!(!is_process_alive(u32::MAX));
     }
 }
