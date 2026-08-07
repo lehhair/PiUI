@@ -50,6 +50,7 @@ export type PiCommandResponse<T = JsonValue | undefined> = {
 export type PiSessionOpenResult = {
   sessionId: string
   sessionFile?: string | null
+  sessionFileReady?: boolean
   cwd?: string
   state?: JsonValue
   [key: string]: JsonValue | undefined
