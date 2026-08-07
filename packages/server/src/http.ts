@@ -18,7 +18,7 @@ import { WorkspaceWatcher } from "./host/workspace-watcher.ts"
 import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./host/security.ts"
 import { resolveAuthToken } from "./host/auth-token.ts"
 import { PathSafetyError } from "./host/path-safety.ts"
-import { HostRuntime } from "./host/command-table.ts"
+import { defaultWorkspaceRoot, HostRuntime } from "./host/command-table.ts"
 import { TerminalManager } from "./host/terminal-manager.ts"
 import { createStaticServer } from "./static.ts"
 
@@ -170,6 +170,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const hub = options.eventHub ?? new EventHub()
   const supervisor = options.supervisor ?? new RuntimeSupervisor()
   const sessions = options.sessionHost ?? new SessionHost(supervisor, hub)
+  void sessions.prewarm(defaultWorkspaceRoot()).catch(() => undefined)
   const watcher = new WorkspaceWatcher(hub)
   const terminals = new TerminalManager({
     publish: (workspacePath, channel, payload) => {

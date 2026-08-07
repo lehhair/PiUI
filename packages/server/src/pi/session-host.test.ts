@@ -115,3 +115,44 @@ test("SessionHost reuses an idle runtime for a session switch", async () => {
   assert.equal(host.getAttached("session-2")?.sessionFile, "session-2.jsonl")
   host.dispose()
 })
+
+test("SessionHost claims a warm runtime and replenishes the slot", async () => {
+  let opened = 0
+  let prewarmed = 0
+  let claimed = false
+  const worker = {
+    command: async (type: string) => type === "state.get" ? { sessionId: "warm-session" } : {},
+    getSessionId: () => "warm-session",
+    getSessionFile: () => "warm-session.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => {
+      opened += 1
+      return worker
+    },
+    takeWarmRuntime: async () => {
+      if (claimed) return undefined
+      claimed = true
+      return worker
+    },
+    prewarm: async () => {
+      prewarmed += 1
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+
+  const result = await host.openSession(".")
+
+  assert.equal(result.sessionId, "warm-session")
+  assert.equal(opened, 0)
+  assert.equal(prewarmed, 1)
+  assert.equal(host.getAttached("warm-session")?.sessionFile, "warm-session.jsonl")
+  host.dispose()
+})
