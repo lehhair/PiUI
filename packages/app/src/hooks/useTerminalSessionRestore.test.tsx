@@ -8,7 +8,7 @@ const { activeServerSnapshot, listHostTerminalsMock, onServerChangeMock, resolve
   activeServerSnapshot: { id: 'test', url: '', token: '' },
   listHostTerminalsMock: vi.fn(),
   onServerChangeMock: vi.fn<(callback: () => void) => () => void>(() => () => {}),
-  resolveWorkspacePathMock: vi.fn(async (directory?: string) => directory ?? null),
+  resolveWorkspacePathMock: vi.fn<(directory?: string) => Promise<string | null>>(),
   serverChangeCallback: { current: undefined as (() => void) | undefined },
   serverHealthSnapshot: new Map(),
   serverSnapshot: [] as never[],
@@ -41,6 +41,7 @@ vi.mock('../utils', async importOriginal => {
 describe('useTerminalSessionRestore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resolveWorkspacePathMock.mockImplementation(async (directory?: string) => directory ?? 'C:/startup')
     serverChangeCallback.current = undefined
     onServerChangeMock.mockImplementation((callback: () => void) => {
       serverChangeCallback.current = callback
@@ -82,11 +83,22 @@ describe('useTerminalSessionRestore', () => {
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
   })
 
-  it('clears terminal sessions when the workspace is unavailable', async () => {
+  it('uses the startup workspace when no project is selected', async () => {
+    listHostTerminalsMock.mockResolvedValue({ terminals: [] })
     const { result } = renderHook(() => useTerminalSessionRestore(undefined))
 
     await waitFor(() => expect(result.current.isRestoring).toBe(false))
-    expect(listHostTerminalsMock).not.toHaveBeenCalled()
+    expect(resolveWorkspacePathMock).toHaveBeenCalledWith(undefined)
+    expect(result.current.workspacePath).toBe('C:/startup')
+    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/startup')
+    expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
+  })
+
+  it('clears terminal sessions when the startup workspace is unavailable', async () => {
+    resolveWorkspacePathMock.mockResolvedValue(null)
+    const { result } = renderHook(() => useTerminalSessionRestore(undefined))
+
+    await waitFor(() => expect(result.current.isRestoring).toBe(false))
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
   })
 

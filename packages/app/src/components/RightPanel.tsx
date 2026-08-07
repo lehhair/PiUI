@@ -56,7 +56,7 @@ export const RightPanel = memo(function RightPanel({
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
-  const { isRestoring, normalizedDirectory } = useTerminalSessionRestore(directory)
+  const { isRestoring, normalizedDirectory, workspacePath } = useTerminalSessionRestore(directory)
 
   const handleNewTerminal = useCallback(async () => {
     try {
@@ -213,13 +213,13 @@ export const RightPanel = memo(function RightPanel({
 
           {activeTab.type === 'terminal' ? (
             <Suspense fallback={<PanelFallback />}>
-              <TerminalContent activeTab={activeTab} workspacePath={normalizedDirectory} />
+              <TerminalContent activeTab={activeTab} workspacePath={workspacePath} />
             </Suspense>
           ) : null}
         </>
       )
     },
-    [normalizedDirectory, isRestoring, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
+    [normalizedDirectory, workspacePath, isRestoring, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
   )
 
   if (inline) {

@@ -49,7 +49,7 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useFocusedSessionId()
   const { interaction, layout } = useChatViewport()
-  const { isRestoring, normalizedDirectory } = useTerminalSessionRestore(directory)
+  const { isRestoring, normalizedDirectory, workspacePath } = useTerminalSessionRestore(directory)
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -184,7 +184,7 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
 
           {activeTab.type === 'terminal' ? (
             <Suspense fallback={<PanelFallback />}>
-              <TerminalContent activeTab={activeTab} workspacePath={normalizedDirectory} position="bottom" />
+              <TerminalContent activeTab={activeTab} workspacePath={workspacePath} position="bottom" />
             </Suspense>
           ) : null}
 
@@ -213,7 +213,7 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
         </>
       )
     },
-    [directory, normalizedDirectory, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
+    [directory, normalizedDirectory, workspacePath, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
   )
 
   return (

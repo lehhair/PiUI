@@ -16,38 +16,34 @@ export function useTerminalSessionRestore(directory?: string) {
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
   const { activeServer } = useServerStore()
   const [isRestoring, setIsRestoring] = useState(false)
+  const [workspacePath, setWorkspacePath] = useState<string | undefined>(undefined)
+  const workspacePathRef = useRef<string | undefined>(undefined)
   const restoreRequestIdRef = useRef(0)
   // 只有首次恢复允许切换"恢复会话中"占位；后续后台刷新如果也置位，
   // 面板会把已挂载的 Terminal 卸载掉，连接一断一连造成状态闪烁
   const hasRestoredRef = useRef(false)
 
   useEffect(() => {
-    if (!normalizedDirectory) return
-    let workspacePath: string | null = null
     let active = true
+    workspacePathRef.current = undefined
+    setWorkspacePath(undefined)
     void resolveWorkspacePath(normalizedDirectory).then(resolved => {
       if (!active || !resolved) return
-      workspacePath = resolved
+      workspacePathRef.current = resolved
+      setWorkspacePath(resolved)
       piEventStream.connectWorkspace(resolved)
     }).catch(() => undefined)
     return () => {
       active = false
-      if (workspacePath) piEventStream.disconnectWorkspace(workspacePath)
+      const resolved = workspacePathRef.current
+      workspacePathRef.current = undefined
+      if (resolved) piEventStream.disconnectWorkspace(resolved)
     }
   }, [activeServer?.id, activeServer?.token, activeServer?.url, normalizedDirectory])
 
   useEffect(() => {
     const restoreSessions = async (requestId: number) => {
       if (!hasRestoredRef.current) setIsRestoring(true)
-      if (!normalizedDirectory) {
-        if (restoreRequestIdRef.current === requestId) {
-          layoutStore.syncTerminalSessions(undefined, [])
-          hasRestoredRef.current = true
-          setIsRestoring(false)
-        }
-        return
-      }
-
       try {
         const workspacePath = await resolveWorkspacePath(normalizedDirectory)
         if (!workspacePath) {
@@ -75,7 +71,7 @@ export function useTerminalSessionRestore(directory?: string) {
     void restoreSessions(requestId)
     const onTerminalsChanged = (event: Event) => {
       const workspacePath = (event as CustomEvent<{ workspacePath?: string }>).detail?.workspacePath
-      if (!workspacePath || normalizeToForwardSlash(workspacePath) !== normalizedDirectory) return
+      if (!workspacePath || normalizeToForwardSlash(workspacePath) !== normalizeToForwardSlash(workspacePathRef.current ?? '')) return
       void restoreSessions(++restoreRequestIdRef.current)
     }
     window.addEventListener('piui:terminals-changed', onTerminalsChanged)
@@ -89,5 +85,5 @@ export function useTerminalSessionRestore(directory?: string) {
     }
   }, [normalizedDirectory])
 
-  return { isRestoring, normalizedDirectory }
+  return { isRestoring, normalizedDirectory, workspacePath }
 }
