@@ -106,6 +106,7 @@ export class SessionHost {
     return {
       sessionId: target.sessionId,
       sessionFile: target.sessionFile ?? null,
+      sessionFileReady: Boolean(target.sessionFile && existsSync(target.sessionFile)),
       cwd: target.cwd,
       state: state ?? null,
     }
@@ -126,6 +127,7 @@ export class SessionHost {
         return {
           sessionId: existing.sessionId,
           sessionFile: existing.sessionFile ?? null,
+          sessionFileReady: Boolean(existing.sessionFile && existsSync(existing.sessionFile)),
           cwd: existing.cwd,
           state: state ?? null,
         }
@@ -145,6 +147,7 @@ export class SessionHost {
       return {
         sessionId: session.sessionId,
         sessionFile: session.sessionFile ?? null,
+        sessionFileReady: Boolean(session.sessionFile && existsSync(session.sessionFile)),
         cwd: session.cwd,
         state: state ?? null,
       }

@@ -5,6 +5,7 @@ import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
 import { serverStore } from '../../store/serverStore'
+import type { PiBranchPage } from '../domain/index.js'
 
 /**
  * Load a session's native slash commands (extension commands, prompt
@@ -67,8 +68,30 @@ export async function openPiSession(
     throw new Error('Session open failed: no sessionId returned')
   }
 
-  // Load initial state and branch data
-  await loadPiSessionData(result.sessionId, signal)
+  if (result.sessionFile && result.sessionFileReady !== false) {
+    // Existing sessions have a persisted file and can be previewed immediately.
+    await loadPiSessionData(result.sessionId, signal)
+  } else {
+    // A fresh Pi runtime has no session file until its first entry is written.
+    // Use the state returned by session.open instead of previewing a path that
+    // does not exist yet.
+    const state = result.state && typeof result.state === 'object' && !Array.isArray(result.state)
+      ? result.state as JsonObject
+      : undefined
+    if (state) piSessionStateStore.setState(result.sessionId, state)
+    piBranchStore.setData(result.sessionId, {
+      head: (state?.head ?? {
+        sdkVersion: 'unknown',
+        revision: 0,
+        header: null,
+        leafId: null,
+        entryCount: 0,
+        epoch: `fresh:${result.sessionId}`,
+      }) as PiBranchPage['head'],
+      items: [],
+      hasMore: false,
+    })
+  }
 
   return result
 }
