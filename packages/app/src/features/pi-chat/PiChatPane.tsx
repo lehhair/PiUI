@@ -18,17 +18,29 @@ import { piEventStream } from '../../pi/eventStream.js'
 import {
   abortPiOperation,
   compactPiSession,
+  cyclePiModel,
+  cyclePiThinkingLevel,
   executePiBash,
+  exportPiSession,
   forkPiSession,
+  importPiSession,
   loadMorePiBranchEntries,
+  loadPiSessionRegistry,
+  logoutPiProvider,
   refreshPiBranch,
   refreshPiSessionState,
   loadPiModels,
   loadPiSessionData,
   navigatePiTree,
+  newPiSessionFrom,
   openPiSession,
+  reloadPiSessionResources,
+  renamePiSession,
   sendPiPrompt,
   sendPiUserMessage,
+  setPiProjectTrust,
+  setPiScopedModels,
+  startPiProviderAuth,
   setPiExtensionEditorState,
   setPiModel,
   setPiThinkingLevel,
@@ -51,6 +63,7 @@ import { notificationStore } from '../../store/notificationStore'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useManagementEvents } from '../../pi/managementEventStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
+import { copyTextToClipboard } from '../../utils/clipboard'
 import {
   getModelVariantPref,
   getPreferredModelKey,
@@ -145,6 +158,8 @@ interface PiChatPaneProps {
   onEnterSession?: (sessionId: string, directory: string) => void
   onNewChat?: () => void
   onOpenSidebar?: () => void
+  onOpenSettings?: () => void
+  onOpenSettingsTab?: (tab: 'config' | 'keybindings' | 'about') => void
   onToggleRightPanel?: () => void
   onSplitPane?: () => void
   onTogglePaneFullscreen?: () => void
@@ -158,6 +173,20 @@ function attachmentToImage(attachment: Attachment): PiImageInput | null {
   const commaIndex = attachment.url.indexOf(',')
   if (commaIndex === -1) return null
   return { type: 'image', data: attachment.url.slice(commaIndex + 1), mimeType: attachment.mime }
+}
+
+function textFromTimelineItem(item: unknown): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return ''
+  const blocks = (item as { blocks?: unknown }).blocks
+  if (!Array.isArray(blocks)) return ''
+  return blocks
+    .filter((block): block is { type: 'text'; text: string } => (
+      Boolean(block) && typeof block === 'object' && !Array.isArray(block)
+      && (block as { type?: unknown }).type === 'text'
+      && typeof (block as { text?: unknown }).text === 'string'
+    ))
+    .map(block => block.text)
+    .join('\n')
 }
 
 /**
@@ -175,6 +204,8 @@ export function PiChatPane({
   onEnterSession,
   onNewChat,
   onOpenSidebar,
+  onOpenSettings,
+  onOpenSettingsTab,
   onToggleRightPanel,
   onSplitPane,
   onTogglePaneFullscreen,
@@ -725,6 +756,31 @@ export function PiChatPane({
         return true
       }
 
+      if (command === 'settings') {
+        onOpenSettings?.()
+        return true
+      }
+
+      if (command === 'hotkeys') {
+        onOpenSettingsTab?.('keybindings')
+        return true
+      }
+
+      if (command === 'changelog') {
+        onOpenSettingsTab?.('about')
+        return true
+      }
+
+      if (command === 'resume') {
+        onOpenSidebar?.()
+        return true
+      }
+
+      if (command === 'model' && !args) {
+        modelSelectorRef.current?.openMenu()
+        return true
+      }
+
       let targetSessionId = sessionId
       if (!targetSessionId) {
         const directory = currentDirectoryRef.current
@@ -771,6 +827,188 @@ export function PiChatPane({
         return true
       }
 
+      if (command === 'reload') {
+        try {
+          await reloadPiSessionResources(sid)
+          notificationStore.push(
+            'completed',
+            '/reload',
+            'Pi resources reloaded',
+            sid,
+            currentDirectoryRef.current,
+          )
+        } catch (error) {
+          notificationStore.push(
+            'error',
+            '/reload',
+            error instanceof Error ? error.message : String(error),
+            sid,
+            currentDirectoryRef.current,
+          )
+        }
+        return true
+      }
+
+      if (command === 'model') {
+        const requested = args.includes(':') ? args : args.split(/\s+/).slice(0, 2).join(':')
+        const model = models.find(item => `${item.provider}:${item.id}` === requested)
+        if (!model) {
+          notificationStore.push('error', '/model', `Unknown model: ${args}`, sid, currentDirectoryRef.current)
+          return true
+        }
+        handleModelChange(requested, model)
+        return true
+      }
+
+      if (command === 'scoped-models') {
+        const patterns = args.split(/[\s,]+/).map(value => value.trim()).filter(Boolean)
+        if (patterns.length === 0) {
+          onOpenSettingsTab?.('config')
+          return true
+        }
+        await setPiScopedModels(sid, patterns)
+        await refreshPiSessionState(sid)
+        return true
+      }
+
+      if (command === 'name') {
+        if (!args) {
+          const currentName = state?.sessionName
+          notificationStore.push('completed', '/name', typeof currentName === 'string' && currentName ? currentName : 'Session has no name', sid, currentDirectoryRef.current)
+          return true
+        }
+        await renamePiSession(sid, args)
+        return true
+      }
+
+      if (command === 'copy') {
+        const lastAssistant = [...items].reverse().find(item => item.kind === 'assistant_message')
+        const text = lastAssistant ? textFromTimelineItem(lastAssistant) : ''
+        if (!text) {
+          notificationStore.push('error', '/copy', 'No AI response to copy', sid, currentDirectoryRef.current)
+          return true
+        }
+        await copyTextToClipboard(text)
+        notificationStore.push('completed', '/copy', 'AI response copied', sid, currentDirectoryRef.current)
+        return true
+      }
+
+      if (command === 'clone') {
+        const result = await newPiSessionFrom(sid)
+        if (result.targetSessionId) {
+          onEnterSessionRef.current?.(result.targetSessionId, result.targetCwd ?? currentDirectoryRef.current ?? '')
+        }
+        return true
+      }
+
+      if (command === 'fork') {
+        const target = args || [...items].reverse().find(item => item.kind === 'user_message')?.entryId
+        if (!target) {
+          notificationStore.push('error', '/fork', 'No user message to fork from', sid, currentDirectoryRef.current)
+          return true
+        }
+        await handleFork(target)
+        return true
+      }
+
+      if (command === 'trust') {
+        const decision = args.toLowerCase()
+        if (!decision) {
+          onOpenSettingsTab?.('config')
+          return true
+        }
+        const value = decision === 'yes' || decision === 'true' || decision === 'allow'
+          ? true
+          : decision === 'no' || decision === 'false' || decision === 'deny'
+            ? false
+            : decision === 'reset' || decision === 'ask'
+              ? null
+              : undefined
+        if (value === undefined) {
+          notificationStore.push('error', '/trust', 'Use yes, no, or reset', sid, currentDirectoryRef.current)
+          return true
+        }
+        const cwd = currentDirectoryRef.current
+        if (!cwd) {
+          notificationStore.push('error', '/trust', 'Open a project before changing trust', sid, currentDirectoryRef.current)
+          return true
+        }
+        await setPiProjectTrust(cwd, value)
+        return true
+      }
+
+      if (command === 'logout') {
+        if (!args) {
+          onOpenSettingsTab?.('config')
+          return true
+        }
+        await logoutPiProvider(args.split(/\s+/)[0]!)
+        return true
+      }
+
+      if (command === 'login') {
+        if (!args) {
+          onOpenSettings?.()
+          return true
+        }
+        await startPiProviderAuth(args.split(/\s+/)[0]!)
+        return true
+      }
+
+      if (command === 'export') {
+        const outputPath = args || `${(currentDirectoryRef.current || '.').replace(/[\\/]+$/, '')}/pi-session.html`
+        const format = outputPath.toLowerCase().endsWith('.jsonl') ? 'jsonl' : 'html'
+        await exportPiSession(sid, format, outputPath)
+        notificationStore.push('completed', '/export', outputPath, sid, currentDirectoryRef.current)
+        return true
+      }
+
+      if (command === 'import') {
+        if (!args) {
+          notificationStore.push('error', '/import', 'Provide a session JSONL path', sid, currentDirectoryRef.current)
+          return true
+        }
+        const result = await importPiSession(sid, args)
+        if (result.targetSessionId) {
+          onEnterSessionRef.current?.(result.targetSessionId, result.targetCwd ?? currentDirectoryRef.current ?? '')
+        }
+        return true
+      }
+
+      if (command === 'tree') {
+        onToggleRightPanel?.()
+        return true
+      }
+
+      if (command === 'session') {
+        const model = state?.model as { provider?: string; id?: string } | undefined
+        const stats = state?.sessionStats as { totalMessages?: number; userMessages?: number; assistantMessages?: number; toolCalls?: number } | undefined
+        notificationStore.push(
+          'completed',
+          '/session',
+          [
+            typeof state?.sessionName === 'string' && state.sessionName ? state.sessionName : sid,
+            model?.provider && model.id ? `${model.provider}/${model.id}` : undefined,
+            stats ? `${stats.totalMessages ?? 0} messages · ${stats.userMessages ?? 0} user · ${stats.assistantMessages ?? 0} assistant · ${stats.toolCalls ?? 0} tool calls` : undefined,
+          ].filter(Boolean).join(' · '),
+          sid,
+          currentDirectoryRef.current,
+        )
+        return true
+      }
+
+      if (command === 'quit') {
+        notificationStore.push('completed', '/quit', 'The web app stays open; close its window to exit', sid, currentDirectoryRef.current)
+        return true
+      }
+
+      const registry = await loadPiSessionRegistry(sid)
+      const builtin = registry?.commands.find(item => item.name === command && item.sourceInfo && typeof item.sourceInfo === 'object' && !Array.isArray(item.sourceInfo) && item.sourceInfo.builtin === true)
+      if (builtin) {
+        notificationStore.push('error', `/${command}`, 'This Pi command needs a GUI interaction that is not available here yet', sid, currentDirectoryRef.current)
+        return true
+      }
+
       void sendPiPrompt(sid, trimmed, {
         streamingBehavior: isStreaming ? 'followUp' : undefined,
       }).catch(error => {
@@ -779,7 +1017,7 @@ export function PiChatPane({
       scheduleDelayedRefresh(sid)
       return true
     },
-    [sessionId, isStreaming, scheduleDelayedRefresh],
+    [currentDirectoryRef, handleFork, handleModelChange, isStreaming, items, models, onOpenSettings, onOpenSettingsTab, onOpenSidebar, onToggleRightPanel, scheduleDelayedRefresh, sessionId, state],
   )
 
   // Image attachment capability from the current model's native input
@@ -1046,6 +1284,9 @@ export function PiChatPane({
             sessionId={sessionId}
             onSend={handleSend}
             onCommand={handleCommand}
+            onCycleModel={direction => sessionId && void cyclePiModel(sessionId, direction).then(() => refreshPiSessionState(sessionId)).catch(() => undefined)}
+            onCycleThinkingLevel={() => sessionId && void cyclePiThinkingLevel(sessionId).then(() => refreshPiSessionState(sessionId)).catch(() => undefined)}
+            onOpenModelSelector={() => modelSelectorRef.current?.openMenu()}
             onTextChange={handleTextChange}
             onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
             onNewChat={onNewChat}

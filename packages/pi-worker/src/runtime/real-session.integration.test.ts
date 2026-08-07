@@ -174,6 +174,7 @@ export default function (pi) {
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       await session.initializeExtensions()
       assert.equal(session.getRegistry().commands.some(command => command.name === "trusted-project-command"), true)
+      assert.equal(session.getRegistry().commands.some(command => command.name === "reload" && command.sourceInfo?.builtin === true), true)
       assert.equal(new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).get(cwd), true)
     } finally {
       await session?.dispose()

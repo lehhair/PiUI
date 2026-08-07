@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, join, resolve } from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
@@ -10,6 +10,7 @@ export type PiSdk = typeof PiSdkModule
 
 export interface LoadedSdk {
   sdk: PiSdk
+  builtinSlashCommands: Array<{ name: string; description?: string; argumentHint?: string }>
   version: string
   source: "bundled" | "external"
   verified: boolean
@@ -222,6 +223,19 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
   const sdk = external
     ? await importExternalSdk(resolveSdkEntry(external))
     : await import("@earendil-works/pi-coding-agent") as PiSdk
+  const sdkEntry = external
+    ? resolveSdkEntry(external)
+    : fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
+  const slashCommands = await import(pathToFileURL(join(dirname(sdkEntry), "core/slash-commands.js")).href) as {
+    BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
+  }
+  const builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
+    .filter(command => typeof command.name === "string")
+    .map(command => ({
+      name: command.name as string,
+      ...(typeof command.description === "string" ? { description: command.description } : {}),
+      ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
+    }))
   const version = external
     ? (typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown")
     : BUNDLED_PI_SDK_VERSION
@@ -253,7 +267,7 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
     }
     console.warn(`[piui-worker] ${message}; continuing because external SDKs are opt-in`)
   }
-  cached = { sdk, version, source: external ? "external" : "bundled", verified }
+  cached = { sdk, builtinSlashCommands, version, source: external ? "external" : "bundled", verified }
   return cached
 }
 

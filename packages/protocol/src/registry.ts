@@ -12,6 +12,7 @@ export type ToolDescriptor = {
 export type CommandDescriptor = {
   name: string
   description?: string
+  argumentHint?: string
   sourceInfo?: JsonValue
   [extra: string]: JsonValue | undefined
 }
