@@ -44,7 +44,7 @@ if (isWorker) {
     await startPiUiServer(options)
   }
 } else if (process.versions.bun) {
-  await import("@earendil-works/pi-coding-agent/bun-cli")
+  await import("./pi-cli-bun-entry.js")
 } else {
-  await import("@earendil-works/pi-coding-agent/cli")
+  await import("./pi-cli-entry.js")
 }
