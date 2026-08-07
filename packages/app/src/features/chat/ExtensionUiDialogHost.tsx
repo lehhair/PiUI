@@ -89,7 +89,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
     <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[11]">
       <div className="mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out px-3.5 pb-2">
         <div className="overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float">
-          <div className="relative flex items-center gap-2 px-4 py-2.5 after:absolute after:bottom-0 after:left-4 after:right-4 after:h-px after:bg-border-200/50">
+          <div className="flex items-center gap-2 px-4 py-2.5">
             <QuestionIcon size={16} className="shrink-0 text-text-400" />
             <h3 className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">
               {request.title}
@@ -159,7 +159,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-2 border-t border-border-200/50 px-4 py-2.5">
+          <div className="flex items-center justify-end gap-2 px-4 py-2.5">
             <button
               type="button"
               onClick={() => void cancel()}
