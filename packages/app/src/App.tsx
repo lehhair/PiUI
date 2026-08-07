@@ -507,6 +507,8 @@ function App() {
         onEnterSession={(sessionId, directory) => navigatePaneToSession(paneId, sessionId, directory)}
         onNewChat={handleNewSession}
         onOpenSidebar={handleOpenSidebar}
+        onOpenSettings={openSettings}
+        onOpenSettingsTab={tab => openSettingsTab(tab)}
         onToggleRightPanel={handleToggleRightPanel}
         onSplitPane={splitPaneEnabled ? handleSplitPane : undefined}
         onTogglePaneFullscreen={paneLayout.isSplit ? handleToggleFocusedPaneFullscreen : undefined}
@@ -518,6 +520,8 @@ function App() {
       navigatePaneToSession,
       handleNewSession,
       handleOpenSidebar,
+      openSettings,
+      openSettingsTab,
       handleToggleRightPanel,
       splitPaneEnabled,
       handleSplitPane,

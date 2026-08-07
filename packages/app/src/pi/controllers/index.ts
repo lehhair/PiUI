@@ -546,6 +546,18 @@ export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> 
   return flight
 }
 
+export async function setPiProjectTrust(cwd: string, decision: boolean | null, signal?: AbortSignal): Promise<void> {
+  await transport.setProjectTrust(cwd, decision, signal)
+}
+
+export async function logoutPiProvider(providerId: string, signal?: AbortSignal): Promise<void> {
+  await transport.logoutProvider(providerId, signal)
+}
+
+export async function startPiProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<void> {
+  await transport.startProviderAuth(providerId, authType, signal)
+}
+
 async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<any>[]> {
   piModelsStore.setLoading(true)
   try {

@@ -17,12 +17,11 @@ import { scrollItemIntoView } from '../../utils/scrollUtils'
 export interface Command {
   name: string
   description?: string
+  argumentHint?: string
   keybind?: string
-  source: 'frontend' | 'api'
+  source: 'frontend' | 'builtin' | 'api'
 }
 
-// Frontend built-ins that map to local/native actions (pi TUI parity:
-// /new starts a new session, /compact compacts natively).
 function getFrontendCommands(): Command[] {
   return [
     { name: 'new', description: i18n.t('commands:slashCommand.newSessionDesc'), source: 'frontend' },
@@ -158,9 +157,11 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
           const sessionCommands: Command[] = descriptors.map(descriptor => ({
             name: descriptor.name,
             description: descriptor.description,
-            source: 'api',
+            argumentHint: descriptor.argumentHint,
+            source: descriptor.sourceInfo && typeof descriptor.sourceInfo === 'object' && !Array.isArray(descriptor.sourceInfo)
+              && descriptor.sourceInfo.builtin === true ? 'builtin' : 'api',
           }))
-          setCommands([...frontend, ...sessionCommands])
+          setCommands(sessionCommands)
           setSelectedIndex(0)
         })
         .catch(err => {
@@ -259,7 +260,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
         {filteredCommands.map((cmd, index) => (
           <button
             key={cmd.name}
-            title={cmd.description}
+            title={[cmd.description, cmd.argumentHint].filter(Boolean).join(' ')}
             className={`w-full px-2.5 py-2 md:py-1.5 flex items-center gap-3 text-left rounded-lg transition-colors ${
               index === activeIndex ? 'bg-accent-main-100/10 text-text-100' : 'text-text-200 hover:bg-bg-100/40'
             }`}
@@ -275,7 +276,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
               /{cmd.name}
             </span>
             <div className="flex-1 min-w-0">
-              {cmd.description && <div className="text-[length:var(--fs-sm)] text-text-400 truncate">{cmd.description}</div>}
+              {(cmd.description || cmd.argumentHint) && <div className="text-[length:var(--fs-sm)] text-text-400 truncate">{cmd.description}{cmd.argumentHint ? ` ${cmd.argumentHint}` : ''}</div>}
             </div>
             {cmd.keybind && <span className="text-[length:var(--fs-sm)] text-text-500 font-mono flex-shrink-0">{cmd.keybind}</span>}
           </button>

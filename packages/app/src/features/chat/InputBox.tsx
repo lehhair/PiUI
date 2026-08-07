@@ -127,6 +127,9 @@ export interface InputBoxProps {
   ) => Promise<boolean> | boolean
   onAbort?: () => void
   onCommand?: (command: string) => Promise<boolean> | boolean // 斜杠命令回调，接收完整命令字符串如 "/help"
+  onCycleModel?: (direction: 'forward' | 'backward') => void
+  onCycleThinkingLevel?: () => void
+  onOpenModelSelector?: () => void
   onTextChange?: (text: string) => void // 输入框文本变化（扩展 editor 状态同步）
   onNewChat?: () => void // 新建对话回调
   disabled?: boolean
@@ -180,6 +183,9 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   onSend,
   onAbort,
   onCommand,
+  onCycleModel,
+  onCycleThinkingLevel,
+  onOpenModelSelector,
   onNewChat,
   disabled,
   isStreaming,
@@ -697,6 +703,24 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         }
       }
 
+      // Pi TUI model/thinking shortcuts. The visible model selector remains
+      // the source of truth; these keys only trigger its native callbacks.
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        onCycleModel?.(e.shiftKey ? 'backward' : 'forward')
+        return
+      }
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        onOpenModelSelector?.()
+        return
+      }
+      if (e.shiftKey && e.key === 'Tab') {
+        e.preventDefault()
+        onCycleThinkingLevel?.()
+        return
+      }
+
       // Tab 键：mention 菜单关闭时，不做任何事（阻止跳到工具栏）
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -724,7 +748,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         handleSend()
       }
     },
-    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown],
+    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown, onCycleModel, onCycleThinkingLevel, onOpenModelSelector],
   )
 
   const handleChange = useCallback(

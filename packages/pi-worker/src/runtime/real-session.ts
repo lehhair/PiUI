@@ -655,11 +655,19 @@ export class RealPiSession implements SessionRuntime {
       tools: requireJsonValue(session.getAllTools()) as RegistrySnapshot["tools"],
       activeTools: session.getActiveToolNames?.() ?? [],
       commands: requireJsonValue(
-        extensions.extensions.flatMap(extension => [...extension.commands.values()].map(command => ({
-          name: command.name,
-          description: command.description,
-          sourceInfo: toJson(command.sourceInfo),
-        }))),
+        [
+          ...getLoadedSdk().builtinSlashCommands.map(command => ({
+            name: command.name,
+            description: command.description,
+            argumentHint: command.argumentHint,
+            sourceInfo: { source: "pi-sdk", builtin: true },
+          })),
+          ...extensions.extensions.flatMap(extension => [...extension.commands.values()].map(command => ({
+            name: command.name,
+            description: command.description,
+            sourceInfo: toJson(command.sourceInfo),
+          }))),
+        ],
       ) as RegistrySnapshot["commands"],
       extensions: extensionDescriptors,
       eventHandlers: [...eventHandlers],
