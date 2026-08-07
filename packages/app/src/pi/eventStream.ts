@@ -19,7 +19,7 @@ import { piBranchStore, piCommandStore, piSessionStateStore } from './state/inde
 import { extensionUiStore } from './extensionUiStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
-import { notifyReconnected, notifySessionIdle } from '../hooks/useGlobalEvents'
+import { notifyReconnected, notifySessionIdle, notifySessionStarted } from '../hooks/useGlobalEvents'
 import {
   getTrackedManagementProviders,
   receivePackageProgress,
@@ -428,11 +428,15 @@ class PiEventStream {
   private handleActivitySnapshot(snapshot: SessionsActivitySnapshot): void {
     const active = snapshot?.sessions ?? {}
     for (const [sessionId, status] of Object.entries(active)) {
+      if (!this.knownActiveSessions.has(sessionId)) notifySessionStarted(sessionId)
       activeSessionStore.updateStatus(sessionId, activityToSessionStatus(status))
     }
     // Sessions no longer active -> idle (clears their dot)
     for (const sessionId of this.knownActiveSessions) {
-      if (!(sessionId in active)) activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+      if (!(sessionId in active)) {
+        activeSessionStore.updateStatus(sessionId, { type: 'idle' })
+        notifySessionIdle(sessionId)
+      }
     }
     this.knownActiveSessions = new Set(Object.keys(active))
   }
@@ -459,6 +463,9 @@ class PiEventStream {
         notifySessionIdle(sessionId)
         break
       case 'agent_start':
+        notifySessionStarted(sessionId)
+        this.scheduleStateRefresh(sessionId)
+        break
       case 'turn_start':
       case 'tool_execution_start':
       case 'tool_execution_update':

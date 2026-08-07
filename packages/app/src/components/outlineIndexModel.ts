@@ -45,7 +45,7 @@ export function buildOutlineSourceEntries(items: PiTimelineItem[]): OutlineSourc
     if (!raw) continue
     const n = normalizeWhitespace(raw)
     entries.push({
-      messageId: item.entryId,
+      messageId: item.renderKey ?? item.entryId,
       title: truncate(n, FULL_TITLE_MAX),
     })
   }

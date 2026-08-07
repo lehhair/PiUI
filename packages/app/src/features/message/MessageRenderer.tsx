@@ -123,8 +123,12 @@ export function ProcessCollapseBlock({
   isActive: boolean
   stateKey: string
 }) {
-  const [expanded, setExpanded] = useUiDisclosureState(stateKey, isActive)
-  const shouldRenderBody = useMessageExpandRender(expanded)
+  const [expanded, setExpanded, touched] = useUiDisclosureState(stateKey, isActive)
+  // Automatic settling happens with the final answer moving outside the
+  // process shell. Animating that height makes the virtualizer measure the
+  // same row repeatedly while its contents move.
+  const settledExpanded = !isActive && !touched ? false : expanded
+  const shouldRenderBody = useMessageExpandRender(settledExpanded)
   const rootRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLButtonElement>(null)
   const unlockScrollRef = useRef<(() => void) | null>(null)
@@ -151,7 +155,7 @@ export function ProcessCollapseBlock({
   // 进行中默认展开：不要跑 grid 展开动画（否则每条新消息都带动画高度重排）
   // 用户手动折叠/展开、或结束后自动收起时再开动画
   // 挂载本身不另做入场生长——像普通消息一样直接出现
-  const animateGrid = !isActive || expanded !== isActive
+  const animateGrid = !(!isActive && !touched) && expanded !== isActive
 
   return (
     <div ref={rootRef} className="flex flex-col">
@@ -159,11 +163,11 @@ export function ProcessCollapseBlock({
         isActive={isActive}
         startedAt={startedAt}
         durationMs={durationMs}
-        expanded={expanded}
+        expanded={settledExpanded}
         onToggle={toggleExpanded}
         headerRef={headerRef}
       />
-      <MessageExpandPanel open={expanded} animate={animateGrid} clip>
+      <MessageExpandPanel open={settledExpanded} animate={animateGrid} clip>
         {shouldRenderBody && <div className={MSG_SPACING.processBody}>{children}</div>}
       </MessageExpandPanel>
     </div>

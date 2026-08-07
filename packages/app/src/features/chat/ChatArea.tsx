@@ -137,7 +137,7 @@ const MessageBody = memo(function MessageBody({
   processContentScope = 'all',
   onEntryGrowComplete,
 }: MessageBodyProps) {
-  const messageId = item.entryId
+  const messageId = item.renderKey ?? item.entryId
   const isUser = item.kind === 'user_message'
   const itemStreaming = item.kind === 'assistant_message' && item.isStreaming
   return (
@@ -404,7 +404,7 @@ export const ChatArea = memo(
         const next = !processCollapseEnabled
           ? visibleItems.map(item => ({
               kind: 'message' as const,
-              key: item.entryId,
+              key: item.renderKey ?? item.entryId,
               item,
             }))
           : buildProcessTimeline(visibleItems, {
@@ -430,11 +430,18 @@ export const ChatArea = memo(
         timeline.forEach((item, index) => {
           if (item.kind === 'message') {
             map.set(item.item.entryId, index)
+            if (item.item.renderKey) map.set(item.item.renderKey, index)
             return
           }
           if (item.userMessageId) map.set(item.userMessageId, index)
-          for (const child of item.children) map.set(child.item.entryId, index)
-          if (item.finalItem) map.set(item.finalItem.entryId, index)
+          for (const child of item.children) {
+            map.set(child.item.entryId, index)
+            if (child.item.renderKey) map.set(child.item.renderKey, index)
+          }
+          if (item.finalItem) {
+            map.set(item.finalItem.entryId, index)
+            if (item.finalItem.renderKey) map.set(item.finalItem.renderKey, index)
+          }
         })
         return map
       }, [timeline])
@@ -775,11 +782,22 @@ export const ChatArea = memo(
 
       // rows 变化且应贴底时再确认一次（append / 首批消息）
       // prepend 由 anchorTo + prepend 锚点处理，这里在用户已离底时不跟
+      const timelineStructureKey = useMemo(
+        () => timeline.map(item => {
+          if (item.kind === 'message') return `message:${item.key}`
+          return `shell:${item.key}:${item.isActive ? 'active' : 'settled'}:${item.children.length}:${item.finalItem?.entryId ?? ''}`
+        }).join('\u0000'),
+        [timeline],
+      )
       useLayoutEffect(() => {
         if (timeline.length === 0) return
         if (!shouldAnchorBottom() || prependLoading.current) return
         pinToBottom()
-      }, [timeline.length, pinToBottom])
+        const frame = requestAnimationFrame(() => {
+          if (shouldAnchorBottom()) pinToBottom()
+        })
+        return () => cancelAnimationFrame(frame)
+      }, [timeline.length, timelineStructureKey, pinToBottom])
 
       // retry/error 出现消失、输入框高度变 → 底部 footer 高度变，贴底时要跟着滚
       // 否则重试条进出后 scrollTop 停在旧位置，看起来没贴底

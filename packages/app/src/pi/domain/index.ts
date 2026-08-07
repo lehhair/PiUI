@@ -129,7 +129,7 @@ export type PiSessionRow = {
  * Tool results are paired back into their owning assistant item so the
  * message keeps its embedded tool calls (matching chat UI structure).
  */
-export type PiTimelineItem =
+export type PiTimelineItem = (
   | PiUserMessageItem
   | PiAssistantMessageItem
   | PiBashExecutionItem
@@ -137,6 +137,10 @@ export type PiTimelineItem =
   | PiBranchSummaryItem
   | PiCustomMessageItem
   | PiUnknownItem
+) & {
+  /** Stable React identity while a live message becomes a persisted entry. */
+  renderKey?: string
+}
 
 export type PiUserMessageItem = {
   kind: 'user_message'
@@ -145,6 +149,7 @@ export type PiUserMessageItem = {
   rawEntry: SessionEntry
   message: UserMessage
   blocks: (TextContent | ImageContent)[]
+  renderKey?: string
 }
 
 export type PiAssistantMessageItem = {
@@ -158,6 +163,7 @@ export type PiAssistantMessageItem = {
   toolResults: Record<string, ToolResultMessage>
   /** True for the live streaming message (not yet persisted as an entry) */
   isStreaming?: boolean
+  renderKey?: string
 }
 
 export type PiBashExecutionItem = {
@@ -319,6 +325,9 @@ export type PiBranchCheckpoint = Omit<BranchCheckpoint, 'liveMessage'> & { liveM
 export type PiBranchPage = Omit<EntriesPage, 'items' | 'checkpoint'> & {
   items: SessionEntry[]
   checkpoint?: PiBranchCheckpoint
+  client?: {
+    stableEntryIds?: Record<string, string>
+  }
 }
 
 /**

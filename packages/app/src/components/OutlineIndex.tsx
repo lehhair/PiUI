@@ -234,6 +234,7 @@ function sliceAroundVisible(entries: OutlineEntry[], visibleIds: string[], max: 
 interface TickRailProps {
   entries: OutlineEntry[]
   visual: VisualConfig
+  visibleIndex: number
 }
 
 const TICK_COLORS = {
@@ -319,7 +320,7 @@ function buildRailVars(entriesLength: number, fisheye: FisheyeConfig): CSSProper
   } as CSSProperties
 }
 
-function TickRail({ entries, visual }: TickRailProps) {
+function TickRail({ entries, visual, visibleIndex }: TickRailProps) {
   const itemStyle = buildItemStyle(visual.fisheye.css, visual.fisheye.margin.min)
   const tickStyle = buildTickStyle(visual.fisheye)
   const labelStyle = buildLabelStyle(visual.fisheye)
@@ -340,7 +341,17 @@ function TickRail({ entries, visual }: TickRailProps) {
           >
             {entry.railLabel}
           </div>
-          <div data-oi-tick className="rounded-full shrink-0" style={tickStyle} />
+          <div
+            data-oi-tick
+            className="rounded-full shrink-0"
+            style={{
+              ...tickStyle,
+              // Keep the passive highlight in React. Imperative repaint is
+              // still used for hover focus, but it must not be the only
+              // path that can make the current node visible.
+              backgroundColor: index === visibleIndex ? TICK_COLORS.visible.bg : TICK_COLORS.default.bg,
+            }}
+          />
         </div>
       ))}
     </>
@@ -371,8 +382,9 @@ export const OutlineIndex = memo(function OutlineIndex({
     let lastUserMsgId: string | null = null
     const ownerMap = new Map<string, string>()
     for (const item of items) {
-      if (item.kind === 'user_message') lastUserMsgId = item.entryId
-      if (lastUserMsgId) ownerMap.set(item.entryId, lastUserMsgId)
+      const messageId = item.renderKey ?? item.entryId
+      if (item.kind === 'user_message') lastUserMsgId = messageId
+      if (lastUserMsgId) ownerMap.set(messageId, lastUserMsgId)
     }
     return ownerMap
   }, [items, ownerByMessageId])
@@ -383,11 +395,16 @@ export const OutlineIndex = memo(function OutlineIndex({
     if (!currentHighlightEnabled || !visibleMessageIds) return set
 
     for (const vid of visibleMessageIds) {
+      // A user prompt can be visible by itself, while an assistant/tool row
+      // needs to resolve back to its owning prompt. Keep both paths explicit
+      // so a missing owner entry cannot suppress a direct user match.
+      const direct = entries.find(entry => entry.messageId === vid)
       const owner = resolvedOwnerByMessageId.get(vid)
-      if (owner) set.add(owner)
+      if (direct) set.add(direct.messageId)
+      else if (owner) set.add(owner)
     }
     return set
-  }, [currentHighlightEnabled, resolvedOwnerByMessageId, visibleMessageIds])
+  }, [currentHighlightEnabled, entries, resolvedOwnerByMessageId, visibleMessageIds])
   const ownerVisibleIndex = useMemo(() => findBiasedVisibleIndex(entries, ownerVisibleIds), [entries, ownerVisibleIds])
 
   if (entries.length < 2) return null
@@ -522,7 +539,7 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
         onMouseEnter={onTickEnter}
       >
         <div ref={railRef} className="pointer-events-none flex flex-col items-end" style={buildRailVars(entries.length, visual.fisheye)}>
-          <TickRail entries={entries} visual={visual} />
+          <TickRail entries={entries} visual={visual} visibleIndex={ownerVisibleIndex} />
         </div>
       </div>
     </div>
@@ -696,7 +713,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
         className="absolute top-1/2 -translate-y-1/2 z-[15] flex flex-col items-end select-none"
         style={{ right: `${visual.rightOffset}px`, ...buildRailVars(entries.length, visual.fisheye) }}
       >
-        <TickRail entries={entries} visual={visual} />
+          <TickRail entries={entries} visual={visual} visibleIndex={ownerVisibleIndex} />
       </div>
     </div>
   )

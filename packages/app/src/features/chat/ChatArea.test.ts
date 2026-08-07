@@ -646,7 +646,38 @@ describe('buildProcessTimeline', () => {
     })
 
     expect(timeline.map(item => item.kind)).toEqual(['message', 'message'])
-    expect(timeline[1]).toMatchObject({ kind: 'message', key: 'assistant-1' })
+    expect(timeline[1]).toMatchObject({ kind: 'message', key: 'process-shell:user-1' })
+  })
+
+  it('keeps a pure text response row key stable when streaming settles', () => {
+    const liveUser = createUserItem('live-user', 1000)
+    const streaming = {
+      ...createAssistantItem('assistant-1', [createTextBlock('hello')], 1001),
+      isStreaming: true,
+    }
+    const active = buildProcessTimeline([liveUser, streaming], {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: true,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+    const persistedUser = {
+      ...createUserItem('user-1', 1000),
+      renderKey: liveUser.entryId,
+    }
+    const completed = buildProcessTimeline([
+      persistedUser,
+      createAssistantItem('assistant-1', [createTextBlock('hello')], 1001, 1200),
+    ], {
+      turnDurationMap: new Map([['assistant-1', 200]]),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(active.map(item => item.key)).toEqual(['live-user', 'process-shell:live-user'])
+    expect(completed.map(item => item.key)).toEqual(active.map(item => item.key))
+    expect(completed[1]).toMatchObject({ kind: 'message', item: { entryId: 'assistant-1' } })
   })
 })
 

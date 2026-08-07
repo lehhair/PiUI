@@ -46,6 +46,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
 
   for (const entry of branch.items) {
     const timestamp = parseTime(entry.timestamp)
+    const renderKey = branch.client?.stableEntryIds?.[entry.id]
 
     if (entry.type === 'message') {
       const message = entry.message
@@ -58,6 +59,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
           rawEntry: entry,
           message,
           blocks: Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }],
+          renderKey,
         })
       } else if (message.role === 'assistant') {
         const item: PiAssistantMessageItem = {
@@ -68,6 +70,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
           message,
           blocks: message.content,
           toolResults: {},
+          renderKey,
         }
         items.push(item)
         for (const block of message.content) {

@@ -6,6 +6,10 @@ export const PAGE_EXTREME_RENDER_WEIGHT = 700
 export const PAGE_OVERSCAN_VIEWPORTS = 2
 export const PAGE_ADJACENT_OVERSCAN = 1
 
+function itemRenderKey(item: PiTimelineItem): string {
+  return item.renderKey ?? item.entryId
+}
+
 export interface MessageGroupRow {
   key: string
   messages: Message[]
@@ -900,12 +904,12 @@ export function buildProcessTimeline(
         turns.push(current)
         current = null
       }
-      items.push({ kind: 'message', key: item.entryId, item })
+      items.push({ kind: 'message', key: itemRenderKey(item), item })
       continue
     }
     if (!current) {
       // 历史续段 / 页首无 user：直接平铺，不挂壳
-      items.push({ kind: 'message', key: item.entryId, item })
+      items.push({ kind: 'message', key: itemRenderKey(item), item })
       continue
     }
     current.assistants.push(item)
@@ -962,7 +966,7 @@ export function buildProcessTimeline(
 
   for (const turn of turns) {
     if (turn.user) {
-      items.push({ kind: 'message', key: turn.user.entryId, item: turn.user })
+      items.push({ kind: 'message', key: itemRenderKey(turn.user), item: turn.user })
     }
 
     const assistants = turn.assistants
@@ -971,7 +975,7 @@ export function buildProcessTimeline(
     // 无 user 的续段：平铺
     if (!turn.user) {
       for (const m of assistants) {
-        items.push({ kind: 'message', key: m.entryId, item: m })
+        items.push({ kind: 'message', key: itemRenderKey(m), item: m })
       }
       continue
     }
@@ -1016,7 +1020,7 @@ export function buildProcessTimeline(
     if (children.length > 0 || turnIsActive) {
       items.push({
         kind: 'process-shell',
-        key: `process-shell:${userId}`,
+        key: `process-shell:${itemRenderKey(turn.user)}`,
         userMessageId: userId,
         startedAt,
         durationMs,
@@ -1027,12 +1031,14 @@ export function buildProcessTimeline(
     } else if (finalOutside) {
       items.push({
         kind: 'message',
-        key: finalOutside.entryId,
+        // Keep the row identity when a pure text response settles. During
+        // streaming this turn is represented by the process-shell row.
+        key: `process-shell:${itemRenderKey(turn.user)}`,
         item: finalOutside,
       })
     } else {
       for (const m of assistants) {
-        items.push({ kind: 'message', key: m.entryId, item: m })
+        items.push({ kind: 'message', key: itemRenderKey(m), item: m })
       }
     }
   }

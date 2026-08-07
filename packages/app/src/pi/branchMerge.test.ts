@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { PiBranchPage } from './domain/index.js'
+import type { PiBranchPage, PiLiveMessage } from './domain/index.js'
 import { mergeLatestBranchPage } from './branchMerge.js'
+import { selectPiTimelineItems } from './selectors/index.js'
 
 function entry(id: string): SessionEntry {
   return { type: 'model_change', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', provider: 'p', modelId: id } as SessionEntry
+}
+
+function messageEntry(id: string, role: 'user' | 'assistant', text: string): SessionEntry {
+  return {
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:00Z',
+    message: role === 'user'
+      ? { role, content: text }
+      : { role, content: [{ type: 'text', text }] },
+  } as SessionEntry
 }
 
 function page(ids: string[], overrides?: Partial<PiBranchPage>): PiBranchPage {
@@ -78,5 +91,37 @@ describe('mergeLatestBranchPage', () => {
     expect(merged).toBe(latest)
     expect(merged.items.map(i => i.id)).toEqual(['a', 'b'])
     expect(merged.hasMore).toBe(false)
+  })
+
+  it('keeps a live checkpoint until its persisted entry appears', () => {
+    const liveMessage = {
+      id: 'live-user',
+      revision: 2,
+      phase: 'streaming' as const,
+      message: { role: 'user', content: 'hello' },
+    } as PiLiveMessage
+    const current = page(['a'], { checkpoint: { position: { epoch: 'epoch-1', sequence: 2 }, liveMessage } })
+    const latest = page(['a'])
+
+    const merged = mergeLatestBranchPage(current, latest)
+
+    expect(merged.checkpoint?.liveMessage?.id).toBe('live-user')
+  })
+
+  it('maps a persisted message back to its live render key', () => {
+    const liveMessage = {
+      id: 'live-assistant',
+      revision: 2,
+      phase: 'persisting' as const,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    } as PiLiveMessage
+    const current = page(['user'], { checkpoint: { position: { epoch: 'epoch-1', sequence: 2 }, liveMessage } })
+    const latest = page(['user', 'assistant'])
+    latest.items[1] = messageEntry('assistant', 'assistant', 'done')
+
+    const merged = mergeLatestBranchPage(current, latest)
+
+    expect(merged.client?.stableEntryIds).toEqual({ assistant: 'live-assistant' })
+    expect(selectPiTimelineItems(merged).find(item => item.entryId === 'assistant')?.renderKey).toBe('live-assistant')
   })
 })
