@@ -88,24 +88,17 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
   return (
     <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[11]">
       <div className="mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out px-3.5 pb-2">
-        <div className="border border-border-300/40 rounded-[14px] shadow-float bg-bg-100 overflow-hidden">
-          <div className="bg-bg-000 rounded-t-[14px]">
-            {/* Header */}
-            <div className="flex items-center justify-between py-3 px-4">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="flex items-center justify-center text-text-100 w-5 h-5 shrink-0">
-                  <QuestionIcon size={18} />
-                </div>
-                <h3 className="text-[length:var(--fs-base)] leading-none font-medium text-text-100 truncate">
-                  {request.title}
-                </h3>
-                {queueLength > 1 && (
-                  <span className="text-[length:var(--fs-sm)] text-text-400 bg-bg-200 px-1.5 py-0.5 rounded shrink-0">
-                    +{queueLength - 1}
-                  </span>
-                )}
-              </div>
-            </div>
+        <div className="overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float">
+          <div className="flex items-center gap-2 border-b border-border-200/50 px-4 py-2.5">
+            <QuestionIcon size={16} className="shrink-0 text-text-400" />
+            <h3 className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">
+              {request.title}
+            </h3>
+            {queueLength > 1 && (
+              <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
+                +{queueLength - 1}
+              </span>
+            )}
           </div>
 
           {/* Body */}
@@ -166,7 +159,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-2 px-4 pb-3">
+          <div className="flex items-center justify-end gap-2 border-t border-border-200/50 px-4 py-2.5">
             <button
               type="button"
               onClick={() => void cancel()}
