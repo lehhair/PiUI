@@ -7,7 +7,13 @@ export { useRouter } from './useRouter'
 export { useProject } from './useProject'
 export { useMessageAnimation } from './useMessageAnimation'
 export { useGlobalEvents } from './useGlobalEvents'
-export { registerSessionConsumer, updateConsumerSessionId, hasOtherConsumerForSession } from './useGlobalEvents'
+export {
+  registerSessionConsumer,
+  updateConsumerSessionId,
+  hasOtherConsumerForSession,
+  notifySessionStarted,
+  subscribeSessionIdle,
+} from './useGlobalEvents'
 export type { SessionEventCallbacks } from './useGlobalEvents'
 export { useDelayedRender } from './useDelayedRender'
 export { useDisclosureScrollLock } from './useDisclosureScrollLock'

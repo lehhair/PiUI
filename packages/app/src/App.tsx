@@ -38,6 +38,7 @@ import { InternalDragLayer } from './components/InternalDragLayer'
 import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 import { trackPiSession } from './pi/piSessionIndex'
+import { piEventStream } from './pi/eventStream.js'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 
@@ -123,6 +124,16 @@ function App() {
 
   // 全局唯一 SSE 连接。所有 pane 通过 consumer 机制接收自己的 session 事件。
   useGlobalEvents(activeDirectories)
+
+  // Workspace streams carry global activity snapshots for sessions that do
+  // not have an open pane. Without this subscription background completion
+  // notifications have no event source.
+  useEffect(() => {
+    for (const directory of activeDirectories) piEventStream.connectWorkspace(directory)
+    return () => {
+      for (const directory of activeDirectories) piEventStream.disconnectWorkspace(directory)
+    }
+  }, [activeDirectories])
 
   // Runtime replacement (fork/new/import): panes follow the new session id
   useEffect(() => {

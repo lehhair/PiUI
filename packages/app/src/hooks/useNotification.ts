@@ -182,7 +182,16 @@ export function useNotification() {
 
   // 发送通知
   const sendNotification = useCallback(async (title: string, body: string, data?: NotificationData) => {
-    if (!enabledRef.current) return
+    let isEnabled = enabledRef.current
+    try {
+      // Settings owns a separate hook instance, so its toggle does not update
+      // this listener's React state. Read the shared persisted flag at send
+      // time to keep background notifications in sync.
+      isEnabled = localStorage.getItem(STORAGE_KEY_NOTIFICATIONS_ENABLED) === 'true'
+    } catch {
+      // Keep the in-memory value when storage is unavailable.
+    }
+    if (!isEnabled) return
 
     // Tauri 原生通知
     if (isTauri()) {
