@@ -18,6 +18,8 @@ import { useServerStore } from '../../../hooks'
 import { settingsFieldClass, SettingField, SettingRow, SettingsSection, SettingsSelect, Toggle } from './SettingsUI'
 
 const TERMINAL_SHELL_STORAGE_KEY = 'piui-terminal-shell'
+const LISTEN_HOST_KEY = 'PIUI_HOST'
+const LISTEN_PORT_KEY = 'PIUI_PORT'
 
 export function ServiceSettings() {
   const { t } = useTranslation(['settings', 'common'])
@@ -129,12 +131,51 @@ export function ServiceSettings() {
     </SettingField>
   )
 
+  const listenHost = serviceStore.envVars.find(item => item.key.trim().toUpperCase() === LISTEN_HOST_KEY)?.value.trim() || '127.0.0.1'
+  const listenPort = serviceStore.envVars.find(item => item.key.trim().toUpperCase() === LISTEN_PORT_KEY)?.value.trim() || '8787'
+  const listenSettings = (
+    <SettingsSection title={t('service.listenTitle')} description={t('service.listenDesc')}>
+      <SettingField label={t('service.listenHost')} description={t('service.listenHostDesc')}>
+        <SettingsSelect
+          ariaLabel={t('service.listenHost')}
+          value={listenHost}
+          options={[
+            { value: '127.0.0.1', label: t('service.listenHostLocal') },
+            { value: '0.0.0.0', label: t('service.listenHostLan') },
+            { value: '::', label: t('service.listenHostAll') },
+          ]}
+          onChange={value => serviceStore.upsertEnvVar(LISTEN_HOST_KEY, value)}
+        />
+      </SettingField>
+      <SettingField label={t('service.listenPort')} description={t('service.listenPortDesc')}>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          inputMode="numeric"
+          value={listenPort}
+          aria-label={t('service.listenPort')}
+          className={`${settingsFieldClass} w-28`}
+          onChange={event => {
+            const value = event.target.value.replace(/\D/g, '').slice(0, 5)
+            if (value) serviceStore.upsertEnvVar(LISTEN_PORT_KEY, value)
+            else serviceStore.setEnvVars(serviceStore.envVars.filter(item => item.key.trim().toUpperCase() !== LISTEN_PORT_KEY))
+          }}
+        />
+      </SettingField>
+      <div className="text-[length:var(--fs-xs)] leading-relaxed text-warning-100/80">
+        {t('service.listenRestartHint')}
+      </div>
+    </SettingsSection>
+  )
+
   if (!desktop) {
     return (
       <>
         <SettingsSection title={t('service.title')} description={t('service.desktopOnly')}>
           <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-300">{t('service.webModeDesc')}</div>
         </SettingsSection>
+        {listenSettings}
         <SettingsSection title={t('service.terminalTitle')} description={t('service.terminalTitleDesc')}>
           {terminalShell}
         </SettingsSection>
@@ -146,10 +187,12 @@ export function ServiceSettings() {
   const serviceEnvironment = status?.environment ?? {}
 
   return (
-    <SettingsSection
-      title={t('service.title')}
-      description={t('service.description')}
-      actions={
+    <>
+      {listenSettings}
+      <SettingsSection
+        title={t('service.title')}
+        description={t('service.description')}
+        actions={
         <button
           type="button"
           className="flex h-7 w-7 items-center justify-center rounded-md text-text-400 hover:bg-bg-200/70 hover:text-text-200 disabled:opacity-40"
@@ -160,8 +203,8 @@ export function ServiceSettings() {
         >
           <RetryIcon size={14} />
         </button>
-      }
-    >
+        }
+      >
       {terminalShell}
 
       <SettingRow
@@ -323,6 +366,7 @@ export function ServiceSettings() {
       </SettingField>
 
       {error && <p className="break-all text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
-    </SettingsSection>
+      </SettingsSection>
+    </>
   )
 }
