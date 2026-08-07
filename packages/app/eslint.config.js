@@ -7,7 +7,15 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'node_modules', 'public/material-icons', 'src-tauri/target/**']),
+  globalIgnores([
+    'dist',
+    'node_modules',
+    'public/material-icons',
+    'src-tauri/target/**',
+    // These are bundled extension examples, not app source. Some examples
+    // intentionally use terminal control codes and CommonJS loading.
+    'src-tauri/resources/examples/**',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
