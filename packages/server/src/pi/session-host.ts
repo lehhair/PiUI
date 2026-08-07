@@ -77,13 +77,53 @@ export class SessionHost {
     this.runtimeReaper.unref?.()
   }
 
+  prewarm(cwd: string): Promise<void> {
+    return this.supervisor.prewarm(cwd)
+  }
+
   async openSession(cwd: string, sessionFile?: string, signal?: AbortSignal, reuseFromSessionId?: string): Promise<JsonObject> {
     if (sessionFile && reuseFromSessionId) {
       const switched = await this.switchAttachedSession(reuseFromSessionId, cwd, sessionFile, signal)
       if (switched) return switched
     }
-    if (!sessionFile) return this.openSessionOnce(cwd, sessionFile, signal)
+    if (!sessionFile) {
+      const warm = await this.supervisor.takeWarmRuntime?.(cwd)
+      if (warm) {
+        try {
+          const opened = await this.adoptRuntime(warm, cwd, signal)
+          void this.supervisor.prewarm?.(cwd)
+          return opened
+        } catch {
+          await warm.dispose().catch(() => undefined)
+        }
+      }
+      const opened = await this.openSessionOnce(cwd, sessionFile, signal)
+      void this.supervisor.prewarm?.(cwd)
+      return opened
+    }
     return this.runtimes.openFlight(sessionFile, openSignal => this.openSessionOnce(cwd, sessionFile, openSignal), signal)
+  }
+
+  private async adoptRuntime(
+    worker: Awaited<ReturnType<RuntimeSupervisor["open"]>>,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
+    const state = await worker.command("state.get", undefined, signal) as JsonObject | undefined
+    const session: AttachedSession = {
+      sessionId: worker.getSessionId(),
+      cwd: worker.getCwd() || cwd,
+      sessionFile: worker.getSessionFile(),
+      worker,
+    }
+    this.attach(session)
+    return {
+      sessionId: session.sessionId,
+      sessionFile: session.sessionFile ?? null,
+      sessionFileReady: Boolean(session.sessionFile && existsSync(session.sessionFile)),
+      cwd: session.cwd,
+      state: state ?? null,
+    }
   }
 
   private async switchAttachedSession(

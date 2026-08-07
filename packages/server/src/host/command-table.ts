@@ -96,7 +96,7 @@ function optLimit(params: JsonObject, key: string, fallback: number, maximum: nu
  * 全局工作区的默认根目录：服务器可执行文件所在目录（桌面安装目录）。
  * 独立运行服务器时同样成立——execPath 就是服务器自身的位置。
  */
-function defaultWorkspaceRoot(): string {
+export function defaultWorkspaceRoot(): string {
   const exe = process.execPath
   if (exe) {
     const dir = path.dirname(exe)

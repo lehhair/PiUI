@@ -1,4 +1,5 @@
 import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHostCall } from "@piui/pi-worker"
+import { resolve } from "node:path"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import {
   WorkerSession,
@@ -24,6 +25,21 @@ export interface RuntimeLeaseManager {
   dispose(): void
 }
 
+interface WarmRuntimeSlot {
+  promise: Promise<WorkerSession>
+  claimed: boolean
+  timer?: NodeJS.Timeout
+}
+
+const DEFAULT_WARM_RUNTIME_TTL_MS = 5 * 60_000
+
+function warmRuntimeTtlMs(): number {
+  const configured = Number(process.env.PIUI_WARM_RUNTIME_TTL_MS)
+  return Number.isFinite(configured) && configured >= 30_000
+    ? configured
+    : DEFAULT_WARM_RUNTIME_TTL_MS
+}
+
 export class RuntimeSupervisor {
   private readonly workerEntry: URL
   private readonly workerOptions?: WorkerClientOptions
@@ -35,6 +51,7 @@ export class RuntimeSupervisor {
   private readonly active = new Set<WorkerSession>()
   private readonly opening = new Set<WorkerHost>()
   private readonly runtimeLeases = new Map<WorkerSession, SessionLease>()
+  private readonly warmSlots = new Map<string, WarmRuntimeSlot>()
   private readonly pendingOpens = new Set<Promise<WorkerSession>>()
   private disposed = false
 
@@ -100,6 +117,51 @@ export class RuntimeSupervisor {
     this.pendingOpens.add(opening)
     void opening.finally(() => this.pendingOpens.delete(opening)).catch(() => undefined)
     return opening
+  }
+
+  /** Start one already-open, empty Pi runtime for a workspace. */
+  prewarm(cwd: string): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    const key = workspaceKey(cwd)
+    if (this.warmSlots.has(key)) return Promise.resolve()
+
+    const slot = { claimed: false } as WarmRuntimeSlot
+    slot.promise = this.open(cwd).then(runtime => {
+      const current = this.warmSlots.get(key)
+      if (current !== slot || slot.claimed || this.disposed) {
+        void runtime.dispose()
+        throw new Error("warm runtime was discarded")
+      }
+      return runtime
+    }).catch(error => {
+      if (this.warmSlots.get(key) === slot) this.warmSlots.delete(key)
+      throw error
+    })
+    this.warmSlots.set(key, slot)
+    slot.timer = setTimeout(() => {
+      if (this.warmSlots.get(key) !== slot || slot.claimed) return
+      slot.claimed = true
+      this.warmSlots.delete(key)
+      void slot.promise.then(runtime => runtime.dispose()).catch(() => undefined)
+    }, warmRuntimeTtlMs())
+    slot.timer.unref?.()
+    void slot.promise.catch(() => undefined)
+    return Promise.resolve()
+  }
+
+  /** Claim a warm runtime; the caller becomes responsible for its lifecycle. */
+  async takeWarmRuntime(cwd: string): Promise<WorkerSession | undefined> {
+    const key = workspaceKey(cwd)
+    const slot = this.warmSlots.get(key)
+    if (!slot) return undefined
+    slot.claimed = true
+    this.warmSlots.delete(key)
+    if (slot.timer) clearTimeout(slot.timer)
+    try {
+      return await slot.promise
+    } catch {
+      return undefined
+    }
   }
 
   private async performOpen(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
@@ -214,6 +276,12 @@ export class RuntimeSupervisor {
     if (this.disposed) return
     this.disposed = true
     const pendingOpens = [...this.pendingOpens]
+    const warmPromises = [...this.warmSlots.values()].map(slot => {
+      slot.claimed = true
+      if (slot.timer) clearTimeout(slot.timer)
+      return slot.promise
+    })
+    this.warmSlots.clear()
     const standby = this.standbyPool.splice(0, this.standbyPool.length)
     await Promise.allSettled([
       ...[...this.active].map(runtime => runtime.dispose()),
@@ -221,6 +289,7 @@ export class RuntimeSupervisor {
       this.catalog?.dispose() ?? Promise.resolve(),
       ...standby.map(host => host.dispose()),
       ...pendingOpens,
+      ...warmPromises,
     ])
     if (this.active.size > 0) {
       await Promise.allSettled([...this.active].map(runtime => runtime.dispose()))
@@ -258,6 +327,11 @@ export class RuntimeSupervisor {
 
 function errorCode(error: unknown): string | undefined {
   return error && typeof error === "object" && "code" in error ? String(error.code) : undefined
+}
+
+function workspaceKey(cwd: string): string {
+  const normalized = resolve(cwd).replace(/\\/g, "/")
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized
 }
 
 function once(run: () => void): () => void {
