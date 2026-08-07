@@ -84,8 +84,8 @@ export default defineConfig({
   server: {
     // Tauri mobile dev 需要通过网络访问 Vite dev server
     host: process.env.TAURI_DEV_HOST || false,
-    // 避免端口冲突
-    strictPort: true,
+    // 普通 web dev 自动避让已占用端口；Tauri mobile 需要固定端口供原生壳连接
+    strictPort: Boolean(tauriDevHost),
     // The proxy injects the local backend token, so only allow the explicit
     // host used by the Tauri dev bridge.
     allowedHosts: tauriDevHost ? [tauriDevHost] : [],
