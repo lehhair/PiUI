@@ -63,6 +63,49 @@ describe('ExtensionUiDialogHost', () => {
     ))
   })
 
+  it('submits input values and keeps the title compact', async () => {
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-input',
+      kind: 'input',
+      title: 'A very long extension title that should stay on one line',
+      options: undefined,
+      placeholder: 'Environment name',
+    } as never))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    const input = screen.getByPlaceholderText('Environment name')
+    fireEvent.change(input, { target: { value: 'preview-windows' } })
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
+      'session-1',
+      'request-input',
+      expect.objectContaining({ value: 'preview-windows' }),
+    ))
+  })
+
+  it('submits multi-line editor content', async () => {
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-editor',
+      kind: 'editor',
+      title: 'Edit release notes',
+      options: undefined,
+      prefill: 'line one\nline two',
+    } as never))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    const editor = screen.getByRole('textbox')
+    expect(editor).toHaveValue('line one\nline two')
+    fireEvent.change(editor, { target: { value: 'updated\ncontent' } })
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
+      'session-1',
+      'request-editor',
+      expect.objectContaining({ value: 'updated\ncontent' }),
+    ))
+  })
+
   it('shows only the current session pending requests', () => {
     extensionUiStore.requestOpened(selectRequest({ sessionId: 'other-session' }))
     render(<ExtensionUiDialogHost sessionId="session-1" />)
