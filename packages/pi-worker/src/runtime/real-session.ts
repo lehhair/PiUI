@@ -5,6 +5,7 @@ import path from "node:path"
 import type {
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
+  LoadExtensionsResult,
   ProjectTrustContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent"
@@ -144,32 +145,24 @@ const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
 }) => {
   const {
     SettingsManager,
-    applyHttpProxySettings,
     createAgentSessionServices,
     createAgentSessionFromServices,
-    ProjectTrustStore,
-    resolveProjectTrusted,
   } = getLoadedSdk().sdk
   const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-  applyHttpProxySettings(globalSettings.getHttpProxy())
-  const trustDiagnostics: string[] = []
   const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
     settingsManager,
     resourceLoaderReloadOptions: {
-      resolveProjectTrust: ({ extensionsResult }) => resolveProjectTrusted({
+      resolveProjectTrust: async ({ extensionsResult }) => resolveProjectTrustFromExtensions(
         cwd,
-        trustStore: new ProjectTrustStore(agentDir),
+        agentDir,
         extensionsResult,
-        defaultProjectTrust: globalSettings.getDefaultProjectTrust(),
-        projectTrustContext: projectTrustContextForRpc(cwd),
-        onExtensionError: message => trustDiagnostics.push(message),
-      }),
+        globalSettings.getDefaultProjectTrust(),
+      ),
     },
   })
-  services.diagnostics.push(...trustDiagnostics.map(message => ({ type: "warning" as const, message })))
   return {
     ...(await createAgentSessionFromServices({
       services,
@@ -661,7 +654,13 @@ export class RealPiSession implements SessionRuntime {
       sdkVersion: getLoadedSdk().version,
       tools: requireJsonValue(session.getAllTools()) as RegistrySnapshot["tools"],
       activeTools: session.getActiveToolNames?.() ?? [],
-      commands: requireJsonValue(session.getCommands()) as RegistrySnapshot["commands"],
+      commands: requireJsonValue(
+        extensions.extensions.flatMap(extension => [...extension.commands.values()].map(command => ({
+          name: command.name,
+          description: command.description,
+          sourceInfo: toJson(command.sourceInfo),
+        }))),
+      ) as RegistrySnapshot["commands"],
       extensions: extensionDescriptors,
       eventHandlers: [...eventHandlers],
     }
@@ -1117,4 +1116,34 @@ async function assertSessionFileInside(rootPath: string, sessionFile: string): P
   if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
     throw Object.assign(new Error("Pi session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
   }
+}
+
+async function resolveProjectTrustFromExtensions(
+  cwd: string,
+  agentDir: string,
+  extensionsResult: LoadExtensionsResult,
+  defaultDecision: "always" | "never" | "ask",
+): Promise<boolean> {
+  const { ProjectTrustStore, hasTrustRequiringProjectResources } = getLoadedSdk().sdk
+  if (!hasTrustRequiringProjectResources(cwd)) return true
+
+  const trustStore = new ProjectTrustStore(agentDir)
+  const context = projectTrustContextForRpc(cwd)
+  for (const extension of extensionsResult.extensions) {
+    const handlers = extension.handlers.get("project_trust") ?? []
+    for (const handler of handlers) {
+      const result = await handler({ type: "project_trust", cwd }, context) as {
+        trusted: "yes" | "no" | "undecided"
+        remember?: boolean
+      }
+      if (result.trusted === "undecided") continue
+      const trusted = result.trusted === "yes"
+      if (result.remember === true) trustStore.set(cwd, trusted)
+      return trusted
+    }
+  }
+
+  const stored = trustStore.get(cwd)
+  if (stored !== null) return stored
+  return defaultDecision === "always"
 }

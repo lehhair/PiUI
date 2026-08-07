@@ -233,11 +233,9 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
   }
 
   async patchSettings(cwd: string, patch: JsonObject): Promise<JsonValue> {
-    const { applyHttpProxySettings } = getLoadedSdk().sdk
     const { manager, trust } = settingsForWorkspace(cwd, this.dir())
     applySettingsPatch(manager, patch)
     await manager.flush()
-    if ("httpProxy" in patch) applyHttpProxySettings(manager.getHttpProxy())
     return settingsSnapshot(cwd, manager, trust.trusted)
   }
 
@@ -330,6 +328,7 @@ function toJsonObject(value: unknown): JsonObject {
 }
 
 function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): JsonValue {
+  const effectiveSettings = (manager as unknown as { settings?: { httpProxy?: unknown } }).settings
   return requireJsonValue({
     workspacePath: cwd,
     projectTrusted: trusted,
@@ -351,7 +350,7 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
       providerRetry: manager.getProviderRetrySettings(),
       httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
       websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs(),
-      httpProxy: manager.getHttpProxy(),
+      httpProxy: typeof effectiveSettings?.httpProxy === "string" ? effectiveSettings.httpProxy : undefined,
       externalEditor: manager.getExternalEditorCommand(),
       hideThinkingBlock: manager.getHideThinkingBlock(),
       showCacheMissNotices: manager.getShowCacheMissNotices(),
@@ -392,6 +391,8 @@ function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolea
 }
 
 function applySettingsPatch(manager: SettingsManager, patch: JsonObject): void {
+  let httpProxyOverride: string | undefined
+  let hasHttpProxyOverride = false
   for (const [key, value] of Object.entries(patch)) {
     if (key === "defaultModelAndProvider") {
       const pair = expectRecord(key, value)
@@ -408,7 +409,10 @@ function applySettingsPatch(manager: SettingsManager, patch: JsonObject): void {
     else if (key === "compactionEnabled") manager.setCompactionEnabled(expectBoolean(key, value))
     else if (key === "retryEnabled") manager.setRetryEnabled(expectBoolean(key, value))
     else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNonNegativeNumber(key, value))
-    else if (key === "httpProxy") manager.setHttpProxy(expectOptionalString(key, value))
+    else if (key === "httpProxy") {
+      httpProxyOverride = expectOptionalString(key, value)?.trim()
+      hasHttpProxyOverride = true
+    }
     else if (key === "hideThinkingBlock") manager.setHideThinkingBlock(expectBoolean(key, value))
     else if (key === "showCacheMissNotices") manager.setShowCacheMissNotices(expectBoolean(key, value))
     else if (key === "shellPath") manager.setShellPath(expectOptionalString(key, value))
@@ -446,6 +450,8 @@ function applySettingsPatch(manager: SettingsManager, patch: JsonObject): void {
     else if (key === "warnings") manager.setWarnings(expectWarnings(key, value))
     else throw Object.assign(new Error(`unsupported Pi setting: ${key}`), { code: "INVALID_REQUEST" })
   }
+  // Setter methods rebuild effective settings, so apply this override last.
+  if (hasHttpProxyOverride) manager.applyOverrides({ httpProxy: httpProxyOverride })
 }
 
 function expectString(key: string, value: unknown): string {

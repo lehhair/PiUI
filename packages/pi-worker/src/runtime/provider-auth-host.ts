@@ -166,7 +166,7 @@ export class ProviderAuthHost {
   }
 
   async reloadConfig(): Promise<void> {
-    await (await this.runtime()).reloadConfig()
+    await (await this.runtime()).refresh()
   }
 
   async refresh(options?: JsonObject): Promise<JsonValue> {
