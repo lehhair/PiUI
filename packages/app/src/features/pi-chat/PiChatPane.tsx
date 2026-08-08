@@ -47,6 +47,7 @@ import {
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import type { PiImageInput } from '../../pi/transport/index.js'
+import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
 import { extensionUiStore } from '../../pi/extensionUiStore'
@@ -168,13 +169,6 @@ interface PiChatPaneProps {
   navigatePaneToSession?: (paneId: string, sessionId: string, directory?: string) => void
 }
 
-/** Convert a data-url attachment to a native ImageContent block */
-function attachmentToImage(attachment: Attachment): PiImageInput | null {
-  if (!attachment.url?.startsWith('data:') || !attachment.mime?.startsWith('image/')) return null
-  const commaIndex = attachment.url.indexOf(',')
-  if (commaIndex === -1) return null
-  return { type: 'image', data: attachment.url.slice(commaIndex + 1), mimeType: attachment.mime }
-}
 
 function textFromTimelineItem(item: unknown): string {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return ''
