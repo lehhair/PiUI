@@ -1,34 +1,13 @@
-// API Types - 向后兼容层
+// ============================================
+// PiUI host surface types — 原生形状，无 OCUI 兼容层
+// ============================================
 
-export type * from '../types/api'
-
-export type { ModelInfo, FileCapabilities, Attachment, AttachmentType } from '../types/ui'
-
-export type { Model as ApiModel, Provider as ApiProvider, ProvidersResponse } from '../types/api/model'
-export type { Project as ApiProject, PathResponse as ApiPath } from '../types/api/project'
-export type { Agent as ApiAgent, AgentPermission as ApiAgentPermission } from '../types/api/agent'
-
-import type { Attachment } from '../types/ui'
-
-export interface RevertedMessage {
-  text: string
-  attachments: Attachment[]
-}
-
-export interface SendMessageParams {
-  sessionId: string
-  text: string
-  attachments: Attachment[]
-  model: {
-    providerID: string
-    modelID: string
-  }
-  agent?: string
-  variant?: string
-  directory?: string
-}
-
-export interface SendMessageResponse {
-  info: import('../types/api/message').AssistantMessage
-  parts: import('../types/api/message').Part[]
+/** 当前/已保存的工作区（由 PiUI server 的 workspace 语义构建） */
+export interface HostProject {
+  id: string
+  name: string
+  /** 工作区绝对路径 */
+  path: string
+  /** git 仓库根（存在即视为 git 工作区） */
+  gitRoot?: string
 }

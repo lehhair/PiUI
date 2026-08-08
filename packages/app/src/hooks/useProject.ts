@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getCurrentProject, getProjects, type ApiProject } from '../api'
+import { getCurrentProject, getProjects, type HostProject } from '../api'
 import { serverStore } from '../store/serverStore'
 import { apiErrorHandler } from '../utils'
 import { serverStorage } from '../utils/perServerStorage'
 
 export interface UseProjectResult {
   // 当前选中的 project
-  currentProject: ApiProject | null
+  currentProject: HostProject | null
   // 所有可用的 projects
-  projects: ApiProject[]
+  projects: HostProject[]
   // 加载状态
   isLoading: boolean
   // 错误信息
@@ -24,8 +24,8 @@ const STORAGE_KEY = 'piui-selected-project-id'
 
 export function useProject(): UseProjectResult {
   const { t } = useTranslation(['commands'])
-  const [currentProject, setCurrentProject] = useState<ApiProject | null>(null)
-  const [projects, setProjects] = useState<ApiProject[]>([])
+  const [currentProject, setCurrentProject] = useState<HostProject | null>(null)
+  const [projects, setProjects] = useState<HostProject[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)

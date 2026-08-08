@@ -30,7 +30,6 @@ import {
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
 import { useChatViewport } from './chatViewport'
-import type { ApiAgent } from '../../api/client'
 import type { Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../types/ui'
 
@@ -134,9 +133,6 @@ export interface InputBoxProps {
   onNewChat?: () => void // 新建对话回调
   disabled?: boolean
   isStreaming?: boolean
-  agents?: ApiAgent[]
-  selectedAgent?: string
-  onAgentChange?: (agentName: string) => void
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
@@ -189,9 +185,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   onNewChat,
   disabled,
   isStreaming,
-  agents = [],
-  selectedAgent,
-  onAgentChange,
   variants = [],
   selectedVariant,
   onVariantChange,
@@ -568,13 +561,9 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     }
 
     // 从 attachments 中找 agent mention
-    const agentAttachment = attachments.find(a => a.type === 'agent')
-    const mentionedAgent = agentAttachment?.agentName
-
     void runSubmit(
       () =>
         onSend(text, attachments, {
-          agent: mentionedAgent || selectedAgent,
           variant: selectedVariant,
           ...(isStreaming && effectiveDeliveryMode ? { delivery: effectiveDeliveryMode } : {}),
         }),
@@ -592,7 +581,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     onSend,
     resetDraft,
     runSubmit,
-    selectedAgent,
     selectedVariant,
     isStreaming,
     effectiveDeliveryMode,
@@ -831,7 +819,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       }
 
       // 构建 @ 文本
-      const mentionText = item.type === 'agent' ? `@${item.displayName}` : `@${item.relativePath || item.displayName}`
+      const mentionText = `@${item.relativePath || item.displayName}`
 
       // 计算新文本
       const beforeAt = text.slice(0, mentionStartIndex)
@@ -844,9 +832,8 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         type: item.type,
         displayName: item.displayName,
         relativePath: item.relativePath,
-        url: item.type !== 'agent' ? item.value : undefined,
-        mime: item.type !== 'agent' ? 'text/plain' : undefined,
-        agentName: item.type === 'agent' ? item.displayName : undefined,
+        url: item.value,
+        mime: 'text/plain',
         textRange: {
           value: mentionText,
           start: mentionStartIndex,
@@ -1340,7 +1327,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               ref={mentionMenuRef}
               isOpen={mentionOpen}
               query={mentionQuery}
-              agents={agents}
               rootPath={rootPath}
               excludeValues={excludeValues}
               onSelect={handleMentionSelect}
@@ -1451,9 +1437,9 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                   {/* Bottom Bar -> InputToolbar */}
                   <div ref={toolbarRef}>
                     <InputToolbar
-                      agents={agents}
-                      selectedAgent={selectedAgent}
-                      onAgentChange={onAgentChange}
+
+
+
                       variants={variants}
                       selectedVariant={selectedVariant}
                       onVariantChange={onVariantChange}

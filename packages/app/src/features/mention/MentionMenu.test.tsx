@@ -32,13 +32,12 @@ describe('MentionMenu', () => {
     vi.useRealTimers()
   })
 
-  it('loads root directory items and agents when opened', async () => {
+  it('loads root directory items when opened', async () => {
     render(
       <div>
         <MentionMenu
           isOpen={true}
           query=""
-          agents={[{ name: 'planner', mode: 'subagent', hidden: false, description: 'plan work' } as never]}
           rootPath="/workspace/project"
           onSelect={vi.fn()}
           onClose={vi.fn()}
@@ -51,7 +50,6 @@ describe('MentionMenu', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText('planner')).toBeInTheDocument()
     expect(screen.getAllByText('src').length).toBeGreaterThan(0)
     expect(screen.getAllByText('README.md').length).toBeGreaterThan(0)
   })
@@ -64,7 +62,6 @@ describe('MentionMenu', () => {
         <MentionMenu
           isOpen={true}
           query="src/components/"
-          agents={[]}
           rootPath="/workspace/project"
           onSelect={vi.fn()}
           onNavigate={onNavigate}

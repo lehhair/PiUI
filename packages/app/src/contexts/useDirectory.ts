@@ -1,5 +1,4 @@
 import { useCallback, useContext } from 'react'
-import type { ApiPath } from '../api'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 
@@ -19,11 +18,6 @@ export function useCurrentDirectory(): string | undefined {
 export function useSavedDirectories(): SavedDirectory[] {
   const { savedDirectories } = useDirectory()
   return savedDirectories
-}
-
-export function usePathInfo(): ApiPath | null {
-  const { pathInfo } = useDirectory()
-  return pathInfo
 }
 
 export function useSidebarExpanded(): [boolean, (expanded: boolean) => void] {

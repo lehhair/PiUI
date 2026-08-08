@@ -58,7 +58,6 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   const [recentProjects, setRecentProjects] = useState<RecentProjects>(readRecentProjects)
 
-  const pathInfo = null
 
   // 保存 savedDirectories 到 per-server storage
   useEffect(() => {
@@ -197,7 +196,6 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       addDirectory,
       removeDirectory,
       reorderDirectories,
-      pathInfo,
       sidebarExpanded,
       setSidebarExpanded,
       recentProjects,
@@ -209,7 +207,6 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       addDirectory,
       removeDirectory,
       reorderDirectories,
-      pathInfo,
       sidebarExpanded,
       setSidebarExpanded,
       recentProjects,

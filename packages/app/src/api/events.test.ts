@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getConnectionInfo, subscribeToEvents } from './events'
+import { subscribeToConnectionState } from './events'
 
-describe('legacy SSE boundary', () => {
+describe('connection state', () => {
   it('does not start a browser SSE request in PiUI mode', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const unsubscribe = subscribeToEvents({ onError: vi.fn() })
+    const unsubscribe = subscribeToConnectionState(() => {})
 
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(getConnectionInfo().state).not.toBe('connecting')
 
     unsubscribe()
     fetchSpy.mockRestore()

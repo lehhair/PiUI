@@ -24,21 +24,21 @@ describe('Pi project adapter', () => {
 
     await expect(getCurrentProject('C:/work/PiUI')).resolves.toEqual({
       id: 'C:/work/PiUI',
-      worktree: 'C:/work/PiUI',
+      path: 'C:/work/PiUI',
       name: 'PiUI',
-      vcs: 'git',
+      gitRoot: 'C:/work/PiUI',
     })
     expect(mocks.getHostGitInfo).toHaveBeenCalledWith('C:/work/PiUI')
   })
 
-  it('omits vcs outside a repository and tolerates git failures', async () => {
+  it('omits gitRoot outside a repository and tolerates git failures', async () => {
     mocks.getHostGitInfo.mockRejectedValue(new Error('not a repo'))
 
     await expect(getCurrentProject('C:/work/PiUI')).resolves.toEqual({
       id: 'C:/work/PiUI',
-      worktree: 'C:/work/PiUI',
+      path: 'C:/work/PiUI',
       name: 'PiUI',
-      vcs: undefined,
+      gitRoot: undefined,
     })
   })
 

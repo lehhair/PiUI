@@ -1,19 +1,19 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ProjectSelector } from './ProjectSelector'
-import type { ApiProject } from '../../api'
+import type { HostProject } from '../../api'
 
 const GLOBAL_PROJECT = {
   id: 'global',
   name: 'Global',
-  worktree: '',
-} as ApiProject
+  path: '',
+} as HostProject
 
 const APP_PROJECT = {
   id: 'project-1',
   name: 'App',
-  worktree: '/workspace/app',
-} as ApiProject
+  path: '/workspace/app',
+} as HostProject
 
 describe('ProjectSelector', () => {
   it('opens remove confirmation without selecting the project row', async () => {

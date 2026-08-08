@@ -45,9 +45,9 @@ export const Sidebar = memo(function Sidebar({
 }: SidebarProps) {
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false)
   const [projectDialogKey, setProjectDialogKey] = useState(0)
-  const { addDirectory, pathInfo, currentDirectory } = useDirectory()
+  const { addDirectory, currentDirectory } = useDirectory()
   // 已在项目里时，从当前项目路径起步，方便加相邻目录；否则回落 home
-  const projectDialogInitialPath = currentDirectory || pathInfo?.home
+  const projectDialogInitialPath = currentDirectory
   const { interaction, layout, actions } = useChatViewport()
   const isOverlay = interaction.sidebarBehavior === 'overlay'
   const touchCapable = interaction.touchCapable

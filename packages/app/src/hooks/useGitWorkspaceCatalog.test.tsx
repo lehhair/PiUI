@@ -12,7 +12,7 @@ function createDeferred<T>() {
 
 const getCurrentProjectMock = vi.fn()
 const listWorktreesMock = vi.fn()
-const subscribeToEventsMock = vi.fn()
+const subscribeToConnectionStateMock = vi.fn()
 const onServerChangeMock = vi.fn()
 let latestServerChange: (() => void) | undefined
 
@@ -22,7 +22,7 @@ vi.mock('../api', () => ({
 }))
 
 vi.mock('../api/events', () => ({
-  subscribeToEvents: (...args: unknown[]) => subscribeToEventsMock(...args),
+  subscribeToConnectionState: (...args: unknown[]) => subscribeToConnectionStateMock(...args),
 }))
 
 vi.mock('../store/serverStore', () => ({
@@ -35,11 +35,11 @@ describe('useGitWorkspaceCatalog', () => {
   beforeEach(() => {
     getCurrentProjectMock.mockReset()
     listWorktreesMock.mockReset()
-    subscribeToEventsMock.mockReset()
+    subscribeToConnectionStateMock.mockReset()
     onServerChangeMock.mockReset()
     latestServerChange = undefined
 
-    subscribeToEventsMock.mockReturnValue(vi.fn())
+    subscribeToConnectionStateMock.mockReturnValue(vi.fn())
     onServerChangeMock.mockImplementation(listener => {
       latestServerChange = listener as () => void
       return vi.fn()

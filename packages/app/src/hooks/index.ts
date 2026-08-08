@@ -1,6 +1,5 @@
 export { useClickOutside } from './useClickOutside'
 export { useDropdown } from './useDropdown'
-export { usePermissions } from './usePermissions'
 export { useTheme } from './useTheme'
 export { useSessions } from './useSessions'
 export { useRouter } from './useRouter'
@@ -44,7 +43,6 @@ export {
   useDirectory,
   useCurrentDirectory,
   useSavedDirectories,
-  usePathInfo,
   useSidebarExpanded,
   SessionProvider,
   useSessionContext,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentProject } from '../api'
-import { subscribeToEvents } from '../api/events'
+import { subscribeToConnectionState } from '../api/events'
 import { serverStore } from '../store/serverStore'
 import { normalizeToForwardSlash } from '../utils'
 
@@ -89,8 +89,8 @@ export function useGitWorkspaceCatalog(directories: string[]) {
 
         const { project } = result.value
 
-        if (project.vcs === 'git' && project.worktree) {
-          const rootDirectory = normalizeToForwardSlash(project.worktree)
+        if (project.gitRoot && project.path) {
+          const rootDirectory = normalizeToForwardSlash(project.path)
           rootDirectories.add(rootDirectory)
           directoryToRoot.set(directory, rootDirectory)
         } else {
@@ -133,12 +133,14 @@ export function useGitWorkspaceCatalog(directories: string[]) {
   }, [refresh])
 
   useEffect(() => {
-    return subscribeToEvents({
-      onWorktreeReady: () => void refresh(),
-      onWorktreeFailed: () => void refresh(),
-      onReconnected: reason => {
-        if (reason !== 'server-switch') void refresh()
-      },
+    let previousState: string | null = null
+    return subscribeToConnectionState(info => {
+      const wasConnected = previousState === 'connected'
+      previousState = info.state
+      // 断线重连（非主动切换 server）后刷新工作区
+      if (!wasConnected && info.state === 'connected' && info.reconnectReason !== 'server-switch') {
+        void refresh()
+      }
     })
   }, [refresh])
 

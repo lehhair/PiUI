@@ -2,15 +2,15 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, GlobeIcon, ChevronDownIcon, PlusIcon, TrashIcon } from '../../components/Icons'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import type { ApiProject } from '../../api'
+import type { HostProject } from '../../api'
 
 // ============================================
 // Types
 // ============================================
 
 interface ProjectSelectorProps {
-  currentProject: ApiProject | null
-  projects: ApiProject[]
+  currentProject: HostProject | null
+  projects: HostProject[]
   isLoading: boolean
   onSelectProject: (projectId: string) => void
   onAddProject: () => void
@@ -69,12 +69,12 @@ export function ProjectSelector({
   // ==========================================
 
   const getDisplayName = useCallback(
-    (project: ApiProject | null): string => {
+    (project: HostProject | null): string => {
       if (!project) return isLoading ? t('common:loading') : t('sessions.noProject')
       if (project.name) return project.name
       if (project.id === 'global') return t('chat:sidebar.global')
 
-      const worktree = project.worktree || ''
+      const worktree = project.path || ''
       const parts = worktree.replace(/\\/g, '/').split('/').filter(Boolean)
       return parts[parts.length - 1] || worktree
     },
@@ -82,10 +82,10 @@ export function ProjectSelector({
   )
 
   const getPath = useCallback(
-    (project: ApiProject | null): string => {
+    (project: HostProject | null): string => {
       if (!project) return ''
       if (project.id === 'global') return t('chat:sidebar.allProjects')
-      return project.worktree || ''
+      return project.path || ''
     },
     [t],
   )
@@ -205,7 +205,7 @@ export function ProjectSelector({
 // ============================================
 
 interface ProjectItemProps {
-  project: ApiProject
+  project: HostProject
   displayName: string
   path: string
   onSelect: () => void

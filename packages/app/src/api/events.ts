@@ -1,4 +1,3 @@
-import type { EventCallbacks } from '../types/api/event'
 import { serverStore, type ServerHealth } from '../store/serverStore'
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
@@ -84,20 +83,4 @@ export function subscribeToConnectionState(listener: (info: ConnectionInfo) => v
   ensureTracking()
   listener(connectionInfo)
   return () => listeners.delete(listener)
-}
-
-/**
- * Reconnect notifications are derived from health-state transitions; the
- * worktree callbacks never fire (pi has no worktrees).
- */
-export function subscribeToEvents(callbacks: EventCallbacks): () => void {
-  if (!callbacks.onReconnected) return () => {}
-  let previousState = connectionInfo.state
-  return subscribeToConnectionState(info => {
-    const wasConnected = previousState === 'connected'
-    previousState = info.state
-    if (!wasConnected && info.state === 'connected') {
-      callbacks.onReconnected?.(info.reconnectReason ?? 'network')
-    }
-  })
 }
