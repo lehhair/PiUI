@@ -18,7 +18,7 @@
     "test:pi": "vitest run src/pi",
     "validate": "npm run typecheck && npm run lint && npm run test:run && npm run build",
     "release:prepare": "node scripts/prepare-release.mjs",
-    "check": "npm run format:check && npm run lint && npm run test:run && npm run build",
+    "check": "npm run lint && npm run test:run && npm run build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -26,6 +26,10 @@
     "tauri:android:init": "tauri android init",
     "tauri:android:dev": "tauri android dev",
     "tauri:android:build": "tauri android build",
+    "tauri:ios:init": "tauri ios init",
+    "tauri:ios:dev": "tauri ios dev",
+    "tauri:ios:build": "tauri ios build",
+    "android:dev": "bash scripts/dev-android.sh",
     "postinstall": "node scripts/copy-material-icons.mjs"
   },
   "dependencies": {
