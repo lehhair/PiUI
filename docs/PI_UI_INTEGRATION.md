@@ -53,7 +53,7 @@
 | tool execution updates | 部分 | R5：事件已流式（bash 实时输出），其余工具渲染待 |
 | image/details/patch/cwd/exitCode | 部分 | R5：其余工具逐项 |
 | truncated/fullOutputPath | 部分 | R5：bash 截断提示已加，其余工具待 |
-| built-in read/bash/edit/write/grep/find/ls | 部分 | R5：逐工具 conformance |
+| built-in read/bash/edit/write/grep/find/ls | 完整 | R12：升级 conformance |
 
 ## Extensions And Resources
 

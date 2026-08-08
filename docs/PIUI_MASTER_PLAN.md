@@ -57,7 +57,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R9 | packages 与三层 trust | 未开始 |
 | R10 | provider auth、模型、scoped models、llama.cpp | 未开始 |
 | R11 | stats、context usage、HTML/JSONL export、share | 未开始 |
-| R12 | conformance、升级门禁、故障注入、发布 | 未开始 |
+| R12 | conformance、升级门禁、故障注入、发布 | 进行中：逐命令真实 SDK 冒烟已加入（real-session.integration.test） |
 
 每项能力的实时状态、来源和完成条件见 `docs/PI_UI_INTEGRATION.md`
 
