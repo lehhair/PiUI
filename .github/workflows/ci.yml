@@ -37,3 +37,40 @@ jobs:
 
       # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建
       - run: npm run validate
+
+  tauri-check:
+    name: tauri check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Drop Windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - run: npm ci
+
+      # Tauri 壳编译校验（cargo check + Rust 单元测试），不打包
+      - name: Cargo check
+        working-directory: packages/app/src-tauri
+        run: cargo check
+
+      - name: Cargo test
+        working-directory: packages/app/src-tauri
+        run: cargo test --lib

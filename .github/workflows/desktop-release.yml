@@ -4,12 +4,17 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Target tag (e.g. v0.2.0). Empty = use latest v* tag."
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-release-${{ github.ref }}-${{ github.event.inputs.tag }}
   cancel-in-progress: true
 
 jobs:
@@ -87,6 +92,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          key: desktop-${{ matrix.name }}
 
       - name: Drop Windows-only patch on Unix
         if: runner.os != 'Windows'
@@ -167,14 +178,28 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          key: android-${{ matrix.name }}
+
+      - name: Gradle cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            packages/app/src-tauri/gen/android/.gradle
+          key: gradle-${{ matrix.name }}-${{ hashFiles('packages/app/src-tauri/gen/android/**/*.gradle*', 'packages/app/src-tauri/gen/android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
       - run: npm ci
       - run: npm run build
       - run: node scripts/prepare-tauri-mobile-resources.mjs
 
-      - name: Initialize Android project
-        working-directory: packages/app
-        run: npx tauri android init
-
+      # gen/android 已提交进仓库（含自定义 MainActivity/沉浸式主题），
+      # 不再重新 init，避免覆盖自定义文件。
       - name: Build Android APK
         working-directory: packages/app
         run: npx tauri android build --apk --target ${{ matrix.target }}
@@ -214,19 +239,114 @@ jobs:
           path: release-artifacts/*.apk
           if-no-files-found: error
 
+  ios:
+    name: ios (${{ matrix.name }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: aarch64, rust-target: aarch64-apple-ios, ios-target: aarch64-apple-ios }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          key: ios-${{ matrix.name }}
+
+      - name: Drop Windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Initialize iOS project
+        working-directory: packages/app
+        run: npx tauri ios init
+
+      - name: Build iOS app
+        working-directory: packages/app
+        run: npx tauri ios build --target ${{ matrix.ios-target }}
+
+      - name: Collect iOS artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          APP_DIR="packages/app/src-tauri/gen/apple"
+          if [ -d "$APP_DIR" ]; then
+            find "$APP_DIR" -name '*.app' -type d -exec cp -R {} release-artifacts/ \; 2>/dev/null || true
+            find "$APP_DIR" -name '*.ipa' -exec cp {} release-artifacts/ \; 2>/dev/null || true
+          fi
+          # tauri ios build 的输出兜底
+          find packages/app/src-tauri/target -path '*apple-ios*/release/bundle' -name '*.app' -type d -exec cp -R {} release-artifacts/ \; 2>/dev/null || true
+          ls -la release-artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piui-ios-${{ matrix.name }}
+          path: release-artifacts/*
+          if-no-files-found: warn
+
   publish:
     name: publish release assets
-    needs: [portable, desktop, android]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [portable, desktop, android, ios]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "no release tag found" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v8
         with:
           pattern: piui-*
           path: release-assets
           merge-multiple: true
 
+      - name: Extract changelog for tag
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          BODY=$(sed -n "/^## \[${TAG}\]/,/^## \[/{ /^## \[${TAG}\]/d; /^## \[/d; p; }" CHANGELOG.md 2>/dev/null || true)
+          BODY=$(echo "$BODY" | sed -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;ba;}')
+          if [ -z "$BODY" ]; then
+            BODY="No changelog entry found for ${TAG}."
+          fi
+          echo "$BODY" > /tmp/release-body.md
+          printf '\n---\n\n**Portable:** Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)\n**Desktop:** Windows (.exe), macOS (.dmg), Linux (.deb, .AppImage)\n**Mobile:** Android (.apk) — arm64, armeabi-v7a; iOS (.app)\n' >> /tmp/release-body.md
+
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: 'PiUI ${{ steps.tag.outputs.tag }}'
+          body_path: /tmp/release-body.md
           files: release-assets/**
-          generate_release_notes: false
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, 'canary') || contains(steps.tag.outputs.tag, 'alpha') || contains(steps.tag.outputs.tag, 'beta') }}
