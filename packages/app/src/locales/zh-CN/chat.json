@@ -55,8 +55,6 @@
     "tryDifferentKeyword": "试试其他关键词",
     "pinned": "已置顶",
     "recent": "最近使用",
-    "thinking": "Thinking",
-    "vision": "Vision",
     "unpin": "取消置顶",
     "pinToTop": "置顶",
     "model": "模型"
@@ -64,30 +62,6 @@
   "retryStatus": {
     "retrying": "重试中（第 {{attempt}} 次）",
     "nextIn": "{{label}} 后重试"
-  },
-  "shareDialog": {
-    "title": "分享对话",
-    "publicLink": "公开链接",
-    "publicLinkDesc": "任何拥有此链接的人都可以查看此对话。",
-    "failedCreate": "创建分享链接失败",
-    "failedRemove": "移除分享链接失败",
-    "copyLink": "复制链接",
-    "stopSharing": "停止分享",
-    "createPublicLink": "创建公开链接",
-    "creatingLink": "创建链接中..."
-  },
-  "questionDialog": {
-    "title": "问题",
-    "moreCount": "还有 {{count}} 个",
-    "minimize": "最小化",
-    "typeYourAnswer": "输入你的回答..."
-  },
-  "permissionDialog": {
-    "permission": "权限：{{permission}}",
-    "moreCount": "还有 {{count}} 个",
-    "minimize": "最小化",
-    "changesPreview": "变更预览",
-    "request": "请求"
   },
   "projectDialog": {
     "typePath": "输入路径...",
@@ -102,9 +76,7 @@
     "sendingMessage": "发送消息中",
     "sendMessage": "发送消息",
     "deliveryMode": "运行中消息发送时机",
-    "steer": "本轮追加",
     "steerHint": "把这条消息加入当前正在生成的回复，用于纠正或补充本轮回答",
-    "followUp": "下一轮发送",
     "followUpHint": "等待当前回复完成，再把这条消息作为下一轮发送",
     "agentMenu": "智能体菜单",
     "variantMenu": "变体菜单"
@@ -149,14 +121,11 @@
     "appearance": "外观",
     "standardWidth": "标准宽度",
     "wideMode": "宽屏模式",
-    "shareChat": "分享对话",
     "settings": "设置",
     "noProjectFoldersYet": "还没有项目文件夹",
     "addProjectDesc": "添加一个项目以按文件夹浏览最近的对话。",
     "deleteChat": "删除对话",
     "deleteChatConfirm": "确定要删除此对话？此操作无法撤销。",
-    "moveFolderUp": "上移文件夹",
-    "moveFolderDown": "下移文件夹",
     "noChatsInFolder": "此文件夹中没有对话",
     "showMoreChats": "展开更多会话",
     "selectedSessions": "已选 {{count}}",
@@ -209,11 +178,7 @@
     "totalCost": "总费用",
     "inputTokens": "输入",
     "outputTokens": "输出",
-    "reasoning": "Reasoning",
     "cacheRW": "缓存 (读/写)",
     "rawMessages": "原始消息"
-  },
-  "hints": {
-    "pressEscAgain": "再按一次 <1>Esc</1> 停止"
   }
 }
