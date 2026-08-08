@@ -89,17 +89,18 @@ export class SessionHost {
     if (!sessionFile) {
       const warm = await this.supervisor.takeWarmRuntime?.(cwd)
       if (warm) {
+        // warm 被消费后立即补一个，保证下一个会话仍是热启动
+        void this.supervisor.prewarm?.(cwd)
         try {
-          const opened = await this.adoptRuntime(warm, cwd, signal)
-          void this.supervisor.prewarm?.(cwd)
-          return opened
+          return await this.adoptRuntime(warm, cwd, signal)
         } catch {
           await warm.dispose().catch(() => undefined)
+          // adopt 失败：warm 已不可用，但补预热已在消费点发起，不再重复补
         }
+      } else {
+        void this.supervisor.prewarm?.(cwd)
       }
-      const opened = await this.openSessionOnce(cwd, sessionFile, signal)
-      void this.supervisor.prewarm?.(cwd)
-      return opened
+      return this.openSessionOnce(cwd, sessionFile, signal)
     }
     return this.runtimes.openFlight(sessionFile, openSignal => this.openSessionOnce(cwd, sessionFile, openSignal), signal)
   }
@@ -631,7 +632,11 @@ export class SessionHost {
     })
 
     for (const session of candidates) {
+      const cwd = session.cwd
       await this.closeSession(session.sessionId).catch(() => undefined)
+      // 空闲回收后给该工作目录补一个 warm runtime：用户切回来时
+      // 会话仍是热启动，避免回收省下的内存变成下次冷启动的等待。
+      if (cwd) void this.supervisor.prewarm?.(cwd).catch(() => undefined)
     }
   }
 
