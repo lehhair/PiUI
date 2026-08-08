@@ -110,6 +110,12 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
   if (metadata && typeof metadata.filepath === 'string') {
     result.filePath = metadata.filepath
   }
+
+  // Pi 原生截断字段：输出超限时 truncated=true 且给出完整日志路径（bash/read 等通用）
+  result.truncated = metadata?.truncated === true
+  result.fullOutputPath = typeof metadata?.fullOutputPath === 'string' && metadata.fullOutputPath
+    ? metadata.fullOutputPath
+    : undefined
   if (!result.filePath && inputObj?.filePath) {
     result.filePath = String(inputObj.filePath)
   }
@@ -269,12 +275,6 @@ function bashExtractData(execution: PiToolExecution): ExtractedToolData {
   if (typeof cwd === 'string' && cwd.trim()) {
     base.cwd = cwd.trim()
   }
-
-  // Pi 原生截断字段：输出超限时 truncated=true 且给出完整日志路径
-  base.truncated = metadata?.truncated === true
-  base.fullOutputPath = typeof metadata?.fullOutputPath === 'string' && metadata.fullOutputPath
-    ? metadata.fullOutputPath
-    : undefined
 
   return base
 }
