@@ -13,6 +13,7 @@ jobs:
   validate:
     name: validate ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +42,7 @@ jobs:
   tauri-check:
     name: tauri check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
