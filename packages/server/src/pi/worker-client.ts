@@ -148,7 +148,7 @@ export class WorkerSession {
         return
       }
       this.heartbeatMisses = 0
-      this.startHeartbeatWatchdog()
+      this.startHeartbeatWatchdog(message.heartbeatIntervalMs || PI_WORKER_HEARTBEAT_INTERVAL_MS)
       if (!this.readySettled) {
         this.readySettled = true
         this.resolveReady(message)
@@ -210,7 +210,7 @@ export class WorkerSession {
     }
   }
 
-  private startHeartbeatWatchdog(): void {
+  private startHeartbeatWatchdog(intervalMs: number): void {
     if (this.heartbeatTimer) return
     this.heartbeatTimer = setInterval(() => {
       this.heartbeatMisses += 1
@@ -220,7 +220,7 @@ export class WorkerSession {
         }))
         this.child.kill("SIGKILL")
       }
-    }, PI_WORKER_HEARTBEAT_INTERVAL_MS)
+    }, intervalMs)
     this.heartbeatTimer.unref()
   }
 
