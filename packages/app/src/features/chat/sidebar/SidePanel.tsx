@@ -61,7 +61,7 @@ interface SidePanelProps {
 
 interface ProjectItem {
   id: string
-  worktree: string
+  path: string
   name: string
   canReorder?: boolean
   memberDirectories?: string[]
@@ -83,7 +83,7 @@ function getSelectionRange(visibleIds: string[], anchorId: string, targetId: str
 
 function findProjectGroupForDirectory(projects: ProjectItem[], directory: string) {
   return projects.find(project => {
-    if (isSameDirectory(project.id, directory) || isSameDirectory(project.worktree, directory)) {
+    if (isSameDirectory(project.id, directory) || isSameDirectory(project.path, directory)) {
       return true
     }
 
@@ -369,7 +369,7 @@ export function SidePanel({
 
         groups.set(projectId, {
           id: projectId,
-          worktree: projectId,
+          path: projectId,
           name: savedNameByPath.get(projectId) ?? getDirectoryName(projectId),
           canReorder,
           memberDirectories: canReorder ? [directory.path] : [],
@@ -428,7 +428,7 @@ export function SidePanel({
   const globalProject = useMemo<ProjectItem>(
     () => ({
       id: 'global',
-      worktree: t('sidebar.allProjects'),
+      path: t('sidebar.allProjects'),
       name: t('sidebar.global'),
     }),
     [t],
@@ -451,7 +451,7 @@ export function SidePanel({
 
     return {
       id: projectId,
-      worktree: projectId,
+      path: projectId,
       name: getDirectoryName(projectId),
       canReorder: false,
       memberDirectories: [],
@@ -475,14 +475,14 @@ export function SidePanel({
   ])
 
   const globalFolderProject = useMemo<ProjectItem>(
-    () => ({ id: 'global', worktree: '', name: t('sidebar.global'), canReorder: true }),
+    () => ({ id: 'global', path: '', name: t('sidebar.global'), canReorder: true }),
     [t],
   )
 
   const folderProjects = useMemo<ProjectItem[]>(() => {
     const list = [...folderProjectGroups]
 
-    if (currentDirectory && !list.some(project => isSameDirectory(project.worktree, currentProject.worktree))) {
+    if (currentDirectory && !list.some(project => isSameDirectory(project.path, currentProject.path))) {
       list.push({ ...currentProject, canReorder: false })
     }
 
@@ -528,7 +528,7 @@ export function SidePanel({
 
       return {
         id: workspaceDirectory,
-        worktree: workspaceDirectory,
+        path: workspaceDirectory,
         name: getDirectoryName(workspaceDirectory),
         canReorder: isSavedWorkspace,
         memberDirectories: isSavedWorkspace ? [workspaceDirectory] : [],
@@ -544,13 +544,13 @@ export function SidePanel({
 
   const handleSelectFolderProject = useCallback(
     (project: ProjectItem) => {
-      if (!project.worktree) {
+      if (!project.path) {
         if (!currentDirectory) return
         setCurrentDirectory(undefined)
         return
       }
-      if (currentDirectory && isSameDirectory(currentDirectory, project.worktree)) return
-      setCurrentDirectory(project.worktree)
+      if (currentDirectory && isSameDirectory(currentDirectory, project.path)) return
+      setCurrentDirectory(project.path)
     },
     [currentDirectory, setCurrentDirectory],
   )
@@ -921,7 +921,7 @@ export function SidePanel({
                 const itemLabel =
                   isActive && !isGlobal
                     ? currentProjectLabel
-                    : project.name || (isGlobal ? t('sidebar.global') : project.worktree)
+                    : project.name || (isGlobal ? t('sidebar.global') : project.path)
                 return (
                   <div
                     key={project.id}
@@ -938,7 +938,7 @@ export function SidePanel({
                       }}
                       aria-current={isActive ? 'true' : undefined}
                       className="min-w-0 flex flex-1 items-center gap-2 text-left bg-transparent border-none p-0"
-                      title={project.worktree}
+                      title={project.path}
                     >
                       <span className="w-5 h-5 flex items-center justify-center shrink-0">
                         {isGlobal ? <GlobeIcon size={14} className="text-accent-main-100" /> : <FolderIcon size={14} />}
@@ -960,8 +960,8 @@ export function SidePanel({
                         >
                           {isGlobal
                             ? t('sidebar.globalProjectHint')
-                            : project.worktree
-                              ? getParentPath(project.worktree)
+                            : project.path
+                              ? getParentPath(project.path)
                               : ''}
                         </div>
                       </div>
