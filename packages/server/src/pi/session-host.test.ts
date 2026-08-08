@@ -278,3 +278,95 @@ test("SessionHost validates extension tool arguments against Pi's own tool schem
   assert.deepEqual(executed, [{ type: "my-tool", params: { value: "ok" } }])
   host.dispose()
 })
+
+test("SessionHost replenishes the warm slot even when adopting it fails", async () => {
+  let opened = 0
+  let prewarmed = 0
+  let claimed = false
+  let stateCalls = 0
+  const worker = {
+    command: async (type: string) => {
+      if (type !== "state.get") return {}
+      stateCalls += 1
+      // 第一次是 adopt 已领走的 warm（抛错），第二次是回退的冷启动（成功）
+      if (stateCalls === 1) throw new Error("state.get failed")
+      return { sessionId: "cold-session" }
+    },
+    getSessionId: () => "warm-session",
+    getSessionFile: () => "warm-session.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => {
+      opened += 1
+      return worker
+    },
+    takeWarmRuntime: async () => {
+      if (claimed) return undefined
+      claimed = true
+      return worker
+    },
+    prewarm: async () => {
+      prewarmed += 1
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+
+  // warm 的 state.get 失败 → adopt 失败 → 回退冷启动；但 warm 已被消费，
+  // 必须立即补预热，保证下一个会话仍是热启动。
+  await host.openSession(".")
+
+  assert.equal(claimed, true)
+  assert.equal(prewarmed, 1)
+  assert.equal(opened, 1)
+  // 回退冷启动成功：attach 用的是 worker.getSessionId()
+  assert.equal(host.getAttached("warm-session")?.sessionId, "warm-session")
+  host.dispose()
+})
+
+test("SessionHost prewarms a workspace after reaping its idle runtime", async () => {
+  let prewarmed = 0
+  const worker = {
+    command: async (type: string) => type === "state.get" ? { sessionId: "idle-session" } : {},
+    getSessionId: () => "idle-session",
+    getSessionFile: () => "idle-session.jsonl",
+    getCwd: () => "/workspace",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => worker,
+    prewarm: async () => {
+      prewarmed += 1
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  await host.openSession("/workspace", "idle-session.jsonl")
+
+  // 把 lastAccess 改成过去，让 reaper 判定该会话空闲
+  const lastAccess = (host as unknown as { lastAccess: Map<string, number> }).lastAccess
+  lastAccess.set("idle-session", Date.now() - 10 * 60_000)
+
+  try {
+    // reaper 每 30s 跑一次，直接触发内部回收逻辑
+    const reap = (host as unknown as { reapIdleRuntimes(): Promise<void> }).reapIdleRuntimes
+    await reap.call(host)
+  } finally {
+    delete process.env.PIUI_SESSION_IDLE_TTL_MS
+  }
+
+  assert.equal(host.getAttached("idle-session"), undefined)
+  // 回收后补了预热
+  assert.equal(prewarmed, 1)
+  host.dispose()
+})
