@@ -68,7 +68,7 @@
 | notify/status/widget/title | 部分 | R7：bridge 完整，缺真实 SDK 状态事件 E2E |
 | custom entries/renderers | 部分 | R7：custom_message 已渲染，其余类型降级 |
 | arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
-| AGENTS/CLAUDE context | 缺失 | R8：SDK `getAgentsFiles()` 未接入 |
+| AGENTS/CLAUDE context | 完整 | R12：升级 conformance |
 | resource reload/diagnostics | 完整 | R12：升级 conformance（reload 命令 + PiResourceManagement + 测试） |
 | global/project settings | 完整 | R12：升级 conformance |
 | packages install/update/remove | 完整 | R12：升级 conformance |

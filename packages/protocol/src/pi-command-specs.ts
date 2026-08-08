@@ -113,6 +113,7 @@ export const PI_COMMAND_SPECS = [
   { name: "registry.get", scope: "session", description: "Read runtime tools, commands, extensions, and handlers", queue: "immediate", idempotent: true },
   { name: "skills.list", scope: "session", description: "List loaded Pi skills", queue: "immediate", idempotent: true },
   { name: "prompts.list", scope: "session", description: "List loaded Pi prompt templates", queue: "immediate", idempotent: true },
+  { name: "agentsFiles.list", scope: "session", description: "List loaded Pi AGENTS/CLAUDE context files", queue: "immediate", idempotent: true },
   { name: "attachment.get", scope: "session", description: "Read an attachment from a Pi entry", paramsSchema: objectSchema({ entryId: STRING, blockIndex: { type: "integer", minimum: 0 } }, ["entryId", "blockIndex"]), queue: "immediate", idempotent: true },
   { name: "session.list", scope: "global", description: "List Pi sessions for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
   { name: "session.listAll", scope: "global", description: "List all Pi sessions", queue: "immediate", idempotent: true },
@@ -196,6 +197,7 @@ export const RUNTIME_TARGETS = {
   "registry.get": "getRegistry",
   "skills.list": "listSkills",
   "prompts.list": "listPrompts",
+  "agentsFiles.list": "listAgentsFiles",
   "attachment.get": "getAttachment",
 } as const
 
@@ -222,6 +224,7 @@ export type PiCommandParams = CoreCommandParams & {
   "registry.get": Record<string, never>
   "skills.list": Record<string, never>
   "prompts.list": Record<string, never>
+  "agentsFiles.list": Record<string, never>
   "attachment.get": { entryId: string; blockIndex: number }
   "session.list": { cwd: string }
   "session.listAll": Record<string, never>

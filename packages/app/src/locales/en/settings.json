@@ -442,6 +442,8 @@
     "commands": "Commands",
     "eventHandlers": "Event handlers",
     "prompts": "Prompt templates",
+    "agentsFiles": "AGENTS/CLAUDE context",
+    "agentsFileLines": "lines",
     "extensionDetail": "{{tools}} tools · {{commands}} commands · {{handlers}} handlers",
     "hidden": "hidden",
     "inactive": "inactive",

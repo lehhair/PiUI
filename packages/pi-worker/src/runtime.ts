@@ -30,6 +30,7 @@ export interface SessionRuntime {
   getRegistry(): RegistrySnapshot | Promise<RegistrySnapshot>
   listSkills(): JsonValue | Promise<JsonValue>
   listPrompts(): JsonValue | Promise<JsonValue>
+  listAgentsFiles(): JsonValue | Promise<JsonValue>
 
   prompt(text: string, images?: ImageInput[], options?: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" }): Promise<void>
   steer(text: string, images?: ImageInput[]): Promise<void>

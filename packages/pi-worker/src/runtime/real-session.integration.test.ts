@@ -954,6 +954,14 @@ export default function (pi) {
         assert.equal(typeof prompt.filePath, "string")
       }
 
+      // agentsFiles.list：AGENTS/CLAUDE 上下文（path/content 结构）
+      const agentsFiles = session.listAgentsFiles() as AnyRecord[]
+      assert.ok(Array.isArray(agentsFiles))
+      for (const file of agentsFiles) {
+        assert.equal(typeof file.path, "string")
+        assert.equal(typeof file.content, "string")
+      }
+
       // entries.get / branch.get / tree.get：分页与树结构
       const entries = session.getEntriesPage(undefined, 100, 1_000_000) as AnyRecord
       assert.ok(Array.isArray(entries.items))

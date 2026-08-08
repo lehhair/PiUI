@@ -503,6 +503,10 @@ export class MockPiSession implements SessionRuntime {
     return []
   }
 
+  listAgentsFiles(): JsonValue {
+    return []
+  }
+
   getRegistry(): RegistrySnapshot {
     const tools: RegistrySnapshot["tools"] = [
       {
