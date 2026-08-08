@@ -124,6 +124,8 @@ export function BashRenderer({ execution, partKey, data, onFullscreenChange }: T
       isFullscreen={isFullscreen}
       onToggleFullscreen={handleToggleFullscreen}
       exitCodeLabel={exitCode !== undefined ? t('contentBlock.exitCode', { code: exitCode }) : undefined}
+      truncated={data.truncated}
+      fullOutputPath={data.fullOutputPath}
     />
   )
 
@@ -151,6 +153,8 @@ function TerminalSurface({
   isFullscreen = false,
   onToggleFullscreen,
   exitCodeLabel,
+  truncated,
+  fullOutputPath,
 }: {
   command?: string
   cwd?: string
@@ -167,6 +171,8 @@ function TerminalSurface({
   isFullscreen?: boolean
   onToggleFullscreen?: () => void
   exitCodeLabel?: string
+  truncated?: boolean
+  fullOutputPath?: string
 }) {
   const { t } = useTranslation(['components'])
   const fullscreenLabel = isFullscreen ? t('contentBlock.exitFullscreen') : t('contentBlock.fullscreen')
@@ -243,6 +249,12 @@ function TerminalSurface({
             }`}
           >
             {exitCodeLabel}
+          </div>
+        )}
+
+        {truncated && fullOutputPath && (
+          <div className="mt-1 text-[length:var(--fs-xxs)] text-text-500">
+            {t('bash.truncatedNotice', { path: fullOutputPath })}
           </div>
         )}
       </div>

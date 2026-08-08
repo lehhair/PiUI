@@ -32,6 +32,10 @@ export interface ExtractedToolData {
   notice?: string
   images?: Array<{ url: string; mimeType: string; requiresAuth?: boolean }>
 
+  // Bash 截断（Pi 原生字段）
+  truncated?: boolean
+  fullOutputPath?: string
+
   // LSP 诊断
   diagnostics?: DiagnosticInfo[]
 }

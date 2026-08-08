@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PiToolExecution } from '../../../pi/domain/index.js'
-import { defaultExtractData } from './registry'
+import { defaultExtractData, extractToolData } from './registry'
 
 describe('defaultExtractData', () => {
   it('extracts files and diagnostics from result details', () => {
@@ -46,5 +46,35 @@ describe('defaultExtractData', () => {
     expect(extracted.diagnostics).toEqual([
       expect.objectContaining({ file: 'app.ts', severity: 'error', line: 3, column: 5 }),
     ])
+  })
+
+  it('extracts native bash truncation fields from result details', () => {
+    const execution: PiToolExecution = {
+      call: {
+        type: 'toolCall',
+        id: 'call-2',
+        name: 'bash',
+        arguments: { command: 'make build' },
+      },
+      result: {
+        role: 'toolResult',
+        toolCallId: 'call-2',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'truncated output...' }],
+        isError: false,
+        timestamp: 0,
+        details: {
+          truncated: true,
+          fullOutputPath: '/tmp/pi-bash-abc.log',
+          exitCode: 0,
+        },
+      },
+    }
+
+    const extracted = extractToolData(execution)
+
+    expect(extracted.cwd).toBeUndefined()
+    expect(extracted.truncated).toBe(true)
+    expect(extracted.fullOutputPath).toBe('/tmp/pi-bash-abc.log')
   })
 })

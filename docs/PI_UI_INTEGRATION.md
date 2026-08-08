@@ -40,7 +40,7 @@
 | compact | 完整 | R12：大型会话 fixture |
 | auto compaction/retry | 完整 | R12：故障注入扩展 |
 | abort retry | 完整 | R12：故障注入扩展 |
-| user bash `!`/`!!` | 缺失 | R6 |
+| user bash `!`/`!!` | 完整 | R12：升级 conformance |
 | active tools 查询/切换 | 完整 | R7：dynamic tools 联动 |
 
 ## Multimodal And Tools
@@ -51,8 +51,8 @@
 | file/PDF prompt | 缺失（明确不做提取） | — |
 | text tool result | 部分 | R5 |
 | tool execution updates | 缺失 | R5 |
-| image/details/patch/cwd/exitCode | 缺失 | R5 |
-| truncated/fullOutputPath | 缺失 | R5 |
+| image/details/patch/cwd/exitCode | 部分 | R5：其余工具逐项 |
+| truncated/fullOutputPath | 部分 | R5：bash 截断提示已加，其余工具待 |
 | built-in read/bash/edit/write/grep/find/ls | 部分 | R5：逐工具 conformance |
 
 ## Extensions And Resources
@@ -65,7 +65,7 @@
 | Dynamic tools/providers | 部分 | R7/R10 |
 | select/confirm/input/editor | 部分 | R7：真实 SDK 对话框 E2E |
 | notify/status/widget/title | 部分 | R7：真实 SDK 状态事件 E2E |
-| custom entries/renderers | 缺失 | R7 |
+| custom entries/renderers | 部分 | R7：custom_message 已渲染，其余类型降级 |
 | arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
 | AGENTS/CLAUDE context | 部分 | R8：来源与诊断 |
 | resource reload/diagnostics | 缺失 | R8 |

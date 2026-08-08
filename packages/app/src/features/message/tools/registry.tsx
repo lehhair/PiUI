@@ -270,6 +270,12 @@ function bashExtractData(execution: PiToolExecution): ExtractedToolData {
     base.cwd = cwd.trim()
   }
 
+  // Pi 原生截断字段：输出超限时 truncated=true 且给出完整日志路径
+  base.truncated = metadata?.truncated === true
+  base.fullOutputPath = typeof metadata?.fullOutputPath === 'string' && metadata.fullOutputPath
+    ? metadata.fullOutputPath
+    : undefined
+
   return base
 }
 
