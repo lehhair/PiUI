@@ -16,6 +16,7 @@ import { useSyntaxHighlight } from '../../../../hooks/useSyntaxHighlight'
 import { useResponsiveMaxHeight } from '../../../../hooks/useResponsiveMaxHeight'
 import { parseAnsi, type AnsiSegment } from '../../../../utils/ansiUtils'
 import { copyTextToClipboard, clipboardErrorHandler } from '../../../../utils'
+import { useLiveToolOutput } from '../../../../pi/liveToolOutput'
 import type { ToolRendererProps } from '../types'
 
 // ============================================
@@ -27,7 +28,9 @@ export function BashRenderer({ execution, partKey, data, onFullscreenChange }: T
   const isActive = !execution.result
   const hasError = !!data.error
   const command = data.input?.trim()
-  const output = data.output?.trim()
+  // 运行中优先显示 Pi 流式推送的实时输出（partialResult 累积文本）
+  const liveOutput = useLiveToolOutput(execution.call.id)
+  const output = data.output?.trim() ?? liveOutput?.trim()
   const cwd = data.cwd?.trim()
   const exitCode = data.exitCode
   const maxHeight = useResponsiveMaxHeight()
