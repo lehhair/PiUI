@@ -832,6 +832,74 @@ export default function (pi) {
     }
   })
 
+  it("exports the native session as HTML and JSONL", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-export-"))
+    const sessionDir = path.join(cwd, "sessions")
+    mkdirSync(sessionDir)
+    let session: RealPiSession | undefined
+    try {
+      const { fauxProvider, fauxAssistantMessage, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()
+      const faux = fauxProvider({ provider: "piui-faux-export", api: "piui-faux-export", models: [{ id: "export-1", contextWindow: 4096, maxTokens: 256 }] })
+      faux.setResponses([fauxAssistantMessage("exported answer")])
+      const modelRuntime = await ModelRuntime.create({
+        credentials: new InMemoryCredentialStore(),
+        modelsPath: null,
+        allowModelNetwork: false,
+      })
+      modelRuntime.registerNativeProvider(faux.provider)
+      await modelRuntime.refresh({ allowNetwork: false })
+      const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } })
+      const resourceLoader = emptyResourceLoader()
+      const createRuntime: CreateAgentSessionRuntimeFactory = async ({ sessionManager, sessionStartEvent }) => {
+        const services: AgentSessionServices = {
+          cwd,
+          agentDir: cwd,
+          modelRuntime,
+          settingsManager,
+          resourceLoader,
+          diagnostics: [],
+        }
+        return {
+          ...(await createAgentSessionFromServices({
+            services,
+            sessionManager,
+            sessionStartEvent,
+            model: faux.getModel(),
+            thinkingLevel: "off",
+            noTools: "all",
+          })),
+          services,
+          diagnostics: [],
+        }
+      }
+      session = await RealPiSession.open(cwd, undefined, {
+        agentDir: cwd,
+        createRuntime,
+        createSessionManager: runtimeCwd => SessionManager.create(runtimeCwd, sessionDir),
+      })
+      await session.prompt("export me")
+      assert.ok(session.getSessionFile())
+      // 磁盘 session 导出 JSONL：落盘且含对话
+      const jsonlPath = path.join(cwd, "export.jsonl")
+      await session.exportJsonl(jsonlPath)
+      assert.equal(existsSync(jsonlPath), true)
+      assert.match(readFileSync(jsonlPath, "utf8"), /exported answer/)
+      // 磁盘 session 导出 HTML：返回路径且落盘；SDK 把会话数据 base64 嵌入模板
+      const htmlPath = path.join(cwd, "export.html")
+      const htmlResult = await session.exportHtml(htmlPath) as AnyRecord | undefined
+      assert.equal(htmlResult?.path, htmlPath)
+      assert.equal(existsSync(htmlPath), true)
+      const html = readFileSync(htmlPath, "utf8")
+      assert.match(html, /<!DOCTYPE html>/)
+      const embedded = html.match(/id="session-data"[^>]*>([A-Za-z0-9+/=]+)</)
+      assert.ok(embedded, "html export should embed base64 session data")
+      assert.match(Buffer.from(embedded[1], "base64").toString("utf8"), /exported answer/)
+    } finally {
+      await session?.dispose()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("exercises the native session command surface end to end", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-conformance-"))
     const cwd = path.join(root, "workspace")
@@ -900,6 +968,7 @@ export default function (pi) {
       const jsonlPath = path.join(root, "out.jsonl")
       await session.exportJsonl(jsonlPath)
       assert.equal(existsSync(jsonlPath), true)
+      assert.match(readFileSync(jsonlPath, "utf8"), /conformance/)
     } finally {
       await session?.dispose()
       rmSync(root, { recursive: true, force: true })
