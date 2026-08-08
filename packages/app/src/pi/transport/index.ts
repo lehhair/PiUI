@@ -34,7 +34,7 @@ import type {
   TerminalInfo,
   TerminalUpdateParams,
 } from '@piui/protocol'
-import type { SessionInfo, SessionTreeNode, Skill } from '@earendil-works/pi-coding-agent'
+import type { SessionInfo, SessionTreeNode, Skill, PromptTemplate } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, getPiAuthToken, piFetch } from '../httpClient.js'
 import { piCommandStore } from '../state/index.js'
@@ -405,6 +405,10 @@ export function getPiSessionRegistry(sessionId: string, signal?: AbortSignal): P
 
 export function getPiSkills(sessionId: string, signal?: AbortSignal): Promise<Skill[]> {
   return postPiSessionCommand(sessionId, 'skills.list', undefined, signal)
+}
+
+export function getPiPrompts(sessionId: string, signal?: AbortSignal): Promise<PromptTemplate[]> {
+  return postPiSessionCommand(sessionId, 'prompts.list', undefined, signal)
 }
 
 // Action commands

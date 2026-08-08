@@ -441,6 +441,7 @@
     "tools": "工具",
     "commands": "命令",
     "eventHandlers": "事件处理器",
+    "prompts": "Prompt 模板",
     "extensionDetail": "{{tools}} 个工具 · {{commands}} 个命令 · {{handlers}} 个处理器",
     "hidden": "已隐藏",
     "inactive": "未启用",

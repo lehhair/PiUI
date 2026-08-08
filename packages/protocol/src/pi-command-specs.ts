@@ -112,6 +112,7 @@ export const PI_COMMAND_SPECS = [
   { name: "tree.get", scope: "session", description: "Read the Pi session tree", queue: "immediate", idempotent: true },
   { name: "registry.get", scope: "session", description: "Read runtime tools, commands, extensions, and handlers", queue: "immediate", idempotent: true },
   { name: "skills.list", scope: "session", description: "List loaded Pi skills", queue: "immediate", idempotent: true },
+  { name: "prompts.list", scope: "session", description: "List loaded Pi prompt templates", queue: "immediate", idempotent: true },
   { name: "attachment.get", scope: "session", description: "Read an attachment from a Pi entry", paramsSchema: objectSchema({ entryId: STRING, blockIndex: { type: "integer", minimum: 0 } }, ["entryId", "blockIndex"]), queue: "immediate", idempotent: true },
   { name: "session.list", scope: "global", description: "List Pi sessions for a workspace", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
   { name: "session.listAll", scope: "global", description: "List all Pi sessions", queue: "immediate", idempotent: true },
@@ -194,6 +195,7 @@ export const RUNTIME_TARGETS = {
   "tree.get": "getTree",
   "registry.get": "getRegistry",
   "skills.list": "listSkills",
+  "prompts.list": "listPrompts",
   "attachment.get": "getAttachment",
 } as const
 
@@ -219,6 +221,7 @@ export type PiCommandParams = CoreCommandParams & {
   "tree.get": Record<string, never>
   "registry.get": Record<string, never>
   "skills.list": Record<string, never>
+  "prompts.list": Record<string, never>
   "attachment.get": { entryId: string; blockIndex: number }
   "session.list": { cwd: string }
   "session.listAll": Record<string, never>

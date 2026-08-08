@@ -682,6 +682,10 @@ export class RealPiSession implements SessionRuntime {
     return toJson(this.runtime.session.resourceLoader.getSkills().skills) ?? []
   }
 
+  listPrompts(): JsonValue {
+    return toJson(this.runtime.session.resourceLoader.getPrompts().prompts) ?? []
+  }
+
   getRegistry(): RegistrySnapshot {
     const session = this.runtime.session
     const loader = session.resourceLoader

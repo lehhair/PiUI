@@ -181,6 +181,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   "tree.get": async (ctx) => ctx.requireRuntime().getTree(),
   "registry.get": async (ctx) => ctx.requireRuntime().getRegistry(),
   "skills.list": async (ctx) => ctx.requireRuntime().listSkills(),
+  "prompts.list": async (ctx) => ctx.requireRuntime().listPrompts(),
   "attachment.get": async (ctx, p) =>
     ctx.requireRuntime().getAttachment(P.reqString(p, "entryId"), P.reqNonNegativeInteger(p, "blockIndex")),
 
