@@ -61,8 +61,10 @@ export class RuntimeSupervisor {
     this.leases = options.leases ?? new SessionLeaseManager()
     // A standby worker is expensive: the compiled server starts another copy
     // of itself for every worker. Create session workers on demand instead of
-    // keeping two idle Pi runtimes alive from server startup.
-    this.standbySize = Math.max(0, options.standbySize ?? 0)
+    // keeping two idle Pi runtimes alive from server startup. Advanced setups
+    // can opt in via PIUI_STANDBY_SIZE to trade memory for faster first-open.
+    const configuredStandby = Number(process.env.PIUI_STANDBY_SIZE)
+    this.standbySize = Math.max(0, options.standbySize ?? (Number.isFinite(configuredStandby) ? configuredStandby : 0))
     this.catalog = this.createCatalog()
     this.replenishStandby()
   }
