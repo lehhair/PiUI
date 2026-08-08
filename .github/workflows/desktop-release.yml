@@ -246,7 +246,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: aarch64, rust-target: aarch64-apple-ios, ios-target: aarch64-apple-ios }
+          # --target 用 cargo-mobile 的架构键名（aarch64 = 真机，aarch64-sim = 模拟器），
+          # 不是 Rust triple；rust-target 才是 Rust 编译目标。
+          - { name: aarch64, rust-target: aarch64-apple-ios, ios-target: aarch64 }
+          - { name: aarch64-sim, rust-target: aarch64-apple-ios-sim, ios-target: aarch64-sim }
 
     steps:
       - uses: actions/checkout@v6
@@ -278,7 +281,8 @@ jobs:
 
       - name: Build iOS app
         working-directory: packages/app
-        run: npx tauri ios build --target ${{ matrix.ios-target }}
+        # --no-sign：GitHub Actions 无 Apple 开发者证书，构建未签名 app
+        run: npx tauri ios build --target ${{ matrix.ios-target }} --no-sign
 
       - name: Collect iOS artifacts
         shell: bash
