@@ -106,4 +106,5 @@
 5. UI 没有假成功、静默空数组或点了才报错的入口
 6. 默认测试不调用真实模型
 7. 至少有一条真实 Pi SDK + faux provider 的无网络测试
-8. Pi 升级时重新运行 API diff、fixture replay 和本矩阵
+8. Pi 升级时重新运行 API diff、fixture replay 和本矩阵 —— 由 `npm run conformance:sdk`（scripts/sdk-conformance.mjs）自动校验协议/依赖/安装三处版本一致并重跑协议与 worker 测试
+9. worker 心跳看门狗、崩溃与协议不匹配路径由 worker-client 故障注入矩阵覆盖（packages/server/src/pi/worker-client.test.ts）
