@@ -221,6 +221,9 @@
     "clickToCopy": "Click to copy",
     "clickToCopyWithPath": "Click to copy: {{path}}"
   },
+  "bash": {
+    "truncatedNotice": "Output truncated — full log at {{path}}"
+  },
   "diffView": {
     "fullscreenView": "Fullscreen"
   },
