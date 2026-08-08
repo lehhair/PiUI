@@ -66,6 +66,11 @@ jobs:
 
       - run: npm ci
 
+      # tauri-build 校验 bundle.resources 引用的目录存在；tauri-check 只
+      # 编译不打包，不需要真实资源内容，建空目录即可通过存在性检查。
+      - name: Prepare empty tauri resources dir
+        run: mkdir -p packages/app/src-tauri/resources
+
       # Tauri 壳编译校验（cargo check + Rust 单元测试），不打包
       - name: Cargo check
         working-directory: packages/app/src-tauri
