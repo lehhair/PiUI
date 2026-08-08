@@ -24,13 +24,16 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tokio = { version = "1", features = ["time", "net", "sync"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+tauri-plugin-decorum = "1.1.1"
+tauri-plugin-single-instance = "2"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Cargo 依赖选择只认内置 target cfg（desktop/mobile 是 tauri-build 的 build-script
+# cfg，在依赖选择阶段不存在），桌面专用依赖必须用显式平台三元组。
+# iOS/Android 不编译 service（无桌面 runtime），只走 WS 桥。
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
 log = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri-plugin-log = "2"
-
-tauri-plugin-decorum = "1.1.1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
