@@ -95,6 +95,9 @@ function getReleaseBaseTag() {
   return lastStableTag
 }
 
+// PiUI 自身 workspace 包名（互依赖引用也随版本一起升）
+const PIUI_PACKAGE_NAMES = ['@piui/app', '@piui/server', '@piui/pi-worker', '@piui/protocol']
+
 function bumpPackageJson(relativePath, oldVersion) {
   const fullPath = resolve(repoRoot, relativePath)
   const pkg = JSON.parse(readFileSync(fullPath, 'utf-8'))
@@ -103,6 +106,21 @@ function bumpPackageJson(relativePath, oldVersion) {
     console.log(`  ${relativePath}        ${pkg.version} -> ${version} (drifted)`)
   }
   pkg.version = version
+  // 同步该包对其他 @piui workspace 包的依赖引用：npm workspace 解析时
+  // 依赖声明版本必须与目标包的实际版本一致，否则会去 registry 找旧版本
+  // 导致 npm ci 404（CI 发布失败）。
+  for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    const deps = pkg[section]
+    if (!deps || typeof deps !== 'object') continue
+    let changed = false
+    for (const name of PIUI_PACKAGE_NAMES) {
+      if (typeof deps[name] === 'string' && deps[name] !== version) {
+        deps[name] = version
+        changed = true
+      }
+    }
+    if (changed) console.log(`  ${relativePath}        ${section} -> ${version}`)
+  }
   writeFileSync(fullPath, JSON.stringify(pkg, null, 2) + '\n')
   console.log(`  ${relativePath}        ${oldVersion} -> ${version}`)
 }
@@ -156,6 +174,45 @@ if (cargoPackageName && existsSync(cargoLockPath)) {
   if (updatedCargoLock !== cargoLock) {
     writeFileSync(cargoLockPath, updatedCargoLock)
     console.log(`  packages/app/src-tauri/Cargo.lock  ${oldVersion} -> ${version}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4b. Update npm package-lock.json (workspace package version + cross refs)
+// ---------------------------------------------------------------------------
+// npm ci 严格按 lockfile 解析：package.json 的 version 和互依赖引用变了，
+// lockfile 里的对应字段必须同步，否则 CI 会按旧版本去 registry 拉 404。
+const npmLockPath = resolve(repoRoot, 'package-lock.json')
+if (existsSync(npmLockPath)) {
+  const npmLock = JSON.parse(readFileSync(npmLockPath, 'utf-8'))
+  let lockChanged = false
+  if (npmLock.version !== version) {
+    npmLock.version = version
+    lockChanged = true
+  }
+  const packageEntries = npmLock.packages ?? {}
+  for (const [pathKey, entry] of Object.entries(packageEntries)) {
+    if (!entry || typeof entry !== 'object') continue
+    // workspace 包自身的 version
+    if (entry.name && PIUI_PACKAGE_NAMES.includes(entry.name) && entry.version !== version) {
+      entry.version = version
+      lockChanged = true
+    }
+    // 对其他 @piui workspace 包的依赖引用
+    for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      const deps = entry[section]
+      if (!deps || typeof deps !== 'object') continue
+      for (const name of PIUI_PACKAGE_NAMES) {
+        if (typeof deps[name] === 'string' && deps[name] !== version) {
+          deps[name] = version
+          lockChanged = true
+        }
+      }
+    }
+  }
+  if (lockChanged) {
+    writeFileSync(npmLockPath, JSON.stringify(npmLock, null, 2) + '\n')
+    console.log(`  package-lock.json      ${oldVersion} -> ${version}`)
   }
 }
 
