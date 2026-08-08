@@ -4,6 +4,10 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.3.0] - 2026-08-08
+
+- feat: pi TUI parity for slash commands and user bash execution (7bbd9df5)
+
 ## [Unreleased]
 
 ## [v0.2.0] - 2026-08-08
