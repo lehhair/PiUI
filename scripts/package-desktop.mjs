@@ -7,7 +7,7 @@
  * 用法：node scripts/package-desktop.mjs [--skip-build] [--target bun-windows-x64]
  */
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -34,6 +34,13 @@ rmSync(join(outDir, "piui-server"), { force: true })
 const piPackageDir = join(repoRoot, "node_modules", "@earendil-works", "pi-coding-agent")
 const piPkg = JSON.parse(readFileSync(join(piPackageDir, "package.json"), "utf8"))
 console.info(`[package] preparing Pi CLI resources ${piPkg.version}`)
+// 同步 bundled SDK 版本常量：worker 用它做 parity 校验（sdk.VERSION 在
+// Bun 打包后会失真，见 sdk-host.ts 注释）。
+const bundledVersionPath = join(repoRoot, "packages", "pi-worker", "src", "bundled-sdk-version.ts")
+writeFileSync(
+  bundledVersionPath,
+  `// The desktop packager replaces this constant with the active SDK version.\nexport const BUNDLED_PI_SDK_VERSION = ${JSON.stringify(piPkg.version)}\n`,
+)
 cpSync(join(piPackageDir, "package.json"), join(outDir, "package.json"))
 for (const [source, destination] of [
   [join(piPackageDir, "dist", "modes", "interactive", "theme"), join(outDir, "theme")],
