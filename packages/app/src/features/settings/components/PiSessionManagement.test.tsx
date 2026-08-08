@@ -7,9 +7,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
 
-const { setScopedModelsMock, loadSessionsMock } = vi.hoisted(() => ({
+const { setScopedModelsMock, loadSessionsMock, exportPiSessionMock } = vi.hoisted(() => ({
   setScopedModelsMock: vi.fn(),
   loadSessionsMock: vi.fn(),
+  exportPiSessionMock: vi.fn(),
 }))
 
 vi.mock('../../../pi/controllers/index.js', () => ({
@@ -18,7 +19,7 @@ vi.mock('../../../pi/controllers/index.js', () => ({
   cyclePiModel: vi.fn(),
   cyclePiThinkingLevel: vi.fn(),
   executePiBash: vi.fn(),
-  exportPiSession: vi.fn(),
+  exportPiSession: (...args: unknown[]) => exportPiSessionMock(...args),
   loadPiSessionsForCwd: () => loadSessionsMock(),
   newPiSessionFrom: vi.fn(),
   openPiSession: vi.fn(),
@@ -48,6 +49,7 @@ describe('PiSessionManagement scoped models', () => {
   beforeEach(() => {
     setScopedModelsMock.mockReset().mockResolvedValue(undefined)
     loadSessionsMock.mockReset().mockResolvedValue([])
+    exportPiSessionMock.mockReset().mockResolvedValue({ path: 'E:\\out.jsonl' })
   })
 
   it('shows the current native scoped model patterns', async () => {
@@ -70,5 +72,32 @@ describe('PiSessionManagement scoped models', () => {
     await waitFor(() => {
       expect(setScopedModelsMock).toHaveBeenCalledWith('session-1', ['anthropic:claude-sonnet-4', 'openai:gpt-5'])
     })
+  })
+})
+
+describe('PiSessionManagement exports', () => {
+  beforeEach(() => {
+    setScopedModelsMock.mockReset().mockResolvedValue(undefined)
+    loadSessionsMock.mockReset().mockResolvedValue([])
+    exportPiSessionMock.mockReset().mockResolvedValue({ path: 'E:\\out.jsonl' })
+  })
+
+  it('exports the session as HTML and JSONL to the given path', async () => {
+    render(<PiSessionManagement sessionId="session-1" workspacePath="E:\\workspace" />)
+
+    const outputPath = await screen.findByPlaceholderText('pi.outputPath')
+    fireEvent.change(outputPath, { target: { value: 'E:\\out' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'pi.exportHtml' }))
+    await waitFor(() => {
+      expect(exportPiSessionMock).toHaveBeenCalledWith('session-1', 'html', 'E:\\out')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'pi.exportJsonl' }))
+    await waitFor(() => {
+      expect(exportPiSessionMock).toHaveBeenCalledWith('session-1', 'jsonl', 'E:\\out')
+    })
+
+    expect(await screen.findByText(/E:\\\\out/)).toBeInTheDocument()
   })
 })

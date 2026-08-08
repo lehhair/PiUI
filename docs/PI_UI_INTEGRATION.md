@@ -24,8 +24,9 @@
 | fork/clone/import | 完整 | R12：更多故障注入 |
 | branch summary 与取消 | 完整 | R12：升级 conformance |
 | stats/context usage | 完整 | R12：升级 conformance |
-| HTML/JSONL export | 缺失 | R11 |
-| share | 缺失 | R11 |
+| HTML/JSONL export | 完整 | R12：升级 conformance |
+
+> share 不属于 Pi 能力矩阵：Pi SDK 未暴露任何 share 语义（命令表与 AgentSession 均无），PiUI 不消费也不展示入口。
 
 ## Agent Control
 

@@ -6,7 +6,7 @@ import { after, describe, it } from "node:test"
 process.env.PIUI_WORKER_HANDSHAKE_TIMEOUT_MS ??= "60000"
 
 import { WebSocket } from "ws"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { EVENT_WS_SUBPROTOCOL, eventStreamKey, type EventEnvelope } from "@piui/protocol"
@@ -129,6 +129,25 @@ describe("event websocket", () => {
     assert.equal(typeof state.json.data.sessionStats.cost, "number")
     assert.equal(typeof state.json.data.contextUsage.contextWindow, "number")
     assert.equal(typeof state.json.data.contextUsage.percent, "number")
+
+    // exportJsonl / exportHtml：serialized session 命令 202 接受，
+    // 完成后通过 command.updated 事件确认，落盘路径由命令结果返回
+    const jsonlExport = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/exportJsonl`, {
+      id: "cmd-export-jsonl",
+      params: { outputPath: path.join(mockHome, "export.jsonl") },
+    })
+    assert.equal(jsonlExport.status, 202)
+    assert.equal(jsonlExport.json.command.status, "accepted")
+    await waitForCommand(ws, envelopes, "cmd-export-jsonl")
+    assert.equal(existsSync(path.join(mockHome, "export.jsonl")), true)
+    const htmlExport = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/exportHtml`, {
+      id: "cmd-export-html",
+      params: { outputPath: path.join(mockHome, "export.html") },
+    })
+    assert.equal(htmlExport.status, 202)
+    assert.equal(htmlExport.json.command.status, "accepted")
+    await waitForCommand(ws, envelopes, "cmd-export-html")
+    assert.equal(existsSync(path.join(mockHome, "export.html")), true)
 
     const branch = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/branch.get`)
     assert.equal(branch.status, 200)
@@ -350,4 +369,21 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     if (Date.now() >= deadline) throw new Error("timed out waiting for websocket frame")
     await new Promise(resolve => setTimeout(resolve, 20))
   }
+}
+
+async function waitForCommand(
+  ws: WebSocket,
+  envelopes: Array<{ channel: string; payload: unknown }>,
+  commandId: string,
+): Promise<void> {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    for (const envelope of envelopes.splice(0)) {
+      if (envelope.channel !== "command.updated") continue
+      const payload = envelope.payload as { id?: string; status?: string }
+      if (payload.id === commandId && payload.status === "completed") return
+    }
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
+  throw new Error(`command ${commandId} did not complete`)
 }
