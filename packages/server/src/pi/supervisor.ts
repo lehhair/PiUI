@@ -1,4 +1,4 @@
-import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHostCall } from "@piui/pi-worker"
+import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHello, type WorkerHostCall } from "@piui/pi-worker"
 import { resolve } from "node:path"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import {
@@ -109,6 +109,13 @@ export class RuntimeSupervisor {
   onEvent(listener: (event: WorkerEvent) => void): () => void {
     this.eventListeners.add(listener)
     return () => this.eventListeners.delete(listener)
+  }
+
+  /** Catalog worker 的握手（真实 SDK 版本、verified、回退标记），供 health 上报。 */
+  getCatalogHandshake(): Promise<WorkerHello> {
+    if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
+    const catalog = this.catalog ?? (this.catalog = this.createCatalog())
+    return catalog.getHandshake()
   }
 
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {

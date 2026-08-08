@@ -36,6 +36,7 @@ function defaultHandshakeTimeoutMs(): number {
 
 export interface WorkerCatalog {
   command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined>
+  getHandshake(): Promise<WorkerHello>
   onEvent(listener: (event: WorkerEvent) => void): () => void
   onCrash(listener: (error: Error) => void): () => void
   dispose(): Promise<void>
@@ -100,6 +101,7 @@ export class WorkerSession {
     const session = new WorkerSession(workerEntry, options)
     return {
       command: (type, params, signal) => session.request({ type, params }, signal),
+      getHandshake: () => session.ready,
       onEvent: listener => session.onEvent(listener),
       onCrash: listener => session.onCrash(listener),
       dispose: () => session.dispose(),

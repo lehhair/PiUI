@@ -3,8 +3,8 @@ import test from "node:test"
 import { join } from "node:path"
 import { resolvePiSdkPath, shouldRequireVerifiedSdk } from "./sdk-host.ts"
 
-test("external SDK verification is strict unless explicitly disabled", () => {
-  assert.equal(shouldRequireVerifiedSdk({}), true)
+test("external SDK verification is advisory unless explicitly enabled", () => {
+  assert.equal(shouldRequireVerifiedSdk({}), false)
   assert.equal(shouldRequireVerifiedSdk({ PIUI_SDK_STRICT: "1" }), true)
   assert.equal(shouldRequireVerifiedSdk({ PIUI_SDK_STRICT: "0" }), false)
 })

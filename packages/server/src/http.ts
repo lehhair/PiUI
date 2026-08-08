@@ -223,11 +223,22 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
 
       if (method === "GET" && p === "/api/v1/host/health") {
+        // 真实 SDK 版本来自 catalog worker 的握手；握手未就绪时回退到 parity
+        // 常量，不让 health 阻塞在 worker 启动上。
+        const handshake = await Promise.race([
+          supervisor.getCatalogHandshake(),
+          new Promise<undefined>(resolve => {
+            const timer = setTimeout(() => resolve(undefined), 3_000)
+            timer.unref?.()
+          }),
+        ]).catch(() => undefined)
         const body: HealthResponse = {
           ok: true,
           protocolVersion: PROTOCOL_VERSION,
           service: "piui-server",
-          piSdkVersion: PI_PARITY_SDK_VERSION,
+          piSdkVersion: handshake?.piSdkVersion ?? PI_PARITY_SDK_VERSION,
+          piSdkVerified: handshake?.piSdkVerified,
+          piSdkFallback: handshake?.piSdkFallback ?? null,
           processId: process.pid,
         }
         return sendJson(res, 200, body)
