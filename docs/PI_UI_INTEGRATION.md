@@ -1,6 +1,6 @@
-# Pi 0.81.1 Native Parity Matrix
+# Pi 0.84.0 Native Parity Matrix
 
-本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@0.81.1`
+本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@0.84.0`
 
 支持等级：
 
@@ -60,24 +60,24 @@
 |---|---|---|
 | Skills 元数据 | 部分 | R8：内容、来源与 reload |
 | Prompt templates | 部分 | R7：改用真实 `getPrompts()` |
-| Extension commands | 缺失 | R7 |
+| Extension commands | 部分 | R7：真实 SDK 执行集成测试、逐命令 schema |
 | Dynamic tools/providers | 部分 | R7/R10 |
-| select/confirm/input/editor | 缺失 | R7 |
-| notify/status/widget/title | 缺失 | R7 |
+| select/confirm/input/editor | 部分 | R7：真实 SDK 对话框 E2E |
+| notify/status/widget/title | 部分 | R7：真实 SDK 状态事件 E2E |
 | custom entries/renderers | 缺失 | R7 |
 | arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
 | AGENTS/CLAUDE context | 部分 | R8：来源与诊断 |
 | resource reload/diagnostics | 缺失 | R8 |
-| global/project settings | 缺失 | R8 |
-| packages install/update/remove | 缺失 | R9 |
-| Pi project trust | 缺失 | R9 |
+| global/project settings | 完整 | R12：升级 conformance |
+| packages install/update/remove | 后端 | R9：前端管理入口 |
+| Pi project trust | 部分 | R9：前端信任流程验收 |
 
 ## Providers And Auth
 
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
 | `~/.pi/agent` 模型与认证读取 | 部分 | R10 |
-| provider auth status | 缺失 | R10 |
+| provider auth status | 部分 | R10：前端认证流程 |
 | API key/OAuth login/logout | 缺失 | R10 |
 | catalog refresh | 缺失 | R10 |
 | extension provider models | 缺失 | R10 |

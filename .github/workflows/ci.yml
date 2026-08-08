@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      # win32 专属补丁在非 Windows 上会让 patch-package 直接报错（包不存在）
+      - name: drop windows-only patch
+        if: runner.os != 'Windows'
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - run: npm ci
+
+      # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建
+      - run: npm run validate
