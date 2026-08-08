@@ -321,8 +321,8 @@ export async function setPiScopedModels(sessionId: string, patterns: string[], s
 }
 
 /** Run a one-shot bash command; resolves with the native result. */
-export async function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, signal?: AbortSignal): Promise<JsonValue> {
-  return submitAndWait(() => transport.executePiBash(sessionId, command, excludeFromContext, signal), signal)
+export async function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, clientId?: string, signal?: AbortSignal): Promise<JsonValue> {
+  return submitAndWait(() => transport.executePiBash(sessionId, command, excludeFromContext, clientId, signal), signal)
 }
 
 export async function abortPiBashExecution(sessionId: string, signal?: AbortSignal): Promise<void> {

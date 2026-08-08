@@ -40,6 +40,9 @@ interface ToolPartViewProps {
   isStreaming?: boolean
   /** Call start time for the running-duration label (entry timestamp) */
   startedAt?: number
+  /** 初始即展开（用户发起的 bash 等：发命令就是为了看输出）。仅影响初始
+   *  状态；用户手动折叠后保持折叠（respectUser）。 */
+  defaultExpanded?: boolean
 }
 
 export const ToolPartView = memo(function ToolPartView({
@@ -51,6 +54,7 @@ export const ToolPartView = memo(function ToolPartView({
   descriptive = false,
   isStreaming = false,
   startedAt,
+  defaultExpanded = false,
 }: ToolPartViewProps) {
   const { t } = useTranslation('message')
   const { call, result } = execution
@@ -69,7 +73,7 @@ export const ToolPartView = memo(function ToolPartView({
   const { immersiveMode } = useTheme()
   const isReadable = isReadableTool(toolName)
   const shouldStartExpanded =
-    isActive || (immersiveMode && descriptive && isStreaming && isReadable)
+    defaultExpanded || isActive || (immersiveMode && descriptive && isStreaming && isReadable)
 
   const [expanded, setExpanded] = useUiDisclosureState(`message:${partKey}`, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)

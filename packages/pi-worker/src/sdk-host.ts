@@ -25,6 +25,37 @@ export interface LoadSdkOptions {
   strict?: boolean
 }
 
+/**
+ * Pi 内置斜杠命令兜底清单（与 pi-coding-agent 的 BUILTIN_SLASH_COMMANDS 对齐）。
+ * 打包后的 Bun exe 内联了 SDK，运行时无法按路径读取 core/slash-commands.js，
+ * registry.get 的 commands 会因此变成空数组，导致前端斜杠菜单空白。这里固化
+ * 一份同版本清单兜底，保证任何形态下 registry 都能报告完整的内置命令。
+ */
+export const PI_BUILTIN_SLASH_COMMANDS: Array<{ name: string; description?: string; argumentHint?: string }> = [
+  { name: "settings", description: "Open settings menu" },
+  { name: "model", description: "Select model (opens selector UI)", argumentHint: "<provider/model>" },
+  { name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
+  { name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
+  { name: "import", description: "Import and resume a session from a JSONL file" },
+  { name: "share", description: "Share session as a secret GitHub gist" },
+  { name: "copy", description: "Copy last agent message to clipboard" },
+  { name: "name", description: "Set session display name" },
+  { name: "session", description: "Show session info and stats" },
+  { name: "changelog", description: "Show changelog entries" },
+  { name: "hotkeys", description: "Show all keyboard shortcuts" },
+  { name: "fork", description: "Create a new fork from a previous user message" },
+  { name: "clone", description: "Duplicate the current session at the current position" },
+  { name: "tree", description: "Navigate session tree (switch branches)" },
+  { name: "trust", description: "Save project trust decision for future sessions" },
+  { name: "login", description: "Configure provider authentication", argumentHint: "<provider>" },
+  { name: "logout", description: "Remove provider authentication" },
+  { name: "new", description: "Start a new session" },
+  { name: "compact", description: "Manually compact the session context" },
+  { name: "resume", description: "Resume a different session" },
+  { name: "reload", description: "Reload keybindings, extensions, skills, prompts, themes, and context files" },
+  { name: "quit", description: "Quit Pi" },
+]
+
 let cached: LoadedSdk | undefined
 
 export function shouldRequireVerifiedSdk(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -259,6 +290,30 @@ function runtimePackageAliases(entry: string): Record<string, string> {
   return aliases
 }
 
+/**
+ * 从磁盘包内读取 pi-coding-agent 的 BUILTIN_SLASH_COMMANDS。
+ * externalEntry 存在时从外部 SDK 目录读取；否则从 bundled SDK 的包入口解析。
+ * 读不到（打包内联）或读到的清单为空时返回 undefined，由调用方回退兜底清单。
+ */
+async function readBuiltinSlashCommands(externalEntry?: string): Promise<Array<{ name: string; description?: string; argumentHint?: string }> | undefined> {
+  try {
+    const entry = externalEntry ?? fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
+    const slashCommands = await import(pathToFileURL(join(dirname(entry), "core/slash-commands.js")).href) as {
+      BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
+    }
+    const commands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
+      .filter(command => typeof command.name === "string")
+      .map(command => ({
+        name: command.name as string,
+        ...(typeof command.description === "string" ? { description: command.description } : {}),
+        ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
+      }))
+    return commands.length > 0 ? commands : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk> {
   if (cached) return cached
   const external = options.sdkPath?.trim()
@@ -270,39 +325,12 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
   const sdk = external
     ? await importExternalSdk(resolveSdkEntry(external))
     : await import("@earendil-works/pi-coding-agent") as PiSdk
-  // 内置 slash 命令列表：外部 SDK 从磁盘包内读取；bundled 的 SDK 已被
-  // Bun/打包器内联（import.meta.resolve 会阻止内联），运行时尝试解析
-  // 失败时返回空列表——内置命令仍由 Pi 执行，只是 registry 少展示描述。
-  let builtinSlashCommands: Array<{ name: string; description?: string; argumentHint?: string }> = []
-  if (external) {
-    const slashCommands = await import(pathToFileURL(join(dirname(resolveSdkEntry(external)), "core/slash-commands.js")).href) as {
-      BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
-    }
-    builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
-      .filter(command => typeof command.name === "string")
-      .map(command => ({
-        name: command.name as string,
-        ...(typeof command.description === "string" ? { description: command.description } : {}),
-        ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
-      }))
-  } else {
-    try {
-      const sdkEntry = fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
-      const slashCommands = await import(pathToFileURL(join(dirname(sdkEntry), "core/slash-commands.js")).href) as {
-        BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
-      }
-      builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
-        .filter(command => typeof command.name === "string")
-        .map(command => ({
-          name: command.name as string,
-          ...(typeof command.description === "string" ? { description: command.description } : {}),
-          ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
-        }))
-    } catch {
-      // 打包产物（Bun exe）中 SDK 已内联，无法按路径读取 slash-commands。
-      // 空列表不影响 Pi 会话功能。
-    }
-  }
+  // 内置 slash 命令列表：优先从磁盘包内的 core/slash-commands.js 读取真实
+  // 清单（外部 SDK 与未打包的 bundled SDK 都能读到）；打包后的 Bun exe 内联
+  // 了 SDK，import.meta.resolve 会失败，此时回退到 PI_BUILTIN_SLASH_COMMANDS
+  // 兜底清单，保证 registry.get 的 commands 永不为空。
+  const builtinSlashCommands = await readBuiltinSlashCommands(external ? resolveSdkEntry(external) : undefined)
+    ?? PI_BUILTIN_SLASH_COMMANDS
   // bundled 的 SDK 版本用编译期常量：打包后 sdk.VERSION 会失真（SDK 的
   // config.js 靠 __dirname 找 package.json，Bun 打包后 __dirname 指向虚拟
   // 路径，读到的可能是宿主包版本）。打包脚本会把常量同步为真实 SDK 版本。

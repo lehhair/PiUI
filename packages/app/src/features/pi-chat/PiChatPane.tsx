@@ -16,6 +16,7 @@ import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
 import { selectPiTimelineItems } from '../../pi/selectors/index.js'
 import { piEventStream } from '../../pi/eventStream.js'
+import { bashPendingStore } from '../../pi/bashPendingStore'
 import {
   abortPiOperation,
   compactPiSession,
@@ -314,7 +315,21 @@ export function PiChatPane({
 
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
-  const items = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
+  const baseItems = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
+  // 用户发起的 bash 乐观条目（执行中显示 + 流式输出，pi TUI 的
+  // BashExecutionComponent 对应物）。订阅 pending 数量变化以便渲染合并。
+  const pendingBashCount = useSyncExternalStore(
+    bashPendingStore.subscribe,
+    () => bashPendingStore.getForSession(sessionId ?? '').length,
+  )
+  const items = useMemo(() => {
+    const pendingItems = sessionId ? bashPendingStore.toItems(baseItems, sessionId) : []
+    return pendingItems.length > 0 ? [...baseItems, ...pendingItems] : baseItems
+  }, [baseItems, sessionId, pendingBashCount])
+  // 真实条目落盘后清理已被吸收的乐观条目（toItems 已过滤，这里防泄漏）
+  useEffect(() => {
+    if (sessionId) bashPendingStore.removeConsumed(baseItems, sessionId)
+  }, [baseItems, sessionId])
 
   // Current model from runtime state (native SDK shape); on home (no
   // session) fall back to the composer's persisted preferred model.
@@ -709,7 +724,9 @@ export function PiChatPane({
 
       // pi TUI parity: `!command` runs one-shot bash through the runtime
       if (text.startsWith('!') && text.length > 1) {
-        void executePiBash(sid, text.slice(1)).catch(error => {
+        const clientId = crypto.randomUUID()
+        bashPendingStore.add(sid, clientId, text.slice(1))
+        void executePiBash(sid, text.slice(1), undefined, clientId).catch(error => {
           console.error('Failed to run bash command:', error)
         })
         scheduleDelayedRefresh(sid)
@@ -819,6 +836,40 @@ export function PiChatPane({
               currentDirectoryRef.current,
             )
           })
+        return true
+      }
+
+      // /bash <command> — 斜杠命令形式的 one-shot bash（pi TUI `!` 前缀的对应物）
+      if (command === 'bash') {
+        if (!args) {
+          notificationStore.push('error', '/bash', 'Usage: /bash <command>', sid, currentDirectoryRef.current)
+          return true
+        }
+        const clientId = crypto.randomUUID()
+        bashPendingStore.add(sid, clientId, args)
+        void executePiBash(sid, args, undefined, clientId).catch(error => {
+          console.error('Failed to run bash command:', error)
+          notificationStore.push(
+            'error',
+            '/bash',
+            error instanceof Error ? error.message : String(error),
+            sid,
+            currentDirectoryRef.current,
+          )
+        })
+        scheduleDelayedRefresh(sid)
+        return true
+      }
+
+      // /share — pi TUI 的 gist 分享依赖本机 gh CLI，Web 客户端暂不提供
+      if (command === 'share') {
+        notificationStore.push(
+          'completed',
+          '/share',
+          'Gist sharing needs the gh CLI on the server host; use /export to save the session instead',
+          sid,
+          currentDirectoryRef.current,
+        )
         return true
       }
 

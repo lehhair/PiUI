@@ -5,29 +5,16 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import i18n from '../../i18n'
 import { loadPiSlashCommands } from '../../pi/controllers/index.js'
 import { apiErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
+import { getFrontendCommands, type Command } from './builtinCommands'
+
+export type { Command } from './builtinCommands'
 
 // ============================================
 // Types
 // ============================================
-
-export interface Command {
-  name: string
-  description?: string
-  argumentHint?: string
-  keybind?: string
-  source: 'frontend' | 'builtin' | 'api'
-}
-
-function getFrontendCommands(): Command[] {
-  return [
-    { name: 'new', description: i18n.t('commands:slashCommand.newSessionDesc'), source: 'frontend' },
-    { name: 'compact', description: i18n.t('commands:slashCommand.compactDesc'), source: 'frontend' },
-  ]
-}
 
 interface SlashCommandMenuProps {
   isOpen: boolean
@@ -137,7 +124,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
     }
   }, [isOpen])
 
-  // 加载命令列表：前端内置 + 会话 registry 原生命令
+  // 加载命令列表：Pi TUI 内置命令（始终展示）+ 会话 registry 的扩展命令
   useEffect(() => {
     if (!isOpen) return
 
@@ -154,14 +141,19 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
       loadPiSlashCommands(sessionId)
         .then(descriptors => {
           if (requestId !== requestIdRef.current) return
-          const sessionCommands: Command[] = descriptors.map(descriptor => ({
-            name: descriptor.name,
-            description: descriptor.description,
-            argumentHint: descriptor.argumentHint,
-            source: descriptor.sourceInfo && typeof descriptor.sourceInfo === 'object' && !Array.isArray(descriptor.sourceInfo)
-              && descriptor.sourceInfo.builtin === true ? 'builtin' : 'api',
-          }))
-          setCommands(sessionCommands)
+          // 内置命令名由前端本地处理，同名 registry 命令（含 pi-sdk 内置命令
+          // 的镜像）直接跳过，避免重复项。仅补充扩展命令。
+          const frontendNames = new Set(frontend.map(cmd => cmd.name))
+          const sessionCommands: Command[] = descriptors
+            .filter(descriptor => !frontendNames.has(descriptor.name))
+            .map(descriptor => ({
+              name: descriptor.name,
+              description: descriptor.description,
+              argumentHint: descriptor.argumentHint,
+              source: descriptor.sourceInfo && typeof descriptor.sourceInfo === 'object' && !Array.isArray(descriptor.sourceInfo)
+                && descriptor.sourceInfo.builtin === true ? 'builtin' : 'api',
+            }))
+          setCommands([...frontend, ...sessionCommands])
           setSelectedIndex(0)
         })
         .catch(err => {

@@ -471,6 +471,16 @@ class PiEventStream {
         this.scheduleStateRefresh(sessionId)
         break
       }
+      case 'bash_execution_update': {
+        // 用户 `!cmd`/`/bash` 的流式输出（pi TUI onChunk 的事件流对应物）。
+        // id = worker 透传的 clientId，delta 是增量 chunk。
+        if ('id' in event && typeof event.id === 'string' && event.id
+          && 'delta' in event && typeof event.delta === 'string') {
+          liveToolOutputStore.append(event.id, sessionId, event.delta)
+        }
+        this.scheduleStateRefresh(sessionId)
+        break
+      }
       case 'agent_end':
       case 'agent_settled':
         this.scheduleBranchRefresh(sessionId)

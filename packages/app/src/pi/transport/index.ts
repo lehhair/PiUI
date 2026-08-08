@@ -448,8 +448,8 @@ export function setPiScopedModels(sessionId: string, patterns: string[], signal?
   return postPiSessionCommand(sessionId, 'setScopedModels', { patterns }, signal)
 }
 
-export function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'bash', { command, excludeFromContext }, signal)
+export function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, clientId?: string, signal?: AbortSignal): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'bash', { command, excludeFromContext, clientId }, signal)
 }
 
 export function abortPiBash(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {

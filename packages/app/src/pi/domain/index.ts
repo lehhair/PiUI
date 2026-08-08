@@ -133,6 +133,7 @@ export type PiTimelineItem = (
   | PiUserMessageItem
   | PiAssistantMessageItem
   | PiBashExecutionItem
+  | PiBashExecutionGroupItem
   | PiCompactionItem
   | PiBranchSummaryItem
   | PiCustomMessageItem
@@ -172,6 +173,18 @@ export type PiBashExecutionItem = {
   timestamp: number
   rawEntry: SessionEntry
   message: BashExecutionMessage
+}
+
+/**
+ * 相邻 bash 执行（用户 `!cmd` / `/bash cmd` 发起的）合并为一个工具组，
+ * 与 AI 连续调用工具时的 ToolGroup 渲染一致（steps header + timeline）。
+ * entryId 取组内第一个 bash 的 entryId（稳定渲染 key）。
+ */
+export type PiBashExecutionGroupItem = {
+  kind: 'bash_execution_group'
+  entryId: string
+  timestamp: number
+  items: PiBashExecutionItem[]
 }
 
 /**
