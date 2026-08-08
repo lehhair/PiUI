@@ -10,11 +10,6 @@ import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useNow } from '../../hooks/useNow'
 import { useTheme } from '../../hooks/useTheme'
 import {
-  useInlineToolRequests,
-  findPermissionRequestForTool,
-  findQuestionRequestForTool,
-} from '../chat/InlineToolRequestContext'
-import {
   TextPartView,
   ReasoningPartView,
   ToolPartView,
@@ -816,17 +811,7 @@ const ToolGroup = memo(function ToolGroup({
   modelLabel,
 }: ToolGroupProps) {
   const { t } = useTranslation('message')
-  const { descriptiveToolSteps, inlineToolRequests, immersiveMode, processCollapseEnabled } = useTheme()
-  const { pendingPermissions, pendingQuestions } = useInlineToolRequests()
-  const hasPendingInteraction =
-    inlineToolRequests &&
-    executions.some(execution => {
-      const childSessionId = getTaskChildSessionId(execution)
-      return (
-        findPermissionRequestForTool(pendingPermissions, execution.call.id, childSessionId) ||
-        findQuestionRequestForTool(pendingQuestions, execution.call.id, childSessionId)
-      )
-    })
+  const { descriptiveToolSteps, immersiveMode, processCollapseEnabled } = useTheme()
 
   const doneCount = executions.filter(e => e.result && !e.result.isError).length
   const totalCount = executions.length
@@ -853,13 +838,11 @@ const ToolGroup = memo(function ToolGroup({
 
   // 沉浸模式下：判断工具组是否包含需要用户阅读的工具
   const hasReadableTools = immersiveMode && executions.some(e => isReadableTool(e.call.name))
-  // 过程折叠：steps 默认收起，只有权限/提问才自动展开
-  // 其它模式：活跃/流式/可读工具时展开
+  // 过程折叠：steps 默认收起；其它模式：活跃/流式/可读工具时展开
   const shouldStartExpanded = processCollapseEnabled
-    ? !!hasPendingInteraction
+    ? false
     : !descriptiveToolSteps ||
       hasActiveTools ||
-      hasPendingInteraction ||
       (immersiveMode && !!isStreaming && hasReadableTools)
 
   const groupStateKey = `message:${item.entryId}:tool-group:${executions[0]?.call.id ?? 'empty'}`
@@ -872,12 +855,6 @@ const ToolGroup = memo(function ToolGroup({
 
   useEffect(() => {
     if (!descriptiveToolSteps) return
-
-    // 权限/提问：必须展开让用户操作
-    if (hasPendingInteraction) {
-      setExpanded(true, { touched: false, respectUser: true })
-      return
-    }
 
     // 过程折叠：不因 active/streaming 自动展开 steps
     if (processCollapseEnabled) return
@@ -903,14 +880,13 @@ const ToolGroup = memo(function ToolGroup({
     descriptiveToolSteps,
     processCollapseEnabled,
     hasActiveTools,
-    hasPendingInteraction,
     immersiveMode,
     hasReadableTools,
     isStreaming,
     setExpanded,
   ])
 
-  const effectiveExpanded = expanded || hasPendingInteraction
+  const effectiveExpanded = expanded
   // Android expand: instant layout + max-height fake; collapse: original grid-rows.
   // Only animate at the steps shell level so nested ToolPartView does not double-animate.
   const {
@@ -1189,14 +1165,6 @@ function getToolSummaryCategory(toolName: string): ToolSummaryCategory {
   if (lower.includes('glob') || lower.includes('find')) return 'list'
   if (lower.includes('think') || lower.includes('reason') || lower.includes('plan')) return 'think'
   return 'other'
-}
-
-function getTaskChildSessionId(execution: PiToolExecution): string | undefined {
-  if (execution.call.name.toLowerCase() !== 'task') return undefined
-  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
-    ? execution.result.details as Record<string, unknown>
-    : undefined
-  return metadata?.sessionId as string | undefined
 }
 
 /** 从 extractToolData 的结果计算 diff stats（当 metadata 没给 diffStats 时） */

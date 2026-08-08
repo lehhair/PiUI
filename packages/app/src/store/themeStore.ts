@@ -120,7 +120,6 @@ const DEFAULT_REASONING_DISPLAY_MODE: ReasoningDisplayMode = 'markdown'
 const DEFAULT_RENDER_USER_MARKDOWN = false
 const DEFAULT_DIFF_STYLE: DiffStyle = 'markers'
 const DEFAULT_DESCRIPTIVE_TOOL_STEPS = true
-const DEFAULT_INLINE_TOOL_REQUESTS = true
 const DEFAULT_CODE_WORD_WRAP = false
 const DEFAULT_UI_FONT_SCALE = 0
 const DEFAULT_CODE_FONT_SCALE = 0
@@ -129,7 +128,6 @@ const DEFAULT_CODE_FONT_SCALE = 0
 export type ToolCardStyle = 'classic' | 'compact'
 const DEFAULT_TOOL_CARD_STYLE: ToolCardStyle = 'compact'
 const DEFAULT_IMMERSIVE_MODE = true
-const DEFAULT_COMPACT_INLINE_PERMISSION = true
 const DEFAULT_GLASS_EFFECT = true
 const DEFAULT_QUEUE_FOLLOWUP_MESSAGES = false
 const DEFAULT_EXTERNAL_FILE_DROP_MODE: ExternalFileDropMode = 'upload-first'
@@ -168,8 +166,6 @@ export interface ThemeState {
   diffStyle: DiffStyle
   /** 是否启用带工具描述的 steps 摘要 */
   descriptiveToolSteps: boolean
-  /** 是否在工具下方内嵌权限/提问请求 */
-  inlineToolRequests: boolean
   /** 代码块/diff 自动换行 */
   codeWordWrap: boolean
   /** UI 字号偏移 (px)，0 = 基准 */
@@ -180,8 +176,6 @@ export interface ThemeState {
   toolCardStyle: ToolCardStyle
   /** 沉浸模式 */
   immersiveMode: boolean
-  /** 内嵌权限精简模式：ToolBody 有内容时只显示操作按钮 */
-  compactInlinePermission: boolean
   /** 毛玻璃效果开关（backdrop-filter blur） */
   glassEffect: boolean
   /** 忙碌时后续消息是否进入队列 */
@@ -249,13 +243,11 @@ const STORAGE_KEY_REASONING_DISPLAY_MODE = 'piui-reasoning-display-mode'
 const STORAGE_KEY_WIDE_MODE = 'piui-chat-wide-mode'
 const STORAGE_KEY_DIFF_STYLE = 'piui-diff-style'
 const STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS = 'piui-descriptive-tool-steps'
-const STORAGE_KEY_INLINE_TOOL_REQUESTS = 'piui-inline-tool-requests'
 const STORAGE_KEY_CODE_WORD_WRAP = 'piui-code-word-wrap'
 const STORAGE_KEY_FONT_SCALE = 'piui-font-scale'
 const STORAGE_KEY_CODE_FONT_SCALE = 'piui-code-font-scale'
 const STORAGE_KEY_TOOL_CARD_STYLE = 'piui-tool-card-style'
 const STORAGE_KEY_IMMERSIVE_MODE = 'piui-immersive-mode'
-const STORAGE_KEY_COMPACT_INLINE_PERMISSION = 'piui-compact-inline-permission'
 const STORAGE_KEY_GLASS_EFFECT = 'piui-glass-effect'
 const STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES = 'piui-queue-followup-messages'
 const STORAGE_KEY_EXTERNAL_FILE_DROP_MODE = 'piui-external-file-drop-mode'
@@ -345,10 +337,6 @@ class ThemeStore {
     const descriptiveToolSteps =
       savedDescriptiveToolSteps === null ? DEFAULT_DESCRIPTIVE_TOOL_STEPS : savedDescriptiveToolSteps === 'true'
 
-    const savedInlineToolRequests = storageGet(STORAGE_KEY_INLINE_TOOL_REQUESTS)
-    const inlineToolRequests =
-      savedInlineToolRequests === null ? DEFAULT_INLINE_TOOL_REQUESTS : savedInlineToolRequests === 'true'
-
     const savedCodeWordWrap = storageGet(STORAGE_KEY_CODE_WORD_WRAP)
     const codeWordWrap = savedCodeWordWrap === 'true' ? true : DEFAULT_CODE_WORD_WRAP
 
@@ -367,12 +355,6 @@ class ThemeStore {
 
     const savedImmersiveMode = storageGet(STORAGE_KEY_IMMERSIVE_MODE)
     const immersiveMode = savedImmersiveMode === null ? DEFAULT_IMMERSIVE_MODE : savedImmersiveMode === 'true'
-
-    const savedCompactInlinePermission = storageGet(STORAGE_KEY_COMPACT_INLINE_PERMISSION)
-    const compactInlinePermission =
-      savedCompactInlinePermission === null
-        ? DEFAULT_COMPACT_INLINE_PERMISSION
-        : savedCompactInlinePermission === 'true'
 
     const savedGlassEffect = storageGet(STORAGE_KEY_GLASS_EFFECT)
     const glassEffect = savedGlassEffect === null ? DEFAULT_GLASS_EFFECT : savedGlassEffect === 'true'
@@ -436,13 +418,11 @@ class ThemeStore {
       wideMode: savedWideMode,
       diffStyle,
       descriptiveToolSteps,
-      inlineToolRequests,
       codeWordWrap,
       uiFontScale,
       codeFontScale,
       toolCardStyle,
       immersiveMode,
-      compactInlinePermission,
       glassEffect,
       queueFollowupMessages,
       externalFileDropMode,
@@ -501,9 +481,6 @@ class ThemeStore {
   get descriptiveToolSteps() {
     return this.state.descriptiveToolSteps
   }
-  get inlineToolRequests() {
-    return this.state.inlineToolRequests
-  }
   get codeWordWrap() {
     return this.state.codeWordWrap
   }
@@ -518,9 +495,6 @@ class ThemeStore {
   }
   get immersiveMode() {
     return this.state.immersiveMode
-  }
-  get compactInlinePermission() {
-    return this.state.compactInlinePermission
   }
   get glassEffect() {
     return this.state.glassEffect
@@ -737,13 +711,6 @@ class ThemeStore {
     this.emit()
   }
 
-  setInlineToolRequests(enabled: boolean) {
-    if (this.state.inlineToolRequests === enabled) return
-    this.state = { ...this.state, inlineToolRequests: enabled }
-    storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
-    this.emit()
-  }
-
   setCodeWordWrap(enabled: boolean) {
     if (this.state.codeWordWrap === enabled) return
     this.state = { ...this.state, codeWordWrap: enabled }
@@ -788,24 +755,13 @@ class ThemeStore {
     this.state = {
       ...this.state,
       immersiveMode: enabled,
-      // 联动四个子功能
-      inlineToolRequests: enabled,
+      // 联动三个子功能
       descriptiveToolSteps: enabled,
       toolCardStyle: enabled ? 'compact' : 'classic',
-      compactInlinePermission: enabled,
     }
     storageSet(STORAGE_KEY_IMMERSIVE_MODE, String(enabled))
-    storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(enabled))
     storageSet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(enabled))
     storageSet(STORAGE_KEY_TOOL_CARD_STYLE, enabled ? 'compact' : 'classic')
-    storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
-    this.emit()
-  }
-
-  setCompactInlinePermission(enabled: boolean) {
-    if (this.state.compactInlinePermission === enabled) return
-    this.state = { ...this.state, compactInlinePermission: enabled }
-    storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
     this.emit()
   }
 
@@ -1092,8 +1048,6 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     diffStyle: parsed?.diffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE,
     descriptiveToolSteps:
       typeof parsed?.descriptiveToolSteps === 'boolean' ? parsed.descriptiveToolSteps : DEFAULT_DESCRIPTIVE_TOOL_STEPS,
-    inlineToolRequests:
-      typeof parsed?.inlineToolRequests === 'boolean' ? parsed.inlineToolRequests : DEFAULT_INLINE_TOOL_REQUESTS,
     codeWordWrap: typeof parsed?.codeWordWrap === 'boolean' ? parsed.codeWordWrap : DEFAULT_CODE_WORD_WRAP,
     uiFontScale: clampFontScale(typeof parsed?.uiFontScale === 'number' ? parsed.uiFontScale : DEFAULT_UI_FONT_SCALE),
     codeFontScale: clampFontScale(
@@ -1104,10 +1058,6 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         ? parsed.toolCardStyle
         : DEFAULT_TOOL_CARD_STYLE,
     immersiveMode: typeof parsed?.immersiveMode === 'boolean' ? parsed.immersiveMode : DEFAULT_IMMERSIVE_MODE,
-    compactInlinePermission:
-      typeof parsed?.compactInlinePermission === 'boolean'
-        ? parsed.compactInlinePermission
-        : DEFAULT_COMPACT_INLINE_PERMISSION,
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
     queueFollowupMessages:
       typeof parsed?.queueFollowupMessages === 'boolean'
@@ -1170,13 +1120,11 @@ export function importThemeBackup(raw: unknown): void {
   storageSet(STORAGE_KEY_WIDE_MODE, String(backup.wideMode))
   storageSet(STORAGE_KEY_DIFF_STYLE, backup.diffStyle)
   storageSet(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(backup.descriptiveToolSteps))
-  storageSet(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(backup.inlineToolRequests))
   storageSet(STORAGE_KEY_CODE_WORD_WRAP, String(backup.codeWordWrap))
   storageSet(STORAGE_KEY_FONT_SCALE, String(backup.uiFontScale))
   storageSet(STORAGE_KEY_CODE_FONT_SCALE, String(backup.codeFontScale))
   storageSet(STORAGE_KEY_TOOL_CARD_STYLE, backup.toolCardStyle)
   storageSet(STORAGE_KEY_IMMERSIVE_MODE, String(backup.immersiveMode))
-  storageSet(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(backup.compactInlinePermission))
   storageSet(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
   storageSet(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
   storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)

@@ -1,16 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { getSoundSnapshotMock, getCustomAudioBlobMock, playSoundMock, autoApproveStoreMock } = vi.hoisted(() => ({
+const { getSoundSnapshotMock, getCustomAudioBlobMock, playSoundMock } = vi.hoisted(() => ({
   getSoundSnapshotMock: vi.fn(),
   getCustomAudioBlobMock: vi.fn(),
   playSoundMock: vi.fn(),
-  autoApproveStoreMock: {
-    fullAutoMode: 'off' as 'off' | 'session' | 'global',
-  },
-}))
-
-vi.mock('../store/autoApproveStore', () => ({
-  autoApproveStore: autoApproveStoreMock,
 }))
 
 vi.mock('../store/notificationStore', () => ({
@@ -35,7 +28,6 @@ describe('notificationSoundBridge', () => {
     getSoundSnapshotMock.mockReset()
     getCustomAudioBlobMock.mockReset()
     playSoundMock.mockReset()
-    autoApproveStoreMock.fullAutoMode = 'off'
     getSoundSnapshotMock.mockReturnValue({
       enabled: true,
       volume: 50,
@@ -48,18 +40,8 @@ describe('notificationSoundBridge', () => {
     })
   })
 
-  it('does not play permission sound while global full auto is enabled', async () => {
+  it('plays the configured sound for a notification type', async () => {
     const { playNotificationSound } = await import('./notificationSoundBridge')
-    autoApproveStoreMock.fullAutoMode = 'global'
-
-    playNotificationSound('permission')
-
-    expect(playSoundMock).not.toHaveBeenCalled()
-  })
-
-  it('still plays non-permission sounds while global full auto is enabled', async () => {
-    const { playNotificationSound } = await import('./notificationSoundBridge')
-    autoApproveStoreMock.fullAutoMode = 'global'
 
     playNotificationSound('question')
 
@@ -68,5 +50,18 @@ describe('notificationSoundBridge', () => {
       customAudioData: null,
       volume: 50,
     })
+  })
+
+  it('respects the master switch and volume', async () => {
+    const { playNotificationSound } = await import('./notificationSoundBridge')
+    getSoundSnapshotMock.mockReturnValue({
+      enabled: false,
+      volume: 50,
+      events: { completed: { soundId: 'builtin:completed' } },
+    })
+
+    playNotificationSound('completed')
+
+    expect(playSoundMock).not.toHaveBeenCalled()
   })
 })

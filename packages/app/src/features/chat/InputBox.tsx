@@ -1490,7 +1490,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           aria-hidden={isCollapsed || undefined}
         >
           <InputFooter
-            paneId={paneId}
             sessionId={sessionId}
             onNewChat={onNewChat}
             inputContainerRef={inputContainerRef}

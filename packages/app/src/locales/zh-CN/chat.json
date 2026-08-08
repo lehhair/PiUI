@@ -86,17 +86,8 @@
     "permission": "权限：{{permission}}",
     "moreCount": "还有 {{count}} 个",
     "minimize": "最小化",
-    "fromSubtask": "来自 Subtask：{{title}}",
     "changesPreview": "变更预览",
-    "request": "请求",
-    "rule": "规则",
-    "allowOnce": "允许一次",
-    "alwaysAllow": "始终允许",
-    "subtaskFallback": "Subtask",
-    "browserSession": "前端临时",
-    "thisSession": "后端始终",
-    "autoApproveEnabled": "前端会临时记住始终允许规则，刷新后清空。",
-    "changePermissionSettings": "始终允许将交给后端处理，可在设置中更改。"
+    "request": "请求"
   },
   "projectDialog": {
     "typePath": "输入路径...",
@@ -119,9 +110,6 @@
     "variantMenu": "变体菜单"
   },
   "inputFooter": {
-    "autoApproveOff": "自动放行：关闭",
-    "autoApproveSession": "自动放行：本次会话 · 点击切换为全部会话",
-    "autoApproveGlobal": "自动放行：全部会话 · 点击关闭",
     "pleaseVerify": "请验证 AI 回复的准确性。",
     "allTasksDone": "所有任务已完成",
     "remaining": "剩余 {{count}} 个",
@@ -226,9 +214,6 @@
     "rawMessages": "原始消息"
   },
   "hints": {
-    "pressEscAgain": "再按一次 <1>Esc</1> 停止",
-    "autoApproveAll": "自动放行：全部会话",
-    "autoApproveSession": "自动放行：本次会话",
-    "autoApproveOffHint": "自动放行：关闭"
+    "pressEscAgain": "再按一次 <1>Esc</1> 停止"
   }
 }

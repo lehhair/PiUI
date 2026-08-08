@@ -34,9 +34,7 @@ vi.mock('../../../hooks', () => ({
 
 vi.mock('../../../hooks/useTheme', () => ({
   useTheme: () => ({
-    inlineToolRequests: false,
     immersiveMode: false,
-    compactInlinePermission: false,
   }),
 }))
 
@@ -44,27 +42,6 @@ vi.mock('../../../store/serverStore', () => ({
   serverStore: {
     getActiveCalibratedNow: getActiveCalibratedNowMock,
   },
-}))
-
-vi.mock('../../chat/InlineToolRequestContext', () => ({
-  useInlineToolRequests: () => ({
-    pendingPermissions: [],
-    pendingQuestions: [],
-    onPermissionReply: vi.fn(),
-    onQuestionReply: vi.fn(),
-    onQuestionReject: vi.fn(),
-    isReplying: false,
-  }),
-  findPermissionRequestForTool: () => undefined,
-  findQuestionRequestForTool: () => undefined,
-}))
-
-vi.mock('../../chat/InlinePermission', () => ({
-  InlinePermission: () => null,
-}))
-
-vi.mock('../../chat/InlineQuestion', () => ({
-  InlineQuestion: () => null,
 }))
 
 vi.mock('../tools', () => ({

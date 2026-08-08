@@ -37,7 +37,6 @@ vi.mock('../../hooks/useTheme', () => ({
     stepFinishDisplay: { latestOnly: true, turnDuration: false, tokens: true, cache: true, cost: true, duration: true, agent: false, model: false, completedAt: false },
     actionsOnLatestAssistantOnly: true,
     descriptiveToolSteps: false,
-    inlineToolRequests: false,
     immersiveMode: false,
   }),
 }))

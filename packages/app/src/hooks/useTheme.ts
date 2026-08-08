@@ -180,12 +180,6 @@ export function useTheme() {
     themeStore.setDescriptiveToolSteps(enabled)
   }, [])
 
-  // ---- Inline Tool Requests ----
-
-  const setInlineToolRequests = useCallback((enabled: boolean) => {
-    themeStore.setInlineToolRequests(enabled)
-  }, [])
-
   // ---- Code Word Wrap ----
 
   const setCodeWordWrap = useCallback((enabled: boolean) => {
@@ -297,10 +291,6 @@ export function useTheme() {
     descriptiveToolSteps: state.descriptiveToolSteps,
     setDescriptiveToolSteps,
 
-    // 工具内嵌权限/提问
-    inlineToolRequests: state.inlineToolRequests,
-    setInlineToolRequests,
-
     // 代码块 / diff 自动换行
     codeWordWrap: state.codeWordWrap,
     setCodeWordWrap,
@@ -320,12 +310,6 @@ export function useTheme() {
     // 沉浸模式
     immersiveMode: state.immersiveMode,
     setImmersiveMode,
-
-    // 内嵌权限精简模式
-    compactInlinePermission: state.compactInlinePermission,
-    setCompactInlinePermission: useCallback((enabled: boolean) => {
-      themeStore.setCompactInlinePermission(enabled)
-    }, []),
 
     // 毛玻璃效果
     glassEffect: state.glassEffect,

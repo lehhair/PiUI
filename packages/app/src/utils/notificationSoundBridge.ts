@@ -12,7 +12,6 @@
 // 不要在其他地方直接调用 playSound，统一走这里
 
 import type { NotificationType } from '../store/notificationStore'
-import { autoApproveStore } from '../store/autoApproveStore'
 import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
 import { playSound } from './soundPlayer'
@@ -22,8 +21,6 @@ import { playSound } from './soundPlayer'
  * 会检查总开关和音量设置
  */
 export function playNotificationSound(type: NotificationType): void {
-  if (type === 'permission' && autoApproveStore.fullAutoMode === 'global') return
-
   const settings = soundStore.getSnapshot()
 
   // 总开关关闭

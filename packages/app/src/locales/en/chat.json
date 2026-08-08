@@ -86,17 +86,8 @@
     "permission": "Permission: {{permission}}",
     "moreCount": "+{{count}} more",
     "minimize": "Minimize",
-    "fromSubtask": "From subtask: {{title}}",
     "changesPreview": "Changes preview",
-    "request": "Request",
-    "rule": "Rule",
-    "allowOnce": "Allow once",
-    "alwaysAllow": "Always allow",
-    "subtaskFallback": "Subtask",
-    "browserSession": "Frontend temporary",
-    "thisSession": "Backend always",
-    "autoApproveEnabled": "The frontend temporarily remembers Always allow rules. Refresh to clear them.",
-    "changePermissionSettings": "Always allow is handled by the backend. You can change this in settings."
+    "request": "Request"
   },
   "projectDialog": {
     "typePath": "Type path...",
@@ -119,9 +110,6 @@
     "variantMenu": "Variant menu"
   },
   "inputFooter": {
-    "autoApproveOff": "Auto-approve: off",
-    "autoApproveSession": "Auto-approve: this session · click for all sessions",
-    "autoApproveGlobal": "Auto-approve: all sessions · click to disable",
     "pleaseVerify": "Please verify AI responses.",
     "allTasksDone": "All tasks done",
     "remaining": "{{count}} remaining",
@@ -226,9 +214,6 @@
     "rawMessages": "Raw Messages"
   },
   "hints": {
-    "pressEscAgain": "Press <1>Esc</1> again to stop",
-    "autoApproveAll": "Auto-approve: all sessions",
-    "autoApproveSession": "Auto-approve: this session",
-    "autoApproveOffHint": "Auto-approve: off"
+    "pressEscAgain": "Press <1>Esc</1> again to stop"
   }
 }

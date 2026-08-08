@@ -40,7 +40,7 @@ function ExtensionUiDialogCard({ request, queueLength }: { request: ExtensionUiD
   const [error, setError] = useState<string | null>(null)
   const [responseId] = useState(() => globalThis.crypto?.randomUUID?.() ?? `${request.requestId}-${Date.now()}`)
 
-  // 弹出动画（同 PermissionDialog）
+  // 弹出动画
   const { shouldRender, ref: animRef } = usePresence<HTMLDivElement>(true, {
     from: { opacity: 0, transform: 'translateY(16px)' },
     to: { opacity: 1, transform: 'translateY(0px)' },

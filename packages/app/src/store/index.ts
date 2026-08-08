@@ -14,9 +14,6 @@ export type { PaneNode, PaneLeaf, PaneSplit, PaneLayoutSnapshot } from './paneLa
 export { paneControllerStore, usePaneController, usePaneControllers } from './paneControllerStore'
 export type { PaneControllerState } from './paneControllerStore'
 
-export { autoApproveStore } from './autoApproveStore'
-export type { AutoApproveRule } from './autoApproveStore'
-
 export { serverStore, exportServerSettingsBackup, importServerSettingsBackup } from './serverStore'
 export type { ServerConfig, ServerHealth, ServerSettingsBackup } from './serverStore'
 
