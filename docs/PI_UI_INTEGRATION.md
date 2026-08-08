@@ -50,7 +50,7 @@
 | image prompt（图片附件） | 完整 | R5：file/PDF 附件明确不提取（路径交给 Pi） |
 | file/PDF prompt | 缺失（明确不做提取） | — |
 | text tool result | 部分 | R5 |
-| tool execution updates | 缺失 | R5 |
+| tool execution updates | 部分 | R5：事件已流式（bash 实时输出），其余工具渲染待 |
 | image/details/patch/cwd/exitCode | 部分 | R5：其余工具逐项 |
 | truncated/fullOutputPath | 部分 | R5：bash 截断提示已加，其余工具待 |
 | built-in read/bash/edit/write/grep/find/ls | 部分 | R5：逐工具 conformance |
