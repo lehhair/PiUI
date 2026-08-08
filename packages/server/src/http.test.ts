@@ -332,5 +332,13 @@ describe("http api", () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     assert.equal(dynamic?.status, 202)
+
+    // 工具参数 schema 来自 Pi 的工具定义：畸形入参响亮 400，合法入参可路由。
+    const badTool = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/mock-tool`, { body: { echo: 42 } })
+    assert.equal(badTool.status, 400)
+    assert.equal(badTool.json.code, "INVALID_REQUEST")
+
+    const goodTool = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/mock-tool`, { body: { echo: "hi" } })
+    assert.equal(goodTool.status, 202)
   })
 })

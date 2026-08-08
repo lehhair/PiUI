@@ -432,11 +432,12 @@ export class SessionHost {
       throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
     }
     const registry = await existing.worker.command("registry.get", undefined, options.signal) as RegistrySnapshot | undefined
-    const registered = Boolean(registry && (
-      registry.commands.some(command => command.name === type) ||
-      registry.tools.some(tool => tool.name === type)
-    ))
-    if (!registered) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    if (!registry) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    const tool = registry.tools.find(item => item.name === type)
+    const command = registry.commands.find(item => item.name === type)
+    if (!tool && !command) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    // 工具参数 schema 来自 Pi 自己的工具定义——在 HTTP 边界校验，畸形入参直接 400。
+    if (tool?.parameters) validateParams(tool.parameters, params ?? {})
     return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
 

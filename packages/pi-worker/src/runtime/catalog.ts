@@ -327,17 +327,32 @@ function toJsonObject(value: unknown): JsonObject {
   return json as JsonObject
 }
 
+/**
+ * 读取 Pi SettingsManager 的生效设置对象（private 字段 settings：global+project+
+ * overrides 合并重建）。这是对 Pi 私有实现的显式依赖——Pi 改名/删除时在此响亮
+ * 失败（PI_SDK_INCOMPATIBLE，带 SDK 版本与指引），而不是返回残缺数据。
+ */
+export function readEffectiveSettings(manager: unknown, version = getLoadedSdk().version): JsonObject {
+  // SettingsManager.settings 是私有字段：不能直接按结构化类型传入（私有成员
+  // 会让类型不兼容），从 unknown 读取并在运行时校验其形状。
+  const effective = (manager as { settings?: unknown } | null | undefined)?.settings
+  if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
+    throw Object.assign(
+      new Error(
+        `Pi SDK ${version} SettingsManager does not expose its effective settings object ` +
+        "(private field \"settings\" renamed or removed)",
+      ),
+      { code: "PI_SDK_INCOMPATIBLE" },
+    )
+  }
+  return effective as JsonObject
+}
+
 function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): JsonValue {
   // 生效设置直接透传 Pi SettingsManager 自己维护的合并对象（global+project+
   // overrides 重建的 settings 字段）。PiUI 不再手写 ~60 键的展平镜像——Pi 加键、
   // 改键都不需要 PiUI 同步；对象不可用时响亮失败（PI_SDK_INCOMPATIBLE）。
-  const effective = (manager as unknown as { settings?: unknown }).settings
-  if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
-    throw Object.assign(
-      new Error("Pi SettingsManager does not expose its effective settings object"),
-      { code: "PI_SDK_INCOMPATIBLE" },
-    )
-  }
+  const effective = readEffectiveSettings(manager)
   return requireJsonValue({
     workspacePath: cwd,
     projectTrusted: trusted,

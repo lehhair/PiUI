@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
-import { isJsonObject, problemFromError, PROTOCOL_VERSION } from "@piui/protocol"
+import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
 import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, type LoadedSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
@@ -240,8 +240,15 @@ async function execute(command: { type: string; params?: JsonObject }): Promise<
   if (!handler) {
     // 静态表未命中：对照 Pi 运行时自己的注册表原生分发扩展命令/工具。
     if (runtime) {
-      const target = resolveExtensionTarget(await runtime.getRegistry(), command.type)
-      if (target === "tool") return runtime.invokeTool(command.type, params)
+      const registry = await runtime.getRegistry()
+      const target = resolveExtensionTarget(registry, command.type)
+      if (target === "tool") {
+        // 工具参数 schema 来自 Pi 自己的工具定义（typebox 序列化后的 JSON
+        // Schema）——在分发边界校验，畸形入参响亮 INVALID_REQUEST。
+        const tool = registry.tools.find(item => item.name === command.type)
+        if (tool?.parameters) validateParams(tool.parameters, params ?? {})
+        return runtime.invokeTool(command.type, params)
+      }
       if (target === "command") {
         const args = typeof params?.args === "string" ? params.args : undefined
         return runtime.invokeCommand(command.type, args)
