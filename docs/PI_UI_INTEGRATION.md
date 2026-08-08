@@ -83,7 +83,10 @@
 | catalog refresh | 完整 | R12：升级 conformance |
 | extension provider models | 完整 | R12：升级 conformance |
 | scoped models | 完整 | R12：升级 conformance |
-| llama.cpp 下载/加载/取消 | TUI-only | Pi SDK 的 ModelRuntime 未暴露本地模型下载 API，Web 无法等价承载 |
+
+> llama.cpp 本地模型下载/加载/取消不属于 Pi 能力矩阵：Pi 官方仍在规划
+> （[#3107 `/local` 命令](https://github.com/earendil-works/pi/issues/3107)、[#3567 llama.cpp provider](https://github.com/earendil-works/pi/issues/3567)、
+> [#3357 本地 LLM 扩展](https://github.com/earendil-works/pi/issues/3357)），SDK 未暴露任何 API，PiUI 不消费也不展示入口。
 
 ## PiUI Host Capabilities
 

@@ -55,7 +55,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
 | R8 | settings、resources、reload、diagnostics | 未开始 |
 | R9 | packages 与三层 trust | 未开始 |
-| R10 | provider auth、模型、scoped models、llama.cpp | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路；llama.cpp 属 Pi TUI 专属（SDK 未暴露），Web 稳定降级 |
+| R10 | provider auth、模型、scoped models | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路。llama.cpp 本地模型属 Pi 官方规划中（issue #3107/#3567/#3357），SDK 未暴露，PiUI 不消费 |
 | R11 | stats、context usage、HTML/JSONL export、share | 未开始 |
 | R12 | conformance、升级门禁、故障注入、发布 | 进行中：逐命令真实 SDK 冒烟（real-session.integration.test）与 scoped models 全链路已加入；升级门禁脚本（scripts/sdk-conformance.mjs）与 worker-client 故障注入矩阵（心跳超时/崩溃/协议不匹配）已完成 |
 
