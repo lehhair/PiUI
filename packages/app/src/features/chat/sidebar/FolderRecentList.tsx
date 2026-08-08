@@ -29,7 +29,7 @@ const DIRECTORY_PAGE_SIZE = 5
 export interface FolderRecentProject {
   id: string
   name: string
-  worktree: string
+  path: string
   canReorder?: boolean
   memberDirectories?: string[]
   sectionKind?: 'project' | 'workspace'
@@ -152,7 +152,7 @@ function getInitialExpandedProjectIds(projects: FolderRecentProject[], currentDi
   if (projects.length === 0) return []
 
   const currentProject = currentDirectory
-    ? projects.find(project => isSameDirectory(project.worktree, currentDirectory))
+    ? projects.find(project => isSameDirectory(project.path, currentDirectory))
     : projects.find(project => project.id === 'global')
 
   return [currentProject?.id || projects[0].id]
@@ -167,7 +167,7 @@ function getCurrentProjectId(projects: FolderRecentProject[], currentDirectory?:
     const globalProject = projects.find(project => project.id === 'global')
     return globalProject?.id
   }
-  return projects.find(project => isSameDirectory(project.worktree, currentDirectory))?.id
+  return projects.find(project => isSameDirectory(project.path, currentDirectory))?.id
 }
 
 function reconcileExpandedProjectIds(prev: string[], projects: FolderRecentProject[], currentDirectory?: string) {
@@ -188,7 +188,7 @@ function toggleProjectId(prev: string[], projectId: string) {
 function createDirectoryProject(directory: string, sectionKind: FolderRecentProject['sectionKind'] = 'project') {
   return {
     id: directory,
-    worktree: directory,
+    path: directory,
     name: getDirectoryName(directory) || directory,
     sectionKind,
   } satisfies FolderRecentProject
@@ -493,7 +493,7 @@ export function FolderRecentList({
       const isProjectExpanded = !isDragging && expandedProjectIds.includes(project.id)
       if (isProjectExpanded) continue
 
-      const statusDirectories = workspaceDirectoriesByProjectId?.get(project.id) ?? [project.worktree]
+      const statusDirectories = workspaceDirectoriesByProjectId?.get(project.id) ?? [project.path]
       const status = buildFolderStatus(statusDirectories, allBusySessions, allNotifications, t)
       if (status) map.set(project.id, status)
     }
@@ -576,7 +576,7 @@ export function FolderRecentList({
                   preferTouchUi={preferTouchUi}
                   currentDirectory={currentDirectory}
                   selectedSessionId={selectedSessionId}
-                  onSelectProject={() => handleSelectDirectory(project.worktree, project.sectionKind)}
+                  onSelectProject={() => handleSelectDirectory(project.path, project.sectionKind)}
                   onSelectDirectory={handleSelectDirectory}
                   onToggle={() => handleToggleProject(project.id)}
                   onSelectSession={onSelectSession}
@@ -851,8 +851,8 @@ function FolderRecentSection({
   const [hasActivated, setHasActivated] = useState(false)
   const shouldRenderBody = useDelayedRender(isExpanded)
   const hasWorkspaceTree = workspaceDirectories.length > 0
-  const workspaceFallbackName = getDirectoryName(project.worktree) || project.worktree
-  const { vcsInfo, isLoading: isBranchLoading } = useVcsInfo(sectionKind === 'workspace' ? project.worktree : undefined)
+  const workspaceFallbackName = getDirectoryName(project.path) || project.path
+  const { vcsInfo, isLoading: isBranchLoading } = useVcsInfo(sectionKind === 'workspace' ? project.path : undefined)
 
   useEffect(() => {
     if (isExpanded && inView) {
@@ -862,7 +862,7 @@ function FolderRecentSection({
   }, [isExpanded, inView])
 
   const { sessions, isLoading, isLoadingMore, hasMore, loadMore, patchLocalSession, removeLocalSession } = useSessions({
-    directory: project.worktree,
+    directory: project.path,
     pageSize: DIRECTORY_PAGE_SIZE,
     enabled: hasActivated && !hasWorkspaceTree,
   })
@@ -968,7 +968,7 @@ function FolderRecentSection({
               onToggle()
             }}
             className="flex flex-1 min-w-0 items-center gap-2 pl-2 pr-2 py-1.5 text-left cursor-default select-none"
-            title={project.worktree}
+            title={project.path}
           >
             <span className="size-5 shrink-0 flex items-center justify-center">
               <FolderDisplayIcon size={15} className="text-text-400" />
@@ -1236,7 +1236,7 @@ function WorkspaceFolderList({
       const draggedWorkspace = workspaceById.get(draggedId)
       const targetWorkspace = workspaceById.get(targetId)
       if (!draggedWorkspace || !targetWorkspace || !onReorderWorkspace) return
-      onReorderWorkspace(draggedWorkspace.worktree, targetWorkspace.worktree)
+      onReorderWorkspace(draggedWorkspace.path, targetWorkspace.path)
     },
     onDragActivated: handleDragActivated,
     onDragFinished: handleDragFinished,
@@ -1257,12 +1257,12 @@ function WorkspaceFolderList({
             folderStatus={
               draggedId === workspaceProject.id || isWorkspaceExpanded
                 ? null
-                : (folderStatusByWorkspaceDirectory?.get(workspaceProject.worktree) ?? null)
+                : (folderStatusByWorkspaceDirectory?.get(workspaceProject.path) ?? null)
             }
             preferTouchUi={preferTouchUi}
             currentDirectory={currentDirectory}
             selectedSessionId={selectedSessionId}
-            onSelectProject={() => onSelectDirectory(workspaceProject.worktree, 'workspace')}
+            onSelectProject={() => onSelectDirectory(workspaceProject.path, 'workspace')}
             onSelectDirectory={onSelectDirectory}
             onToggle={() => handleToggleWorkspace(workspaceProject.id)}
             onSelectSession={onSelectSession}
