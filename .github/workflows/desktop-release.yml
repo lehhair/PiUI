@@ -239,73 +239,9 @@ jobs:
           path: release-artifacts/*.apk
           if-no-files-found: error
 
-  ios:
-    name: ios (${{ matrix.name }})
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # --target 用 cargo-mobile 的架构键名（aarch64 = 真机，aarch64-sim = 模拟器），
-          # 不是 Rust triple；rust-target 才是 Rust 编译目标。
-          - { name: aarch64, rust-target: aarch64-apple-ios, ios-target: aarch64 }
-          - { name: aarch64-sim, rust-target: aarch64-apple-ios-sim, ios-target: aarch64-sim }
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-target }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './packages/app/src-tauri -> target'
-          key: ios-${{ matrix.name }}
-
-      - name: Drop Windows-only patch
-        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
-
-      - run: npm ci
-      - run: npm run build
-
-      - name: Initialize iOS project
-        working-directory: packages/app
-        run: npx tauri ios init
-
-      - name: Build iOS app
-        working-directory: packages/app
-        # --no-sign：GitHub Actions 无 Apple 开发者证书，构建未签名 app
-        run: npx tauri ios build --target ${{ matrix.ios-target }} --no-sign
-
-      - name: Collect iOS artifacts
-        shell: bash
-        run: |
-          mkdir -p release-artifacts
-          APP_DIR="packages/app/src-tauri/gen/apple"
-          if [ -d "$APP_DIR" ]; then
-            find "$APP_DIR" -name '*.app' -type d -exec cp -R {} release-artifacts/ \; 2>/dev/null || true
-            find "$APP_DIR" -name '*.ipa' -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          fi
-          # tauri ios build 的输出兜底
-          find packages/app/src-tauri/target -path '*apple-ios*/release/bundle' -name '*.app' -type d -exec cp -R {} release-artifacts/ \; 2>/dev/null || true
-          ls -la release-artifacts
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: piui-ios-${{ matrix.name }}
-          path: release-artifacts/*
-          if-no-files-found: warn
-
   publish:
     name: publish release assets
-    needs: [portable, desktop, android, ios]
+    needs: [portable, desktop, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -344,7 +280,7 @@ jobs:
             BODY="No changelog entry found for ${TAG}."
           fi
           echo "$BODY" > /tmp/release-body.md
-          printf '\n---\n\n**Portable:** Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)\n**Desktop:** Windows (.exe), macOS (.dmg), Linux (.deb, .AppImage)\n**Mobile:** Android (.apk) — arm64, armeabi-v7a; iOS (.app)\n' >> /tmp/release-body.md
+          printf '\n---\n\n**Portable:** Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)\n**Desktop:** Windows (.exe), macOS (.dmg), Linux (.deb, .AppImage)\n**Mobile:** Android (.apk) — arm64, armeabi-v7a\n' >> /tmp/release-body.md
 
       - uses: softprops/action-gh-release@v2
         with:
