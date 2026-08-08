@@ -849,6 +849,23 @@ export default function (pi) {
       assert.equal(typeof state.thinkingLevel, "string")
       assert.equal(typeof state.messageCount, "number")
 
+      // state.get：stats/context usage 来自 SDK getSessionStats/getContextUsage
+      assert.ok(state.sessionStats && typeof state.sessionStats === "object" && !Array.isArray(state.sessionStats))
+      assert.equal(typeof state.sessionStats.sessionId, "string")
+      assert.equal(typeof state.sessionStats.totalMessages, "number")
+      assert.equal(typeof state.sessionStats.cost, "number")
+      const statsTokens = state.sessionStats.tokens as AnyRecord
+      assert.equal(typeof statsTokens.input, "number")
+      assert.equal(typeof statsTokens.output, "number")
+      assert.equal(typeof statsTokens.cacheRead, "number")
+      assert.equal(typeof statsTokens.cacheWrite, "number")
+      assert.equal(typeof statsTokens.total, "number")
+      // 无 provider 时 contextUsage 可为 null 或估算结构，两种都接受
+      if (state.contextUsage != null) {
+        assert.ok(typeof state.contextUsage === "object" && !Array.isArray(state.contextUsage))
+        assert.equal(typeof state.contextUsage.contextWindow, "number")
+      }
+
       // registry.get：tools/commands/extensions/handlers 数组
       const registry = session.getRegistry()
       assert.ok(Array.isArray(registry.tools))
