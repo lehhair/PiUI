@@ -47,8 +47,9 @@ jobs:
 
       - run: npm ci
 
-      # 全量验证：typecheck + lint + 三个包的测试 + 构建
-      - run: npm run validate
+      # 构建 worker 产物（SDK 内联所需）；全量 validate 由 ci.yml 在
+      # tag push 时独立执行（带 timeout），不再阻塞 portable 打包。
+      - run: npm run build
 
       - name: package desktop bundle
         run: node scripts/package-desktop.mjs --skip-build --target ${{ matrix.target }}
