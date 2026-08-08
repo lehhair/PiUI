@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.84.0",
-    "@piui/protocol": "0.1.0",
+    "@piui/protocol": "0.2.0",
     "jiti": "^2.7.0"
   },
   "devDependencies": {
