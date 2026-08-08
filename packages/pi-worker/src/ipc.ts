@@ -8,6 +8,10 @@ export interface WorkerHello {
   workerProtocolVersion: number
   piSdkVersion: string
   piSdkVerified: boolean
+  /** Present when an external SDK failed to load and the worker fell back to
+   * the bundled SDK; the server surfaces it through health so the UI can
+   * report why the user-installed Pi is not in use. */
+  piSdkFallback?: { source: string; message: string }
   generation: string
   processId: number
   heartbeatIntervalMs: number

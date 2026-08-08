@@ -14,6 +14,10 @@ export interface LoadedSdk {
   version: string
   source: "bundled" | "external"
   verified: boolean
+  /** Set by the worker entry when an external SDK failed to load and the
+   * worker fell back to the bundled SDK. Surfaced through the hello/health
+   * so the UI can report why the user-installed Pi is not in use. */
+  fallbackFrom?: { source: "env" | "global" | "bundled"; message: string; code: string }
 }
 
 export interface LoadSdkOptions {
@@ -24,7 +28,10 @@ export interface LoadSdkOptions {
 let cached: LoadedSdk | undefined
 
 export function shouldRequireVerifiedSdk(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.PIUI_SDK_STRICT !== "0"
+  // Advisory by default: an external SDK of a different version is used with
+  // a warning, and load failures fall back to the bundled SDK. Set
+  // PIUI_SDK_STRICT=1 to require the exact verified parity version instead.
+  return env.PIUI_SDK_STRICT === "1"
 }
 
 function resolveSdkEntry(sdkPath: string): string {
@@ -236,9 +243,9 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
       ...(typeof command.description === "string" ? { description: command.description } : {}),
       ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
     }))
-  const version = external
-    ? (typeof sdk.VERSION === "string" ? sdk.VERSION : "unknown")
-    : BUNDLED_PI_SDK_VERSION
+  const version = typeof sdk.VERSION === "string" && sdk.VERSION
+    ? sdk.VERSION
+    : external ? "unknown" : BUNDLED_PI_SDK_VERSION
   const runtimeContract = sdk as PiSdk & {
     ModelRuntime?: { create?: unknown }
     SettingsManager?: unknown
@@ -256,7 +263,10 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
   const verified = version === PI_PARITY_SDK_VERSION
   if (!verified && !external) {
     throw Object.assign(
-      new Error(`Bundled Pi SDK ${version} does not match the verified parity version ${PI_PARITY_SDK_VERSION}`),
+      new Error(
+        `Bundled Pi SDK ${version} does not match the verified parity version ${PI_PARITY_SDK_VERSION}; ` +
+        "update PI_PARITY_SDK_VERSION in packages/protocol/src/version.ts together with the dependency",
+      ),
       { code: "PI_SDK_VERSION_MISMATCH" },
     )
   }
