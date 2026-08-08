@@ -15,7 +15,7 @@ describe('settingsBackup', () => {
     localStorage.setItem('piui-notifications-enabled', 'true')
     localStorage.setItem('piui:toast-enabled', 'false')
     localStorage.setItem('piui-srv:local:last-directory', '/workspace/project')
-    localStorage.setItem('piui-srv:local:opencode-auto-approve-enabled', 'true')
+    localStorage.setItem('piui-srv:local:auto-approve-enabled', 'true')
     localStorage.setItem('piui-service-env-vars', JSON.stringify([{ key: 'PIUI_USE_SYSTEM_PI', value: '1' }]))
 
     const { exportSettingsBackup } = await import('./settingsBackup')
@@ -45,7 +45,7 @@ describe('settingsBackup', () => {
     localStorage.setItem('piui-notifications-enabled', 'true')
     localStorage.setItem('piui:toast-enabled', 'false')
     localStorage.setItem('piui-srv:local:last-directory', '/workspace/project')
-    localStorage.setItem('piui-srv:local:opencode-auto-approve-enabled', 'true')
+    localStorage.setItem('piui-srv:local:auto-approve-enabled', 'true')
     localStorage.setItem(
       'piui-service-env-vars',
       JSON.stringify([{ key: 'HTTPS_PROXY', value: 'http://127.0.0.1:7890' }]),
@@ -68,7 +68,7 @@ describe('settingsBackup', () => {
     expect(localStorage.getItem('piui-right-panel-width')).toBe('512')
     expect(localStorage.getItem('piui-notifications-enabled')).toBe('true')
     expect(localStorage.getItem('piui-srv:local:last-directory')).toBe('/workspace/project')
-    expect(localStorage.getItem('piui-srv:local:opencode-auto-approve-enabled')).toBe('true')
+    expect(localStorage.getItem('piui-srv:local:auto-approve-enabled')).toBe('true')
     expect(localStorage.getItem('piui:toast-enabled')).toBe('false')
     expect(localStorage.getItem('piui-service-env-vars')).toBe(
       JSON.stringify([{ key: 'HTTPS_PROXY', value: 'http://127.0.0.1:7890' }]),

@@ -111,7 +111,7 @@ export const LOCAL_SERVER_ID = 'local'
 
 /**
  * Server Store
- * 管理多个 OpenCode 后端服务器配置
+ * 管理多个 PiUI server 配置
  */
 class ServerStore {
   private servers: ServerConfig[] = []

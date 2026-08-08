@@ -46,7 +46,7 @@ const MERMAID_SCALE_STEP = 0.15
 const MERMAID_CONTROL_BUTTON_BASE_CLASS =
   'inline-flex h-8 w-8 items-center justify-center rounded-md bg-bg-300/70 backdrop-blur-md transition-colors duration-150 hover:bg-bg-300/85 disabled:opacity-40 disabled:cursor-not-allowed'
 const MERMAID_CONTROL_BUTTON_CLASS = `${MERMAID_CONTROL_BUTTON_BASE_CLASS} text-text-400 hover:text-text-200`
-const LOCAL_FILE_LINK_PREFIX = '#opencode-local-file:'
+const LOCAL_FILE_LINK_PREFIX = '#piui-local-file:'
 
 type DiagramPointer = { x: number; y: number }
 
@@ -893,8 +893,8 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
           attributes: Array.from(node.attributes).map(attr => [attr.name, attr.value]),
           text: node.textContent || ''
         });
-        node.setAttribute('data-opencode-script-index', String(index));
-        node.setAttribute('type', 'application/x-opencode-pending');
+        node.setAttribute('data-piui-script-index', String(index));
+        node.setAttribute('type', 'application/x-piui-pending');
       });
       doc.querySelectorAll('*').forEach(node => Array.from(node.attributes).forEach(attr => {
         if (/^(href|src|action|formaction)$/i.test(attr.name) && /^\\s*javascript:/i.test(attr.value)) node.removeAttribute(attr.name);
@@ -909,7 +909,7 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
       const nextId = next.getAttribute('id');
       if (currentId || nextId) return currentId === nextId;
       if (current.nodeName === 'SCRIPT') {
-        return current.getAttribute('data-opencode-script-index') === next.getAttribute('data-opencode-script-index');
+        return current.getAttribute('data-piui-script-index') === next.getAttribute('data-piui-script-index');
       }
       return true;
     };
@@ -924,7 +924,7 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
       }
       const currentElement = current;
       const nextElement = next;
-      if (currentElement.nodeName === 'SCRIPT' && currentElement.hasAttribute('data-opencode-script-executed')) return;
+      if (currentElement.nodeName === 'SCRIPT' && currentElement.hasAttribute('data-piui-script-executed')) return;
       Array.from(currentElement.attributes).forEach(attr => {
         if (!nextElement.hasAttribute(attr.name)) currentElement.removeAttribute(attr.name);
       });
@@ -956,7 +956,7 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
       while (currentElement.childNodes.length > nextChildren.length) currentElement.lastChild?.remove();
     };
     const patchHead = next => {
-      const currentNodes = Array.from(document.head.querySelectorAll('[data-opencode-stream-head]'));
+      const currentNodes = Array.from(document.head.querySelectorAll('[data-piui-stream-head]'));
       const nextNodes = Array.from(next.head.querySelectorAll('style,link[rel="stylesheet"],script'));
       for (let index = 0; index < Math.max(currentNodes.length, nextNodes.length); index += 1) {
         const current = currentNodes[index];
@@ -964,7 +964,7 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
         if (!candidate) current?.remove();
         else if (!current) {
           const added = clone(candidate);
-          added.setAttribute('data-opencode-stream-head', '');
+          added.setAttribute('data-piui-stream-head', '');
           document.head.append(added);
         } else patch(current, candidate);
       }
@@ -974,16 +974,16 @@ function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'):
         const descriptor = descriptors[index];
         scheduledScripts = index + 1;
         scriptQueue = scriptQueue.then(() => new Promise(resolve => {
-          const pending = document.querySelector('script[data-opencode-script-index="' + index + '"]');
-          if (!pending || pending.hasAttribute('data-opencode-script-executed')) {
+          const pending = document.querySelector('script[data-piui-script-index="' + index + '"]');
+          if (!pending || pending.hasAttribute('data-piui-script-executed')) {
             resolve();
             return;
           }
           const script = document.createElement('script');
           descriptor.attributes.forEach(([name, value]) => script.setAttribute(name, value));
-          script.setAttribute('data-opencode-script-index', String(index));
-          script.setAttribute('data-opencode-script-executed', '');
-          if (pending.hasAttribute('data-opencode-stream-head')) script.setAttribute('data-opencode-stream-head', '');
+          script.setAttribute('data-piui-script-index', String(index));
+          script.setAttribute('data-piui-script-executed', '');
+          if (pending.hasAttribute('data-piui-stream-head')) script.setAttribute('data-piui-stream-head', '');
           script.textContent = descriptor.text;
           const waitsForLoad = script.hasAttribute('src') || script.getAttribute('type') === 'module';
           if (script.hasAttribute('src') && !script.hasAttribute('async') && !script.hasAttribute('defer')) script.async = false;

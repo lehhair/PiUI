@@ -314,7 +314,7 @@
     "testNotification": "测试通知",
     "sendSampleDesc": "发送一条示例通知",
     "enableToTest": "启用通知以进行测试",
-    "testTitle": "OpenCode",
+    "testTitle": "PiUI",
     "testBody": "这是一条测试通知",
     "notAvailable": "此环境不支持系统通知",
     "notificationTypes": "通知类型",

@@ -174,7 +174,7 @@ describe('serverStore health check', () => {
 
   it('rejects HTML responses even when the status is 200', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('<!doctype html><title>OpenCode</title>', {
+      new Response('<!doctype html><title>PiUI</title>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
       }),
@@ -221,7 +221,7 @@ describe('serverStore health check', () => {
     expect(serverStore.getHealth('local')?.status).toBe('online')
 
     staleResponse.resolve(
-      new Response('<!doctype html><title>OpenCode</title>', {
+      new Response('<!doctype html><title>PiUI</title>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
       }),

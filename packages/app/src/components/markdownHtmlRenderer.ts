@@ -4,7 +4,7 @@ import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { inferImageDimensions } from './imageDimensions'
 
-const LOCAL_FILE_LINK_PREFIX = '#opencode-local-file:'
+const LOCAL_FILE_LINK_PREFIX = '#piui-local-file:'
 
 function escapeHtml(value: string): string {
   return value

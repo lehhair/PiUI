@@ -1,4 +1,4 @@
-/** Tracks session ids owned by piui-server (not OpenCode). */
+/** Tracks session ids owned by piui-server (not a legacy transport). */
 
 const ids = new Set<string>()
 const workspacePathBySession = new Map<string, string>()

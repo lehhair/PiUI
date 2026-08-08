@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 
-const BACK_CLOSE_STATE_KEY = '__opencodeuiBackClose'
+const BACK_CLOSE_STATE_KEY = '__piuiBackClose'
 
 interface BackCloseEntry {
   id: string
