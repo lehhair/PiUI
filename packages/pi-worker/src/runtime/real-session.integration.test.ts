@@ -789,6 +789,49 @@ export default function (pi) {
     }
   })
 
+  it("resolves and persists scoped models through the native resolver", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-scoped-"))
+    let session: RealPiSession | undefined
+    try {
+      const opened = await openOfflineSession(cwd, {
+        provider: "piui-faux-scoped",
+        api: "piui-faux-scoped",
+        models: [{ id: "scoped-1", contextWindow: 4096, maxTokens: 256 }],
+      }, {
+        compaction: { enabled: false },
+        retry: { enabled: false },
+      }, api => [api.fauxAssistantMessage("scope answer")])
+      session = opened.session
+
+      // 精确 pattern 解析为 ScopedModel 并持久化到 session state
+      const diagnostics = await session.setScopedModels(["piui-faux-scoped/scoped-1"]) as AnyRecord[] | undefined
+      assert.ok(Array.isArray(diagnostics))
+      assert.deepEqual(
+        ((session.getState() as AnyRecord).scopedModels as AnyRecord[])?.map(item => item.model?.id),
+        ["scoped-1"],
+      )
+
+      // glob pattern（provider/*）同样解析
+      await session.setScopedModels(["piui-faux-scoped/*"])
+      assert.deepEqual(
+        ((session.getState() as AnyRecord).scopedModels as AnyRecord[])?.map(item => item.model?.id),
+        ["scoped-1"],
+      )
+
+      // 无法匹配的 pattern 返回 no-match 诊断，而不是抛错
+      const noMatch = await session.setScopedModels(["piui-faux-scoped/missing"]) as AnyRecord[] | undefined
+      assert.ok(Array.isArray(noMatch))
+      assert.ok(noMatch?.some((item: AnyRecord) => item.code === "no-match"))
+
+      // 清空范围
+      await session.setScopedModels([])
+      assert.deepEqual((session.getState() as AnyRecord).scopedModels, [])
+    } finally {
+      await session?.dispose()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("exercises the native session command surface end to end", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-conformance-"))
     const cwd = path.join(root, "workspace")
