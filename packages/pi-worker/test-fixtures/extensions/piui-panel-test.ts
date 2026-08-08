@@ -11,7 +11,8 @@ export default function (pi: ExtensionAPI) {
       "completed item B",
     ])
     ctx.ui.setWorkingMessage("test extension working")
-    setTimeout(() => ctx.ui.setWorkingMessage(undefined), 5000)
+    // 注意：不要在异步延迟里继续使用 ctx —— session replacement/reload 后
+    // ctx 会失效（assertActive 抛错），未捕获异常会崩掉整个 worker 进程。
   })
 
   pi.registerCommand("ui-test-dialog", {

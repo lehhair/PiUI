@@ -327,6 +327,16 @@ const heartbeatTimer = setInterval(() => {
 }, PI_WORKER_HEARTBEAT_INTERVAL_MS)
 heartbeatTimer.unref()
 
+// 扩展的异步疏忽（如延迟回调持有 stale ctx）会产生未捕获异常/拒绝。
+// 记录并继续运行：单个扩展的错误不应杀死 worker 进程（worker 崩溃会让
+// 所有已 attach 的 session 一起丢失）。正常退出只走 IPC disconnect。
+process.on("unhandledRejection", (reason) => {
+  console.error(`[piui-worker] unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
+})
+process.on("uncaughtException", (error) => {
+  console.error(`[piui-worker] uncaught exception: ${error?.stack ?? error}`)
+})
+
 function toResponseData(data: JsonValue | undefined | void): JsonValue | undefined {
   return data === undefined ? undefined : data as JsonValue
 }
