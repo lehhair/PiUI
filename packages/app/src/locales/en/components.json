@@ -5,7 +5,6 @@
   },
   "fileExplorer": {
     "selectProject": "Select a project to browse files",
-    "explorer": "Explorer",
     "searchFiles": "Search files",
     "clearSearch": "Clear search",
     "noFilesFound": "No files found",
@@ -37,14 +36,10 @@
     "overwrite": "Overwrite"
   },
   "terminal": {
-    "terminal": "Terminal",
-    "newTerminal": "New Terminal",
     "hidePanel": "Hide Panel",
     "restoringSessions": "Restoring sessions...",
-    "noTerminals": "No terminals",
     "createTerminal": "Create Terminal",
-    "createTerminalFailed": "Failed to create terminal",
-    "closeTerminal": "Close terminal"
+    "createTerminalFailed": "Failed to create terminal"
   },
   "diffViewer": {
     "noChanges": "No changes",
@@ -66,15 +61,12 @@
     "sessionTree": "Session Tree",
     "sessionControls": "Session",
     "terminal": "Terminal",
-    "mcp": "MCP",
     "skills": "Skills",
-    "worktrees": "Worktrees",
     "tab": "Tab",
     "addTab": "Add Tab",
     "renameTerminal": "Rename Terminal",
     "moveToRight": "Move to Right Panel",
     "moveToBottom": "Move to Bottom Panel",
-    "mcpServers": "MCP Servers",
     "extensions": "Extensions"
   },
   "sessionTree": {
@@ -142,8 +134,6 @@
     "steeringHint": "Messages sent with Enter while the Agent is running, inserted at a safe point in the current turn",
     "followUp": "Follow-up",
     "followUpHint": "Messages queued while the Agent is running, sent as a new turn after it finishes",
-    "steeringMode": "Steering delivery mode",
-    "followUpMode": "Follow-up delivery mode",
     "oneAtATime": "One at a time",
     "allAtOnce": "All",
     "activeTools": "{{active}}/{{total}} active",
@@ -173,17 +163,11 @@
   "sessionChanges": {
     "loadingChanges": "Loading changes...",
     "failedToLoad": "Failed to load changes",
-    "failedToInitGit": "Failed to initialize Git repository",
     "mode": "Change mode",
-    "modeHint": "Review scope",
-    "noChanges": "No changes in this session",
     "noGitChanges": "No uncommitted changes yet",
     "noBranchChanges": "No branch changes yet",
-    "noTurnChanges": "No changes in the current turn",
     "noGit": "No Git repository detected",
     "noGitHint": "Version control details are unavailable for this directory",
-    "initGit": "Initialize Git repository",
-    "initializingGit": "Initializing...",
     "fileCount_one": "{{count}} file",
     "fileCount_other": "{{count}} files",
     "fileCountCompact": "{{count}}f",
@@ -191,10 +175,6 @@
     "gitScopeHint": "Uncommitted files in the working tree",
     "branchScope": "Branch changes",
     "branchScopeHint": "All changes on this branch since {{branch}}",
-    "sessionScope": "Session changes",
-    "sessionScopeHint": "Everything changed during this session",
-    "turnScope": "Last turn changes",
-    "turnScopeHint": "Only files changed in the last assistant turn",
     "list": "List",
     "flatList": "Flat list",
     "tree": "Tree",
@@ -209,32 +189,8 @@
     "binaryFileChanged": "Binary file changed"
   },
   "mcpPanel": {
-    "title": "MCP Servers",
-    "addServer": "Add Server",
-    "loadingServers": "Loading servers...",
-    "failedToLoad": "Failed to load MCP servers",
-    "failedToLoadResources": "Failed to load MCP resources",
-    "noServers": "No MCP servers configured",
-    "addMcpServer": "Add MCP Server",
-    "local": "Local",
-    "remote": "Remote",
-    "serverName": "Server name",
-    "commandPlaceholder": "Command (e.g., npx -y @modelcontextprotocol/server-github)",
-    "urlPlaceholder": "Server URL (e.g., https://mcp.example.com)",
-    "nameRequired": "Server name is required",
-    "commandRequired": "Command is required",
-    "urlRequired": "URL is required",
-    "failedToAdd": "Failed to add server",
-    "connected": "Connected",
-    "disabled": "Disabled",
-    "needsAuth": "Needs Auth",
-    "needsRegistration": "Needs Registration",
-    "resources": "Resources",
     "resourceCount_one": "{{count}} resource",
-    "resourceCount_other": "{{count}} resources",
-    "disconnect": "Disconnect",
-    "connect": "Connect",
-    "authenticate": "Authenticate"
+    "resourceCount_other": "{{count}} resources"
   },
   "skillPanel": {
     "title": "Skills",
@@ -243,34 +199,8 @@
     "failedToLoad": "Failed to load skills",
     "noSkills": "No skills found"
   },
-  "worktreePanel": {
-    "selectProject": "Select a project to manage worktrees",
-    "git": "Git",
-    "worktrees": "Worktrees",
-    "createWorktree": "Create Worktree",
-    "loadingWorktrees": "Loading worktrees...",
-    "failedToLoad": "Failed to load worktrees",
-    "failedWithMessage": "Worktree failed: {{message}}",
-    "failedToCreate": "Failed to create worktree",
-    "failedToRemove": "Failed to remove worktree",
-    "failedToReset": "Failed to reset worktree",
-    "noWorktrees": "No worktrees found",
-    "removeWorktree": "Remove Worktree",
-    "removeWorktreeConfirm": "Remove worktree \"{{name}}\"? This will delete the worktree directory.",
-    "resetWorktree": "Reset Worktree",
-    "resetWorktreeConfirm": "Reset worktree \"{{name}}\"? This will discard all uncommitted changes.",
-    "newWorktree": "New Worktree",
-    "worktreeNamePlaceholder": "Worktree name (e.g. feature-xyz)",
-    "openSessionAfter": "Open session after creation",
-    "openSession": "Open session in this worktree",
-    "resetWorktreeAction": "Reset worktree",
-    "removeWorktreeAction": "Remove worktree"
-  },
   "toast": {
     "clearAll": "Clear all"
-  },
-  "fullscreenViewer": {
-    "lines": "lines"
   },
   "desktopTitlebar": {
     "goBack": "Go Back",
@@ -281,12 +211,8 @@
     "newWindow": "New Window"
   },
   "multiFileDiff": {
-    "sessionChanges": "Session Changes",
     "fileCount_one": "{{count}} file",
-    "fileCount_other": "{{count}} files",
-    "failedToLoad": "Failed to load changes",
-    "noChangesFound": "No changes found",
-    "selectFile": "Select a file to view changes"
+    "fileCount_other": "{{count}} files"
   },
   "contentBlock": {
     "fullscreen": "Fullscreen",

@@ -55,8 +55,6 @@
     "tryDifferentKeyword": "Try a different keyword",
     "pinned": "Pinned",
     "recent": "Recent",
-    "thinking": "Thinking",
-    "vision": "Vision",
     "unpin": "Unpin",
     "pinToTop": "Pin to top",
     "model": "Model"
@@ -64,30 +62,6 @@
   "retryStatus": {
     "retrying": "Retrying (attempt {{attempt}})",
     "nextIn": "next in {{label}}"
-  },
-  "shareDialog": {
-    "title": "Share Chat",
-    "publicLink": "Public Link",
-    "publicLinkDesc": "Anyone with this link can view this chat session.",
-    "failedCreate": "Failed to create share link",
-    "failedRemove": "Failed to remove share link",
-    "copyLink": "Copy link",
-    "stopSharing": "Stop sharing",
-    "createPublicLink": "Create public link",
-    "creatingLink": "Creating link..."
-  },
-  "questionDialog": {
-    "title": "Question",
-    "moreCount": "+{{count}} more",
-    "minimize": "Minimize",
-    "typeYourAnswer": "Type your own answer..."
-  },
-  "permissionDialog": {
-    "permission": "Permission: {{permission}}",
-    "moreCount": "+{{count}} more",
-    "minimize": "Minimize",
-    "changesPreview": "Changes preview",
-    "request": "Request"
   },
   "projectDialog": {
     "typePath": "Type path...",
@@ -102,9 +76,7 @@
     "sendingMessage": "Sending message",
     "sendMessage": "Send message",
     "deliveryMode": "Running message timing",
-    "steer": "Current turn",
     "steerHint": "Add this message to the response currently being generated",
-    "followUp": "Next turn",
     "followUpHint": "Send this message as the next turn after the current response finishes",
     "agentMenu": "Agent menu",
     "variantMenu": "Variant menu"
@@ -149,14 +121,11 @@
     "appearance": "Appearance",
     "standardWidth": "Standard Width",
     "wideMode": "Wide Mode",
-    "shareChat": "Share Chat",
     "settings": "Settings",
     "noProjectFoldersYet": "No project folders yet",
     "addProjectDesc": "Add a project to browse recent chats by folder.",
     "deleteChat": "Delete Chat",
     "deleteChatConfirm": "Are you sure you want to delete this chat? This action cannot be undone.",
-    "moveFolderUp": "Move folder up",
-    "moveFolderDown": "Move folder down",
     "noChatsInFolder": "No chats in this folder",
     "showMoreChats": "Show more chats",
     "selectedSessions": "{{count}} selected",
@@ -209,11 +178,7 @@
     "totalCost": "Total Cost",
     "inputTokens": "Input",
     "outputTokens": "Output",
-    "reasoning": "Reasoning",
     "cacheRW": "Cache (r/w)",
     "rawMessages": "Raw Messages"
-  },
-  "hints": {
-    "pressEscAgain": "Press <1>Esc</1> again to stop"
   }
 }
