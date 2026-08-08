@@ -251,4 +251,86 @@ describe("http api", () => {
     const removedShortcut = await request(port, "GET", "/api/v1/pi/models")
     assert.equal(removedShortcut.status, 404)
   })
+
+  it("reports the real SDK version and fallback state through health", async () => {
+    const hello = {
+      kind: "hello" as const,
+      workerProtocolVersion: 3,
+      piSdkVersion: "9.9.9",
+      piSdkVerified: false,
+      piSdkFallback: { source: "global", message: "incompatible contract: missing createAgentSessionRuntime" },
+      generation: "gen-1",
+      processId: 123,
+      heartbeatIntervalMs: 5000,
+    }
+    const supervisor = {
+      onEvent: () => () => {},
+      prewarm: async () => {},
+      getCatalogHandshake: async () => hello,
+      dispose: async () => {},
+    } as unknown as import("./pi/supervisor.ts").RuntimeSupervisor
+    const app = createAppServer({ authToken: "test-token", supervisor })
+    const port = await listen(app)
+    cleanups.push(() => app.dispose())
+
+    const health = await request(port, "GET", "/api/v1/host/health", { token: "test-token" })
+    assert.equal(health.status, 200)
+    assert.equal(health.json.piSdkVersion, "9.9.9")
+    assert.equal(health.json.piSdkVerified, false)
+    assert.deepEqual(health.json.piSdkFallback, { source: "global", message: "incompatible contract: missing createAgentSessionRuntime" })
+  })
+
+  it("health falls back to the parity constants when the catalog handshake is unavailable", async () => {
+    const supervisor = {
+      onEvent: () => () => {},
+      prewarm: async () => {},
+      getCatalogHandshake: async () => { throw new Error("worker crashed") },
+      dispose: async () => {},
+    } as unknown as import("./pi/supervisor.ts").RuntimeSupervisor
+    const app = createAppServer({ authToken: "test-token", supervisor })
+    const port = await listen(app)
+    cleanups.push(() => app.dispose())
+
+    const health = await request(port, "GET", "/api/v1/host/health", { token: "test-token" })
+    assert.equal(health.status, 200)
+    assert.equal(health.json.piSdkVersion, "0.84.0")
+    assert.equal(health.json.piSdkVerified, undefined)
+    assert.equal(health.json.piSdkFallback, null)
+  })
+
+  it("routes extension commands and tools natively through the runtime registry (mock driver)", async () => {
+    const mockHome = mkdtempSync(path.join(tmpdir(), "piui-http-ext-"))
+    process.env.PIUI_MOCK_DIR = mockHome
+    process.env.PIUI_DRIVER = "mock"
+    const app = createAppServer({ authToken: null })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      await app.dispose()
+      rmSync(mockHome, { recursive: true, force: true })
+    })
+
+    const opened = await request(port, "POST", "/api/v1/pi/commands/session.open", { body: { cwd: mockHome } })
+    assert.equal(opened.status, 200)
+    const sessionId = opened.json.data.sessionId as string
+
+    // 扩展命令按名字路由：静态表未命中 → 查 Pi 运行时注册表 → 原生分发。
+    const command = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/mock-command`)
+    assert.equal(command.status, 202)
+    assert.equal(command.json.command.type, "mock-command")
+
+    // 注册表里没有的命令仍响亮 404。
+    const unknown = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/does.not.exist`)
+    assert.equal(unknown.status, 404)
+    assert.equal(unknown.json.code, "UNKNOWN_COMMAND")
+
+    // mock-command 执行后注册了 mock-dynamic-tool：轮询直到按名字可路由，
+    // 证明命令真的执行了且注册表是 Pi 运行时自己更新的。
+    let dynamic: { status: number } | undefined
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      dynamic = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/mock-dynamic-tool`, { body: { value: "v1" } })
+      if (dynamic.status === 202) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    assert.equal(dynamic?.status, 202)
+  })
 })

@@ -1,4 +1,4 @@
-import { PI_COMMAND_SPECS, piSpecToCapability, type JsonObject, type JsonValue, type PiCapability, type PiCapabilityScope } from "@piui/protocol"
+import { PI_COMMAND_SPECS, piSpecToCapability, type JsonObject, type JsonValue, type PiCapability, type PiCapabilityScope, type RegistrySnapshot } from "@piui/protocol"
 import type { CatalogProvider, SessionRuntime } from "./runtime.js"
 import * as P from "./params.js"
 
@@ -269,6 +269,17 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
 
 export function isReplacementCommand(type: string): boolean {
   return type in REPLACEMENT_OPS
+}
+
+/**
+ * 扩展命令/工具的按名路由：唯一事实源是 Pi 运行时自己的注册表
+ * （loader.getExtensions 的结果），PiUI 不做第二份镜像。静态表未命中的
+ * 命令先在这里查，注册过就原生分发（invokeCommand / invokeTool）。
+ */
+export function resolveExtensionTarget(registry: RegistrySnapshot, type: string): "command" | "tool" | undefined {
+  if (registry.commands.some(command => command.name === type)) return "command"
+  if (registry.tools.some(tool => tool.name === type)) return "tool"
+  return undefined
 }
 
 export function listCommandTypes(): string[] {

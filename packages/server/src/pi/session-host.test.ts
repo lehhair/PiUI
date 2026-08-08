@@ -156,3 +156,69 @@ test("SessionHost claims a warm runtime and replenishes the slot", async () => {
   assert.equal(host.getAttached("warm-session")?.sessionFile, "warm-session.jsonl")
   host.dispose()
 })
+
+test("SessionHost routes extension commands by name through the runtime registry", async () => {
+  const executed: Array<{ type: string; params?: unknown }> = []
+  const worker = {
+    command: async (type: string, params?: unknown) => {
+      if (type === "registry.get") {
+        return {
+          sdkVersion: "0.84.0",
+          tools: [],
+          activeTools: [],
+          commands: [{ name: "my-ext-command", description: "extension command" }],
+          extensions: [],
+          eventHandlers: [],
+        }
+      }
+      if (type === "state.get") return {}
+      executed.push({ type, params })
+      return { ok: true }
+    },
+    getSessionId: () => "session-1",
+    getSessionFile: () => "session-1.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => worker,
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  await host.openSession(".", "session-1.jsonl")
+
+  const submitted = await host.executeSessionCommand("session-1", "my-ext-command", { args: "hello" }) as { promise: Promise<unknown> }
+  await submitted.promise
+  assert.deepEqual(executed, [{ type: "my-ext-command", params: { args: "hello" } }])
+
+  // 注册表里没有的命令仍然响亮 404，不落到 worker。
+  await assert.rejects(
+    async () => { await host.executeSessionCommand("session-1", "does.not.exist") },
+    { code: "UNKNOWN_COMMAND" },
+  )
+  assert.deepEqual(executed, [{ type: "my-ext-command", params: { args: "hello" } }])
+  host.dispose()
+})
+
+test("SessionHost rejects unknown session commands on a cold session without spawning a worker", async () => {
+  let opens = 0
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => {
+      opens += 1
+      throw new Error("should not spawn")
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+
+  await assert.rejects(
+    async () => { await host.executeSessionCommand("cold-session", "my-ext-command") },
+    { code: "UNKNOWN_COMMAND" },
+  )
+  assert.equal(opens, 0)
+  host.dispose()
+})
