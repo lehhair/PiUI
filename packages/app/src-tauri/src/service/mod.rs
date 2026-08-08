@@ -536,6 +536,18 @@ mod tests {
     #[test]
     fn process_liveness_distinguishes_current_and_missing_processes() {
         assert!(is_process_alive(std::process::id()));
-        assert!(!is_process_alive(u32::MAX));
+        // u32::MAX 在某些 Linux 内核上 kill -0 会误判为存活，不可靠。
+        // 用"已退出子进程的 PID"——任何平台都能确定它已死。
+        let exited = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .status()
+            .expect("spawn helper should succeed");
+        // 直接拿子进程 PID 不可行（status 不暴露），改用它退出后由系统回收
+        // 的常见空 PID：spawn 一个会立刻自杀的子进程。
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .spawn()
+            .expect("spawn helper should succeed");
+        let dead_pid = child.id();
+        let _ = child.wait();
+        assert!(!is_process_alive(dead_pid));
     }
 }
