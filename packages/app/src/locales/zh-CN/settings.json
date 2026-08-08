@@ -444,6 +444,8 @@
     "prompts": "Prompt 模板",
     "agentsFiles": "AGENTS/CLAUDE 上下文",
     "agentsFileLines": "行数",
+    "skills": "Skills",
+    "skillModelInvocationOff": "禁止模型调用",
     "extensionDetail": "{{tools}} 个工具 · {{commands}} 个命令 · {{handlers}} 个处理器",
     "hidden": "已隐藏",
     "inactive": "未启用",

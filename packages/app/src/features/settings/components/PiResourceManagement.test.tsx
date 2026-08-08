@@ -7,8 +7,9 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
 
-const { registryMock, promptsMock, agentsFilesMock, reloadMock } = vi.hoisted(() => ({
+const { registryMock, skillsMock, promptsMock, agentsFilesMock, reloadMock } = vi.hoisted(() => ({
   registryMock: vi.fn(),
+  skillsMock: vi.fn(),
   promptsMock: vi.fn(),
   agentsFilesMock: vi.fn(),
   reloadMock: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('../../../pi/controllers/index.js', () => ({
 }))
 
 vi.mock('../../../pi/transport/index.js', () => ({
+  getPiSkills: () => skillsMock(),
   getPiPrompts: () => promptsMock(),
   getPiAgentsFiles: () => agentsFilesMock(),
 }))
@@ -48,6 +50,9 @@ describe('PiResourceManagement', () => {
     promptsMock.mockReset().mockResolvedValue([
       { name: 'code-review', description: 'Review this change', argumentHint: '<files>', content: '...', sourceInfo: { source: 'pi-extension' }, filePath: '/tmp/review.md' },
     ])
+    skillsMock.mockReset().mockResolvedValue([
+      { name: 'debug', description: 'Debug a failing test', filePath: '/tmp/debug.md', baseDir: '/tmp', sourceInfo: { source: 'pi-extension' }, disableModelInvocation: false },
+    ])
     agentsFilesMock.mockReset().mockResolvedValue([
       { path: 'AGENTS.md', content: '# rules\none rule' },
     ])
@@ -63,6 +68,7 @@ describe('PiResourceManagement', () => {
     expect(screen.getByText('pi.eventHandlers')).toBeInTheDocument()
     expect(screen.getByText('pi.prompts')).toBeInTheDocument()
     expect(screen.getByText('pi.agentsFiles')).toBeInTheDocument()
+    expect(screen.getByText('pi.skills')).toBeInTheDocument()
 
     // 展开 tools 与 prompts 区块验证内容
     fireEvent.click(screen.getByText('pi.tools'))
@@ -71,6 +77,11 @@ describe('PiResourceManagement', () => {
     expect(await screen.findByText('code-review <files>')).toBeInTheDocument()
     expect(screen.getByText(/Review this change/)).toBeInTheDocument()
     expect(screen.getByText(/\/tmp\/review\.md/)).toBeInTheDocument()
+    // Skills 元数据：名称 + 描述 + 来源文件
+    fireEvent.click(screen.getByText('pi.skills'))
+    expect(await screen.findByText('debug')).toBeInTheDocument()
+    expect(screen.getByText(/Debug a failing test/)).toBeInTheDocument()
+    expect(screen.getByText(/\/tmp\/debug\.md/)).toBeInTheDocument()
     // AGENTS/CLAUDE 上下文文件
     fireEvent.click(screen.getByText('pi.agentsFiles'))
     expect(await screen.findByText('AGENTS.md')).toBeInTheDocument()

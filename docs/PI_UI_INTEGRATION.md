@@ -60,7 +60,7 @@
 
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
-| Skills 元数据 | 部分 | R8：`getSkills()` 已通，缺内容/来源/reload 的专门 UI |
+| Skills 元数据 | 完整 | R12：升级 conformance |
 | Prompt templates | 完整 | R12：升级 conformance |
 | Extension commands | 完整 | R12：升级 conformance |
 | Dynamic tools/providers | 完整 | R12：升级 conformance |
