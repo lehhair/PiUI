@@ -170,12 +170,23 @@ function defaultNpmRootGlobal(): string | undefined {
 /**
  * SDK 定位顺序：
  *   1. PIUI_SDK_PATH 显式指定
- *   2. PIUI_USE_SYSTEM_PI=1 时使用用户全局 npm 安装的 Pi
- *   3. undefined → 使用编译进 worker 的 SDK
+ *   2. PIUI_NATIVE_MODULES 存在时，从该目录找 SDK（Bun 编译的 exe 不内联
+ *      SDK，worker 从 exe 旁/应用数据目录的 node_modules 用 jiti 加载，
+ *      与 bun-pty 原生模块同一机制）
+ *   3. PIUI_USE_SYSTEM_PI=1 时使用用户全局 npm 安装的 Pi
+ *   4. undefined → 使用编译进 worker 的 SDK（Node 开发模式）
  */
 export function resolvePiSdkPath(deps: ResolveDeps): SdkResolution {
   const explicit = deps.env.PIUI_SDK_PATH?.trim()
   if (explicit) return { sdkPath: explicit, source: "env" }
+
+  const nativeModules = deps.env.PIUI_NATIVE_MODULES?.trim()
+  if (nativeModules) {
+    const nativeSdk = sdkPackageDir(nativeModules, deps.exists)
+    if (nativeSdk) return { sdkPath: nativeSdk, source: "env" }
+    // 目录存在但没有 SDK：打包时漏拷会在这里暴露，但用 bundled 会崩得更晚，
+    // 所以继续走后面的系统 Pi / bundled。
+  }
 
   if (deps.env.PIUI_USE_SYSTEM_PI === "1") {
     const globalRoot = globalNpmRoot(deps)
@@ -259,22 +270,45 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
   const sdk = external
     ? await importExternalSdk(resolveSdkEntry(external))
     : await import("@earendil-works/pi-coding-agent") as PiSdk
-  const sdkEntry = external
-    ? resolveSdkEntry(external)
-    : fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
-  const slashCommands = await import(pathToFileURL(join(dirname(sdkEntry), "core/slash-commands.js")).href) as {
-    BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
+  // 内置 slash 命令列表：外部 SDK 从磁盘包内读取；bundled 的 SDK 已被
+  // Bun/打包器内联（import.meta.resolve 会阻止内联），运行时尝试解析
+  // 失败时返回空列表——内置命令仍由 Pi 执行，只是 registry 少展示描述。
+  let builtinSlashCommands: Array<{ name: string; description?: string; argumentHint?: string }> = []
+  if (external) {
+    const slashCommands = await import(pathToFileURL(join(dirname(resolveSdkEntry(external)), "core/slash-commands.js")).href) as {
+      BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
+    }
+    builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
+      .filter(command => typeof command.name === "string")
+      .map(command => ({
+        name: command.name as string,
+        ...(typeof command.description === "string" ? { description: command.description } : {}),
+        ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
+      }))
+  } else {
+    try {
+      const sdkEntry = fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
+      const slashCommands = await import(pathToFileURL(join(dirname(sdkEntry), "core/slash-commands.js")).href) as {
+        BUILTIN_SLASH_COMMANDS?: Array<{ name?: unknown; description?: unknown; argumentHint?: unknown }>
+      }
+      builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
+        .filter(command => typeof command.name === "string")
+        .map(command => ({
+          name: command.name as string,
+          ...(typeof command.description === "string" ? { description: command.description } : {}),
+          ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
+        }))
+    } catch {
+      // 打包产物（Bun exe）中 SDK 已内联，无法按路径读取 slash-commands。
+      // 空列表不影响 Pi 会话功能。
+    }
   }
-  const builtinSlashCommands = (slashCommands.BUILTIN_SLASH_COMMANDS ?? [])
-    .filter(command => typeof command.name === "string")
-    .map(command => ({
-      name: command.name as string,
-      ...(typeof command.description === "string" ? { description: command.description } : {}),
-      ...(typeof command.argumentHint === "string" ? { argumentHint: command.argumentHint } : {}),
-    }))
-  const version = typeof sdk.VERSION === "string" && sdk.VERSION
-    ? sdk.VERSION
-    : external ? "unknown" : BUNDLED_PI_SDK_VERSION
+  // bundled 的 SDK 版本用编译期常量：打包后 sdk.VERSION 会失真（SDK 的
+  // config.js 靠 __dirname 找 package.json，Bun 打包后 __dirname 指向虚拟
+  // 路径，读到的可能是宿主包版本）。打包脚本会把常量同步为真实 SDK 版本。
+  const version = external
+    ? typeof sdk.VERSION === "string" && sdk.VERSION ? sdk.VERSION : "unknown"
+    : BUNDLED_PI_SDK_VERSION
   const runtimeContract = sdk as PiSdk & {
     ModelRuntime?: { create?: unknown }
     SettingsManager?: unknown

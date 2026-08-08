@@ -30,7 +30,10 @@ if (isWeb && !process.env.PIUI_NATIVE_MODULES) {
 }
 
 if (isWorker) {
-  await import("@piui/pi-worker/entry")
+  // 用相对路径指向已构建的 worker 产物：Bun 打包时包名（workspace）内的
+  // 动态 import SDK 不会内联（Cannot find module），相对路径能正确打包。
+  // 指向 dist 而非 src，避免 tsc rootDir 把 pi-worker 源文件拉进 server 编译。
+  await import("../../pi-worker/dist/entry.js")
 } else if (isWeb) {
   // Bun builds cannot fork a TypeScript entry, so the server respawns this
   // executable with --pi-worker. Node development keeps using child_process.fork.
