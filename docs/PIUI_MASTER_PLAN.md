@@ -50,12 +50,12 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 已完成 |
 | R3 | session tree、navigate、label、fork、clone、import、持久删除 | 已完成 |
 | R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 已完成 |
-| R5 | 多模态 prompt 与完整工具结果 | 未开始 |
+| R5 | 多模态 prompt 与完整工具结果 | 已完成：图片附件 base64 原生上传、工具结果与截断路径完整渲染、所有工具流式实时输出 |
 | R6 | Pi user bash 与流式执行控制 | 未开始 |
 | R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
 | R8 | settings、resources、reload、diagnostics | 未开始 |
 | R9 | packages 与三层 trust | 未开始 |
-| R10 | provider auth、模型、scoped models、llama.cpp | 未开始 |
+| R10 | provider auth、模型、scoped models、llama.cpp | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路；llama.cpp 属 Pi TUI 专属（SDK 未暴露），Web 稳定降级 |
 | R11 | stats、context usage、HTML/JSONL export、share | 未开始 |
 | R12 | conformance、升级门禁、故障注入、发布 | 进行中：逐命令真实 SDK 冒烟已加入（real-session.integration.test） |
 

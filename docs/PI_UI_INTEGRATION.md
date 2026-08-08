@@ -35,8 +35,8 @@
 | steer/followUp | 完整 | R12：升级 conformance |
 | queue 内容与模式 | 完整 | R12：升级 conformance |
 | clear queue | 完整 | R12：升级 conformance |
-| model select | 部分 | R10：失败回滚与认证状态 |
-| thinking level | 部分 | R10：cycle/scoped model |
+| model select | 完整 | R12：升级 conformance |
+| thinking level | 完整 | R12：升级 conformance |
 | compact | 完整 | R12：大型会话 fixture |
 | auto compaction/retry | 完整 | R12：故障注入扩展 |
 | abort retry | 完整 | R12：故障注入扩展 |
@@ -49,10 +49,10 @@
 |---|---|---|
 | image prompt（图片附件） | 完整 | R5：file/PDF 附件明确不提取（路径交给 Pi） |
 | file/PDF prompt | 缺失（明确不做提取） | — |
-| text tool result | 部分 | R5 |
-| tool execution updates | 部分 | R5：事件已流式（bash 实时输出），其余工具渲染待 |
-| image/details/patch/cwd/exitCode | 部分 | R5：其余工具逐项 |
-| truncated/fullOutputPath | 部分 | R5：bash 截断提示已加，其余工具待 |
+| text tool result | 完整 | R12：升级 conformance |
+| tool execution updates | 完整 | R12：升级 conformance |
+| image/details/patch/cwd/exitCode | 完整 | R12：升级 conformance |
+| truncated/fullOutputPath | 完整 | R12：升级 conformance |
 | built-in read/bash/edit/write/grep/find/ls | 完整 | R12：升级 conformance |
 
 ## Extensions And Resources
@@ -80,10 +80,10 @@
 | `~/.pi/agent` 模型与认证读取 | 部分 | R10 |
 | provider auth status | 完整 | R12：升级 conformance |
 | API key/OAuth login/logout | 完整 | R12：升级 conformance |
-| catalog refresh | 缺失 | R10 |
-| extension provider models | 缺失 | R10 |
-| scoped models | 缺失 | R10 |
-| llama.cpp 下载/加载/取消 | 缺失 | R10 |
+| catalog refresh | 完整 | R12：升级 conformance |
+| extension provider models | 完整 | R12：升级 conformance |
+| scoped models | 完整 | R12：升级 conformance |
+| llama.cpp 下载/加载/取消 | TUI-only | Pi SDK 的 ModelRuntime 未暴露本地模型下载 API，Web 无法等价承载 |
 
 ## PiUI Host Capabilities
 
