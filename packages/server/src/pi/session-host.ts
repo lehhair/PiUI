@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
+import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, RegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
 import { isJsonObject, validateParams } from "@piui/protocol"
 import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
@@ -409,9 +409,34 @@ export class SessionHost {
       return withAbort(this.closeSession(sessionId), options.signal).then(() => ({ ok: true }))
     }
     const capability = this.getSessionCapability(type)
-    if (!capability) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    if (!capability) return this.dispatchExtensionCommand(sessionId, type, params, id, options)
     validateParams(capability.paramsSchema, params ?? {})
     if (capability.queue === "immediate") return this.sessionQuery(sessionId, type, params, options.signal)
+    return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
+  }
+
+  /**
+   * 静态命令表未命中：对照该会话 Pi 运行时自己的注册表（loader.getExtensions
+   * 的结果）原生路由扩展命令/工具——PiUI 不做第二份镜像。注册过才提交执行；
+   * 冷会话（未 attach）不因一个未知命令而孵化 worker。
+   */
+  private async dispatchExtensionCommand(
+    sessionId: string,
+    type: string,
+    params?: JsonObject,
+    id?: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SubmittedCommand> {
+    const existing = this.runtimes.get(sessionId)
+    if (!existing) {
+      throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
+    }
+    const registry = await existing.worker.command("registry.get", undefined, options.signal) as RegistrySnapshot | undefined
+    const registered = Boolean(registry && (
+      registry.commands.some(command => command.name === type) ||
+      registry.tools.some(tool => tool.name === type)
+    ))
+    if (!registered) throw Object.assign(new Error(`unknown command: ${type}`), { code: "UNKNOWN_COMMAND" })
     return this.submitSessionCommand(sessionId, { id: id ?? randomUUID(), type, params })
   }
 

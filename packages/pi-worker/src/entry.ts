@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError, PROTOCOL_VERSION } from "@piui/protocol"
-import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution } from "./sdk-host.js"
+import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, type LoadedSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
 import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
-import { COMMAND_HANDLERS, listCommandCapabilities, type CommandContext } from "./command-table.js"
+import { COMMAND_HANDLERS, listCommandCapabilities, resolveExtensionTarget, type CommandContext } from "./command-table.js"
 import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
 import { getDriverMode } from "./driver.js"
 import {
@@ -23,7 +23,7 @@ import * as P from "./params.js"
 
 const workerGeneration = randomUUID()
 let runtime: SessionRuntime | undefined
-let loadedSdkInfo: { version: string; verified: boolean } | undefined
+let loadedSdkInfo: LoadedSdk | undefined
 let registryRevision = 1
 let runtimeRegistryDigest: string | undefined
 let registryCheck: Promise<void> = Promise.resolve()
@@ -234,6 +234,15 @@ async function execute(command: { type: string; params?: JsonObject }): Promise<
   }
   const handler = COMMAND_HANDLERS[command.type]
   if (!handler) {
+    // 静态表未命中：对照 Pi 运行时自己的注册表原生分发扩展命令/工具。
+    if (runtime) {
+      const target = resolveExtensionTarget(await runtime.getRegistry(), command.type)
+      if (target === "tool") return runtime.invokeTool(command.type, params)
+      if (target === "command") {
+        const args = typeof params?.args === "string" ? params.args : undefined
+        return runtime.invokeCommand(command.type, args)
+      }
+    }
     throw Object.assign(new Error(`unknown command: ${command.type}`), { code: "UNKNOWN_COMMAND" })
   }
   const result = await handler(ctx, params)
@@ -430,11 +439,23 @@ const resolution = defaultSdkResolution()
 if (resolution.source !== "bundled") {
   console.info(`[piui-worker] pi sdk source=${resolution.source} path=${resolution.sdkPath}`)
 }
-const loaded = await loadPiSdk({
-  sdkPath: resolution.sdkPath,
-  // 系统 SDK 是显式 opt-in；路径 SDK 默认要求与验证版本一致
-  strict: resolution.source === "env" && shouldRequireVerifiedSdk(),
-})
+// 严格模式（PIUI_SDK_STRICT=1）要求外部 SDK 与验证版本一致；缺省为 advisory，
+// 外部 SDK 加载失败时回退到内置 SDK 并上报详情。
+const strict = resolution.source !== "bundled" && shouldRequireVerifiedSdk()
+let loaded: LoadedSdk
+if (resolution.source === "bundled") {
+  loaded = await loadPiSdk()
+} else {
+  try {
+    loaded = await loadPiSdk({ sdkPath: resolution.sdkPath, strict })
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "PI_SDK_INCOMPATIBLE"
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[piui-worker] external Pi SDK failed to load (${code}): ${message}; falling back to the bundled SDK`)
+    loaded = await loadPiSdk()
+    loaded.fallbackFrom = { source: resolution.source, message, code }
+  }
+}
 loadedSdkInfo = loaded
 
 send({
@@ -442,6 +463,7 @@ send({
   workerProtocolVersion: PI_WORKER_PROTOCOL_VERSION,
   piSdkVersion: loaded.version,
   piSdkVerified: loaded.verified,
+  piSdkFallback: loaded.fallbackFrom,
   generation: workerGeneration,
   processId: process.pid,
   heartbeatIntervalMs: PI_WORKER_HEARTBEAT_INTERVAL_MS,

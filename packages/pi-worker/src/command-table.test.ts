@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { PI_COMMAND_SPECS } from "@piui/protocol"
-import { COMMAND_HANDLERS, getCommandCapability, listCommandCapabilities, listCommandTypes } from "./command-table.ts"
+import { COMMAND_HANDLERS, getCommandCapability, listCommandCapabilities, listCommandTypes, resolveExtensionTarget } from "./command-table.ts"
 
 describe("Pi capability registry", () => {
   it("binds exactly the commands declared in the protocol package", () => {
@@ -57,5 +57,20 @@ describe("Pi capability registry", () => {
 
     const fork = getCommandCapability("fork")
     assert.equal(fork?.replacement, true)
+  })
+
+  it("resolves extension commands and tools by name from Pi's own registry", () => {
+    const registry = {
+      sdkVersion: "0.84.0",
+      tools: [{ name: "my-tool", description: "extension tool" }],
+      activeTools: [],
+      commands: [{ name: "my-command", description: "extension command" }],
+      extensions: [],
+      eventHandlers: [],
+    }
+    assert.equal(resolveExtensionTarget(registry, "my-command"), "command")
+    assert.equal(resolveExtensionTarget(registry, "my-tool"), "tool")
+    assert.equal(resolveExtensionTarget(registry, "does.not.exist"), undefined)
+    assert.equal(resolveExtensionTarget({ ...registry, commands: [], tools: [] }, "my-command"), undefined)
   })
 })
