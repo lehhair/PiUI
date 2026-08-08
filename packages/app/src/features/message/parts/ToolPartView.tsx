@@ -10,13 +10,6 @@ import { useTheme } from '../../../hooks/useTheme'
 import { formatToolName, formatDuration } from '../../../utils/formatUtils'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import {
-  useInlineToolRequests,
-  findPermissionRequestForTool,
-  findQuestionRequestForTool,
-} from '../../chat/InlineToolRequestContext'
-import { InlinePermission } from '../../chat/InlinePermission'
-import { InlineQuestion } from '../../chat/InlineQuestion'
-import {
   getToolIcon,
   extractToolData,
   getToolConfig,
@@ -73,70 +66,16 @@ export const ToolPartView = memo(function ToolPartView({
   const endTime = result?.timestamp ?? (isActive ? (calibratedNow ?? now) : undefined)
   const rawDuration = startTime !== undefined && endTime !== undefined ? endTime - startTime : undefined
   const duration = rawDuration !== undefined && isActive ? Math.max(0, rawDuration) : rawDuration
-  const { inlineToolRequests, immersiveMode, compactInlinePermission } = useTheme()
-
-  const { pendingPermissions, pendingQuestions, onPermissionReply, onQuestionReply, onQuestionReject, isReplying } =
-    useInlineToolRequests()
-  const childSessionId = getTaskChildSessionId(execution)
-  const permissionRequest = inlineToolRequests
-    ? findPermissionRequestForTool(pendingPermissions, call.id, childSessionId)
-    : undefined
-  const questionRequest = inlineToolRequests
-    ? findQuestionRequestForTool(pendingQuestions, call.id, childSessionId)
-    : undefined
-
-  const toolDone = status === 'completed' || status === 'error'
-  // ── 延迟卸载 edit/write 权限组件 ──
-  // 用户授权后 permissionRequest 会立即消失，但工具结果可能还没到，
-  // 为了避免 "权限消失→空白→结果出现" 的跳动，缓存最后一次权限请求，
-  // 在工具完成之前继续渲染（以 resolved 状态）
-  const [cachedPermissionRequest, setCachedPermissionRequest] = useState(permissionRequest)
-  useEffect(() => {
-    let frameId: number | null = null
-
-    if (permissionRequest) {
-      frameId = requestAnimationFrame(() => {
-        setCachedPermissionRequest(permissionRequest)
-      })
-    } else if (toolDone) {
-      frameId = requestAnimationFrame(() => {
-        setCachedPermissionRequest(undefined)
-      })
-    }
-
-    return () => {
-      if (frameId !== null) cancelAnimationFrame(frameId)
-    }
-  }, [permissionRequest, toolDone])
-
-  const effectivePermissionRequest = permissionRequest || cachedPermissionRequest
-  const isFilePermission =
-    effectivePermissionRequest?.permission === 'edit' || effectivePermissionRequest?.permission === 'write'
-  // 权限已批准但工具还没完成 → 保留渲染
-  const permissionResolved = !permissionRequest && !!cachedPermissionRequest && isFilePermission && !toolDone
-
-  const hasPendingInteraction = !!permissionRequest || !!questionRequest
-  // 精简模式：非 edit/write 权限时不隐藏 ToolBody（ToolBody 已经渲染了命令内容）
-  const isEditWritePermission =
-    permissionRequest?.permission === 'edit' || permissionRequest?.permission === 'write' || permissionResolved
-  const hideToolBodyForPermission = isEditWritePermission
-  // 精简模式：ToolBody 已渲染时，InlinePermission 只显示按钮
-  // task 工具除外：task renderer 无法显示详细的工具请求内容，需要完整展示权限信息
-  const isTaskTool = toolName.toLowerCase() === 'task'
-  const permissionContentHidden =
-    compactInlinePermission && !isEditWritePermission && !isTaskTool && !!permissionRequest
+  const { immersiveMode } = useTheme()
   const isReadable = isReadableTool(toolName)
   const shouldStartExpanded =
-    isActive ||
-    hasPendingInteraction ||
-    permissionResolved ||
-    (immersiveMode && descriptive && isStreaming && isReadable)
+    isActive || (immersiveMode && descriptive && isStreaming && isReadable)
 
   const [expanded, setExpanded] = useUiDisclosureState(`message:${partKey}`, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)
   const [isChildFullscreen, setIsChildFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
-  const effectiveExpanded = expanded || hasPendingInteraction || permissionResolved || isChildFullscreen
+  const effectiveExpanded = expanded || isChildFullscreen
   // Android expand: instant layout + max-height fake; collapse: original grid-rows.
   const { contentRef: expandContentRef, layoutOpen, keepMounted, panelClassName } =
     useCompositorExpand(effectiveExpanded)
@@ -149,7 +88,7 @@ export const ToolPartView = memo(function ToolPartView({
   useEffect(() => {
     let frameId: number | null = null
 
-    if (isActive || hasPendingInteraction || permissionResolved) {
+    if (isActive) {
       if (immersiveMode && descriptive && isReadable) {
         hasAutoExpandedReadableRef.current = true
       }
@@ -172,8 +111,6 @@ export const ToolPartView = memo(function ToolPartView({
     }
   }, [
     isActive,
-    hasPendingInteraction,
-    permissionResolved,
     immersiveMode,
     descriptive,
     isStreaming,
@@ -195,9 +132,6 @@ export const ToolPartView = memo(function ToolPartView({
     </div>
   )
 
-  // 需要渲染权限组件的请求对象：优先用活跃的，否则用缓存的（resolved 态）
-  const displayPermission = permissionRequest || (permissionResolved ? cachedPermissionRequest : undefined)
-
   // Memoize once — shared by both the descriptive header (diffStats) and ToolBody.
   const toolData = useMemo(() => extractToolData(execution), [execution])
 
@@ -207,30 +141,7 @@ export const ToolPartView = memo(function ToolPartView({
 
   const bodyContent = (
     <>
-      {!hideToolBodyForPermission && (
-        <ToolBody execution={execution} partKey={partKey} data={toolData} onFullscreenChange={handleFullscreenChange} />
-      )}
-      {displayPermission && (
-        <div className={hideToolBodyForPermission && !permissionContentHidden ? '' : MSG_SPACING.inner}>
-          <InlinePermission
-            request={displayPermission}
-            onReply={onPermissionReply}
-            isReplying={isReplying}
-            resolved={permissionResolved}
-            contentHidden={permissionContentHidden}
-          />
-        </div>
-      )}
-      {questionRequest && (
-        <div className={MSG_SPACING.inner}>
-          <InlineQuestion
-            request={questionRequest}
-            onReply={onQuestionReply}
-            onReject={onQuestionReject}
-            isReplying={isReplying}
-          />
-        </div>
-      )}
+      <ToolBody execution={execution} partKey={partKey} data={toolData} onFullscreenChange={handleFullscreenChange} />
     </>
   )
 
@@ -552,14 +463,6 @@ const ToolBody = memo(function ToolBody({
 
   return <DefaultRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
 })
-
-function getTaskChildSessionId(execution: PiToolExecution): string | undefined {
-  if (execution.call.name.toLowerCase() !== 'task') return undefined
-  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
-    ? execution.result.details as Record<string, unknown>
-    : undefined
-  return metadata?.sessionId as string | undefined
-}
 
 /** Extract description from tool input as title fallback (available while running) */
 function getInputDescription(execution: PiToolExecution): string | undefined {

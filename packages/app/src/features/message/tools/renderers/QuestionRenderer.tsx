@@ -2,7 +2,7 @@
  * QuestionRenderer - 提问工具专用渲染器
  *
  * 从 input 获取问题结构，从 output 解析用户答案，
- * 用和 InlineQuestion 一致的视觉风格渲染已回答状态（只读）。
+ * 渲染已回答状态（只读），与内嵌提问交互视觉一致。
  */
 
 import { useMemo } from 'react'
@@ -50,7 +50,7 @@ export function QuestionRenderer({ execution, data }: ToolRendererProps) {
     return buildQAList(inputObj, output, metadata)
   }, [inputObj, output, metadata])
 
-  // 运行中不渲染（InlineQuestion 接管交互）
+  // 运行中不渲染（由交互层接管）
   if (isActive) {
     return null
   }
@@ -86,7 +86,7 @@ function AnsweredQuestion({ qa }: { qa: QAPair }) {
         <div className="text-[length:var(--fs-md)] text-text-100">{qa.question}</div>
       </div>
 
-      {/* 选项 — 和 InlineQuestion 一致的按钮组，已选中的高亮 */}
+      {/* 选项 — 一致的按钮组，已选中的高亮 */}
       <div className="flex flex-wrap gap-1.5">
         {qa.options.map((option, idx) => {
           const isSelected = qa.answers.includes(option.label)

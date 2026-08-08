@@ -33,14 +33,10 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
   ...definitions('agent', [
     'agent.behavior',
     'agent.toolInteraction',
-    'chat.alwaysAllowMode',
-    'chat.approvePendingOnFullAuto',
     'chat.queueFollowupMessages',
     'chat.immersiveMode',
-    'chat.inlineToolRequests',
     'chat.descriptiveToolSteps',
     'chat.processCollapse',
-    'chat.compactInlinePermission',
     'chat.toolCardStyle',
   ]),
   ...definitions('chat', [

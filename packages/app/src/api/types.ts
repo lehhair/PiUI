@@ -6,14 +6,6 @@ export type { ModelInfo, FileCapabilities, Attachment, AttachmentType } from '..
 
 export type { Model as ApiModel, Provider as ApiProvider, ProvidersResponse } from '../types/api/model'
 export type { Project as ApiProject, PathResponse as ApiPath } from '../types/api/project'
-export type {
-  PermissionRequest as ApiPermissionRequest,
-  PermissionReply,
-  QuestionOption as ApiQuestionOption,
-  QuestionInfo as ApiQuestionInfo,
-  QuestionRequest as ApiQuestionRequest,
-  QuestionAnswer,
-} from '../types/api/permission'
 export type { Agent as ApiAgent, AgentPermission as ApiAgentPermission } from '../types/api/agent'
 
 import type { Attachment } from '../types/ui'

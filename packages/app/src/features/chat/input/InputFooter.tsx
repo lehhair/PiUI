@@ -1,38 +1,24 @@
-import { memo, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore, useCallback, useMemo } from 'react'
+import { memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { RefObject } from 'react'
-import { CheckIcon, ClockIcon, CircleIcon, CloseIcon, FastForwardIcon } from '../../../components/Icons'
+import { CheckIcon, ClockIcon, CircleIcon, CloseIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
 import { usePiSessionTodos } from '../../../pi/hooks/index.js'
-import { autoApproveStore, type FullAutoMode } from '../../../store/autoApproveStore'
 import type { PiTodoItem as TodoItem } from '../../../pi/hooks/index.js'
 
 // ============================================
-// Full Auto 状态 hook
+// InputFooter - disclaimer + todo progress
 // ============================================
-
-function useFullAutoMode(paneId: string): FullAutoMode {
-  return useSyncExternalStore(
-    cb => autoApproveStore.onFullAutoChange(cb),
-    () => autoApproveStore.getPaneFullAutoMode(paneId),
-  )
-}
 
 const TODO_SWAP_DURATION_MS = 260
 
-// ============================================
-// InputFooter - disclaimer + todo progress + full auto toggle
-// ============================================
-
 interface InputFooterProps {
-  paneId: string
   sessionId?: string | null
   onNewChat?: () => void
   inputContainerRef?: RefObject<HTMLDivElement | null>
 }
 
 export const InputFooter = memo(function InputFooter({
-  paneId,
   sessionId,
   onNewChat,
   inputContainerRef,
@@ -53,7 +39,6 @@ export const InputFooter = memo(function InputFooter({
   const closeTimerRef = useRef<number | null>(null)
   const openingFrameRef = useRef<number | null>(null)
   const previousSessionIdRef = useRef(sessionId)
-  const fullAutoMode = useFullAutoMode(paneId)
 
   const clearPanelTimers = useCallback(() => {
     if (closeTimerRef.current !== null) {
@@ -191,30 +176,6 @@ export const InputFooter = memo(function InputFooter({
       className="relative flex h-full w-full items-center justify-center gap-2 text-[length:var(--fs-xs)] leading-none text-text-500"
       ref={popoverRef}
     >
-      {/* Full Auto 三态切换: off -> session -> global -> off */}
-      <button
-        onClick={() => autoApproveStore.cyclePaneFullAutoMode(paneId)}
-        className="shrink-0 flex items-center justify-center hover:text-text-300 transition-colors"
-        title={
-          fullAutoMode === 'off'
-            ? t('inputFooter.autoApproveOff')
-            : fullAutoMode === 'session'
-              ? t('inputFooter.autoApproveSession')
-              : t('inputFooter.autoApproveGlobal')
-        }
-      >
-        <FastForwardIcon
-          size={11}
-          className={`transition-colors ${
-            fullAutoMode === 'global'
-              ? 'text-danger-100 drop-shadow-[0_0_4px_var(--color-danger-100)]'
-              : fullAutoMode === 'session'
-                ? 'text-warning-100 drop-shadow-[0_0_4px_var(--color-warning-100)]'
-                : ''
-          }`}
-        />
-      </button>
-
       <span className="text-text-500/30 shrink-0">·</span>
 
       {/* disclaimer / todos */}
