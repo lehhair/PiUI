@@ -137,6 +137,53 @@ async function runExtensionReplacement(
   }
 }
 
+/**
+ * 会话实例契约门禁：PiUI 委托到的 Pi SDK 会话/运行时方法必须存在。
+ * 按 SDK 版本缓存（同版本只验一次）；缺方法 → PI_SDK_INCOMPATIBLE 响亮失败，
+ * 在开会话时暴露详情，而不是等用户发消息才在运行时炸。
+ */
+let verifiedSessionContractSdkVersion: string | undefined
+
+export function verifySdkSessionContract(runtime: AgentSessionRuntime, version = getLoadedSdk().version): void {
+  if (verifiedSessionContractSdkVersion === version) return
+  const missing: string[] = []
+  const session = runtime.session as unknown as Record<string, unknown>
+  for (const method of [
+    "subscribe", "bindExtensions", "waitForIdle", "prompt", "steer", "followUp", "sendUserMessage",
+    "clearQueue", "abort", "setSessionName", "cycleModel", "setScopedModels", "setThinkingLevel",
+    "cycleThinkingLevel", "setSteeringMode", "setFollowUpMode", "compact", "abortBranchSummary",
+    "abortRetry", "setAutoCompactionEnabled", "setAutoRetryEnabled", "recordBashResult", "executeBash",
+    "abortBash", "getAllTools", "setActiveToolsByName", "navigateTree", "sendCustomMessage",
+    "exportToHtml", "exportToJsonl", "reload",
+  ] as const) {
+    if (typeof session[method] !== "function") missing.push(`session.${method}`)
+  }
+  for (const method of [
+    "newSession", "switchSession", "fork", "importFromJsonl", "dispose",
+    "setBeforeSessionInvalidate", "setRebindSession",
+  ] as const) {
+    if (typeof (runtime as unknown as Record<string, unknown>)[method] !== "function") missing.push(`runtime.${method}`)
+  }
+  const manager = runtime.session.sessionManager as unknown as Record<string, unknown> | undefined
+  for (const method of [
+    "getSessionId", "getSessionFile", "getCwd", "getEntries", "getTree", "getEntry",
+    "getSessionName", "getSessionDir", "appendLabelChange", "appendCustomEntry", "getLeafId",
+  ] as const) {
+    if (!manager || typeof manager[method] !== "function") missing.push(`sessionManager.${method}`)
+  }
+  const loader = runtime.session.resourceLoader as unknown as Record<string, unknown> | undefined
+  for (const method of ["getThemes", "getSkills", "getExtensions"] as const) {
+    if (!loader || typeof loader[method] !== "function") missing.push(`resourceLoader.${method}`)
+  }
+  if (missing.length > 0) {
+    throw Object.assign(
+      new Error(`Pi SDK ${version} session contract is incompatible:\n- ${missing.join("\n- ")}`),
+      { code: "PI_SDK_INCOMPATIBLE" },
+    )
+  }
+  verifiedSessionContractSdkVersion = version
+}
+
 const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
   agentDir,
@@ -245,6 +292,7 @@ export class RealPiSession implements SessionRuntime {
       agentDir,
       sessionManager,
     })
+    verifySdkSessionContract(runtime)
 
     const result = new RealPiSession(runtime, options.hostActions)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())

@@ -142,6 +142,63 @@ export const PI_COMMAND_SPECS = [
   { name: "packages.checkUpdates", scope: "global", description: "Check Pi package updates", paramsSchema: CWD_PARAMS, queue: "serialized" },
 ] as const satisfies readonly PiCommandSpec[]
 
+/**
+ * 会话命令 → SessionRuntime 方法的绑定清单（PiUI 驱动层对 Pi 的能力接缝）。
+ * 这是"不手写第二份镜像"的关键：每条会话命令声明它驱动哪个驱动方法，
+ * worker 启动时校验 RealPiSession 与 MockPiSession 都实现了它——加了命令
+ * 忘实现（或反过来）会启动即炸，不允许静默漂移。
+ */
+export const RUNTIME_TARGETS = {
+  prompt: "prompt",
+  steer: "steer",
+  followUp: "followUp",
+  sendUserMessage: "sendUserMessage",
+  abort: "abort",
+  newSession: "newSession",
+  switchSession: "switchSession",
+  fork: "fork",
+  importSession: "importSession",
+  setSessionName: "setSessionName",
+  setModel: "setModel",
+  cycleModel: "cycleModel",
+  setScopedModels: "setScopedModels",
+  setThinkingLevel: "setThinkingLevel",
+  cycleThinkingLevel: "cycleThinkingLevel",
+  setSteeringMode: "setSteeringMode",
+  setFollowUpMode: "setFollowUpMode",
+  clearQueue: "clearQueue",
+  compact: "compact",
+  abortCompaction: "abortCompaction",
+  abortBranchSummary: "abortBranchSummary",
+  setAutoCompaction: "setAutoCompaction",
+  setAutoRetry: "setAutoRetry",
+  abortRetry: "abortRetry",
+  bash: "bash",
+  abortBash: "abortBash",
+  setActiveTools: "setActiveTools",
+  invokeTool: "invokeTool",
+  invokeCommand: "invokeCommand",
+  navigateTree: "navigateTree",
+  setLabel: "setLabel",
+  sendCustomMessage: "sendCustomMessage",
+  appendCustomEntry: "appendCustomEntry",
+  exportHtml: "exportHtml",
+  exportJsonl: "exportJsonl",
+  waitForIdle: "waitForIdle",
+  reload: "reload",
+  respondExtensionUi: "respondExtensionUi",
+  setExtensionEditorState: "setExtensionEditorState",
+  "state.get": "getState",
+  "entries.get": "getEntriesPage",
+  "branch.get": "getBranchPage",
+  "tree.get": "getTree",
+  "registry.get": "getRegistry",
+  "skills.list": "listSkills",
+  "attachment.get": "getAttachment",
+} as const
+
+export type RuntimeTarget = (typeof RUNTIME_TARGETS)[keyof typeof RUNTIME_TARGETS]
+
 export type PiCommandName = (typeof PI_COMMAND_SPECS)[number]["name"]
 
 export type PiPageParams = {
@@ -204,3 +261,17 @@ export type PiParamsFor<K extends string> = K extends keyof PiCommandParams ? Pi
 type Assert<Condition extends true> = Condition
 type _PiParamsCoverAllSpecs = Assert<PiCommandName extends keyof PiCommandParams ? true : false>
 type _PiParamsHaveNoExtras = Assert<Exclude<keyof PiCommandParams, PiCommandName> extends never ? true : false>
+
+// 编译期防漂移：RUNTIME_TARGETS 的键必须是已声明的命令名（不能指向不存在的命令）。
+type _RuntimeTargetsNameKnownCommands = Assert<keyof typeof RUNTIME_TARGETS extends PiCommandName ? true : false>
+
+// 运行时防漂移（worker 启动时再校验一次）：每条 session 作用域命令都必须有 runtime
+// target，且 target 只指向 session 命令（global 命令走 catalog/auth/packages）。
+export function assertSessionCommandsTargeted(): string[] {
+  const missing: string[] = []
+  for (const spec of PI_COMMAND_SPECS) {
+    if (spec.scope !== "session") continue
+    if (!(spec.name in RUNTIME_TARGETS)) missing.push(spec.name)
+  }
+  return missing
+}

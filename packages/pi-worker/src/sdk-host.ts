@@ -61,6 +61,35 @@ const PI_SDK_FAMILY = [
   "@earendil-works/pi-tui",
 ] as const
 
+/**
+ * PiUI 对 Pi SDK 模块级导出的依赖清单（"改了哪些会被谁用"的一处登记）。
+ * loadPiSdk 加载后校验：缺符号直接 PI_SDK_INCOMPATIBLE 响亮失败（外部 SDK
+ * 失败会触发 worker 回退内置 SDK 并上报详情），不允许运行时才发现。
+ */
+const PI_SDK_MODULE_CONTRACT = [
+  { symbol: "SessionManager", usedBy: "catalog session lifecycle, real-session open" },
+  { symbol: "createAgentSessionRuntime", usedBy: "real-session open" },
+  { symbol: "createAgentSessionServices", usedBy: "real-session createDefaultRuntime" },
+  { symbol: "createAgentSessionFromServices", usedBy: "real-session createDefaultRuntime" },
+  { symbol: "getAgentDir", usedBy: "catalog settings/trust/session dirs, real-session open" },
+  { symbol: "ModelRuntime", usedBy: "catalog models, provider auth host" },
+  { symbol: "SettingsManager", usedBy: "catalog settings, real-session createDefaultRuntime" },
+  { symbol: "DefaultPackageManager", usedBy: "catalog packages" },
+  { symbol: "ProjectTrustStore", usedBy: "catalog trust, real-session project trust" },
+  { symbol: "hasTrustRequiringProjectResources", usedBy: "catalog settingsForWorkspace, real-session project trust" },
+  { symbol: "resolveModelScopeWithDiagnostics", usedBy: "real-session setScopedModels" },
+] as const
+
+export function verifySdkModuleContract(sdk: PiSdk): string[] {
+  const missing: string[] = []
+  for (const { symbol, usedBy } of PI_SDK_MODULE_CONTRACT) {
+    if (typeof (sdk as unknown as Record<string, unknown>)[symbol] !== "function") {
+      missing.push(`${symbol} (used by ${usedBy})`)
+    }
+  }
+  return missing
+}
+
 export interface SdkResolution {
   /** 解析到的 SDK 包目录；undefined 表示使用编译进 worker 的 SDK */
   sdkPath?: string
@@ -259,6 +288,13 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
     throw Object.assign(new Error(`Pi SDK ${version} does not expose the PiUI runtime contract`), {
       code: "PI_SDK_INCOMPATIBLE",
     })
+  }
+  const missingContract = verifySdkModuleContract(sdk)
+  if (missingContract.length > 0) {
+    throw Object.assign(
+      new Error(`Pi SDK ${version} is missing the PiUI module contract:\n- ${missingContract.join("\n- ")}`),
+      { code: "PI_SDK_INCOMPATIBLE" },
+    )
   }
   const verified = version === PI_PARITY_SDK_VERSION
   if (!verified && !external) {

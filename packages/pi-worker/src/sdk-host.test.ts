@@ -1,7 +1,35 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { join } from "node:path"
-import { resolvePiSdkPath, shouldRequireVerifiedSdk } from "./sdk-host.ts"
+import { resolvePiSdkPath, shouldRequireVerifiedSdk, verifySdkModuleContract } from "./sdk-host.ts"
+
+function completeFakeSdk(): Record<string, unknown> {
+  const fn = () => undefined
+  return {
+    SessionManager: fn,
+    createAgentSessionRuntime: fn,
+    createAgentSessionServices: fn,
+    createAgentSessionFromServices: fn,
+    getAgentDir: fn,
+    ModelRuntime: fn,
+    SettingsManager: fn,
+    DefaultPackageManager: fn,
+    ProjectTrustStore: fn,
+    hasTrustRequiringProjectResources: fn,
+    resolveModelScopeWithDiagnostics: fn,
+  }
+}
+
+test("verifySdkModuleContract accepts a complete SDK surface", () => {
+  assert.deepEqual(verifySdkModuleContract(completeFakeSdk() as never), [])
+})
+
+test("verifySdkModuleContract reports missing symbols with their usage", () => {
+  const missing = verifySdkModuleContract({ SessionManager: () => undefined } as never)
+  assert.ok(missing.some(item => item.startsWith("createAgentSessionRuntime")))
+  assert.ok(missing.some(item => item.includes("used by")))
+  assert.equal(missing.some(item => item.startsWith("SessionManager")), false)
+})
 
 test("external SDK verification is advisory unless explicitly enabled", () => {
   assert.equal(shouldRequireVerifiedSdk({}), false)

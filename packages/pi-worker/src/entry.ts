@@ -7,6 +7,7 @@ import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
 import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
 import { COMMAND_HANDLERS, listCommandCapabilities, resolveExtensionTarget, type CommandContext } from "./command-table.js"
+import { assertRuntimeTargetBindings } from "./runtime-contract.js"
 import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
 import { getDriverMode } from "./driver.js"
 import {
@@ -30,6 +31,9 @@ let registryCheck: Promise<void> = Promise.resolve()
 const runtimeUnsubs: Array<() => void> = []
 
 const driver = getDriverMode()
+
+// 会话命令 → 驱动方法绑定门禁：缺实现或缺 target 直接启动失败（响亮，不回退）。
+assertRuntimeTargetBindings()
 
 function send(message: WorkerMessage): void {
   process.send?.(message)
