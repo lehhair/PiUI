@@ -123,6 +123,12 @@ describe("event websocket", () => {
     const state = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/state.get`)
     assert.equal(state.status, 200)
     assert.equal(state.json.data.sessionId, sessionId)
+    // state.get 透传原生 stats/context usage（SDK getSessionStats/getContextUsage 形状）
+    assert.equal(typeof state.json.data.sessionStats.totalMessages, "number")
+    assert.equal(typeof state.json.data.sessionStats.tokens.total, "number")
+    assert.equal(typeof state.json.data.sessionStats.cost, "number")
+    assert.equal(typeof state.json.data.contextUsage.contextWindow, "number")
+    assert.equal(typeof state.json.data.contextUsage.percent, "number")
 
     const branch = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/branch.get`)
     assert.equal(branch.status, 200)

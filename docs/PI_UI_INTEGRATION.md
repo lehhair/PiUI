@@ -23,7 +23,7 @@
 | navigateTree/label | 完整 | R12：大型 tree fixture |
 | fork/clone/import | 完整 | R12：更多故障注入 |
 | branch summary 与取消 | 完整 | R12：升级 conformance |
-| stats/context usage | 缺失 | R11 |
+| stats/context usage | 完整 | R12：升级 conformance |
 | HTML/JSONL export | 缺失 | R11 |
 | share | 缺失 | R11 |
 
