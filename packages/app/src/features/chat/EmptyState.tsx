@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageSquareIcon, FolderIcon, ChevronDownIcon, NewChatIcon } from '../../components/Icons'
-import type { ApiProject } from '../../api'
+import type { HostProject } from '../../api'
 
 interface EmptyStateProps {
-  currentProject: ApiProject | null
-  projects: ApiProject[]
+  currentProject: HostProject | null
+  projects: HostProject[]
   onStartChat: (directory: string) => void
 }
 
@@ -36,7 +36,7 @@ export function EmptyState({ currentProject, projects, onStartChat }: EmptyState
   }, [isCustomMode])
 
   // 当前选中的目录
-  const currentDirectory = currentProject?.id === 'global' ? '' : currentProject?.worktree || ''
+  const currentDirectory = currentProject?.id === 'global' ? '' : currentProject?.path || ''
 
   // 处理开始聊天
   const handleStart = () => {
@@ -64,8 +64,8 @@ export function EmptyState({ currentProject, projects, onStartChat }: EmptyState
 
   // 其他可选目录（排除当前的）
   const otherDirectories = projects
-    .filter(p => p.id !== 'global' && p.worktree !== currentDirectory)
-    .map(p => p.worktree)
+    .filter(p => p.id !== 'global' && p.path !== currentDirectory)
+    .map(p => p.path)
 
   return (
     <div className="flex-1 flex items-center justify-center p-8">

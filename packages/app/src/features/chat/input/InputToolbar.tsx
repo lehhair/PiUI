@@ -1,21 +1,16 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDownIcon, SendIcon, StopIcon, PaperclipIcon, AgentIcon, ThinkingIcon } from '../../../components/Icons'
+import { ChevronDownIcon, SendIcon, StopIcon, PaperclipIcon, ThinkingIcon } from '../../../components/Icons'
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewport } from '../chatViewport'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
-import type { ApiAgent } from '../../../api/client'
 import type { Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../../types/ui'
 
 type ModelInfo = Model<any>
 
 interface InputToolbarProps {
-  agents: ApiAgent[]
-  selectedAgent?: string
-  onAgentChange?: (agentName: string) => void
-
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
@@ -45,9 +40,6 @@ interface InputToolbarProps {
 }
 
 export function InputToolbar({
-  agents,
-  selectedAgent,
-  onAgentChange,
   variants = [],
   selectedVariant,
   onVariantChange,
@@ -112,18 +104,13 @@ export function InputToolbar({
     }
   }, [caps.image, caps.pdf, caps.audio, caps.video])
   // State for menus
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [variantMenuOpen, setVariantMenuOpen] = useState(false)
 
   // Refs
-  const agentTriggerRef = useRef<HTMLButtonElement>(null)
-  const agentMenuRef = useRef<HTMLDivElement>(null)
   const variantTriggerRef = useRef<HTMLButtonElement>(null)
   const variantMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const agentMenuFocusRef = useRef<'selected' | 'first' | 'last'>('selected')
   const variantMenuFocusRef = useRef<'selected' | 'first' | 'last'>('selected')
-  const agentMenuId = 'input-toolbar-agent-menu'
   const variantMenuId = 'input-toolbar-variant-menu'
 
   const focusComposerInput = useCallback(() => {
@@ -273,16 +260,6 @@ export function InputToolbar({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
-        agentMenuOpen &&
-        !agentMenuRef.current?.contains(e.target as Node) &&
-        !agentTriggerRef.current?.contains(e.target as Node)
-      ) {
-        setAgentMenuOpen(false)
-        if (!isFocusableElement(e.target)) {
-          agentTriggerRef.current?.focus()
-        }
-      }
-      if (
         variantMenuOpen &&
         !variantMenuRef.current?.contains(e.target as Node) &&
         !variantTriggerRef.current?.contains(e.target as Node)
@@ -295,15 +272,7 @@ export function InputToolbar({
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [agentMenuOpen, variantMenuOpen, isFocusableElement])
-
-  useEffect(() => {
-    if (!agentMenuOpen) return
-    const timerId = window.setTimeout(() => {
-      focusMenuItem(agentMenuRef.current, agentMenuFocusRef.current)
-    }, 0)
-    return () => clearTimeout(timerId)
-  }, [agentMenuOpen, focusMenuItem])
+  }, [variantMenuOpen, isFocusableElement])
 
   useEffect(() => {
     if (!variantMenuOpen) return
@@ -312,9 +281,6 @@ export function InputToolbar({
     }, 0)
     return () => clearTimeout(timerId)
   }, [variantMenuOpen, focusMenuItem])
-
-  const selectableAgents = agents.filter(a => a.mode !== 'subagent' && !a.hidden)
-  const currentAgent = agents.find(a => a.name === selectedAgent)
   const activeDeliveryMode = deliveryMode === 'steer' && canSteer ? 'steer' : canFollowUp ? 'followUp' : 'steer'
   const deliveryLabel = activeDeliveryMode === 'steer' ? 'Steer' : 'Follow-up'
   const deliveryHint = activeDeliveryMode === 'steer' ? t('inputToolbar.steerHint') : t('inputToolbar.followUpHint')
@@ -337,86 +303,6 @@ export function InputToolbar({
             constrainToRef={inputContainerRef}
           />
         )}
-
-        {/* Agent Selector */}
-        <AnimatedPresence show={selectableAgents.length > 1} className={isCompact ? 'shrink-0' : ''}>
-          <div className="relative">
-            <button
-              ref={agentTriggerRef}
-              type="button"
-              onClick={() => {
-                agentMenuFocusRef.current = 'selected'
-                setAgentMenuOpen(!agentMenuOpen)
-              }}
-              onKeyDown={e => {
-                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  agentMenuFocusRef.current = e.key === 'ArrowUp' ? 'last' : 'first'
-                  setAgentMenuOpen(true)
-                }
-              }}
-              disabled={controlsDisabled}
-              aria-haspopup="menu"
-              aria-expanded={agentMenuOpen}
-              aria-controls={agentMenuOpen ? agentMenuId : undefined}
-              className="flex items-center gap-1.5 px-2 py-1.5 text-[length:var(--fs-base)] rounded-lg transition-all duration-150 hover:bg-bg-200 active:scale-95 cursor-pointer min-w-0 overflow-hidden w-full"
-              title={
-                currentAgent
-                  ? `${currentAgent.name}${currentAgent.description ? ': ' + currentAgent.description : ''}`
-                  : selectedAgent || 'build'
-              }
-            >
-              {/* 紧凑信息流隐藏 AgentIcon 节省空间 */}
-              <span
-                className={`text-text-400 shrink-0 ${isCompact ? 'hidden' : ''}`}
-                style={currentAgent?.color ? { color: currentAgent.color } : undefined}
-              >
-                <AgentIcon />
-              </span>
-              <span className="text-[length:var(--fs-sm)] text-text-300 capitalize truncate">{selectedAgent || 'build'}</span>
-              <span className={`text-text-400 shrink-0 ${isCompact ? 'hidden' : ''}`}>
-                <ChevronDownIcon />
-              </span>
-            </button>
-
-            <DropdownMenu
-              triggerRef={agentTriggerRef}
-              isOpen={agentMenuOpen}
-              position="top"
-              align="left"
-              constrainToRef={inputContainerRef}
-            >
-              <div
-                id={agentMenuId}
-                ref={agentMenuRef}
-                role="menu"
-                aria-label={t('inputToolbar.agentMenu')}
-                onKeyDown={event =>
-                  handleMenuKeyDown(event, agentMenuRef.current, () => setAgentMenuOpen(false), agentTriggerRef.current)
-                }
-              >
-                {selectableAgents.map(agent => (
-                  <MenuItem
-                    key={agent.name}
-                    label={agent.name.charAt(0).toUpperCase() + agent.name.slice(1)}
-                    description={agent.description}
-                    icon={
-                      <span style={agent.color ? { color: agent.color } : undefined}>
-                        <AgentIcon />
-                      </span>
-                    }
-                    selected={selectedAgent === agent.name}
-                    selectionRole="menuitemradio"
-                    onClick={() => {
-                      onAgentChange?.(agent.name)
-                      closeMenuToComposer(() => setAgentMenuOpen(false))
-                    }}
-                  />
-                ))}
-              </div>
-            </DropdownMenu>
-          </div>
-        </AnimatedPresence>
 
         {/* Variant Selector */}
         <AnimatedPresence show={variants.length > 0} className={isCompact ? 'shrink-0' : ''}>

@@ -1,5 +1,5 @@
 import { extToMime } from '../../../utils/tauri'
-import type { FileCapabilities } from '../../../api'
+import type { FileCapabilities } from '../../../types/ui'
 
 // ============================================
 // 文本样式常量

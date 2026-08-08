@@ -1,6 +1,6 @@
 // ============================================
 // MentionMenu Component
-// 文件/文件夹/Agent 选择菜单
+// 文件/文件夹选择菜单
 // ============================================
 
 import {
@@ -14,7 +14,6 @@ import {
   useMemo,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ApiAgent } from '../../api/client'
 import { searchFiles, listDirectory } from '../../pi/files'
 import { fileErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
@@ -28,7 +27,6 @@ import { getFileName, toAbsolutePath, normalizePath } from './utils'
 interface MentionMenuProps {
   isOpen: boolean
   query: string // 从 InputBox 传入的搜索词（@ 之后的文本）
-  agents: ApiAgent[]
   rootPath?: string
   excludeValues?: Set<string> // 需要排除的项（已选择的）
   onSelect: (item: MentionItem) => void
@@ -52,7 +50,7 @@ export interface MentionMenuHandle {
 // ============================================
 
 export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(function MentionMenu(
-  { isOpen, query, agents, rootPath = '', excludeValues, onSelect, onNavigate, onClose },
+  { isOpen, query, rootPath = '', excludeValues, onSelect, onNavigate, onClose },
   ref,
 ) {
   const { t } = useTranslation(['commands', 'common'])
@@ -147,7 +145,7 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
   // 创建 MentionItem
   const createItem = useCallback(
     (type: MentionType, name: string, path: string, _description?: string): MentionItem => {
-      const absolutePath = type !== 'agent' && rootPath ? toAbsolutePath(path, rootPath) : path
+      const absolutePath = rootPath ? toAbsolutePath(path, rootPath) : path
 
       return {
         type,
@@ -189,16 +187,7 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
             }
           })
 
-          // Agent 列表（只在根目录且无过滤时显示，或过滤匹配时显示）
-          const agentItems: MentionItem[] =
-            path === '.'
-              ? agentsRef.current
-                  .filter(a => !a.hidden && a.mode === 'subagent')
-                  .filter(a => !lowerFilter || a.name.toLowerCase().includes(lowerFilter))
-                  .map(a => createItem('agent', a.name, a.name, a.description))
-              : []
-
-          const allItems = [...agentItems, ...folders, ...files].filter(item => !excludeValuesRef.current?.has(item.value))
+          const allItems = [...folders, ...files].filter(item => !excludeValuesRef.current?.has(item.value))
 
           setItems(allItems)
 
@@ -227,11 +216,9 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
   )
 
   // 搜索逻辑 - 基于 query prop
-  // 依赖里故意排除 agents/excludeValues：流式输出期间这些引用可能变化，
+  // 依赖里故意排除 excludeValues：流式输出期间这些引用可能变化，
   // 但它们只影响过滤结果（在 setItems 时已处理），不应触发重新搜索和重置 selectedIndex。
-  const agentsRef = useRef(agents)
   const excludeValuesRef = useRef(excludeValues)
-  agentsRef.current = agents
   excludeValuesRef.current = excludeValues
 
   useEffect(() => {
@@ -274,13 +261,7 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
             }
           })
 
-          const lowerQuery = query.toLowerCase()
-          const agentItems = agentsRef.current
-            .filter(a => !a.hidden && a.mode === 'subagent')
-            .filter(a => a.name.toLowerCase().includes(lowerQuery))
-            .map(a => createItem('agent', a.name, a.name, a.description))
-
-          const allItems = [...agentItems, ...folders, ...fileItems].filter(item => !excludeValuesRef.current?.has(item.value))
+          const allItems = [...folders, ...fileItems].filter(item => !excludeValuesRef.current?.has(item.value))
 
           setItems(allItems)
           setSelectedIndex(0)
@@ -420,7 +401,7 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
                 <TypeBadge type={item.type} />
                 <span className="ml-1.5">{item.displayName}</span>
               </div>
-              {item.relativePath && item.type !== 'agent' && (
+              {item.relativePath && (
                 <div className="text-[length:var(--fs-sm)] text-text-400 truncate ml-[calc(2ch+0.375rem)]">{item.relativePath}</div>
               )}
             </div>

@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import type { PermissionRequest, QuestionRequest } from '../types/api/permission'
 import i18n from '../i18n'
 import { useFocusedSessionId } from '../pi/hooks/index.js'
 import { activeSessionStore } from '../store/activeSessionStore'
@@ -8,15 +7,10 @@ import { notificationEventSettingsStore } from '../store/notificationEventSettin
 import { useNotification } from './useNotification'
 
 /**
- * PiUI keeps the pane-consumer contract while Pi permission/question events
- * are not implemented. Session streaming is delivered by PiEventSocket.
+ * Session streaming is delivered by PiEventSocket; this consumer contract
+ * only carries lifecycle notifications (idle/error/reconnect/scroll).
  */
 export interface SessionEventCallbacks {
-  onPermissionAsked?: (request: PermissionRequest) => void
-  onPermissionReplied?: (data: { sessionID: string; requestID: string }) => void
-  onQuestionAsked?: (request: QuestionRequest) => void
-  onQuestionReplied?: (data: { sessionID: string; requestID: string }) => void
-  onQuestionRejected?: (data: { sessionID: string; requestID: string }) => void
   onScrollRequest?: () => void
   onSessionIdle?: (sessionID: string) => void
   onSessionError?: (sessionID: string) => void
