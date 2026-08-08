@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 
 /**
- * prepare-release.mjs - Validate before version bumping
+ * prepare-release.mjs - Validate before version bumping (PiUI monorepo)
  *
  * Usage:
- *   node scripts/prepare-release.mjs <version>
- *   node scripts/prepare-release.mjs <version> --skip-validate
+ *   node packages/app/scripts/prepare-release.mjs <version>
+ *   node packages/app/scripts/prepare-release.mjs <version> --skip-validate
  *
  * What it does:
  *   1. Ensures the git worktree is clean before starting
  *   2. Runs `npm run validate` by default
- *   3. Runs bump-version.mjs to update release files
+ *   3. Runs bump-version.mjs to update release files (root + workspaces)
  *   4. Prints the remaining git steps (commit, tag, push)
  */
 
@@ -18,8 +18,7 @@ import { execSync } from 'child_process'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const root = resolve(__dirname, '..')
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
 const args = process.argv.slice(2)
 const showHelp = args.includes('--help') || args.includes('-h')
@@ -27,9 +26,9 @@ const skipValidate = args.includes('--skip-validate')
 const version = args.find(arg => !arg.startsWith('-'))
 
 if (showHelp || !version) {
-  console.log('Usage: node scripts/prepare-release.mjs <version> [--skip-validate]')
-  console.log('  e.g. node scripts/prepare-release.mjs 0.2.0')
-  console.log('  e.g. node scripts/prepare-release.mjs 0.2.1-canary.1')
+  console.log('Usage: node packages/app/scripts/prepare-release.mjs <version> [--skip-validate]')
+  console.log('  e.g. node packages/app/scripts/prepare-release.mjs 0.2.0')
+  console.log('  e.g. node packages/app/scripts/prepare-release.mjs 0.2.1-canary.1')
   process.exit(showHelp ? 0 : 1)
 }
 
@@ -37,12 +36,12 @@ const tagName = `v${version}`
 
 function run(command, label) {
   console.log(`\n> ${label}`)
-  execSync(command, { cwd: root, stdio: 'inherit' })
+  execSync(command, { cwd: repoRoot, stdio: 'inherit' })
 }
 
 function read(command) {
   return execSync(command, {
-    cwd: root,
+    cwd: repoRoot,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
@@ -81,14 +80,14 @@ if (!skipValidate) {
   console.log('\n> Skipping release validation (--skip-validate)')
 }
 
-run(`node scripts/bump-version.mjs ${version}`, `Preparing release ${tagName}`)
+run(`node packages/app/scripts/bump-version.mjs ${version}`, `Preparing release ${tagName}`)
 
 console.log(`
 Release preparation finished for ${tagName}.
 
 Next steps:
   git add -A
-  git commit -m "chore: bump version to ${version}"
+  git commit -m "chore: release ${version}"
   git tag ${tagName}
   git push && git push origin ${tagName}
 `)
