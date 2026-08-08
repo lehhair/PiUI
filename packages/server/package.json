@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",
-    "@piui/pi-worker": "0.1.0",
-    "@piui/protocol": "0.1.0",
+    "@piui/pi-worker": "0.2.0",
+    "@piui/protocol": "0.2.0",
     "bun-pty": "^0.4.8",
     "chokidar": "^4.0.3",
     "ws": "^8.21.1"
