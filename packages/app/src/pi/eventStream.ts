@@ -17,6 +17,7 @@ import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
 import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
+import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
 import { notifyReconnected, notifySessionIdle, notifySessionStarted } from '../hooks/useGlobalEvents'
@@ -105,6 +106,7 @@ class PiEventStream {
       this.refCounts.delete(sessionId)
       this.cursors.delete(eventStreamKey({ kind: 'session', id: sessionId }))
       this.clearRefreshTimers(sessionId)
+      liveToolOutputStore.clearSession(sessionId)
     } else {
       this.refCounts.set(sessionId, count - 1)
       return
@@ -453,9 +455,22 @@ class PiEventStream {
       case 'message_end':
       case 'turn_end':
       case 'entry_appended':
-      case 'tool_execution_end':
         this.scheduleBranchRefresh(sessionId)
         break
+      case 'tool_execution_end':
+        if ('toolCallId' in event && typeof event.toolCallId === 'string') {
+          liveToolOutputStore.delete(event.toolCallId)
+        }
+        this.scheduleBranchRefresh(sessionId)
+        break
+      case 'tool_execution_update': {
+        if ('toolCallId' in event && typeof event.toolCallId === 'string') {
+          const text = extractToolExecutionText('partialResult' in event ? event.partialResult : undefined)
+          if (text) liveToolOutputStore.set(event.toolCallId, sessionId, text)
+        }
+        this.scheduleStateRefresh(sessionId)
+        break
+      }
       case 'agent_end':
       case 'agent_settled':
         this.scheduleBranchRefresh(sessionId)
@@ -467,8 +482,6 @@ class PiEventStream {
         this.scheduleStateRefresh(sessionId)
         break
       case 'turn_start':
-      case 'tool_execution_start':
-      case 'tool_execution_update':
       case 'thinking_level_changed':
       case 'session_info_changed':
       case 'queue_update':
