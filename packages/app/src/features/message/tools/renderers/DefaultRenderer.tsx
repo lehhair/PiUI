@@ -5,6 +5,7 @@ import { AlertCircleIcon } from '../../../../components/Icons'
 import { detectLanguage } from '../../../../utils/languageUtils'
 import { getMaterialIconUrl } from '../../../../utils/materialIcons'
 import { themeStore } from '../../../../store/themeStore'
+import { useLiveToolOutput } from '../../../../pi/liveToolOutput'
 import type { ToolRendererProps, ExtractedToolData } from '../types'
 import { AuthenticatedImage } from '../../../attachment'
 
@@ -19,10 +20,13 @@ export function DefaultRenderer({ execution, partKey, data, onFullscreenChange }
   const { toolCardStyle } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const isCompact = toolCardStyle === 'compact'
   const isActive = !execution.result
+  // 运行中优先显示 Pi 流式推送的实时输出（edit/read 等非 bash 工具同样适用）
+  const liveOutput = useLiveToolOutput(execution.call.id)
+  const effectiveOutput = data.output?.trim() ?? liveOutput?.trim()
 
   const hasInput = !!data.input?.trim()
   const hasError = !!data.error
-  const hasOutput = !!(data.files || data.diff || data.output?.trim() || data.exitCode !== undefined)
+  const hasOutput = !!(data.files || data.diff || effectiveOutput || data.exitCode !== undefined)
   const hasDiagnostics = !!data.diagnostics?.length
 
   const showOutput = hasOutput || hasError || (isActive && !hasOutput)
@@ -54,6 +58,7 @@ export function DefaultRenderer({ execution, partKey, data, onFullscreenChange }
         <OutputBlock
           tool={tool}
           data={data}
+          output={effectiveOutput}
           isActive={isActive}
           hasError={hasError}
           hasOutput={hasOutput}
@@ -96,6 +101,8 @@ export function DefaultRenderer({ execution, partKey, data, onFullscreenChange }
 interface OutputBlockProps {
   tool: string
   data: ExtractedToolData
+  /** 优先取持久化结果，运行中回退到 Pi 流式实时输出 */
+  output?: string
   isActive: boolean
   hasError: boolean
   hasOutput: boolean
@@ -108,6 +115,7 @@ interface OutputBlockProps {
 function OutputBlock({
   tool,
   data,
+  output,
   isActive,
   hasError,
   hasOutput,
@@ -204,7 +212,7 @@ function OutputBlock({
       <ContentBlock
         stateKey={stateBaseKey}
         label={t('defaultRenderer.output')}
-        content={data.output}
+        content={output}
         language={data.outputLang}
         filePath={data.filePath}
         stats={data.exitCode !== undefined ? { exit: data.exitCode } : undefined}
