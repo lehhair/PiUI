@@ -222,3 +222,59 @@ test("SessionHost rejects unknown session commands on a cold session without spa
   assert.equal(opens, 0)
   host.dispose()
 })
+
+test("SessionHost validates extension tool arguments against Pi's own tool schema", async () => {
+  const executed: Array<{ type: string; params?: unknown }> = []
+  const worker = {
+    command: async (type: string, params?: unknown) => {
+      if (type === "registry.get") {
+        return {
+          sdkVersion: "0.84.0",
+          tools: [{
+            name: "my-tool",
+            description: "extension tool",
+            parameters: {
+              type: "object",
+              properties: { value: { type: "string" } },
+              required: ["value"],
+              additionalProperties: false,
+            },
+          }],
+          activeTools: [],
+          commands: [],
+          extensions: [],
+          eventHandlers: [],
+        }
+      }
+      if (type === "state.get") return {}
+      executed.push({ type, params })
+      return { ok: true }
+    },
+    getSessionId: () => "session-1",
+    getSessionFile: () => "session-1.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: () => () => {},
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => worker,
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  await host.openSession(".", "session-1.jsonl")
+
+  // 畸形入参：schema 来自 Pi 的工具定义，在 HTTP 边界响亮 400。
+  await assert.rejects(
+    async () => { await host.executeSessionCommand("session-1", "my-tool", { value: 42 }) },
+    { code: "INVALID_REQUEST" },
+  )
+  assert.deepEqual(executed, [])
+
+  const submitted = await host.executeSessionCommand("session-1", "my-tool", { value: "ok" }) as { promise: Promise<unknown> }
+  await submitted.promise
+  assert.deepEqual(executed, [{ type: "my-tool", params: { value: "ok" } }])
+  host.dispose()
+})

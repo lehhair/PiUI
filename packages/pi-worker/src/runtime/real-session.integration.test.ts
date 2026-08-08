@@ -166,6 +166,12 @@ export default function (pi) {
     writeFileSync(path.join(projectExtensions, "trusted-command.js"), `
 export default function (pi) {
   pi.registerCommand("trusted-project-command", { description: "trusted", handler: async () => {} })
+  pi.registerTool({
+    name: "trusted-project-tool",
+    description: "trusted tool",
+    parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+  })
 }
 `)
     writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ extensions: [trustExtension] }))
@@ -175,6 +181,7 @@ export default function (pi) {
       await session.initializeExtensions()
       assert.equal(session.getRegistry().commands.some(command => command.name === "trusted-project-command"), true)
       assert.equal(session.getRegistry().commands.some(command => command.name === "reload" && command.sourceInfo?.builtin === true), true)
+      assert.equal(session.getRegistry().tools.some(tool => tool.name === "trusted-project-tool" && tool.parameters && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)), true)
       assert.equal(new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).get(cwd), true)
     } finally {
       await session?.dispose()
