@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { PromptTemplate } from '@earendil-works/pi-coding-agent'
 import type { RegistrySnapshot } from '@piui/protocol'
 import { Button } from '../../../components/ui/Button'
 import { JsonView } from '../../../components/JsonView'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
 import { useManagementEvents } from '../../../pi/managementEventStore'
+import { getPiPrompts } from '../../../pi/transport/index.js'
 import { loadPiSessionRegistry, reloadPiSessionResources } from '../../../pi/controllers/index.js'
 import { SettingsSection, SettingsDisclosure, settingsFieldClass } from './SettingsUI'
 
@@ -12,10 +14,12 @@ import { SettingsSection, SettingsDisclosure, settingsFieldClass } from './Setti
  * Session resource inspector over the native runtime registry (registry.get).
  * Extensions, tools, commands and event handlers come straight from the
  * session's extension runner; reload goes through the native reload command.
+ * Prompt templates come from the native prompts.list (SDK getPrompts()).
  */
 export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: string | null; workspacePath: string }) {
   const { t } = useTranslation(['settings', 'common'])
   const [registry, setRegistry] = useState<RegistrySnapshot | null>(null)
+  const [prompts, setPrompts] = useState<PromptTemplate[] | null>(null)
   const [eventType, setEventType] = useState('')
   const [handlerResult, setHandlerResult] = useState<boolean | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -28,6 +32,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
     if (!sessionId) return
     try {
       setRegistry((await loadPiSessionRegistry(sessionId)) ?? null)
+      setPrompts((await getPiPrompts(sessionId)) ?? null)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -94,6 +99,15 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
           <ResourceList title={t('pi.tools')} items={registry.tools.map(item => ({ name: `${item.name}${registry.activeTools.includes(item.name) ? '' : ` (${t('pi.inactive')})`}`, detail: item.description ?? '' }))} />
           <ResourceList title={t('pi.commands')} items={registry.commands.map(item => ({ name: item.name, detail: item.description ?? '' }))} />
           <ResourceList title={t('pi.eventHandlers')} items={registry.eventHandlers.map(name => ({ name, detail: '' }))} />
+          {prompts ? (
+            <ResourceList
+              title={t('pi.prompts')}
+              items={prompts.map(item => ({
+                name: `${item.name}${item.argumentHint ? ` ${item.argumentHint}` : ''}`,
+                detail: [item.description, item.filePath].filter(Boolean).join(' · '),
+              }))}
+            />
+          ) : null}
         </div>
       ) : null}
 

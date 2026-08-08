@@ -53,7 +53,7 @@ const unavailable: PiCapabilities = {
  * available exactly when the backend registry advertises its command.
  */
 const COMMAND_MAP: Record<keyof PiCapabilities, string | null> = {
-  pty: null,
+  pty: 'terminals.create',
   share: null,
   fork: 'fork',
   sessionTree: 'tree.get',
@@ -66,8 +66,8 @@ const COMMAND_MAP: Record<keyof PiCapabilities, string | null> = {
   retryManage: 'setAutoRetry',
   compactionManage: 'compact',
   toolsManage: 'setActiveTools',
-  fileWrite: null,
-  gitDiff: null,
+  fileWrite: 'files.write',
+  gitDiff: 'git.diff',
   sessionRename: 'setSessionName',
   sessionArchive: null,
   mcp: null,

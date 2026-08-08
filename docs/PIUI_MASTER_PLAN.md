@@ -53,7 +53,7 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 | R5 | 多模态 prompt 与完整工具结果 | 已完成：图片附件 base64 原生上传、工具结果与截断路径完整渲染、所有工具流式实时输出 |
 | R6 | Pi user bash 与流式执行控制 | 未开始 |
 | R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
-| R8 | settings、resources、reload、diagnostics | 未开始 |
+| R8 | settings、resources、reload、diagnostics | 进行中：settings/global/project 完整；reload + 资源检查（PiResourceManagement）+ prompts.list 完整；AGENTS/CLAUDE context（getAgentsFiles）待接入 |
 | R9 | packages 与三层 trust | 未开始 |
 | R10 | provider auth、模型、scoped models | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路。llama.cpp 本地模型属 Pi 官方规划中（issue #3107/#3567/#3357），SDK 未暴露，PiUI 不消费 |
 | R11 | stats、context usage、HTML/JSONL export | 已完成：stats/context usage 全链路（左下角圆环 + 详情对话框）与 HTML/JSONL export 三层测试齐全。share 属 Pi 官方未暴露语义（SDK 无 share API），PiUI 不消费 |

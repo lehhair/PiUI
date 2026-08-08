@@ -499,6 +499,10 @@ export class MockPiSession implements SessionRuntime {
     return []
   }
 
+  listPrompts(): JsonValue {
+    return []
+  }
+
   getRegistry(): RegistrySnapshot {
     const tools: RegistrySnapshot["tools"] = [
       {

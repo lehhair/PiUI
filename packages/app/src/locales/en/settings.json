@@ -441,6 +441,7 @@
     "tools": "Tools",
     "commands": "Commands",
     "eventHandlers": "Event handlers",
+    "prompts": "Prompt templates",
     "extensionDetail": "{{tools}} tools · {{commands}} commands · {{handlers}} handlers",
     "hidden": "hidden",
     "inactive": "inactive",

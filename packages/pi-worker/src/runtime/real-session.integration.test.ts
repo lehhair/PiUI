@@ -944,6 +944,16 @@ export default function (pi) {
       // skills.list
       assert.ok(Array.isArray(session.listSkills()))
 
+      // prompts.list：模板结构（name/description/content/filePath）
+      const prompts = session.listPrompts() as AnyRecord[]
+      assert.ok(Array.isArray(prompts))
+      for (const prompt of prompts) {
+        assert.equal(typeof prompt.name, "string")
+        assert.equal(typeof prompt.description, "string")
+        assert.equal(typeof prompt.content, "string")
+        assert.equal(typeof prompt.filePath, "string")
+      }
+
       // entries.get / branch.get / tree.get：分页与树结构
       const entries = session.getEntriesPage(undefined, 100, 1_000_000) as AnyRecord
       assert.ok(Array.isArray(entries.items))

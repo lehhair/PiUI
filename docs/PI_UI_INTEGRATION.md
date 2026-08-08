@@ -60,16 +60,16 @@
 
 | Pi 能力 | 当前状态 | 下一阶段 |
 |---|---|---|
-| Skills 元数据 | 部分 | R8：内容、来源与 reload |
-| Prompt templates | 部分 | R7：改用真实 `getPrompts()` |
+| Skills 元数据 | 部分 | R8：`getSkills()` 已通，缺内容/来源/reload 的专门 UI |
+| Prompt templates | 完整 | R12：升级 conformance |
 | Extension commands | 完整 | R12：升级 conformance |
-| Dynamic tools/providers | 部分 | R7/R10 |
-| select/confirm/input/editor | 部分 | R7：真实 SDK 对话框 E2E |
-| notify/status/widget/title | 部分 | R7：真实 SDK 状态事件 E2E |
+| Dynamic tools/providers | 完整 | R12：升级 conformance |
+| select/confirm/input/editor | 部分 | R7：bridge 完整，缺真实 SDK 对话框 E2E |
+| notify/status/widget/title | 部分 | R7：bridge 完整，缺真实 SDK 状态事件 E2E |
 | custom entries/renderers | 部分 | R7：custom_message 已渲染，其余类型降级 |
 | arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
-| AGENTS/CLAUDE context | 部分 | R8：来源与诊断 |
-| resource reload/diagnostics | 缺失 | R8 |
+| AGENTS/CLAUDE context | 缺失 | R8：SDK `getAgentsFiles()` 未接入 |
+| resource reload/diagnostics | 完整 | R12：升级 conformance（reload 命令 + PiResourceManagement + 测试） |
 | global/project settings | 完整 | R12：升级 conformance |
 | packages install/update/remove | 完整 | R12：升级 conformance |
 | Pi project trust | 完整 | R12：升级 conformance |
@@ -93,10 +93,10 @@
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| 文件读取、搜索、写入 API | 部分 | 写入 API 有实现，完整编辑工作流待验收 |
-| Git status/diff | 部分 | 当前只有 Git/branch 范围 |
-| PTY | 缺失 | Pi user bash 不能由 PTY 替代 |
-| workspace access | 部分 | 需与 Pi project trust、执行批准分离 |
+| 文件读取、搜索、写入 API | 完整 | R12：升级 conformance |
+| Git status/diff | 完整 | R12：升级 conformance（git/staged/unstaged/branch 四种 mode） |
+| PTY（宿主终端） | 完整 | R12：升级 conformance（terminals.* 命令 + ws e2e） |
+| workspace access | 完整 | R12：升级 conformance |
 | WebSocket replay/resync | 完整 | R12：完整故障注入矩阵 |
 
 ## Completion Gate
