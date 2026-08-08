@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/Button'
 import { JsonView } from '../../../components/JsonView'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
 import { useManagementEvents } from '../../../pi/managementEventStore'
-import { getPiPrompts } from '../../../pi/transport/index.js'
+import { getPiAgentsFiles, getPiPrompts } from '../../../pi/transport/index.js'
 import { loadPiSessionRegistry, reloadPiSessionResources } from '../../../pi/controllers/index.js'
 import { SettingsSection, SettingsDisclosure, settingsFieldClass } from './SettingsUI'
 
@@ -20,6 +20,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
   const { t } = useTranslation(['settings', 'common'])
   const [registry, setRegistry] = useState<RegistrySnapshot | null>(null)
   const [prompts, setPrompts] = useState<PromptTemplate[] | null>(null)
+  const [agentsFiles, setAgentsFiles] = useState<Array<{ path: string; content: string }> | null>(null)
   const [eventType, setEventType] = useState('')
   const [handlerResult, setHandlerResult] = useState<boolean | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -33,6 +34,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
     try {
       setRegistry((await loadPiSessionRegistry(sessionId)) ?? null)
       setPrompts((await getPiPrompts(sessionId)) ?? null)
+      setAgentsFiles((await getPiAgentsFiles(sessionId)) ?? null)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -105,6 +107,15 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
               items={prompts.map(item => ({
                 name: `${item.name}${item.argumentHint ? ` ${item.argumentHint}` : ''}`,
                 detail: [item.description, item.filePath].filter(Boolean).join(' · '),
+              }))}
+            />
+          ) : null}
+          {agentsFiles ? (
+            <ResourceList
+              title={t('pi.agentsFiles')}
+              items={agentsFiles.map(item => ({
+                name: item.path,
+                detail: `${t('pi.agentsFileLines')}: ${item.content.split('\n').length}`,
               }))}
             />
           ) : null}

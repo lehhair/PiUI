@@ -7,9 +7,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
 
-const { registryMock, promptsMock, reloadMock } = vi.hoisted(() => ({
+const { registryMock, promptsMock, agentsFilesMock, reloadMock } = vi.hoisted(() => ({
   registryMock: vi.fn(),
   promptsMock: vi.fn(),
+  agentsFilesMock: vi.fn(),
   reloadMock: vi.fn(),
 }))
 
@@ -20,6 +21,7 @@ vi.mock('../../../pi/controllers/index.js', () => ({
 
 vi.mock('../../../pi/transport/index.js', () => ({
   getPiPrompts: () => promptsMock(),
+  getPiAgentsFiles: () => agentsFilesMock(),
 }))
 
 const emptyExtensionUi = { sessions: {} }
@@ -46,6 +48,9 @@ describe('PiResourceManagement', () => {
     promptsMock.mockReset().mockResolvedValue([
       { name: 'code-review', description: 'Review this change', argumentHint: '<files>', content: '...', sourceInfo: { source: 'pi-extension' }, filePath: '/tmp/review.md' },
     ])
+    agentsFilesMock.mockReset().mockResolvedValue([
+      { path: 'AGENTS.md', content: '# rules\none rule' },
+    ])
     reloadMock.mockReset().mockResolvedValue(undefined)
   })
 
@@ -57,6 +62,7 @@ describe('PiResourceManagement', () => {
     expect(screen.getByText('pi.commands')).toBeInTheDocument()
     expect(screen.getByText('pi.eventHandlers')).toBeInTheDocument()
     expect(screen.getByText('pi.prompts')).toBeInTheDocument()
+    expect(screen.getByText('pi.agentsFiles')).toBeInTheDocument()
 
     // 展开 tools 与 prompts 区块验证内容
     fireEvent.click(screen.getByText('pi.tools'))
@@ -65,6 +71,9 @@ describe('PiResourceManagement', () => {
     expect(await screen.findByText('code-review <files>')).toBeInTheDocument()
     expect(screen.getByText(/Review this change/)).toBeInTheDocument()
     expect(screen.getByText(/\/tmp\/review\.md/)).toBeInTheDocument()
+    // AGENTS/CLAUDE 上下文文件
+    fireEvent.click(screen.getByText('pi.agentsFiles'))
+    expect(await screen.findByText('AGENTS.md')).toBeInTheDocument()
   })
 
   it('reloads resources through the native command', async () => {

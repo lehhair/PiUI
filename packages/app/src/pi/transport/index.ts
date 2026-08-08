@@ -411,6 +411,10 @@ export function getPiPrompts(sessionId: string, signal?: AbortSignal): Promise<P
   return postPiSessionCommand(sessionId, 'prompts.list', undefined, signal)
 }
 
+export function getPiAgentsFiles(sessionId: string, signal?: AbortSignal): Promise<Array<{ path: string; content: string }>> {
+  return postPiSessionCommand(sessionId, 'agentsFiles.list', undefined, signal)
+}
+
 // Action commands
 export function promptPi(sessionId: string, params: PromptParams, signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'prompt', params, signal)
