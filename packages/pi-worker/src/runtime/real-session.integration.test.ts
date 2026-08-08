@@ -189,6 +189,87 @@ export default function (pi) {
     }
   })
 
+  it("round-trips native extension dialogs through the real SDK", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-real-dialog-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    const projectExtensions = path.join(cwd, ".pi", "extensions")
+    mkdirSync(projectExtensions, { recursive: true })
+    mkdirSync(agentDir)
+    writeFileSync(path.join(projectExtensions, "dialog-command.js"), `
+export default function (pi) {
+  pi.registerCommand("dialog-e2e", {
+    description: "exercise extension dialogs",
+    handler: async (args, ctx) => {
+      ctx.ui.setStatus("mode", "Planning")
+      ctx.ui.setWidget("plan", ["1. Inspect", "2. Fix"], { placement: "aboveEditor" })
+      ctx.ui.notify("started", "info")
+      const choice = await ctx.ui.select("Pick one", ["alpha", "beta"])
+      const ok = await ctx.ui.confirm("Confirm?", "Proceed?")
+      const text = await ctx.ui.input("Name", "hint")
+      const edited = await ctx.ui.editor("Editor", "prefill")
+      ctx.ui.setStatus("mode", "Done")
+      ctx.ui.notify("finished", "success")
+      const { writeFileSync } = await import("node:fs")
+      writeFileSync(${JSON.stringify(path.join(root, "dialog-result.json"))}, JSON.stringify({ choice, ok, text, edited }))
+    },
+  })
+}
+`)
+    let session: RealPiSession | undefined
+    try {
+      // 预置项目信任，让 .pi/extensions 的扩展在 trust pass 后加载
+      new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).set(cwd, true)
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      await session.initializeExtensions()
+      assert.equal(session.getRegistry().commands.some(command => command.name === "dialog-e2e"), true)
+
+      // 触发 command：handler 依次发起 4 个原生对话框
+      const pending: Array<{ requestId: string; kind: string }> = []
+      const states: string[] = []
+      const notifications: string[] = []
+      const off = session.onExtensionUi(event => {
+        const uiEvent = event as { type?: string; request?: { requestId?: string; kind?: string }; patch?: { kind?: string }; message?: string }
+        const request = uiEvent.request
+        if (request?.requestId) pending.push({ requestId: request.requestId, kind: String(request.kind) })
+        if (uiEvent.type === "state" && uiEvent.patch?.kind === "status" && typeof uiEvent.patch.text === "string") {
+          states.push(uiEvent.patch.text)
+        }
+        if (uiEvent.type === "notify" && typeof uiEvent.message === "string") notifications.push(uiEvent.message)
+      })
+      const result = session.invokeCommand("dialog-e2e", undefined)
+
+      // 逐个响应：select -> confirm -> input -> editor
+      const kinds: string[] = []
+      const deadline = Date.now() + 10_000
+      while (kinds.length < 4 && Date.now() < deadline) {
+        const next = pending.shift()
+        if (!next) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+          continue
+        }
+        kinds.push(next.kind)
+        const response = next.kind === "select" ? { value: "beta" }
+          : next.kind === "confirm" ? { confirmed: true }
+          : next.kind === "input" ? { value: "typed" }
+          : { value: "edited!" }
+        assert.equal(await session.respondExtensionUi(next.requestId, response as never), true)
+      }
+      assert.deepEqual(kinds, ["select", "confirm", "input", "editor"])
+
+      await result
+      const values = JSON.parse(readFileSync(path.join(root, "dialog-result.json"), "utf8")) as Record<string, unknown>
+      assert.deepEqual(values, { choice: "beta", ok: true, text: "typed", edited: "edited!" })
+      // 状态事件：setStatus 先后推送 Planning / Done，notify 推送 started / finished
+      assert.deepEqual(states, ["Planning", "Done"])
+      assert.deepEqual(notifications, ["started", "finished"])
+      off()
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("streams raw events and persists an offline faux-provider turn", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-sdk-"))
     const { fauxAssistantMessage, fauxProvider, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()

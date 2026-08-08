@@ -64,8 +64,8 @@
 | Prompt templates | 完整 | R12：升级 conformance |
 | Extension commands | 完整 | R12：升级 conformance |
 | Dynamic tools/providers | 完整 | R12：升级 conformance |
-| select/confirm/input/editor | 部分 | R7：bridge 完整，缺真实 SDK 对话框 E2E |
-| notify/status/widget/title | 部分 | R7：bridge 完整，缺真实 SDK 状态事件 E2E |
+| select/confirm/input/editor | 完整 | R12：升级 conformance（真实 SDK 对话框 E2E 已加入） |
+| notify/status/widget/title | 完整 | R12：升级 conformance（真实 SDK 状态事件 E2E 已加入） |
 | custom entries/renderers | 部分 | R7：custom_message 已渲染，其余类型降级 |
 | arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
 | AGENTS/CLAUDE context | 完整 | R12：升级 conformance |
