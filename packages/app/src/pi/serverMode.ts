@@ -35,7 +35,7 @@ export function isPiServerReachable(): boolean {
   return state.status === "online"
 }
 
-/** This application must never fall back to an OpenCode transport. */
+/** This application must never fall back to a legacy transport. */
 export function isPiUiBackendMode(): true {
   return true
 }

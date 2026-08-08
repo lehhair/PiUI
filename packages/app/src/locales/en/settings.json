@@ -314,7 +314,7 @@
     "testNotification": "Test Notification",
     "sendSampleDesc": "Send a sample notification",
     "enableToTest": "Enable notifications to test",
-    "testTitle": "OpenCode",
+    "testTitle": "PiUI",
     "testBody": "This is a test notification",
     "notAvailable": "System notifications are not available in this environment",
     "notificationTypes": "Notification Types",

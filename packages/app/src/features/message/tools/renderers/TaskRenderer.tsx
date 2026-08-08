@@ -281,7 +281,7 @@ interface SubSessionViewProps {
 
 const SubSessionView = memo(function SubSessionView(_props: SubSessionViewProps) {
   const { t } = useTranslation('message')
-  // Sub-agent sessions are an opencode concept with no Pi equivalent yet —
+  // Sub-agent sessions have no Pi equivalent yet —
   // task tools never appear in Pi timelines, so this view stays a placeholder.
   return <div className="text-[length:var(--fs-sm)] text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
 })

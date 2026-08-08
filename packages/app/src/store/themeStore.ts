@@ -929,8 +929,8 @@ class ThemeStore {
       if (meta) meta.setAttribute('content', hex)
 
       const androidBridge = (
-        window as unknown as { __opencode_android?: { setSystemBars?: (mode: string, bg: string) => void } }
-      ).__opencode_android
+        window as unknown as { __piui_android?: { setSystemBars?: (mode: string, bg: string) => void } }
+      ).__piui_android
       if (androidBridge?.setSystemBars) {
         androidBridge.setSystemBars(resolvedMode, hex)
       }

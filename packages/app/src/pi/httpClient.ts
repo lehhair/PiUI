@@ -6,7 +6,7 @@ const DEFAULT_BASE = 'http://127.0.0.1:8787'
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 
 // 请求代次 + 在途请求注册表：server 切换/重连时一锅端中止，旧 server 的响应
-// 不可能回来污染新 server 的状态（参考 OpenCodeUI 的 sdk.ts generation 模式）。
+// 不可能回来污染新 server 的状态（参考原 UI 基线的 generation 模式）。
 let requestGeneration = 0
 const inflightControllers = new Set<AbortController>()
 

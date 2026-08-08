@@ -50,7 +50,7 @@ describe('ServersSettings', () => {
   })
 
   it('switches servers even when health verification fails', async () => {
-    checkHealthMock.mockResolvedValueOnce({ status: 'error', error: 'Not an OpenCode server' })
+    checkHealthMock.mockResolvedValueOnce({ status: 'error', error: 'Not an PiUI server' })
 
     render(<ServersSettings />)
 

@@ -213,8 +213,8 @@ export async function resolveHtmlPreviewResources(
       const isModule = script.getAttribute('type')?.trim().toLowerCase() === 'module'
       if (isModule && hasUnresolvedModuleImports(source)) {
         script.removeAttribute('src')
-        script.setAttribute('type', 'application/x-opencode-unresolved-module')
-        script.setAttribute('data-opencode-unresolved-src', path)
+        script.setAttribute('type', 'application/x-piui-unresolved-module')
+        script.setAttribute('data-piui-unresolved-src', path)
         script.textContent = source.replace(/<\/script/gi, '<\\/script')
         return
       }
@@ -232,7 +232,7 @@ export async function resolveHtmlPreviewResources(
       const content = await load(path, 'style')
       if (!content) return
       const style = parsed.createElement('style')
-      style.setAttribute('data-opencode-resolved-css', '')
+      style.setAttribute('data-piui-resolved-css', '')
       if (link.media) style.media = link.media
       style.textContent = (await replaceCssUrls(fileContentToText(content), path, directory, load)).replace(/<\/style/gi, '<\\/style')
       link.replaceWith(style)
@@ -240,7 +240,7 @@ export async function resolveHtmlPreviewResources(
   )
 
   await Promise.all(
-    Array.from(parsed.querySelectorAll<HTMLStyleElement>('style:not([data-opencode-resolved-css])')).map(async style => {
+    Array.from(parsed.querySelectorAll<HTMLStyleElement>('style:not([data-piui-resolved-css])')).map(async style => {
       style.textContent = await replaceCssUrls(style.textContent ?? '', htmlPath, directory, load)
     }),
   )

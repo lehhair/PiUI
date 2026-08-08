@@ -548,7 +548,7 @@ $$`
     render(<MarkdownRenderer content={`<a href="${filePath}">file.ts</a>`} />)
 
     const link = screen.getByRole('link', { name: 'file.ts' })
-    expect(link).toHaveAttribute('href', `#opencode-local-file:${encodeURIComponent(filePath)}`)
+    expect(link).toHaveAttribute('href', `#piui-local-file:${encodeURIComponent(filePath)}`)
     expect(link).toHaveAttribute('title', filePath)
   })
 
@@ -1017,7 +1017,7 @@ $$`
     expect(frame).not.toHaveAttribute('scrolling')
     expect(frame.parentElement?.parentElement?.className).toContain('overflow-x-auto')
     expect(frame.getAttribute('srcdoc')).toContain('scriptQueue')
-    expect(frame.getAttribute('srcdoc')).toContain('data-opencode-script-executed')
+    expect(frame.getAttribute('srcdoc')).toContain('data-piui-script-executed')
     expect(frame.getAttribute('srcdoc')).not.toContain('window.bad')
     expect(screen.queryByTestId('code-block')).not.toBeInTheDocument()
   })
@@ -1091,7 +1091,7 @@ $$`
 
   it('keeps React code and table renderers when reference definitions are present', () => {
     const content = [
-      '[OpenCode][docs]',
+      '[PiUI][docs]',
       '',
       '```ts',
       'const x = 1',
@@ -1106,7 +1106,7 @@ $$`
 
     render(<MarkdownRenderer content={content} />)
 
-    expect(screen.getByRole('link', { name: 'OpenCode' })).toHaveAttribute('href', 'https://example.com/docs')
+    expect(screen.getByRole('link', { name: 'PiUI' })).toHaveAttribute('href', 'https://example.com/docs')
     expect(screen.getByTestId('code-block')).toHaveTextContent('ts:const x = 1')
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByTestId('copy-button')).toBeInTheDocument()
@@ -1378,7 +1378,7 @@ $$`
     render(<MarkdownRenderer content={`[conversation.ts](${filePath})`} />)
 
     const link = screen.getByRole('link', { name: 'conversation.ts' })
-    expect(link).toHaveAttribute('href', `#opencode-local-file:${encodeURIComponent(filePath)}`)
+    expect(link).toHaveAttribute('href', `#piui-local-file:${encodeURIComponent(filePath)}`)
     expect(link).toHaveAttribute('title', filePath)
     expect(screen.queryByText(/\[blocked\]/)).not.toBeInTheDocument()
   })
@@ -1388,7 +1388,7 @@ $$`
     render(<MarkdownRenderer content={`[script.js](${filePath})`} />)
 
     const link = screen.getByRole('link', { name: 'script.js' })
-    expect(link).toHaveAttribute('href', `#opencode-local-file:${encodeURIComponent(filePath)}`)
+    expect(link).toHaveAttribute('href', `#piui-local-file:${encodeURIComponent(filePath)}`)
     expect(link).toHaveAttribute('title', filePath)
     expect(screen.queryByText(/\[blocked\]/)).not.toBeInTheDocument()
   })
