@@ -41,7 +41,9 @@
     "tauri:android:build": "npm run tauri:android:build -w @piui/app",
     "tauri:ios:init": "npm run tauri:ios:init -w @piui/app",
     "tauri:ios:dev": "npm run tauri:ios:dev -w @piui/app",
-    "tauri:ios:build": "npm run tauri:ios:build -w @piui/app"
+    "tauri:ios:build": "npm run tauri:ios:build -w @piui/app",
+    "release:prepare": "npm run release:prepare -w @piui/app",
+    "release:bump": "node packages/app/scripts/bump-version.mjs"
   },
   "engines": {
     "node": ">=22.19.0"
