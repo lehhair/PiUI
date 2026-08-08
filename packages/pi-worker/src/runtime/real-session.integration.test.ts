@@ -788,6 +788,63 @@ export default function (pi) {
       rmSync(cwd, { recursive: true, force: true })
     }
   })
+
+  it("exercises the native session command surface end to end", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-conformance-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    mkdirSync(cwd)
+    mkdirSync(agentDir)
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      await session.appendCustomEntry("conformance", { text: "hello" })
+
+      // state.get：核心状态结构
+      const state = session.getState() as AnyRecord
+      assert.equal(typeof state.sessionId, "string")
+      assert.equal(typeof state.thinkingLevel, "string")
+      assert.equal(typeof state.messageCount, "number")
+
+      // registry.get：tools/commands/extensions/handlers 数组
+      const registry = session.getRegistry()
+      assert.ok(Array.isArray(registry.tools))
+      assert.ok(Array.isArray(registry.commands))
+      assert.ok(Array.isArray(registry.extensions))
+      assert.ok(Array.isArray(registry.eventHandlers))
+
+      // skills.list
+      assert.ok(Array.isArray(session.listSkills()))
+
+      // entries.get / branch.get / tree.get：分页与树结构
+      const entries = session.getEntriesPage(undefined, 100, 1_000_000) as AnyRecord
+      assert.ok(Array.isArray(entries.items))
+      assert.ok(entries.items.some((item: AnyRecord) => item.type === "custom"))
+      assert.ok(entries.head)
+      const branch = session.getBranchPage(undefined, 100, 1_000_000) as AnyRecord
+      assert.ok(Array.isArray(branch.items))
+      const tree = session.getTree() as AnyRecord[]
+      assert.ok(Array.isArray(tree))
+
+      // 状态类命令：name / auto-compaction / auto-retry
+      // （thinking level 依赖模型支持，无 provider 时保持 off，不断言）
+      await session.setSessionName("conformance-session")
+      assert.equal((session.getState() as AnyRecord).sessionName, "conformance-session")
+      await session.setAutoCompaction(false)
+      await session.setAutoRetry(false)
+      const updated = session.getState() as AnyRecord
+      assert.equal(updated.autoCompactionEnabled, false)
+      assert.equal(updated.autoRetryEnabled, false)
+
+      // exportJsonl：落盘
+      const jsonlPath = path.join(root, "out.jsonl")
+      await session.exportJsonl(jsonlPath)
+      assert.equal(existsSync(jsonlPath), true)
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 function findTreeLabel(
