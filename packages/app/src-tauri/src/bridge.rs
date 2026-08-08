@@ -124,6 +124,7 @@ pub async fn ws_bridge_connect(
         while let Some(frame) = reader.next().await {
             match frame {
                 Ok(Message::Text(text)) => {
+                    // WS Text 帧本身就是完整 UTF-8，直接透传
                     if on_event
                         .send(json!({ "type": "message", "data": text.to_string() }))
                         .is_err()
@@ -132,6 +133,7 @@ pub async fn ws_bridge_connect(
                     }
                 }
                 Ok(Message::Binary(bytes)) => {
+                    // Binary 帧是完整消息（如 base64 附件），单帧转换即可
                     let data = String::from_utf8_lossy(&bytes).to_string();
                     if on_event
                         .send(json!({ "type": "message", "data": data }))
@@ -214,4 +216,56 @@ pub fn ws_bridge_close(
         let _ = sender.send(Message::Close(frame));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(window_label: &str, bridge_id: u32) -> BridgeKey {
+        BridgeKey {
+            window_label: window_label.to_string(),
+            bridge_id,
+        }
+    }
+
+    #[test]
+    fn window_destroy_cleans_only_that_windows_bridges() {
+        let state = BridgeState::default();
+        let (tx_a1, _rx_a1) = unbounded_channel::<Message>();
+        let (tx_a2, _rx_a2) = unbounded_channel::<Message>();
+        let (tx_b1, _rx_b1) = unbounded_channel::<Message>();
+        state.insert(key("main", 1), tx_a1);
+        state.insert(key("main", 2), tx_a2);
+        state.insert(key("win-1", 1), tx_b1);
+
+        state.disconnect_window("main");
+
+        assert!(state.sender(&key("main", 1)).is_none());
+        assert!(state.sender(&key("main", 2)).is_none());
+        // 其他窗口的同 id 连接不受影响
+        assert!(state.sender(&key("win-1", 1)).is_some());
+    }
+
+    #[test]
+    fn same_id_in_different_windows_is_isolated() {
+        let state = BridgeState::default();
+        let (tx_a, _rx_a) = unbounded_channel::<Message>();
+        let (tx_b, _rx_b) = unbounded_channel::<Message>();
+        state.insert(key("main", 7), tx_a);
+        state.insert(key("win-1", 7), tx_b);
+
+        // 关掉 main 的 7，win-1 的 7 保留
+        state.remove(&key("main", 7));
+        assert!(state.sender(&key("main", 7)).is_none());
+        assert!(state.sender(&key("win-1", 7)).is_some());
+    }
+
+    #[test]
+    fn next_id_is_unique_across_windows() {
+        let state = BridgeState::default();
+        let first = state.next_id();
+        let second = state.next_id();
+        assert_ne!(first, second);
+    }
 }
