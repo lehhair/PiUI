@@ -11,6 +11,7 @@ import { FolderProjectDropOverlay } from '../chat/FolderProjectDropOverlay.js'
 import { ChatViewportProvider, useChatViewportMaybe, type ChatViewportValue } from '../chat/chatViewport.js'
 import type { Attachment } from '../attachment/index.js'
 import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
+import { ProjectTrustPrompt } from './ProjectTrustPrompt'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
 import { selectPiTimelineItems } from '../../pi/selectors/index.js'
@@ -1275,6 +1276,8 @@ export function PiChatPane({
       />
 
       <ExtensionUiDialogHost sessionId={sessionId} />
+
+      <ProjectTrustPrompt cwd={currentDirectory} />
 
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
         <div className="pointer-events-auto">
