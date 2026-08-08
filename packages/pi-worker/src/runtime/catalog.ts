@@ -328,64 +328,22 @@ function toJsonObject(value: unknown): JsonObject {
 }
 
 function settingsSnapshot(cwd: string, manager: SettingsManager, trusted: boolean): JsonValue {
-  const effectiveSettings = (manager as unknown as { settings?: { httpProxy?: unknown } }).settings
+  // 生效设置直接透传 Pi SettingsManager 自己维护的合并对象（global+project+
+  // overrides 重建的 settings 字段）。PiUI 不再手写 ~60 键的展平镜像——Pi 加键、
+  // 改键都不需要 PiUI 同步；对象不可用时响亮失败（PI_SDK_INCOMPATIBLE）。
+  const effective = (manager as unknown as { settings?: unknown }).settings
+  if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
+    throw Object.assign(
+      new Error("Pi SettingsManager does not expose its effective settings object"),
+      { code: "PI_SDK_INCOMPATIBLE" },
+    )
+  }
   return requireJsonValue({
     workspacePath: cwd,
     projectTrusted: trusted,
     global: manager.getGlobalSettings(),
     project: manager.getProjectSettings(),
-    effective: {
-      lastChangelogVersion: manager.getLastChangelogVersion(),
-      sessionDir: manager.getSessionDir(),
-      defaultProvider: manager.getDefaultProvider(),
-      defaultModel: manager.getDefaultModel(),
-      defaultThinkingLevel: manager.getDefaultThinkingLevel(),
-      transport: manager.getTransport(),
-      steeringMode: manager.getSteeringMode(),
-      followUpMode: manager.getFollowUpMode(),
-      theme: manager.getThemeSetting(),
-      compaction: manager.getCompactionSettings(),
-      branchSummary: manager.getBranchSummarySettings(),
-      retry: manager.getRetrySettings(),
-      providerRetry: manager.getProviderRetrySettings(),
-      httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
-      websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs(),
-      httpProxy: typeof effectiveSettings?.httpProxy === "string" ? effectiveSettings.httpProxy : undefined,
-      externalEditor: manager.getExternalEditorCommand(),
-      hideThinkingBlock: manager.getHideThinkingBlock(),
-      showCacheMissNotices: manager.getShowCacheMissNotices(),
-      shellPath: manager.getShellPath(),
-      shellCommandPrefix: manager.getShellCommandPrefix(),
-      quietStartup: manager.getQuietStartup(),
-      defaultProjectTrust: manager.getDefaultProjectTrust(),
-      npmCommand: manager.getNpmCommand(),
-      enableAnalytics: manager.getEnableAnalytics(),
-      trackingId: manager.getTrackingId(),
-      enableInstallTelemetry: manager.getEnableInstallTelemetry(),
-      collapseChangelog: manager.getCollapseChangelog(),
-      enableSkillCommands: manager.getEnableSkillCommands(),
-      packages: manager.getPackages(),
-      extensionPaths: manager.getExtensionPaths(),
-      skillPaths: manager.getSkillPaths(),
-      promptTemplatePaths: manager.getPromptTemplatePaths(),
-      themePaths: manager.getThemePaths(),
-      showImages: manager.getShowImages(),
-      imageWidthCells: manager.getImageWidthCells(),
-      imageAutoResize: manager.getImageAutoResize(),
-      blockImages: manager.getBlockImages(),
-      enabledModels: manager.getEnabledModels(),
-      thinkingBudgets: manager.getThinkingBudgets(),
-      doubleEscapeAction: manager.getDoubleEscapeAction(),
-      treeFilterMode: manager.getTreeFilterMode(),
-      clearOnShrink: manager.getClearOnShrink(),
-      showTerminalProgress: manager.getShowTerminalProgress(),
-      showHardwareCursor: manager.getShowHardwareCursor(),
-      editorPaddingX: manager.getEditorPaddingX(),
-      outputPad: manager.getOutputPad(),
-      autocompleteMaxVisible: manager.getAutocompleteMaxVisible(),
-      codeBlockIndent: manager.getCodeBlockIndent(),
-      warnings: manager.getWarnings(),
-    },
+    effective,
     errors: manager.drainErrors().map(error => ({ scope: error.scope, message: error.error.message })),
   })
 }
