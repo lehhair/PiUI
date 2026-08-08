@@ -5,6 +5,8 @@ import type {
   PiSessionRow,
   PiTimelineItem,
   PiAssistantMessageItem,
+  PiBashExecutionItem,
+  PiBashExecutionGroupItem,
   PiCompactionItem,
   PiBranchSummaryItem,
   PiCustomMessageItem,
@@ -43,6 +45,9 @@ export function selectPiSessionRows(): PiSessionRow[] {
 export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
   const items: PiTimelineItem[] = []
   const assistantByCallId = new Map<string, PiAssistantMessageItem>()
+  // 相邻 bash 执行合并为工具组：遇到非 bash 条目时重置，保证只有连续
+  // 的 bash（`!cmd` / `/bash cmd`）才会并组，与 AI 连续工具调用一致。
+  let lastBashGroup: PiBashExecutionGroupItem | undefined
 
   for (const entry of branch.items) {
     const timestamp = parseTime(entry.timestamp)
@@ -61,6 +66,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
           blocks: Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }],
           renderKey,
         })
+        lastBashGroup = undefined
       } else if (message.role === 'assistant') {
         const item: PiAssistantMessageItem = {
           kind: 'assistant_message',
@@ -76,17 +82,30 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         for (const block of message.content) {
           if (block.type === 'toolCall') assistantByCallId.set(block.id, item)
         }
+        lastBashGroup = undefined
       } else if (message.role === 'toolResult') {
         const owner = assistantByCallId.get(message.toolCallId)
         if (owner) owner.toolResults[message.toolCallId] = message
       } else if (message.role === 'bashExecution') {
-        items.push({
+        // 相邻 bash 执行并入当前工具组；非连续时开新组
+        const bashItem: PiBashExecutionItem = {
           kind: 'bash_execution',
           entryId: entry.id,
           timestamp,
           rawEntry: entry,
           message,
-        })
+        }
+        if (lastBashGroup) {
+          lastBashGroup.items.push(bashItem)
+        } else {
+          lastBashGroup = {
+            kind: 'bash_execution_group',
+            entryId: entry.id,
+            timestamp,
+            items: [bashItem],
+          }
+          items.push(lastBashGroup)
+        }
       }
       // role custom is persisted as custom_message entry; summary roles are
       // runtime projections — neither exists in persisted entries.
@@ -101,6 +120,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         firstKeptEntryId: entry.firstKeptEntryId,
         details: entry.details,
       } as PiCompactionItem)
+      lastBashGroup = undefined
     } else if (entry.type === 'branch_summary') {
       items.push({
         kind: 'branch_summary',
@@ -111,6 +131,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         fromId: entry.fromId,
         details: entry.details,
       } as PiBranchSummaryItem)
+      lastBashGroup = undefined
     } else if (entry.type === 'custom_message') {
       items.push({
         kind: 'custom_message',
@@ -122,6 +143,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         display: entry.display,
         details: entry.details,
       } as PiCustomMessageItem)
+      lastBashGroup = undefined
     } else if (
       entry.type === 'thinking_level_change' ||
       entry.type === 'model_change' ||
@@ -146,6 +168,7 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         rawEntry: entry,
         entryType: unknown.type,
       } as PiUnknownItem)
+      lastBashGroup = undefined
     }
   }
 

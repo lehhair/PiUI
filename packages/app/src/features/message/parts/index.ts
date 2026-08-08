@@ -1,6 +1,7 @@
 export { TextPartView } from './TextPartView'
 export { ReasoningPartView } from './ReasoningPartView'
 export { ToolPartView } from './ToolPartView'
+export { ToolGroup } from './ToolGroup'
 export { FilePartView, AgentPartView, SyntheticTextPartView } from './AttachmentPartViews'
 export { StepFinishPartView } from './StepFinishPartView'
 export { RetryPartView, CompactionPartView, PatchPartView } from './SystemPartViews'

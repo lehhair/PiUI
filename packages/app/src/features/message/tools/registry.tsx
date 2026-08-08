@@ -333,6 +333,8 @@ function editExtractData(execution: PiToolExecution): ExtractedToolData {
 // ============================================
 
 export const toolRegistry: ToolRegistry = [
+  // Bash 工具专用渲染器（终端风格：$ 命令、ANSI 输出、退出码、全屏）。
+  // 外壳（ToolPartView compact/timeline、工具组 steps）与助手工具完全一致。
   { match: exact('bash'), icon: <TerminalIcon />, extractData: bashExtractData, renderer: BashRenderer },
   { match: exact('read'), icon: <FileReadIcon />, extractData: readExtractData },
   { match: exact('write'), icon: <FileWriteIcon />, extractData: writeExtractData },

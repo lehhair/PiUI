@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SlashCommandMenu } from './SlashCommandMenu'
+import { getFrontendCommands } from './builtinCommands'
 
 const mocks = vi.hoisted(() => ({
   loadPiSlashCommands: vi.fn(),
@@ -30,7 +31,7 @@ describe('SlashCommandMenu', () => {
     vi.useRealTimers()
   })
 
-  it('shows only frontend built-ins without a session', async () => {
+  it('shows the full Pi TUI builtin command list without a session', async () => {
     render(
       <div>
         <SlashCommandMenu isOpen={true} query="" onSelect={vi.fn()} onClose={vi.fn()} />
@@ -45,13 +46,39 @@ describe('SlashCommandMenu', () => {
     expect(mocks.loadPiSlashCommands).not.toHaveBeenCalled()
     expect(screen.getByText('/new')).toBeInTheDocument()
     expect(screen.getByText('/compact')).toBeInTheDocument()
+    expect(screen.getByText('/model')).toBeInTheDocument()
+    expect(screen.getByText('/settings')).toBeInTheDocument()
+    expect(screen.getByText('/export')).toBeInTheDocument()
+    expect(screen.getByText('/share')).toBeInTheDocument()
+    expect(screen.getByText('/bash')).toBeInTheDocument()
     expect(screen.queryByText('/explain')).not.toBeInTheDocument()
   })
 
-  it('merges native session commands and filters by query', async () => {
+  it('keeps builtin commands even when the session registry has no commands', async () => {
+    mocks.loadPiSlashCommands.mockResolvedValue([])
+
     render(
       <div>
-        <SlashCommandMenu isOpen={true} query="exp" sessionId="session-1" onSelect={vi.fn()} onClose={vi.fn()} />
+        <SlashCommandMenu isOpen={true} query="" sessionId="session-1" onSelect={vi.fn()} onClose={vi.fn()} />
+      </div>,
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(32)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.loadPiSlashCommands).toHaveBeenCalledWith('session-1')
+    expect(screen.getByText('/new')).toBeInTheDocument()
+    expect(screen.getByText('/compact')).toBeInTheDocument()
+    expect(screen.getByText('/model')).toBeInTheDocument()
+  })
+
+  it('merges native extension commands with builtins and filters by query', async () => {
+    render(
+      <div>
+        <SlashCommandMenu isOpen={true} query="expl" sessionId="session-1" onSelect={vi.fn()} onClose={vi.fn()} />
       </div>,
     )
 
@@ -65,5 +92,39 @@ describe('SlashCommandMenu', () => {
     expect(screen.getByText('/explain')).toBeInTheDocument()
     expect(screen.queryByText('/review')).not.toBeInTheDocument()
     expect(screen.queryByText('/compact')).not.toBeInTheDocument()
+    expect(screen.queryByText('/export')).not.toBeInTheDocument()
+  })
+
+  it('does not duplicate builtin commands reported by the registry', async () => {
+    mocks.loadPiSlashCommands.mockResolvedValue([
+      { name: 'new', description: 'registry new', sourceInfo: { builtin: true } },
+      { name: 'explain', description: 'Explain code', sourceInfo: null },
+    ])
+
+    render(
+      <div>
+        <SlashCommandMenu isOpen={true} query="" sessionId="session-1" onSelect={vi.fn()} onClose={vi.fn()} />
+      </div>,
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(32)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getAllByText('/new')).toHaveLength(1)
+    expect(screen.getByText('/explain')).toBeInTheDocument()
+  })
+
+  it('exports the pi TUI builtin command set', () => {
+    const names = getFrontendCommands().map(cmd => cmd.name)
+    for (const builtin of [
+      'new', 'compact', 'model', 'settings', 'hotkeys', 'changelog', 'resume',
+      'session', 'tree', 'clone', 'copy', 'fork', 'trust', 'login', 'logout',
+      'export', 'import', 'scoped-models', 'name', 'share', 'reload', 'quit', 'bash',
+    ]) {
+      expect(names).toContain(builtin)
+    }
   })
 })

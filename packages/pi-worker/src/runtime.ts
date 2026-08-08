@@ -61,7 +61,7 @@ export interface SessionRuntime {
   setAutoRetry(enabled: boolean): Promise<void>
   abortRetry(): Promise<void>
 
-  bash(command: string, excludeFromContext?: boolean): Promise<JsonValue | undefined>
+  bash(command: string, excludeFromContext?: boolean, clientId?: string): Promise<JsonValue | undefined>
   abortBash(): Promise<void>
 
   setActiveTools(toolNames: string[]): Promise<void>

@@ -113,7 +113,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   abortRetry: async (ctx) => ctx.requireRuntime().abortRetry(),
 
   bash: async (ctx, p) =>
-    ctx.requireRuntime().bash(P.reqString(p, "command"), P.optBoolean(p, "excludeFromContext")),
+    ctx.requireRuntime().bash(P.reqString(p, "command"), P.optBoolean(p, "excludeFromContext"), P.optString(p, "clientId")),
   abortBash: async (ctx) => ctx.requireRuntime().abortBash(),
 
   setActiveTools: async (ctx, p) => {

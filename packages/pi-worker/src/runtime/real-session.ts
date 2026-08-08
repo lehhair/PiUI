@@ -1012,7 +1012,7 @@ export class RealPiSession implements SessionRuntime {
     this.runtime.session.setAutoRetryEnabled(enabled)
   }
 
-  async bash(command: string, excludeFromContext = false): Promise<JsonValue | undefined> {
+  async bash(command: string, excludeFromContext = false, clientId?: string): Promise<JsonValue | undefined> {
     const normalized = command.trim()
     if (!normalized) throw Object.assign(new Error("empty bash command"), { code: "INVALID_REQUEST" })
     try {
@@ -1026,9 +1026,12 @@ export class RealPiSession implements SessionRuntime {
         this.runtime.session.recordBashResult(normalized, eventResult.result, { excludeFromContext })
         return toJson(eventResult.result)
       }
+      // clientId 透传为 bash_execution_update 事件的 id：前端用它关联乐观
+      // 条目的实时输出（pi TUI 的 onChunk 对应物，经事件流转发）。
       return toJson(await this.runtime.session.executeBash(normalized, undefined, {
         excludeFromContext,
         operations: eventResult?.operations,
+        id: clientId,
       }))
     } finally {
       this.emitHeadIfChanged()

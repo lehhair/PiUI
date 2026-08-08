@@ -839,7 +839,7 @@ export class MockPiSession implements SessionRuntime {
 
   async abortRetry(): Promise<void> {}
 
-  async bash(command: string): Promise<JsonValue | undefined> {
+  async bash(command: string, _excludeFromContext?: boolean, _clientId?: string): Promise<JsonValue | undefined> {
     return { output: `mock bash: ${command}`, exitCode: 0, cancelled: false, truncated: false }
   }
 

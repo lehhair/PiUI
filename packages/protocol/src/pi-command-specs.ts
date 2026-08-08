@@ -91,7 +91,7 @@ export const PI_COMMAND_SPECS = [
   { name: "setAutoCompaction", scope: "session", description: "Toggle automatic compaction", paramsSchema: objectSchema({ enabled: BOOLEAN }, ["enabled"]), queue: "serialized" },
   { name: "setAutoRetry", scope: "session", description: "Toggle automatic retry", paramsSchema: objectSchema({ enabled: BOOLEAN }, ["enabled"]), queue: "serialized" },
   { name: "abortRetry", scope: "session", description: "Abort active retry", queue: "immediate" },
-  { name: "bash", scope: "session", description: "Run a bash command through the Pi runtime", paramsSchema: objectSchema({ command: STRING, excludeFromContext: BOOLEAN }, ["command"]), queue: "serialized", cancellable: true },
+  { name: "bash", scope: "session", description: "Run a bash command through the Pi runtime", paramsSchema: objectSchema({ command: STRING, excludeFromContext: BOOLEAN, clientId: STRING }, ["command"]), queue: "serialized", cancellable: true },
   { name: "abortBash", scope: "session", description: "Abort active bash execution", queue: "immediate" },
   { name: "setActiveTools", scope: "session", description: "Set active Pi tools", paramsSchema: objectSchema({ toolNames: STRING_ARRAY }), queue: "serialized" },
   { name: "invokeTool", scope: "session", source: "pi-extension", description: "Invoke a registered Pi tool by name", paramsSchema: objectSchema({ name: STRING, arguments: objectSchema({}, [], true) }, ["name"]), queue: "serialized" },

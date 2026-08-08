@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
+  PiBashExecutionGroupItem,
   PiBashExecutionItem,
   PiBranchSummaryItem,
   PiCompactionItem,
@@ -13,8 +14,9 @@ import { MarkdownRenderer } from '../../../components/MarkdownRenderer'
 import { ChevronDownIcon } from '../../../components/Icons'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { useDisclosureScrollLock } from '../../../hooks'
+import { useNow } from '../../../hooks/useNow'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
-import { ToolPartView } from './ToolPartView'
+import { ToolGroup } from './ToolGroup'
 
 // ============================================
 // Pi system timeline item views
@@ -30,7 +32,8 @@ import { ToolPartView } from './ToolPartView'
 export const PiSystemItemView = memo(function PiSystemItemView({ item }: { item: PiTimelineItem }) {
   switch (item.kind) {
     case 'bash_execution':
-      return <BashExecutionView item={item} />
+    case 'bash_execution_group':
+      return <BashExecutionGroupView item={item} />
     case 'compaction':
       return <CompactionItemView item={item} />
     case 'branch_summary':
@@ -101,24 +104,60 @@ const DividerRow = memo(function DividerRow({ partKey, label, detail }: DividerR
 // Item views
 // ============================================
 
-function BashExecutionView({ item }: { item: PiBashExecutionItem }) {
-  const execution: PiToolExecution = {
-    call: {
-      type: 'toolCall',
-      id: item.entryId,
-      name: 'bash',
-      arguments: { command: item.message.command },
-    },
+/**
+ * 用户发起的 bash 执行（`!cmd` / `/bash cmd`）渲染。
+ * 相邻执行由 selector 合并为 bash_execution_group；单个 bash 也走同一
+ * 组件。复用 ToolGroup：与 AI 自己调用工具（连续工具组）的渲染完全一致
+ * —— 单条 compact、多条 steps header + timeline。
+ *
+ * 展开策略：参考助手工具"进行中展开"——bash 刚执行完（最近
+ * FRESH_BASH_WINDOW_MS 内落盘）视为活跃，默认展开（发命令就是为了看
+ * 输出）；窗口过后 / 刷新回到 session 的历史条目恢复默认折叠。初始展开
+ * 后由 useUiDisclosureState 保持，用户手动折叠会尊重。
+ */
+const FRESH_BASH_WINDOW_MS = 5 * 60_000
+
+function BashExecutionGroupView({ item }: { item: PiBashExecutionItem | PiBashExecutionGroupItem }) {
+  const items = 'items' in item ? item.items : [item]
+  const executions: PiToolExecution[] = items.map(bashItemToExecution)
+  // 组内最新一条的执行时间：组增长（连续发新命令并入）时按最新命令判定。
+  // useNow 提供渲染安全的时间源（渲染期不得直接调 Date.now）。
+  const latestTimestamp = items.reduce((max, bashItem) => Math.max(max, bashItem.timestamp), 0)
+  const now = useNow(60_000)
+  const fresh = latestTimestamp > 0 && now - latestTimestamp < FRESH_BASH_WINDOW_MS
+  return (
+    <ToolGroup
+      groupId={item.entryId}
+      startedAt={item.timestamp}
+      executions={executions}
+      defaultExpanded={fresh}
+    />
+  )
+}
+
+function bashItemToExecution(item: PiBashExecutionItem): PiToolExecution {
+  const call: PiToolExecution['call'] = {
+    type: 'toolCall',
+    id: item.entryId,
+    name: 'bash',
+    arguments: { command: item.message.command },
+  }
+  // 乐观条目（执行中，无 exitCode）：result 缺失 → isActive，BashRenderer
+  // 通过 useLiveToolOutput(call.id) 显示流式输出（pi TUI 的 onChunk 对应物）
+  if (item.message.exitCode === undefined) {
+    return { call }
+  }
+  return {
+    call,
     result: {
       role: 'toolResult',
       toolCallId: item.entryId,
       toolName: 'bash',
       content: [{ type: 'text', text: item.message.output }],
-      isError: item.message.exitCode != null && item.message.exitCode !== 0,
+      isError: item.message.exitCode !== 0,
       timestamp: item.message.timestamp,
     },
   }
-  return <ToolPartView execution={execution} partKey={item.entryId} startedAt={item.timestamp} />
 }
 
 function CompactionItemView({ item }: { item: PiCompactionItem }) {

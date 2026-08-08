@@ -38,6 +38,13 @@ export const liveToolOutputStore = {
     outputs.set(toolCallId, { sessionId, text })
     notify()
   },
+  /** 追加增量输出（用户 `!cmd` 的 bash_execution_update.delta 是 chunk） */
+  append(toolCallId: string, sessionId: string, delta: string): void {
+    if (!delta) return
+    const previous = outputs.get(toolCallId)
+    outputs.set(toolCallId, { sessionId, text: (previous?.text ?? '') + delta })
+    notify()
+  },
   delete(toolCallId: string): void {
     if (!outputs.delete(toolCallId)) return
     notify()

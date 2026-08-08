@@ -136,6 +136,8 @@ export type SetEnabledParams = {
 export type BashParams = {
   command: string
   excludeFromContext?: boolean
+  /** 前端生成的关联键：作为 bash_execution_update 事件的 id 透传 */
+  clientId?: string
 }
 
 export type SetActiveToolsParams = {
