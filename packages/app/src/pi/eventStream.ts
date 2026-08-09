@@ -528,6 +528,12 @@ class PiEventStream {
       case 'queue_update':
       case 'compaction_start':
       case 'compaction_end':
+        this.scheduleStateRefresh(sessionId)
+        // 压缩结束会改写会话（插入 compaction 摘要条目）：强制刷新分支，
+        // 让"上下文已压缩"分隔线出现在聊天流里，而不是等不可靠的
+        // entry_appended 事件。
+        if (event.type === 'compaction_end') this.scheduleBranchRefresh(sessionId)
+        break
       case 'auto_retry_start':
       case 'auto_retry_end':
       case 'summarization_retry_scheduled':
@@ -617,6 +623,7 @@ function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
   if (status.type === 'retry') {
     return { type: 'retry', attempt: status.attempt, message: status.message, next: status.next }
   }
+  // busy / compacting 都算"工作中"
   return { type: 'busy' }
 }
 
