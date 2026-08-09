@@ -11,7 +11,6 @@ import { FolderProjectDropOverlay } from '../chat/FolderProjectDropOverlay.js'
 import { ChatViewportProvider, useChatViewportMaybe, type ChatViewportValue } from '../chat/chatViewport.js'
 import type { Attachment } from '../attachment/index.js'
 import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
-import { CompactionBanner } from '../chat/CompactionBanner.js'
 import { ProjectTrustPrompt } from './ProjectTrustPrompt'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
@@ -20,6 +19,7 @@ import { piEventStream } from '../../pi/eventStream.js'
 import { bashPendingStore } from '../../pi/bashPendingStore'
 import {
   abortPiOperation,
+  abortPiCompaction,
   compactPiSession,
   cyclePiModel,
   cyclePiThinkingLevel,
@@ -240,6 +240,7 @@ export function PiChatPane({
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
+  const compacting = state?.isCompacting === true
   const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
   // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端
@@ -1386,6 +1387,7 @@ export function PiChatPane({
             queuedFollowUps={queue?.followUp ?? []}
             sessionId={sessionId}
             isStreaming={isStreaming}
+            isCompacting={compacting}
             allowStreamingLayoutAnimation
             loadState="loaded"
             hasMoreHistory={Boolean(branch?.hasMore)}
@@ -1408,14 +1410,6 @@ export function PiChatPane({
 
       <ExtensionUiDialogHost sessionId={sessionId} />
 
-      {/* 压缩进行中指示（输入框上方，不遮挡输入）——SDK 无进度流，只有
-          spinner + 取消，对齐 Pi TUI 的 CompactionStatusIndicator */}
-      <div className="absolute left-0 right-0 z-[12] pointer-events-none" style={{ bottom: inputBoxHeight + 8 }}>
-        <div className="pointer-events-auto">
-          <CompactionBanner state={state} sessionId={sessionId} />
-        </div>
-      </div>
-
       <ProjectTrustPrompt cwd={currentDirectory} />
 
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
@@ -1430,9 +1424,12 @@ export function PiChatPane({
             onCycleThinkingLevel={() => sessionId && void cyclePiThinkingLevel(sessionId).then(() => refreshPiSessionState(sessionId)).catch(() => undefined)}
             onOpenModelSelector={() => modelSelectorRef.current?.openMenu()}
             onTextChange={handleTextChange}
-            onAbort={() => (sessionId ? void abortPiOperation(sessionId).catch(() => undefined) : undefined)}
+            onAbort={() => (sessionId
+              ? void (compacting ? abortPiCompaction(sessionId) : abortPiOperation(sessionId)).catch(() => undefined)
+              : undefined)}
             onNewChat={onNewChat}
             isStreaming={isStreaming}
+            isCompacting={compacting}
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}
             onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}

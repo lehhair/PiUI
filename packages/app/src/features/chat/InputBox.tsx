@@ -133,6 +133,8 @@ export interface InputBoxProps {
   onNewChat?: () => void // 新建对话回调
   disabled?: boolean
   isStreaming?: boolean
+  /** 上下文压缩进行中：发送按钮变为停止按钮（取消压缩） */
+  isCompacting?: boolean
   variants?: string[]
   selectedVariant?: string
   onVariantChange?: (variant: string | undefined) => void
@@ -185,6 +187,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   onNewChat,
   disabled,
   isStreaming,
+  isCompacting = false,
   variants = [],
   selectedVariant,
   onVariantChange,
@@ -1446,6 +1449,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                       fileCapabilities={fileCaps}
                       onFilesSelected={handleFilesSelected}
                       isStreaming={isStreaming}
+                      isCompacting={isCompacting}
                       isSending={isSubmitting}
                       onAbort={onAbort}
                       deliveryMode={deliveryMode}

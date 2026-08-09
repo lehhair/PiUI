@@ -25,6 +25,8 @@ import {
   assistantHasProcessContent,
 } from '../message'
 import { MessageErrorView } from '../message/parts'
+import { CloseIcon, SpinnerIcon } from '../../components/Icons'
+import { abortPiCompaction } from '../../pi/controllers/index.js'
 import type { MessageError } from '../../types/message'
 import type { PiTimelineItem } from '../../pi/domain/index.js'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
@@ -83,6 +85,8 @@ interface ChatAreaProps {
   turnLatestAssistantIds?: Set<string>
   sessionId?: string | null
   isStreaming?: boolean
+  /** 上下文压缩进行中：在消息流底部显示行内指示 + 取消（对齐 Pi TUI 的状态条） */
+  isCompacting?: boolean
   allowStreamingLayoutAnimation?: boolean
   loadState?: 'idle' | 'loading' | 'loaded' | 'error'
   loadError?: MessageError
@@ -359,7 +363,7 @@ export const ChatArea = memo(
         items, queuedSteering = [], queuedFollowUps = [],
         forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
-        sessionId, isStreaming = false, allowStreamingLayoutAnimation = false,
+        sessionId, isStreaming = false, isCompacting = false, allowStreamingLayoutAnimation = false,
         loadState = 'idle', loadError, connectionError, onOpenSettings,
         hasMoreHistory = false, onLoadMore, onUndo, onFork, canUndo,
         registerMessage, retryStatus = null, bottomPadding = 0,
@@ -1029,6 +1033,27 @@ export const ChatArea = memo(
                         {t('chatArea.openServerSettings')}
                       </button>
                     )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 压缩进行中：消息流底部的行内指示（压缩条目要等完成后才进时间线，
+                这里给一个 TUI 状态条对应物）+ 取消 */}
+            {isCompacting && sessionId && (
+              <div className={`w-full ${maxWidthClass} mx-auto ${paddingClass}`}>
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-2 rounded-lg border border-border-200/60 bg-bg-200/40 px-3 py-2 text-[length:var(--fs-sm)] text-text-200">
+                    <SpinnerIcon className="shrink-0 animate-spin text-accent-main-100" size={14} />
+                    <span className="min-w-0 flex-1 truncate">{t('chatArea.compacting')}</span>
+                    <button
+                      type="button"
+                      onClick={() => void abortPiCompaction(sessionId).catch(() => undefined)}
+                      className="shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[length:var(--fs-xxs)] text-text-400 hover:text-danger-100 hover:bg-bg-200/60 transition-colors"
+                    >
+                      <CloseIcon size={12} />
+                      {t('chatArea.compactingCancel')}
+                    </button>
                   </div>
                 </div>
               </div>
