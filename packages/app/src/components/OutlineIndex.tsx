@@ -20,7 +20,13 @@ import { memo, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from '
 import type { CSSProperties } from 'react'
 import type { PiTimelineItem } from '../pi/domain/index.js'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { buildOutlineSourceEntries, truncateOutlineLabel, type OutlineSourceEntry } from './outlineIndexModel'
+import {
+  buildOutlineSourceEntries,
+  findBiasedVisibleIndex,
+  resolveVisibleSectionIds,
+  truncateOutlineLabel,
+  type OutlineSourceEntry,
+} from './outlineIndexModel'
 
 const EMPTY_ITEMS: PiTimelineItem[] = []
 
@@ -169,27 +175,6 @@ function nearestIndexFromY(count: number, cursorY: number, railCenterY: number, 
   const centerY = railCenterY + (index - mid) * step
   return Math.abs(cursorY - centerY) <= fisheye.css.strengthRadius ? index : -1
 }
-
-/** 从 entries 中找偏置后的可见索引。
- *  取第二个匹配项（而非第一个），避免 viewport 顶部刚好落在上一条 prompt 尾部时误判。
- *  若只有一条匹配则退化为第一条。 */
-function findBiasedVisibleIndex(entries: OutlineEntry[], ownerVisibleIds?: Set<string>): number {
-  if (!ownerVisibleIds || ownerVisibleIds.size === 0) return -1
-  let first = -1
-  let second = -1
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i]
-    if (entry && ownerVisibleIds.has(entry.messageId)) {
-      if (first === -1) first = i
-      else {
-        second = i
-        break
-      }
-    }
-  }
-  return second !== -1 ? second : first
-}
-
 
 function formatEntries(entries: OutlineSourceEntry[], visual: VisualConfig): OutlineEntry[] {
   return entries.map(entry => ({
@@ -372,10 +357,6 @@ export const OutlineIndex = memo(function OutlineIndex({
   const visual = presentation.isCompact ? COMPACT_VISUAL : DESKTOP_VISUAL
   const outlineSourceEntries = useMemo(() => sourceEntries ?? buildOutlineSourceEntries(items), [items, sourceEntries])
   const allEntries = useMemo(() => formatEntries(outlineSourceEntries, visual), [outlineSourceEntries, visual])
-  const entries = useMemo(
-    () => sliceAroundVisible(allEntries, visibleMessageIds ?? [], visual.maxEntries),
-    [allEntries, visibleMessageIds, visual.maxEntries],
-  )
   const resolvedOwnerByMessageId = useMemo(() => {
     if (ownerByMessageId) return ownerByMessageId
 
@@ -389,23 +370,21 @@ export const OutlineIndex = memo(function OutlineIndex({
     return ownerMap
   }, [items, ownerByMessageId])
 
-  // 构建 territory 映射：每个消息 ID → 所属 user prompt 的 ID
-  const ownerVisibleIds = useMemo(() => {
-    const set = new Set<string>()
-    if (!currentHighlightEnabled || !visibleMessageIds) return set
-
-    for (const vid of visibleMessageIds) {
-      // A user prompt can be visible by itself, while an assistant/tool row
-      // needs to resolve back to its owning prompt. Keep both paths explicit
-      // so a missing owner entry cannot suppress a direct user match.
-      const direct = entries.find(entry => entry.messageId === vid)
-      const owner = resolvedOwnerByMessageId.get(vid)
-      if (direct) set.add(direct.messageId)
-      else if (owner) set.add(owner)
-    }
-    return set
-  }, [currentHighlightEnabled, entries, resolvedOwnerByMessageId, visibleMessageIds])
-  const ownerVisibleIndex = useMemo(() => findBiasedVisibleIndex(entries, ownerVisibleIds), [entries, ownerVisibleIds])
+  // 可见行 → 所属区块（user prompt）：助手/工具行解析回 owner，用户 prompt 行直接命中。
+  // 视口停在助手长文中间（用户 prompt 行不在可见集）时，窗口仍能定位当前区块。
+  const visibleSectionIds = useMemo(() => {
+    if (!currentHighlightEnabled) return []
+    return resolveVisibleSectionIds(outlineSourceEntries, visibleMessageIds ?? [], resolvedOwnerByMessageId)
+  }, [currentHighlightEnabled, outlineSourceEntries, visibleMessageIds, resolvedOwnerByMessageId])
+  const entries = useMemo(
+    () => sliceAroundVisible(allEntries, visibleSectionIds, visual.maxEntries),
+    [allEntries, visibleSectionIds, visual.maxEntries],
+  )
+  // 高亮取第一个（更早的）可见区块——"当前节点上一条回答"所在区块。
+  const ownerVisibleIndex = useMemo(
+    () => findBiasedVisibleIndex(entries, new Set(visibleSectionIds)),
+    [entries, visibleSectionIds],
+  )
 
   if (entries.length < 2) return null
 
@@ -423,6 +402,9 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
   const railRef = useRef<HTMLDivElement>(null)
   const hoveringRef = useRef(false)
   const focusIdxRef = useRef(-1)
+  // 最近一次指针 Y：流式更新会清掉 focusIdxRef（entries 变化重建），点击时
+  // 用最近光标位置现算目标，避免流式期间点了没反应。
+  const cursorYRef = useRef(0)
   // tick 元素缓存（只用于低频颜色重绘；entries 变化时清空）
   const ticksRef = useRef<HTMLElement[]>([])
   const railCenterRef = useRef(0)
@@ -439,7 +421,6 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
 
   useEffect(() => {
     ticksRef.current = []
-    focusIdxRef.current = -1
   }, [entries])
 
   useLayoutEffect(() => {
@@ -488,6 +469,7 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     setZoneActive(true)
     const rail = railRef.current
     if (!rail) return
+    cursorYRef.current = e.clientY
     ticksRef.current = getTicks()
     activateRail(rail, e.clientY)
     const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
@@ -498,6 +480,7 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
   const onZoneMove = useCallback((e: React.MouseEvent) => {
     const rail = railRef.current
     if (!rail) return
+    cursorYRef.current = e.clientY
     // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
     rail.style.setProperty('--oi-cursor-y', String(e.clientY))
     // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
@@ -511,7 +494,12 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
   const onZoneLeave = useCallback(() => deactivate(), [deactivate])
 
   const onZoneClick = useCallback(() => {
-    const idx = focusIdxRef.current
+    // 流式渲染会重建 entries 并把 focusIdxRef 清回 -1；此时用最近光标位置
+    // 现算目标，保证流式期间点击仍然有效。
+    let idx = focusIdxRef.current
+    if (idx < 0) {
+      idx = nearestIndexFromY(entriesRef.current.length, cursorYRef.current, railCenterRef.current, fisheyeRef.current)
+    }
     const cur = entriesRef.current
     if (idx >= 0 && idx < cur.length) {
       deactivate()
@@ -554,6 +542,8 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
   const backdropRef = useRef<HTMLDivElement>(null)
   const touchingRef = useRef(false)
   const prevFocusRef = useRef(-1)
+  // 最近触点 Y：流式更新会清掉 prevFocusRef，松手时用最近位置现算目标。
+  const lastTouchYRef = useRef(0)
   // tick 元素缓存（只用于低频颜色重绘；entries 变化时清空）
   const ticksRef = useRef<HTMLElement[]>([])
   const railCenterRef = useRef(0)
@@ -571,7 +561,6 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
 
   useEffect(() => {
     ticksRef.current = []
-    prevFocusRef.current = -1
   }, [entries])
 
   useLayoutEffect(() => {
@@ -624,6 +613,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       touchingRef.current = true
       prevFocusRef.current = -1
       const y = touch.clientY
+      lastTouchYRef.current = y
       ticksRef.current = getTicks()
       activateRail(el, y)
       // 直接用 ref 显示遮罩，不触发 React 重渲染
@@ -636,6 +626,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       if (!touch) return
       e.preventDefault()
       const y = touch.clientY
+      lastTouchYRef.current = y
       // 主线程每帧唯一的工作：写一个变量
       el.style.setProperty('--oi-cursor-y', String(y))
       updateFocus(y)
@@ -662,7 +653,11 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
     }
     const onEnd = () => {
       if (!touchingRef.current) return
-      const idx = prevFocusRef.current
+      // 流式更新会清 prevFocusRef：用最近触点位置现算，保证松手即跳转
+      let idx = prevFocusRef.current
+      if (idx < 0) {
+        idx = nearestIndexFromY(entriesRef.current.length, lastTouchYRef.current, railCenterRef.current, fisheyeRef.current)
+      }
       const cur = entriesRef.current
       if (idx >= 0 && idx < cur.length) onSelectRef.current(cur[idx].messageId)
 
