@@ -51,6 +51,7 @@ import {
 import { invokePiCommand } from '../../pi/transport/index.js'
 import { layoutStore } from '../../store/layoutStore'
 import { themeStore } from '../../store/themeStore'
+import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
@@ -240,7 +241,9 @@ export function PiChatPane({
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
-  const compacting = state?.isCompacting === true
+  // 压缩中：优先用活动状态（worker 推送、已验证可靠），state.isCompacting 兜底
+  const sessionEntry = useSessionActiveEntry(sessionId ?? '')
+  const compacting = sessionEntry?.status.type === 'compacting' || state?.isCompacting === true
   const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
   // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端

@@ -29,6 +29,7 @@ export interface PiSessionSummary {
 export type SessionStatus =
   | { type: 'idle' }
   | { type: 'busy' }
+  | { type: 'compacting' }
   | { type: 'retry'; attempt: number; message: string; next: number }
 
 export type SessionStatusMap = Record<string, SessionStatus>

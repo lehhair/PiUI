@@ -623,7 +623,10 @@ function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
   if (status.type === 'retry') {
     return { type: 'retry', attempt: status.attempt, message: status.message, next: status.next }
   }
-  // busy / compacting 都算"工作中"
+  // compacting 保留独立类型（信息流指示/停止按钮靠它驱动），busy 算工作中
+  if (status.type === 'compacting') {
+    return { type: 'compacting' }
+  }
   return { type: 'busy' }
 }
 
