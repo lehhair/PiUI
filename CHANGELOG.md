@@ -4,6 +4,18 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.2] - 2026-08-09
+
+- feat(chat): restore streaming height-grow animation for the live row (d655203f)
+- perf(chat): skip deep serialization in live-message persistence match (39c83148)
+- perf(chat): drop streaming shimmer and render markdown directly (reference align) (5b45fb8c)
+- perf(chat): selector-subscribe viewport so width changes skip React re-render (9ea25380)
+- perf(chat): cache tool-merge results so history rows hold memo identity (31d1cf11)
+- perf(chat): keep ChatArea and row props reference-stable during streaming (de057959)
+- perf(chat): rebuild timeline selection with stable history and per-chunk live item (61097535)
+- fix(dev): listen on IPv4+IPv6 so browser WS to localhost connects (fd5256e6)
+- perf(chat): add ?piuiPerf=1 instrumentation for streaming render stages (94d9d580)
+
 ## [v0.4.1] - 2026-08-09
 
 - fix(ui): drop the orphan dot in the input footer and honor hidden models in the selector (6842904b)
