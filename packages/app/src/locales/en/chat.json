@@ -30,8 +30,7 @@
     "sessionBusyDesc": "Another Pi runtime is using this session. Close it or try again later.",
     "backToHome": "Back to home",
     "openServerSettings": "Open server settings",
-    "compacting": "Compacting context…",
-    "compactingCancel": "Cancel"
+    "compacting": "Compacting context…"
   },
   "emptyState": {
     "title": "Start a new conversation",
