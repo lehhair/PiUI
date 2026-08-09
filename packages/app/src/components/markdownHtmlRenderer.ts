@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import type { Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -70,6 +71,11 @@ function isEscapedAt(text: string, index: number): boolean {
   return slashCount % 2 === 1
 }
 
+function isAsciiDigitAt(text: string, index: number): boolean {
+  const char = text[index]
+  return char !== undefined && char >= '0' && char <= '9'
+}
+
 function normalizeAlignedMath(source: string): string {
   return source.replace(/\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}/g, (environment, body: string) => {
     if ((body.match(/&/g)?.length ?? 0) < 2) return environment
@@ -83,7 +89,7 @@ function normalizeAlignedMath(source: string): string {
   })
 }
 
-function renderKatexHtml(source: string, displayMode: boolean): string {
+function renderKatexHtml(source: string, displayMode: boolean, fallback?: string): string {
   try {
     return katex.renderToString(displayMode ? normalizeAlignedMath(source) : source, {
       displayMode,
@@ -92,9 +98,66 @@ function renderKatexHtml(source: string, displayMode: boolean): string {
       trust: false,
     })
   } catch {
-    return escapeHtml(displayMode ? `$$${source}$$` : `$${source}$`)
+    return escapeHtml(fallback ?? (displayMode ? `$$${source}$$` : `$${source}$`))
   }
 }
+
+/**
+ * \(...\) / \[...\] 是否按 LaTeX 公式处理。
+ * 只接受明显的公式内容，避免把转义括号（\(注意\)、\[0\]）误当成数学。
+ */
+function looksLikeMath(source: string): boolean {
+  if (!source) return false
+  if (/[\u4e00-\u9fff\u3040-\u30ff]/.test(source)) return false
+  return /[=^_{}<>\\]/.test(source) || /[\p{L}\p{N}][+\-*/][\p{L}\p{N}]/u.test(source)
+}
+
+// marked v18（CommonMark 0.31+）会把单 ~ 对也切成 del（删除线），而中文对话里 ~ 常用作
+// 范围/约数符（1~2、3~5个、TGP021~024、8.85~9.16），导致 1~2 被误渲染成下标/删除线。
+// 这里只让双 ~~ 生成 del；单 ~ 保留为文本，由下方 subscript 逻辑决定是否按下标渲染。
+marked.use({
+  tokenizer: {
+    del(src: string) {
+      const cap = /^~~(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))~~(?=[^~]|$)/.exec(src)
+      if (!cap) return undefined
+      return {
+        type: 'del',
+        raw: cap[0],
+        text: cap[1],
+        tokens: this.lexer.inlineTokens(cap[1]),
+      }
+    },
+  },
+  extensions: [
+    {
+      name: 'math',
+      level: 'inline',
+      start(src: string) {
+        const inline = src.indexOf('\\(')
+        const display = src.indexOf('\\[')
+        if (inline === -1) return display
+        if (display === -1) return inline
+        return Math.min(inline, display)
+      },
+      tokenizer(src: string) {
+        const inlineMatch = /^\\\(([\s\S]*?)\\\)/.exec(src)
+        if (inlineMatch?.[1] && !inlineMatch[1].includes('\n') && looksLikeMath(inlineMatch[1])) {
+          return { type: 'math', raw: inlineMatch[0], text: inlineMatch[1], display: false }
+        }
+        const displayMatch = /^\\\[([\s\S]*?)\\\]/.exec(src)
+        if (displayMatch?.[1] && looksLikeMath(displayMatch[1])) {
+          return { type: 'math', raw: displayMatch[0], text: displayMatch[1], display: true }
+        }
+        return undefined
+      },
+      renderer(token: Tokens.Generic) {
+        const text = String(token.text ?? '')
+        const display = token.display === true
+        return renderKatexHtml(text, display, display ? `\\[${text}\\]` : `\\(${text}\\)`)
+      },
+    },
+  ],
+})
 
 function getFootnoteId(label: string): string {
   const normalized = label.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
@@ -178,8 +241,15 @@ function renderTextExtensionsHtml(text: string, isReasoning: boolean): string {
       const close = findUnescaped(text, '~', cursor + 1)
       const content = close === -1 ? '' : text.slice(cursor + 1, close)
       // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-      // 否则 ~ 会被范围/约数文本误匹配（如 TGP021~024流量8.85~9.16）。
-      if (content && !/\s/.test(content) && !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) && content.length <= 5) {
+      // 两侧紧邻数字视为范围/约数写法（1~2、3~5个、版本1.0~2.0），保持字面。
+      if (
+        content &&
+        !/\s/.test(content) &&
+        !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) &&
+        content.length <= 5 &&
+        !isAsciiDigitAt(text, cursor - 1) &&
+        !isAsciiDigitAt(text, close + 1)
+      ) {
         pushText(cursor)
         chunks.push(`<sub>${renderTextExtensionsHtml(content, isReasoning)}</sub>`)
         cursor = close + 1
@@ -328,15 +398,8 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
     return `<em class="${className}">${this.parser.parseInline(tokens)}</em>`
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderer.del = function (this: any, { raw, tokens }: any) {
-    if (typeof raw === 'string' && raw.startsWith('~') && !raw.startsWith('~~') && !raw.endsWith('~~')) {
-      const inner = raw.slice(1, -1)
-      // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-      if (inner && !/\s/.test(inner) && !/[\u4e00-\u9fff\u3040-\u30ff]/.test(inner) && inner.length <= 5) {
-        return `<sub>${this.parser.parseInline(tokens)}</sub>`
-      }
-    }
+  // 删除线只来自 ~~...~~（tokenizer 已限制单 ~ 不产生 del）
+  renderer.del = function ({ tokens }) {
     const className = isReasoning
       ? 'text-[length:var(--fs-sm)] text-text-500 line-through decoration-text-500/50'
       : 'text-text-400 line-through decoration-text-400/50'

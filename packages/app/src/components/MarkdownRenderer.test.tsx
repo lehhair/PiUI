@@ -130,6 +130,58 @@ describe('MarkdownRenderer', () => {
     expect(container.querySelector('mark')).toHaveTextContent('mark')
   })
 
+  it('keeps tilde number ranges literal instead of strikethrough or subscript', () => {
+    const cases = [
+      '范围 1~2~3 之间',
+      '大约 3~5个，7~9个',
+      '用时 1~2小时，约 3~5公里',
+      '温度 1~2度，湿度 3~4%',
+      '版本 1.0~2.0 已发布',
+    ]
+    for (const content of cases) {
+      const { container } = render(<MarkdownRenderer content={content} />)
+      const paragraph = container.querySelector('p')
+      expect(paragraph).toHaveTextContent(content)
+      expect(paragraph?.querySelector('del')).toBeNull()
+      expect(paragraph?.querySelector('sub')).toBeNull()
+    }
+  })
+
+  it('still renders chemical subscripts while keeping digit ranges literal in the same line', () => {
+    const { container } = render(<MarkdownRenderer content={'H~2~O 的沸点约 90~100度，CO~2~ 浓度 400~500ppm'} />)
+
+    expect(container.querySelectorAll('sub')).toHaveLength(2)
+    expect(container.querySelectorAll('del')).toHaveLength(0)
+    expect(container.querySelector('p')).toHaveTextContent('H2O 的沸点约 90~100度，CO2 浓度 400~500ppm')
+  })
+
+  it('keeps ~~double tilde~~ strikethrough working', () => {
+    const { container } = render(<MarkdownRenderer content={'这是 ~~删除的内容~~ 测试'} />)
+
+    expect(container.querySelector('del')).toHaveTextContent('删除的内容')
+  })
+
+  it('renders backslash-paren LaTeX inline math delimiters', () => {
+    const { container } = render(<MarkdownRenderer content={String.raw`公式 \(E = mc^2\) 很棒，还有 \(x^2 + y^2 = z^2\)`} />)
+
+    expect(container.querySelectorAll('.katex')).toHaveLength(2)
+    expect(container.querySelector('.katex')).not.toHaveTextContent('\\(')
+  })
+
+  it('renders backslash-bracket LaTeX display math delimiters', () => {
+    const { container } = render(<MarkdownRenderer content={String.raw`\[E = mc^2\]`} />)
+
+    expect(container.querySelector('.katex-display')).toBeInTheDocument()
+    expect(container.querySelector('.katex-error')).not.toBeInTheDocument()
+  })
+
+  it('keeps escaped parentheses and brackets literal when they are not math', () => {
+    const { container } = render(<MarkdownRenderer content={String.raw`\(注意\) 这里 \[0\] 是索引，(a) 是文本`} />)
+
+    expect(container.querySelector('.katex')).not.toBeInTheDocument()
+    expect(container.querySelector('p')).toHaveTextContent('(注意) 这里 [0] 是索引，(a) 是文本')
+  })
+
   it('renders footnote references and definitions', () => {
     const content = '这是一段需要说明的文字[^ref1]。这里还有另一个引用[^ref2]。\n\n[^ref2]: 第二个脚注，来自某文献第 42 页。'
     const { container } = render(<MarkdownRenderer content={content} />)

@@ -684,15 +684,8 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
     }
     if (item.type === 'strong') return <strong key={index} className={_isReasoning ? 'font-semibold text-text-300' : 'font-semibold text-text-100'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</strong>
     if (item.type === 'em') return <em key={index} className={_isReasoning ? 'italic text-text-300' : 'italic text-text-200'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</em>
+    // 删除线只来自 ~~...~~（tokenizer 已限制单 ~ 不产生 del）
     if (item.type === 'del') {
-      const raw = typeof item.raw === 'string' ? item.raw : ''
-      if (raw.startsWith('~') && !raw.startsWith('~~') && !raw.endsWith('~~')) {
-        const inner = raw.slice(1, -1)
-        // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-        if (inner && !/\s/.test(inner) && !/[\u4e00-\u9fff\u3040-\u30ff]/.test(inner) && inner.length <= 5) {
-          return <sub key={index}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</sub>
-        }
-      }
       return <del key={index} className={_isReasoning ? 'text-text-500 line-through decoration-text-500/50' : 'text-text-400 line-through decoration-text-400/50'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</del>
     }
     if (item.type === 'codespan') return <code key={index} className={_isReasoning ? 'font-mono text-accent-main-100 text-[0.9em] align-baseline break-words' : 'text-accent-main-100 text-[0.9em] font-mono align-baseline break-words'}>{String(item.text ?? '')}</code>
@@ -727,6 +720,11 @@ function isEscapedTextAt(text: string, index: number): boolean {
   let slashCount = 0
   for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashCount += 1
   return slashCount % 2 === 1
+}
+
+function isAsciiDigitAtText(text: string, index: number): boolean {
+  const char = text[index]
+  return char !== undefined && char >= '0' && char <= '9'
 }
 
 function findUnescapedText(text: string, marker: string, start: number): number {
@@ -813,8 +811,15 @@ function renderTextExtensionsToReact(text: string, keyPrefix: string, isReasonin
       const close = findUnescapedText(text, '~', cursor + 1)
       const content = close === -1 ? '' : text.slice(cursor + 1, close)
       // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-      // 否则 ~ 会被范围/约数文本误匹配（如 TGP021~024流量8.85~9.16）。
-      if (content && !/\s/.test(content) && !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) && content.length <= 5) {
+      // 两侧紧邻数字视为范围/约数写法（1~2、3~5个、版本1.0~2.0），保持字面。
+      if (
+        content &&
+        !/\s/.test(content) &&
+        !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) &&
+        content.length <= 5 &&
+        !isAsciiDigitAtText(text, cursor - 1) &&
+        !isAsciiDigitAtText(text, close + 1)
+      ) {
         pushText(cursor)
         parts.push(<sub key={`${keyPrefix}-sub-${cursor}`}>{renderTextExtensionsToReact(content, `${keyPrefix}-sub-${cursor}`, isReasoning)}</sub>)
         cursor = close + 1
