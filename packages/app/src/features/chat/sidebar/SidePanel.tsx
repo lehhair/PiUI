@@ -789,9 +789,9 @@ export function SidePanel({
             opacity: showLabels ? 1 : 0,
           }}
         >
-          <a href="/" className="flex items-center whitespace-nowrap text-[length:var(--fs-heading-1)]" aria-label="Pi">
-            {/* 官方 Pi 标志 */}
-            <svg viewBox="0 0 470 470" fill="currentColor" aria-hidden="true" className="h-[0.72em] w-auto text-text-100">
+          <a href="/" className="flex items-center whitespace-nowrap" aria-label="Pi">
+            {/* 官方 Pi 标志：16px 固定尺寸，中心点与下方导航按钮图标(X=24px)垂直对齐 */}
+            <svg viewBox="0 0 470 470" fill="currentColor" aria-hidden="true" className="h-4 w-auto text-text-100">
               <path fillRule="evenodd" clipRule="evenodd" d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z" />
               <path d="M352.07 234.71H469.43V469.43H352.07V234.71Z" />
             </svg>
