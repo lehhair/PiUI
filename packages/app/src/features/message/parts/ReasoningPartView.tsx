@@ -138,11 +138,12 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey
     const summaryClassName = isPartStreaming
       ? 'text-[length:var(--fs-sm)] leading-5 text-text-200 whitespace-nowrap overflow-hidden text-ellipsis'
       : 'text-[length:var(--fs-sm)] leading-5 text-text-300 whitespace-nowrap overflow-hidden text-ellipsis'
-    // 折叠态 markdown：只渲染第一行 + 单行省略号（对齐斜体）
+    // 折叠态 markdown：只渲染第一行 + 单行省略号（对齐斜体）。
+    // 流式正文不用 shimmer：background-clip:text 会随 token 变长每帧重光栅化，
+    // 与内容增长叠加导致掉帧（对齐 reference：动画只挂固定状态标签，正文零动画）。
     const collapsedMarkdownClassName = [
       'h-5 max-h-5 overflow-hidden whitespace-nowrap text-ellipsis',
       isPartStreaming ? 'text-text-200' : 'text-text-300',
-      isPartStreaming ? 'reasoning-shimmer-text' : '',
       // 第一行 markdown 压成单行，才能吃到 text-ellipsis
       '[&_.markdown-stream-block]:!my-0 [&_.markdown-stream-block]:inline',
       '[&_p]:!my-0 [&_p]:inline',
@@ -183,7 +184,6 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey
                   className={[
                     'block min-w-0 italic',
                     summaryClassName,
-                    isPartStreaming ? 'reasoning-shimmer-text' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}

@@ -18,6 +18,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
 import { detectLanguage } from '../utils/languageUtils'
 import { isTauri } from '../utils/tauri'
+import { perfMark } from '../utils/perf'
 import { marked } from 'marked'
 import type { Tokens } from 'marked'
 import { isMarkupPreviewLanguage, projectMarkdownStream, stripLeadingHtmlComments, type MarkdownStreamProjection } from './markdownStream'
@@ -68,7 +69,6 @@ const HTML_SOURCE_BUTTON_CLASS = 'absolute right-2 top-2 z-10 inline-flex h-8 w-
 const BLOCK_HTML_SOURCE_PATTERN = /^\s*<(?:address|article|aside|blockquote|center|details|dialog|div|dl|fieldset|figure|footer|form|header|html|main|nav|ol|section|svg|table|ul)\b/i
 const PREFIXED_BLOCK_HTML_SOURCE_PATTERN = /^\s*<(?:style|script)\b[\s\S]*<(?:address|article|aside|blockquote|center|details|dialog|div|dl|fieldset|figure|footer|form|header|html|main|nav|ol|section|svg|table|ul)\b/i
 const ARTIFACT_HTML_SOURCE_PATTERN = /(?:<!doctype\s+html\b|<html\b|<style\b|<script\b|<canvas\b|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?\s*javascript:)/i
-const STREAMING_HTML_CONTENT_PATTERN = /(?:```(?:html|htm|xhtml|xml|svg)\b|<(?:address|article|aside|blockquote|canvas|center|details|dialog|div|dl|fieldset|figure|footer|form|header|html|main|nav|ol|section|style|svg|table|ul)\b)/i
 
 function getCachedHtml(src: string, isReasoning: boolean): string {
   const key = `${isReasoning ? 'r' : 'd'}:${src}`
@@ -1334,7 +1334,7 @@ const MarkdownDomBlock = memo(function MarkdownDomBlock({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const appliedHtmlRef = useRef<string | null>(null)
   const appliedSrcRef = useRef<string | null>(null)
-  // useSmoothMarkdownStream 上游已做 rAF 平滑，这里不再叠 useDeferredValue：
+  // 流式直接渲染最新 src，不叠 useDeferredValue：
   // 双重延迟会让 React 18 concurrent 每帧跑两轮协调（紧急+deferred），流式帧时长翻倍。
   const renderSrc = src
 
@@ -1558,47 +1558,6 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
   )
 })
 
-// ─── Smooth stream ──────────────────────────────────────────────
-
-function useSmoothMarkdownStream(content: string, enabled: boolean) {
-  const [displayedContent, setDisplayedContent] = useState(content)
-  const displayedRef = useRef(content)
-  const targetRef = useRef(content)
-  const rafRef = useRef<number | null>(null)
-
-  const stop = useCallback(() => {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-    rafRef.current = null
-  }, [])
-
-  useEffect(() => {
-    if (!enabled) {
-      stop()
-      if (displayedRef.current !== content) {
-        displayedRef.current = content
-        setDisplayedContent(content)
-      }
-      return
-    }
-
-    targetRef.current = content
-    if (content === displayedRef.current) return
-
-    if (rafRef.current !== null) return
-
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null
-      const target = targetRef.current
-      if (target === displayedRef.current) return
-      displayedRef.current = target
-      setDisplayedContent(target)
-    })
-    return stop
-  }, [content, enabled, stop])
-
-  return displayedContent
-}
-
 // ─── Main Renderer ──────────────────────────────────────────────
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -1609,12 +1568,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const isReasoning = variant === 'reasoning'
   const projectionKey = useId()
-  const renderHtmlImmediately = isStreaming && STREAMING_HTML_CONTENT_PATTERN.test(content)
-  const smoothedContent = useSmoothMarkdownStream(content, isStreaming && !renderHtmlImmediately)
-  const renderedContent = renderHtmlImmediately ? content : isStreaming ? smoothedContent : content
+  // 流式直接渲染最新 content，不做 rAF 节流：旧实现会把一帧内的多次
+  // token 更新合并成一次跳变，导致内容「突然蹦出来」而非逐 token 平滑
+  // 流出（对齐 reference：直接渲染 + 增量解析保证性能，浏览器按帧自然显示）。
+  const renderedContent = content
   const streamBlocks = useMemo(() => {
+    perfMark('piui:render-markdown')
     const projection = projectMarkdownStream(markdownProjectionCache.get(projectionKey), renderedContent, isStreaming)
     markdownProjectionCache.set(projectionKey, projection)
+    perfMark('piui:render-markdown:end')
     return projection.blocks
   }, [projectionKey, renderedContent, isStreaming])
 
