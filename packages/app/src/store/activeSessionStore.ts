@@ -112,7 +112,7 @@ class ActiveSessionStore {
 
   private recomputeDerived() {
     const entries = Object.entries(this.state.statusMap)
-      .filter(([, status]) => status.type === 'busy' || status.type === 'retry')
+      .filter(([, status]) => status.type === 'busy' || status.type === 'compacting' || status.type === 'retry')
       .map(([sessionId, status]) => {
         const meta = this.sessionMeta.get(sessionId)
         // 从自身 pendingRequests 查 pending action
@@ -159,7 +159,11 @@ class ActiveSessionStore {
         continue
       }
 
-      nextMap[sessionId] = status.type === 'retry' ? { ...status } : { type: 'busy' }
+      nextMap[sessionId] = status.type === 'retry'
+        ? { ...status }
+        : status.type === 'compacting'
+          ? { type: 'compacting' }
+          : { type: 'busy' }
     }
 
     return nextMap
@@ -310,6 +314,9 @@ class ActiveSessionStore {
     } else if (status.type === 'retry') {
       this.deferredIdleSessions.delete(sessionId)
       newMap[sessionId] = { ...status }
+    } else if (status.type === 'compacting') {
+      this.deferredIdleSessions.delete(sessionId)
+      newMap[sessionId] = { type: 'compacting' }
     } else {
       this.deferredIdleSessions.delete(sessionId)
       newMap[sessionId] = { type: 'busy' }
