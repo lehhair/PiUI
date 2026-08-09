@@ -180,5 +180,9 @@
     "outputTokens": "输出",
     "cacheRW": "缓存 (读/写)",
     "rawMessages": "原始消息"
-  }
+  },
+  "compactingManual": "正在压缩上下文…",
+  "compactingOverflow": "检测到上下文溢出，正在压缩…",
+  "compactingAuto": "自动压缩中…",
+  "compactingCancel": "取消"
 }
