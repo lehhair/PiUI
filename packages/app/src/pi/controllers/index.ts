@@ -221,6 +221,18 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
       items: [...olderPage.items, ...currentBranch.items],
     })
   } catch (error) {
+    const code = (error as { code?: string })?.code
+    if (code === 'INVALID_REQUEST' || code === 'STALE_CURSOR') {
+      // 光标已失效（worker 重启后密钥变化，或会话被替换/重载）。停掉分页并
+      // 重载首页拿新光标，否则每次滚动都会拿同一个坏光标重试、无限刷 400。
+      piBranchStore.setData(sessionId, {
+        ...currentBranch,
+        beforeCursor: undefined,
+        hasMore: false,
+      })
+      void refreshPiBranch(sessionId).catch(() => undefined)
+      return
+    }
     console.error('Failed to load more branch entries:', error)
     throw error
   }

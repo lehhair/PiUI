@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Server as HttpServer } from "node:http"
-import { authTokenPath, resolveAuthToken } from "./host/auth-token.ts"
+import { authTokenPath, ensureCursorSecretEnv, resolveAuthToken } from "./host/auth-token.ts"
 import { createAppServer, firstLanAddress } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
@@ -104,6 +104,9 @@ export async function startPiUiServer(
 ): Promise<RunningPiUiServer> {
   const config = resolveServerConfig(process.env, overrides)
   const authToken = config.authToken ?? resolveAuthToken()
+  // 分页光标密钥持久化并注入环境，保证 worker 重启后客户端旧光标仍有效
+  // （必须在任何 worker spawn 之前完成）。
+  ensureCursorSecretEnv()
   const app = createAppServer({
     authToken,
     share: { host: config.host, port: config.port },

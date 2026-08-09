@@ -5,7 +5,22 @@ import type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead } from "@p
 export type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead }
 
 type NativeCursor = { v: 1; epoch: string; beforeId: string }
-const cursorSecret = randomBytes(32)
+
+/**
+ * 光标 HMAC 密钥。优先用服务端注入的持久化密钥（PIUI_CURSOR_SECRET），
+ * 这样 worker 进程重启（空闲回收后重新 attach）后旧光标依然有效；
+ * 没有注入时退回每进程随机密钥（独立运行场景）。
+ */
+const cursorSecret = resolveCursorSecret()
+
+function resolveCursorSecret(): Buffer {
+  const configured = process.env.PIUI_CURSOR_SECRET?.trim()
+  if (configured) {
+    const decoded = Buffer.from(configured, "base64url")
+    if (decoded.length >= 32) return decoded.subarray(0, 32)
+  }
+  return randomBytes(32)
+}
 
 export function sessionHeadFromParts(
   parts: Omit<SessionHead, "epoch">,
