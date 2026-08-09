@@ -83,7 +83,11 @@ export default defineConfig({
 
   server: {
     // Tauri mobile dev 需要通过网络访问 Vite dev server
-    host: process.env.TAURI_DEV_HOST || false,
+    // 默认监听所有接口（IPv4 127.0.0.1 + IPv6 ::1 双栈）：浏览器（尤其
+    // Firefox）把 localhost 优先解析为 ::1，若只监听 IPv4，WebSocket 升级
+    // 握手会失败，事件流连不上、内容只能靠 HTTP 轮询刷新（表现为"突然蹦
+    // 出来"）。Tauri mobile 场景由 TAURI_DEV_HOST 覆盖为指定 host。
+    host: process.env.TAURI_DEV_HOST || true,
     // 普通 web dev 自动避让已占用端口；Tauri mobile 需要固定端口供原生壳连接
     strictPort: Boolean(tauriDevHost),
     // The proxy injects the local backend token, so only allow the explicit
