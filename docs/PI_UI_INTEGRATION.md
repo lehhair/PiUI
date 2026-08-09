@@ -1,6 +1,6 @@
-# Pi 0.84.0 Native Parity Matrix
+# Pi 0.84.1 Native Parity Matrix
 
-本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@0.84.0`
+本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@0.84.1`
 
 支持等级：
 

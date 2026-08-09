@@ -5,7 +5,7 @@
 > Pi 源码参考：`E:\dev\re_agent_UI\pi`  
 > UI 基线：`_archive/opencodeui-baseline`  
 > 当前版本：`0.1.0`
-> Pi parity 基线：`@earendil-works/pi-coding-agent@0.84.0`
+> Pi parity 基线：`@earendil-works/pi-coding-agent@0.84.1`
 
 > 2026-07-25 修订：项目目标已提升为 Pi SDK/headless 与内置工作流完整覆盖。能力状态以
 > `docs/PI_UI_INTEGRATION.md` 为准，后续实施采用 R0-R12 路线。本文后半部分保留的旧阶段记录仅作历史参考，
