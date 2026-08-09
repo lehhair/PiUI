@@ -1085,8 +1085,9 @@ export function PiChatPane({
       }
 
       if (command === 'tree') {
+        // 跳到右侧会话树标签（而不是 toggle：面板已开时不会把它关掉）
         report('info', 'Opened the session tree panel')
-        onToggleRightPanel?.()
+        layoutStore.addSessionTreeTab('right')
         return true
       }
 
@@ -1144,7 +1145,7 @@ export function PiChatPane({
       scheduleDelayedRefresh(sid)
       return true
     },
-    [currentDirectoryRef, handleFork, handleModelChange, isStreaming, items, models, onOpenSettings, onOpenSettingsTab, onOpenSidebar, onToggleRightPanel, scheduleDelayedRefresh, sessionId, state],
+    [currentDirectoryRef, handleFork, handleModelChange, isStreaming, items, models, onOpenSettings, onOpenSettingsTab, onOpenSidebar, scheduleDelayedRefresh, sessionId, state],
   )
 
   // Image attachment capability from the current model's native input
