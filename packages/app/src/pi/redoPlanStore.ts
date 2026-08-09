@@ -1,5 +1,5 @@
 import { piBranchStore, piSessionStateStore } from './state/index.js'
-import { selectPiTimelineItems } from './selectors/index.js'
+import { selectPiTimelineItemsCached } from './selectors/timelineCache.js'
 import { refreshPiSessionState } from './controllers/index.js'
 
 /**
@@ -88,7 +88,7 @@ export const redoPlanStore = new RedoPlanStore()
  */
 export function captureRedoCheckpoints(sessionId: string, entryId: string): string[] {
   const branch = piBranchStore.getData(sessionId)
-  const items = branch ? selectPiTimelineItems(branch) : []
+  const items = selectPiTimelineItemsCached(sessionId, branch)
   const undoIndex = items.findIndex(item => item.entryId === entryId)
   if (undoIndex === -1) return []
   return items.slice(undoIndex).filter(item => item.kind !== 'user_message').map(item => item.entryId)

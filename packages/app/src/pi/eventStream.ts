@@ -23,6 +23,7 @@ import { notificationStore } from '../store/notificationStore'
 import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
+import { perfMark } from '../utils/perf'
 import { notifyReconnected, notifySessionIdle, notifySessionStarted } from '../hooks/useGlobalEvents'
 import {
   getTrackedManagementProviders,
@@ -545,15 +546,22 @@ class PiEventStream {
   }
 
   private updateLiveMessage(sessionId: string, message: AgentMessage, meta: PiEventPayload['meta']): void {
+    perfMark('piui:event-message-update')
     const data = piBranchStore.getData(sessionId)
-    if (!data?.checkpoint) return
+    if (!data) return
     const liveMessage: PiLiveMessage = {
       id: meta.liveMessage?.id ?? `live-${meta.sequence}`,
       revision: meta.liveMessage?.revision ?? meta.sequence,
       phase: 'streaming',
       message,
     }
-    piBranchStore.setData(sessionId, { ...data, checkpoint: { ...data.checkpoint, liveMessage } })
+    // checkpoint 可能不存在（fresh 会话本地构造的 page / preview 未带
+    // checkpoint）：此时仍要保留 liveMessage，否则流式内容被丢弃，要等
+    // message_end 后 branch refresh 才整体出现。position 用 head 兜底。
+    const checkpoint = data.checkpoint
+      ? { ...data.checkpoint, liveMessage }
+      : { position: { epoch: data.head.epoch, sequence: data.head.revision }, liveMessage }
+    piBranchStore.setData(sessionId, { ...data, checkpoint })
   }
 
   private handleResync(key: string, cursor?: EventCursor): void {

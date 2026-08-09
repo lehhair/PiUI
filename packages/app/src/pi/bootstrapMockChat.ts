@@ -9,6 +9,7 @@ import { extensionTuiStore } from "./extensionTuiStore"
 import { commandFeedbackStore } from "./commandFeedbackStore"
 import { resetWorkspaceResolutionCache } from "./workspaces"
 import { clearAllWorkspaceFileCaches } from "./files"
+import { clearPiTimelineItemCache } from "./selectors/timelineCache"
 import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
@@ -81,6 +82,7 @@ export function installPiBackendServerSwitch(): void {
   serverStore.onServerChange(() => {
     abortInFlightPiRequests()
     clearPiSessionIndex()
+    clearPiTimelineItemCache()
     piBranchStore.clearAll()
     piSessionStateStore.clearAll()
     piModelsStore.clear()

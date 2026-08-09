@@ -87,3 +87,87 @@ describe('selectPiTimelineItems bash grouping', () => {
     expect((items[0] as PiTimelineItem).entryId).toBe('b1')
   })
 })
+
+describe('selectPiTimelineItems live/persisted key handover', () => {
+  const assistantEntry = (id: string, text: string) => ({
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:00Z',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'm',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'stop',
+      timestamp: Date.now(),
+    },
+  }) as SessionEntry
+
+  function branchWith(checkpoint: PiBranchPage['checkpoint'], client?: PiBranchPage['client']): PiBranchPage {
+    const entries = [userEntry('u1', 'hi'), assistantEntry('a1', 'done')]
+    return {
+      ...page(entries),
+      checkpoint,
+      client,
+    }
+  }
+
+  it('does not render the live row once its persisted entry is visible via stableEntryIds', () => {
+    // persisted entry a1 is mapped back to live.id as renderKey (branchMerge
+    // sets stableEntryIds.a1 = 'live-a1') — rendering the live row too would
+    // produce two children with the same key.
+    const branch = branchWith(
+      {
+        position: { epoch: 'epoch-1', sequence: 3 },
+        liveMessage: {
+          id: 'live-a1',
+          revision: 3,
+          phase: 'persisting',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            api: 'anthropic-messages',
+            provider: 'anthropic',
+            model: 'm',
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            stopReason: 'stop',
+            timestamp: Date.now(),
+          },
+        },
+      },
+      { stableEntryIds: { a1: 'live-a1' } },
+    )
+    const items = selectPiTimelineItems(branch)
+    // Only the persisted entry renders (no live duplicate).
+    expect(items.filter(i => i.kind === 'assistant_message')).toHaveLength(1)
+    expect(items.some(i => i.kind === 'assistant_message' && i.entryId === 'live-a1')).toBe(false)
+    const persisted = items.find(i => i.kind === 'assistant_message' && i.entryId === 'a1')
+    expect(persisted?.renderKey).toBe('live-a1')
+  })
+
+  it('still renders a persisting live row while its entry is not yet visible', () => {
+    const branch = branchWith({
+      position: { epoch: 'epoch-1', sequence: 3 },
+      liveMessage: {
+        id: 'live-a1',
+        revision: 3,
+        phase: 'persisting',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          api: 'anthropic-messages',
+          provider: 'anthropic',
+          model: 'm',
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        },
+      },
+    })
+    const items = selectPiTimelineItems(branch)
+    expect(items.some(i => i.kind === 'assistant_message' && i.entryId === 'live-a1' && i.isStreaming)).toBe(true)
+  })
+})

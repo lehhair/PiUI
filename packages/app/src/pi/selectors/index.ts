@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
+import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import type {
   PiBranchPage,
   PiSessionRow,
@@ -43,6 +44,20 @@ export function selectPiSessionRows(): PiSessionRow[] {
  * Entries without a conversation representation still surface as items.
  */
 export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
+  const items = buildPiHistoryItems(branch)
+  const liveItems = buildPiLiveItems(branch)
+  for (const item of liveItems) items.push(item)
+  return items
+}
+
+/**
+ * History part of the timeline (persisted branch entries, tool results
+ * paired back). Excludes the live streaming message — see buildPiLiveItems.
+ * Exported for the reference-stable cached selector, which reuses this array
+ * (stable item references keep memoized rows from re-rendering) while the
+ * live item is rebuilt per streaming chunk.
+ */
+export function buildPiHistoryItems(branch: PiBranchPage): PiTimelineItem[] {
   const items: PiTimelineItem[] = []
   const assistantByCallId = new Map<string, PiAssistantMessageItem>()
   // 相邻 bash 执行合并为工具组：遇到非 bash 条目时重置，保证只有连续
@@ -172,14 +187,42 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
     }
   }
 
-  // Append the live streaming message as a streaming item.
-  // Present only while streaming; cleared once the entry persists.
-  // Skip empty content (message_start before first update) — nothing to show.
-  // User live messages appear at message_start (native TUI behavior: the
-  // user message is visible immediately). Only in streaming phase — once
-  // persisting, the entry is about to land and takes over.
+  return items
+}
+
+/**
+ * Live streaming message items (from the branch checkpoint).
+ * Rebuilt per streaming chunk — only the live row re-renders; the cached
+ * history array keeps every other row's references stable.
+ */
+/** Live 消息的原始条目（id 用 live.id，保证 live→持久化交接时 React key 连续） */
+function liveRawEntry(live: NonNullable<NonNullable<PiBranchPage['checkpoint']>['liveMessage']>): SessionEntry {
+  const timestamp = live.message.timestamp || Date.now()
+  return {
+    type: 'message',
+    id: live.id,
+    parentId: null,
+    timestamp: new Date(timestamp).toISOString(),
+    message: live.message,
+  }
+}
+
+/**
+ * Live streaming message items (from the branch checkpoint).
+ * Rebuilt per streaming chunk — only the live row re-renders; the cached
+ * history array keeps every other row's references stable.
+ */
+export function buildPiLiveItems(branch: PiBranchPage): PiTimelineItem[] {
+  const items: PiTimelineItem[] = []
   const live = branch.checkpoint?.liveMessage
-  if (live && live.message.role === 'user' && live.phase === 'streaming') {
+  // 持久化条目已可见（stableEntryIds 把它映射回 live.id 作 renderKey）时，
+  // 不再渲染 live 行——否则 live 行与条目同时存在、同 key，React 报
+  // "two children with the same key" 且 DOM 错乱。条目可见前仍渲染
+  // persisting live，避免消息短暂消失（branchMerge 保留 checkpoint 的初衷）。
+  const persistedVisible = live != null
+    && branch.client?.stableEntryIds != null
+    && Object.values(branch.client.stableEntryIds).includes(live.id)
+  if (live && !persistedVisible && live.message.role === 'user' && live.phase === 'streaming') {
     const message = live.message
     const text = typeof message.content === 'string'
       ? message.content
@@ -192,31 +235,19 @@ export function selectPiTimelineItems(branch: PiBranchPage): PiTimelineItem[] {
         kind: 'user_message',
         entryId: live.id,
         timestamp: message.timestamp || Date.now(),
-        rawEntry: {
-          type: 'message',
-          id: live.id,
-          parentId: null,
-          timestamp: new Date(message.timestamp || Date.now()).toISOString(),
-          message,
-        },
+        rawEntry: liveRawEntry(live),
         message,
         blocks: Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }],
       })
     }
   }
-  if (live && live.message.role === 'assistant' && live.message.content.length > 0) {
+  if (live && !persistedVisible && live.message.role === 'assistant' && live.message.content.length > 0) {
     const message = live.message as AssistantMessage
     items.push({
       kind: 'assistant_message',
       entryId: live.id,
       timestamp: message.timestamp || Date.now(),
-      rawEntry: {
-        type: 'message',
-        id: live.id,
-        parentId: null,
-        timestamp: new Date(message.timestamp || Date.now()).toISOString(),
-        message,
-      },
+      rawEntry: liveRawEntry(live),
       message,
       blocks: message.content,
       toolResults: {},
