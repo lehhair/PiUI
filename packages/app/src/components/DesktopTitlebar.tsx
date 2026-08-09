@@ -1,44 +1,25 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   DESKTOP_MACOS_TRAFFIC_LIGHTS_WIDTH,
-  DESKTOP_TITLEBAR_CONTROLS_Z_INDEX,
   DESKTOP_TITLEBAR_HEIGHT,
   DESKTOP_TITLEBAR_Z_INDEX,
 } from '../constants'
-import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, SettingsIcon, AppWindowIcon } from './Icons'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  FolderOpenIcon,
+  SettingsIcon,
+  AppWindowIcon,
+  MinusIcon,
+  SquareIcon,
+  CopyIcon,
+  CloseIcon,
+} from './Icons'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '../hooks/useTheme'
 import { getDesktopPlatform, isTauri, usesCustomDesktopTitlebar } from '../utils/tauri'
 import { useUpdateStore, hasUpdateAvailable } from '../store/updateStore'
-
-/* ---- 持久化标题栏控制按钮容器 ---- */
-const DECORUM_HOST_SELECTOR = '[data-tauri-decorum-tb]'
-const DECORUM_BUTTON_SELECTOR = '.decorum-tb-btn, button[id^="decorum-tb-"]'
-let persistentTbHost: HTMLDivElement | null = null
-
-function prepareTbHost(host: HTMLDivElement): HTMLDivElement {
-  host.setAttribute('data-tauri-decorum-tb', '')
-  host.className = 'desktop-titlebar-controls flex h-full min-w-[138px] shrink-0 items-stretch justify-end'
-  host.style.cssText = ''
-  host.style.zIndex = String(DESKTOP_TITLEBAR_CONTROLS_Z_INDEX)
-  return host
-}
-
-function getOrCreateTbHost(): HTMLDivElement {
-  if (!persistentTbHost) {
-    const hosts = Array.from(document.querySelectorAll<HTMLDivElement>(DECORUM_HOST_SELECTOR))
-    persistentTbHost =
-      hosts.find(host => host.querySelector(DECORUM_BUTTON_SELECTOR)) ?? hosts[0] ?? document.createElement('div')
-
-    for (const host of hosts) {
-      if (host !== persistentTbHost && !host.querySelector(DECORUM_BUTTON_SELECTOR)) {
-        host.remove()
-      }
-    }
-  }
-
-  return prepareTbHost(persistentTbHost)
-}
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 /* 标题栏图标按钮通用样式 — Windows 和 macOS 视觉节奏不同，按钮尺寸分开控制 */
 const TB_BTN =
@@ -48,21 +29,95 @@ const TB_BTN_MAC =
 const TB_BTN_MAC_UPDATE =
   'inline-flex h-7 w-7 items-center justify-center rounded-md text-accent-main-100 transition-colors hover:bg-accent-main-100/10'
 
-const WindowsControlsHost = memo(function WindowsControlsHost() {
-  const mountRef = useRef<HTMLDivElement>(null)
+/**
+ * Windows 窗口控制按钮（最小化 / 最大化还原 / 关闭）。
+ *
+ * 之前依赖 decorum 的 create_overlay_titlebar() 注入 JS 按钮，按钮容器被 React
+ * 搬进标题栏 DOM；运行中（重渲染 / 容器搬移 / 窗口状态变化）按钮经常丢失。
+ * 现在改为 React 自绘，直接调用 Tauri window API，与左侧设置 / 新建窗口按钮一致。
+ */
+const WindowsControls = memo(function WindowsControls() {
+  const { t } = useTranslation('components')
+  const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
-    const host = getOrCreateTbHost()
-    mountRef.current?.appendChild(host)
+    let cancelled = false
+    let unlistenResize: (() => void) | undefined
+
+    const win = getCurrentWindow()
+    win
+      .isMaximized()
+      .then(m => {
+        if (!cancelled) setMaximized(m)
+      })
+      .catch(() => {
+        // best effort
+      })
+
+    win
+      .onResized(() => {
+        void win
+          .isMaximized()
+          .then(m => {
+            if (!cancelled) setMaximized(m)
+          })
+          .catch(() => {})
+      })
+      .then(fn => {
+        unlistenResize = fn
+      })
+      .catch(() => {})
 
     return () => {
-      if (host.parentNode) {
-        host.parentNode.removeChild(host)
-      }
+      cancelled = true
+      unlistenResize?.()
     }
   }, [])
 
-  return <div ref={mountRef} className="flex h-full" />
+  const handleMinimize = useCallback(() => {
+    getCurrentWindow().minimize()
+  }, [])
+
+  const handleToggleMaximize = useCallback(() => {
+    getCurrentWindow().toggleMaximize()
+  }, [])
+
+  const handleClose = useCallback(() => {
+    // 走 close-requested 流程：Rust 端拦截并 emit 事件，前端确认框处理后再真正关闭
+    getCurrentWindow().close()
+  }, [])
+
+  return (
+    <div className="flex h-full shrink-0 items-stretch">
+      <button
+        type="button"
+        onClick={handleMinimize}
+        className={TB_BTN}
+        title={t('desktopTitlebar.minimize')}
+        aria-label={t('desktopTitlebar.minimize')}
+      >
+        <MinusIcon size={14} />
+      </button>
+      <button
+        type="button"
+        onClick={handleToggleMaximize}
+        className={TB_BTN}
+        title={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
+        aria-label={maximized ? t('desktopTitlebar.restore') : t('desktopTitlebar.maximize')}
+      >
+        {maximized ? <CopyIcon size={12} /> : <SquareIcon size={12} />}
+      </button>
+      <button
+        type="button"
+        onClick={handleClose}
+        className={`${TB_BTN} hover:bg-danger-100 hover:text-white`}
+        title={t('desktopTitlebar.close')}
+        aria-label={t('desktopTitlebar.close')}
+      >
+        <CloseIcon size={14} />
+      </button>
+    </div>
+  )
 })
 
 export function DesktopTitlebar() {
@@ -211,7 +266,7 @@ export function DesktopTitlebar() {
 
       {/* ---- 右侧：Windows 控制按钮 / macOS 留白 ---- */}
       {platform === 'windows' ? (
-        <WindowsControlsHost />
+        <WindowsControls />
       ) : (
         <div data-tauri-drag-region className="h-full w-3 shrink-0" />
       )}

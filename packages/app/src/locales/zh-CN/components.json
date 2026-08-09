@@ -206,7 +206,11 @@
     "openProject": "打开项目",
     "openSettings": "打开设置",
     "settingsUpdate": "有新版本可用，打开设置",
-    "newWindow": "新建窗口"
+    "newWindow": "新建窗口",
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "restore": "还原",
+    "close": "关闭"
   },
   "multiFileDiff": {
     "fileCount_other": "{{count}} 个文件"

@@ -208,7 +208,11 @@
     "openProject": "Open Project",
     "openSettings": "Open Settings",
     "settingsUpdate": "Update available — open settings",
-    "newWindow": "New Window"
+    "newWindow": "New Window",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
   },
   "multiFileDiff": {
     "fileCount_one": "{{count}} file",
