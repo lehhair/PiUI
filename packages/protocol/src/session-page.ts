@@ -37,6 +37,7 @@ export type EntriesPage = {
  */
 export type SessionActivityStatus =
   | { type: "busy" }
+  | { type: "compacting" }
   | { type: "retry"; attempt: number; message: string; next: number }
 
 export type SessionsActivitySnapshot = {

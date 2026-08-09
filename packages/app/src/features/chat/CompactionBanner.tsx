@@ -23,9 +23,12 @@ export const CompactionBanner = memo(function CompactionBanner({ state, sessionI
   const operation = compaction && typeof compaction === 'object'
     ? (compaction as { operation?: { phase?: string; reason?: string } }).operation
     : undefined
-  if (operation?.phase !== 'running' || !sessionId) return null
+  // 顶层 isCompacting 与 compaction.operation.phase 双保险（压缩瞬间/旧版本
+  // worker 可能只更新其中一个）
+  const compacting = state?.isCompacting === true || operation?.phase === 'running'
+  if (!compacting || !sessionId) return null
 
-  const reason = operation.reason
+  const reason = operation?.reason
   const label = reason === 'manual'
     ? t('chat.compactingManual')
     : reason === 'overflow'

@@ -358,8 +358,10 @@ export class RealPiSession implements SessionRuntime {
     const session = this.runtime.session
     const streaming = Boolean(session.isStreaming)
     const retrying = Boolean(session.isRetrying)
-    if (streaming === this.lastActivity.streaming && retrying === this.lastActivity.retrying) return
-    this.lastActivity = { streaming, retrying }
+    const compacting = Boolean(session.isCompacting) || this.isCompactingFlag
+    if (streaming === this.lastActivity.streaming && retrying === this.lastActivity.retrying &&
+      compacting === this.lastActivity.compacting) return
+    this.lastActivity = { streaming, retrying, compacting }
 
     let status: SessionActivityStatus | null = null
     if (retrying) {
@@ -373,11 +375,14 @@ export class RealPiSession implements SessionRuntime {
       }
     } else if (streaming) {
       status = { type: "busy" }
+    } else if (compacting) {
+      // 压缩中没有 LLM 流，但会话确实在干活——让宿主把它标为工作中
+      status = { type: "compacting" }
     }
     for (const listener of this.activityListeners) listener(status)
   }
 
-  private lastActivity = { streaming: false, retrying: false }
+  private lastActivity = { streaming: false, retrying: false, compacting: false }
 
   private trackShadowState(event: { type: string; [key: string]: unknown }): void {
     const session = this.runtime.session
@@ -570,7 +575,7 @@ export class RealPiSession implements SessionRuntime {
   onActivity(listener: (status: SessionActivityStatus | null) => void): Unsubscribe {
     this.activityListeners.add(listener)
     // Push current status immediately so late subscribers get the truth
-    this.lastActivity = { streaming: false, retrying: false }
+    this.lastActivity = { streaming: false, retrying: false, compacting: false }
     this.emitActivityIfChanged()
     return () => this.activityListeners.delete(listener)
   }
