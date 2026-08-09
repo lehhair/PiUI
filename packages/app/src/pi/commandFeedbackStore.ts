@@ -10,11 +10,13 @@ export type CommandFeedbackStatus = 'ok' | 'error' | 'info'
 export interface CommandFeedbackEntry {
   id: string
   sessionId: string
-  /** Command name without the leading slash, e.g. "compact". */
+  /** Command name without the leading slash, e.g. "compact". Empty for extension notify entries. */
   command: string
   args?: string
   status: CommandFeedbackStatus
   message: string
+  /** 'command' = a slash command the client executed; 'notify' = ctx.ui.notify output. */
+  kind?: 'command' | 'notify'
   at: number
 }
 
@@ -41,9 +43,10 @@ export const commandFeedbackStore = {
     return current
   },
 
-  add(entry: Omit<CommandFeedbackEntry, 'id' | 'at'>): void {
+  add(entry: Omit<CommandFeedbackEntry, 'id' | 'at' | 'kind'> & { kind?: 'command' | 'notify' }): void {
     const full: CommandFeedbackEntry = {
       ...entry,
+      kind: entry.kind ?? 'command',
       id: globalThis.crypto?.randomUUID?.() ?? `${entry.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       at: Date.now(),
     }

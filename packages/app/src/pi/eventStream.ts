@@ -18,6 +18,8 @@ import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type
 import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
 import { extensionTuiStore } from './extensionTuiStore'
+import { commandFeedbackStore } from './commandFeedbackStore'
+import { notificationStore } from '../store/notificationStore'
 import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
@@ -421,9 +423,25 @@ class PiEventStream {
       case 'editor':
         extensionUiStore.editorCommand(sessionId, event.command)
         break
-      case 'notify':
-        // Notifications surface through the extension UI state/status
+      case 'notify': {
+        // 扩展通知（ctx.ui.notify）是扩展命令的主要输出通道（如 /perm list 的
+        // 规则列表）。完整文本进命令反馈日志；同时弹一条瞬时通知。
+        const status = event.notifyType === 'error' ? 'error' : event.notifyType === 'warning' ? 'info' : 'ok'
+        commandFeedbackStore.add({
+          sessionId,
+          command: '',
+          kind: 'notify',
+          status,
+          message: event.message,
+        })
+        notificationStore.push(
+          event.notifyType === 'error' ? 'error' : 'completed',
+          'Extension',
+          event.message,
+          sessionId,
+        )
         break
+      }
       case 'tuiAttach':
         extensionTuiStore.attach(event.sessionId, event.attach)
         break
