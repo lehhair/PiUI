@@ -1,6 +1,6 @@
 import path from "node:path"
 import chokidar, { type FSWatcher } from "chokidar"
-import { lstat, readFile } from "node:fs/promises"
+import { lstat, readFile, readdir } from "node:fs/promises"
 import type { JsonObject } from "@piui/protocol"
 
 type WorkspaceFileChange = { path: string; kind: "created" | "changed" | "deleted"; type: "file" | "directory" }
@@ -11,10 +11,16 @@ import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
 const FLUSH_DELAY_MS = 80
 const MAX_CHANGES_PER_EVENT = 512
 const MAX_WATCHED_WORKSPACES = 32
+// chokidar recursively enumerates the tree and opens one fs.watch handle per
+// directory. Past this many directories the initial scan alone can take minutes
+// and exhaust memory (a dev drive root such as E:\dev easily holds 20k+
+// directories), so such workspaces are not recursively watched at all.
+const MAX_WATCH_DIRECTORIES = 4_000
+const PRE_SCAN_BATCH = 64
 const SKIP_SEGMENTS = new Set(["node_modules", "dist", "build", ".next", "coverage", ".turbo", "target"])
 
 interface WatchedWorkspace {
-  watcher: FSWatcher
+  watcher?: FSWatcher
   gitWatcher?: FSWatcher
   revision: number
   pending: Map<string, WorkspaceFileChange>
@@ -27,12 +33,15 @@ interface WatchedWorkspace {
 export class WorkspaceWatcher {
   private readonly watched = new Map<string, WatchedWorkspace>()
 
-  constructor(private readonly eventHub: EventHub) {}
+  constructor(
+    private readonly eventHub: EventHub,
+    private readonly maxWatchDirectories = MAX_WATCH_DIRECTORIES,
+  ) {}
 
   async dispose(): Promise<void> {
     const closing = [...this.watched.values()].map(async state => {
       if (state.timer) clearTimeout(state.timer)
-      await Promise.all([state.watcher.close(), state.gitWatcher?.close()])
+      await Promise.all([state.watcher?.close(), state.gitWatcher?.close()])
     })
     this.watched.clear()
     await Promise.all(closing)
@@ -47,14 +56,6 @@ export class WorkspaceWatcher {
     }
     if (this.watched.size >= MAX_WATCHED_WORKSPACES) this.evictOldest()
     const state: WatchedWorkspace = {
-      watcher: chokidar.watch(workspace.canonicalRoot, {
-        ignoreInitial: true,
-        persistent: true,
-        followSymlinks: false,
-        atomic: true,
-        awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 },
-        ignored: candidate => shouldIgnore(workspace.canonicalRoot, candidate),
-      }),
       revision: 0,
       pending: new Map(),
       gitDirty: false,
@@ -62,6 +63,43 @@ export class WorkspaceWatcher {
       lastAccessedAt: Date.now(),
     }
     this.watched.set(key, state)
+    void this.establishWatch(workspace, key, state)
+  }
+
+  /**
+   * Runs a bounded pre-scan before attaching chokidar. A giant workspace (for
+   * example the root of a dev drive with tens of thousands of directories)
+   * would otherwise make chokidar enumerate the whole tree and open a watch
+   * handle per directory, flooding the server's event loop until it appears
+   * completely frozen with no error in the log. When the tree exceeds the cap
+   * the recursive watcher is skipped with a warning: the workspace stays fully
+   * usable, it simply does not push file-change events.
+   */
+  private async establishWatch(workspace: WorkspaceRecord, key: string, state: WatchedWorkspace): Promise<void> {
+    const directories = await countWatchableDirectories(workspace.canonicalRoot, this.maxWatchDirectories + 1)
+    if (this.watched.get(key) !== state) return // evicted or disposed while scanning
+    if (directories > this.maxWatchDirectories) {
+      this.watched.delete(key)
+      console.warn(
+        `[piui-server] skipping recursive watch for ${workspace.canonicalRoot}: ` +
+          `${directories} directories exceeds the cap of ${this.maxWatchDirectories}`,
+      )
+      return
+    }
+    state.watcher = chokidar.watch(workspace.canonicalRoot, {
+      ignoreInitial: true,
+      persistent: true,
+      followSymlinks: false,
+      atomic: true,
+      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 },
+      ignored: candidate => shouldIgnore(workspace.canonicalRoot, candidate),
+    })
+    if (this.watched.get(key) !== state) {
+      // Evicted or disposed between the pre-scan and watcher creation — do not leak it.
+      await state.watcher.close()
+      state.watcher = undefined
+      return
+    }
     state.watcher.on("all", (event, absolutePath) => {
       const relative = path.relative(workspace.canonicalRoot, absolutePath).replace(/\\/g, "/")
       if (!relative || relative.startsWith("../")) return
@@ -142,7 +180,7 @@ export class WorkspaceWatcher {
     if (!state) return
     if (state.timer) clearTimeout(state.timer)
     this.watched.delete(key)
-    void Promise.all([state.watcher.close(), state.gitWatcher?.close()]).catch(() => undefined)
+    void Promise.all([state.watcher?.close(), state.gitWatcher?.close()]).catch(() => undefined)
   }
 
   private evictOldest(): void {
@@ -151,7 +189,7 @@ export class WorkspaceWatcher {
     const [key, state] = oldest
     if (state.timer) clearTimeout(state.timer)
     this.watched.delete(key)
-    void Promise.all([state.watcher.close(), state.gitWatcher?.close()]).catch(() => undefined)
+    void Promise.all([state.watcher?.close(), state.gitWatcher?.close()]).catch(() => undefined)
   }
 
   private schedule(workspace: WorkspaceRecord, state: WatchedWorkspace): void {
@@ -198,6 +236,46 @@ function shouldIgnore(root: string, candidate: string): boolean {
   if (relative === ".git") return false
   if (relative === ".git/refs" || relative === ".git/logs") return false
   return !isGitMetadata(relative)
+}
+
+/**
+ * Bounded BFS counting the directories chokidar would watch (same skip rules,
+ * symlinks pruned), stopping once `cap` is reached. Exact below the cap;
+ * returns a value >= cap once the tree is known to be that large.
+ */
+export async function countWatchableDirectories(root: string, cap: number): Promise<number> {
+  let count = 1 // the root itself
+  const seen = new Set<string>([root])
+  let frontier = [root]
+  while (frontier.length > 0 && count < cap) {
+    const batch = frontier.splice(0, PRE_SCAN_BATCH)
+    const batches = await Promise.all(
+      batch.map(async dir => {
+        let entries
+        try {
+          entries = await readdir(dir, { withFileTypes: true })
+        } catch {
+          return []
+        }
+        const children: string[] = []
+        for (const entry of entries) {
+          if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+          const child = path.join(dir, entry.name)
+          if (seen.has(child)) continue
+          seen.add(child)
+          if (shouldIgnore(root, child)) continue
+          children.push(child)
+        }
+        return children
+      }),
+    )
+    for (const children of batches) {
+      if (count >= cap) break
+      frontier.push(...children)
+      count += children.length
+    }
+  }
+  return count
 }
 
 function isGitMetadata(relative: string): boolean {

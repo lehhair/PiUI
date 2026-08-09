@@ -6,8 +6,8 @@ import path from "node:path"
 import { afterEach, describe, it } from "node:test"
 import type { EventEnvelope } from "@piui/protocol"
 import { EventHub } from "../event-hub.ts"
-import { WorkspaceStore } from "./workspace-store.ts"
-import { WorkspaceWatcher } from "./workspace-watcher.ts"
+import { WorkspaceStore, workspacePathKey } from "./workspace-store.ts"
+import { WorkspaceWatcher, countWatchableDirectories } from "./workspace-watcher.ts"
 
 const roots: string[] = []
 afterEach(() => {
@@ -90,7 +90,61 @@ describe("WorkspaceWatcher", () => {
       try { git(main, "worktree", "remove", "--force", worktree) } catch { /* cleanup below */ }
     }
   })
+
+  it("skips the recursive watcher when the tree exceeds the directory cap", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-watch-big-"))
+    roots.push(root)
+    const cap = 10
+    for (let index = 0; index < cap + 5; index++) mkdirSync(path.join(root, `d${index}`), { recursive: true })
+    const store = new WorkspaceStore()
+    const hub = new EventHub()
+    const watcher = new WorkspaceWatcher(hub, cap)
+    watcher.watch(store.resolve(root))
+    try {
+      // The state entry is inserted synchronously, then removed again once the
+      // bounded pre-scan finds the tree oversized — no chokidar watcher is ever
+      // attached, so the server cannot be ground to a halt by a huge workspace.
+      await waitFor(() => watchedMap(watcher).size === 0)
+    } finally {
+      await watcher.dispose()
+    }
+  })
+
+  it("still watches trees within the directory cap", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-watch-ok-"))
+    roots.push(root)
+    mkdirSync(path.join(root, "src", "nested"), { recursive: true })
+    mkdirSync(path.join(root, "node_modules", "pkg"), { recursive: true })
+    const store = new WorkspaceStore()
+    const hub = new EventHub()
+    const watcher = new WorkspaceWatcher(hub, 10)
+    const workspace = store.resolve(root)
+    watcher.watch(workspace)
+    try {
+      await waitFor(() => watchedMap(watcher).get(workspacePathKey(workspace.canonicalRoot))?.watcher !== undefined)
+    } finally {
+      await watcher.dispose()
+    }
+  })
+
+  it("counts watchable directories with the same skip rules as the watcher", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-watch-count-"))
+    roots.push(root)
+    mkdirSync(path.join(root, "src", "nested"), { recursive: true })
+    mkdirSync(path.join(root, "node_modules", "pkg"), { recursive: true })
+    mkdirSync(path.join(root, "dist", "assets"), { recursive: true })
+    mkdirSync(path.join(root, ".git", "refs", "heads"), { recursive: true })
+    mkdirSync(path.join(root, ".git", "objects", "ab"), { recursive: true })
+    // root, src, src/nested, .git, .git/refs, .git/refs/heads — node_modules,
+    // dist and .git/objects are ignored exactly like the chokidar configuration.
+    assert.equal(await countWatchableDirectories(root, 100), 6)
+    assert.equal(await countWatchableDirectories(root, 3), 3)
+  })
 })
+
+function watchedMap(watcher: WorkspaceWatcher): Map<string, { watcher?: unknown }> {
+  return (watcher as unknown as { watched: Map<string, { watcher?: unknown }> }).watched
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs

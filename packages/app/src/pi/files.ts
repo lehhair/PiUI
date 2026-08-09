@@ -79,7 +79,16 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
       : path && (/^[a-zA-Z]:/.test(path) || path.startsWith('/'))
         ? path
         : directory
-  const workspacePath = await requireWorkspacePath(workspaceDir)
+  const isAbsolute = Boolean(workspaceDir && (/^[a-zA-Z]:[\\/]/.test(workspaceDir) || workspaceDir.startsWith('/')))
+  // Browsing a directory must not register it as a watched workspace:
+  // requireWorkspacePath -> resolveWorkspacePath fires workspaces.open (spawns a
+  // Pi worker prewarm) and workspaces.watch (recursive chokidar watcher). On a
+  // huge tree such as E:\dev (tens of thousands of subdirectories) the recursive
+  // watcher grinds the server to a halt. files.list auto-registers the workspace
+  // record server-side (workspace() find/resolve) without watching or prewarming;
+  // the workspace is properly opened + watched only when the user actually picks
+  // the directory and the app switches to it.
+  const workspacePath = isAbsolute && workspaceDir ? workspaceDir : await requireWorkspacePath(workspaceDir)
   const rel = toPiRelativePath(path, workspaceDir)
   const entries: FileNodeDto[] = []
   let cursor: string | undefined
