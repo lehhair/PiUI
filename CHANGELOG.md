@@ -4,6 +4,10 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.1] - 2026-08-09
+
+- fix(ui): drop the orphan dot in the input footer and honor hidden models in the selector (6842904b)
+
 ## [v0.4.0] - 2026-08-09
 
 - fix(desktop): strip the system title bar on Windows without decorum button injection (76cb2129)
