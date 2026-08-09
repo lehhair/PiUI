@@ -99,6 +99,11 @@ export interface SessionRuntime {
   respondExtensionUi(requestId: string, response: JsonObject): Promise<boolean>
   setExtensionEditorState(text: string): Promise<void>
 
+  /** Offscreen extension TUI mirror (component widgets / custom() / footer / header). */
+  extensionTuiInput(data: string): void
+  extensionTuiResize(cols: number, rows: number): void
+  extensionTuiRedraw(): void
+
   dispose(): Promise<void>
 }
 

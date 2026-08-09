@@ -65,4 +65,45 @@ describe("ExtensionUiBridge", () => {
       /at most 200/,
     )
   })
+
+  it("hosts component widgets offscreen and streams ANSI frames", async () => {
+    const bridge = new ExtensionUiBridge(() => "session-1", () => "g1")
+    const events: PiExtensionUiEvent[] = []
+    bridge.onEvent(event => events.push(event))
+    const { Container, Text } = await import("@earendil-works/pi-tui")
+
+    bridge.context.setWidget("panel", (tui, theme) => {
+      const container = new Container()
+      container.addChild(new Text(theme.fg("accent", "hello panel"), 1, 0))
+      return container
+    }, { placement: "aboveEditor" })
+
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.ok(events.some(event =>
+      event.type === "tuiAttach" && event.attach.key === "panel" && event.attach.kind === "widget"))
+    assert.ok(events.some(event => event.type === "tuiFrame" && event.data.includes("hello panel")))
+
+    // clearing the widget unmounts the component and emits detach
+    bridge.context.setWidget("panel", undefined)
+    assert.ok(events.some(event => event.type === "tuiDetach" && event.key === "panel"))
+  })
+
+  it("runs custom() components offscreen and resolves through done()", async () => {
+    const bridge = new ExtensionUiBridge(() => "session-1", () => "g1")
+    const events: PiExtensionUiEvent[] = []
+    bridge.onEvent(event => events.push(event))
+    const { Container, Text } = await import("@earendil-works/pi-tui")
+
+    const result = bridge.context.custom<number>((tui, theme, keybindings, done) => {
+      const container = new Container()
+      container.addChild(new Text("custom panel", 1, 0))
+      setTimeout(() => done(42), 10)
+      return container
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.ok(events.some(event => event.type === "tuiAttach" && event.attach.key === "custom" && event.attach.kind === "custom"))
+    assert.equal(await result, 42)
+    assert.ok(events.some(event => event.type === "tuiDetach" && event.key === "custom"))
+  })
 })

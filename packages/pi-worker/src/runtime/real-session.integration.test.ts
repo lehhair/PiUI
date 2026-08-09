@@ -270,6 +270,76 @@ export default function (pi) {
     }
   })
 
+  it("hosts extension component widgets and custom() offscreen through the real SDK", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-real-tui-"))
+    const cwd = path.join(root, "workspace")
+    const agentDir = path.join(root, "agent")
+    const projectExtensions = path.join(cwd, ".pi", "extensions")
+    mkdirSync(projectExtensions, { recursive: true })
+    mkdirSync(agentDir)
+    writeFileSync(path.join(projectExtensions, "tui-command.js"), `
+export default function (pi) {
+  pi.registerCommand("tui-e2e", {
+    description: "exercise the extension TUI mirror",
+    handler: async (args, ctx) => {
+      const { Container, Text } = await import("@earendil-works/pi-tui")
+      ctx.ui.setWidget("panel", (tui, theme) => {
+        const container = new Container()
+        container.addChild(new Text(theme.fg("accent", "e2e panel"), 1, 0))
+        return container
+      }, { placement: "aboveEditor" })
+      const result = await ctx.ui.custom((tui, theme, keybindings, done) => {
+        const container = new Container()
+        container.addChild(new Text("custom e2e", 1, 0))
+        setTimeout(() => done("custom-done"), 50)
+        return container
+      })
+      const { writeFileSync } = await import("node:fs")
+      writeFileSync(${JSON.stringify(path.join(root, "tui-result.json"))}, JSON.stringify({ result }))
+    },
+  })
+}
+`)
+    let session: RealPiSession | undefined
+    try {
+      // 预置项目信任，让 .pi/extensions 的扩展在 trust pass 后加载
+      new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).set(cwd, true)
+      session = await RealPiSession.open(cwd, undefined, { agentDir })
+      await session.initializeExtensions()
+      assert.equal(session.getRegistry().commands.some(command => command.name === "tui-e2e"), true)
+
+      const tuiEvents: Array<{ type: string; key?: string; data?: string }> = []
+      const off = session.onExtensionUi(event => {
+        const tuiEvent = event as { type?: string; attach?: { key?: string }; key?: string; data?: string }
+        if (tuiEvent.type === "tuiAttach" || tuiEvent.type === "tuiDetach" || tuiEvent.type === "tuiFrame") {
+          tuiEvents.push({
+            type: String(tuiEvent.type),
+            key: tuiEvent.attach?.key ?? tuiEvent.key,
+            data: tuiEvent.data,
+          })
+        }
+      })
+
+      await session.invokeCommand("tui-e2e", undefined)
+      // custom() 的 done 在 50ms 后触发，帧走 setTimeout(0) flush
+      await new Promise(resolve => setTimeout(resolve, 300))
+
+      // 组件 widget 与 custom() 都挂载、出帧、custom 关闭后 detach
+      assert.ok(tuiEvents.some(event => event.type === "tuiAttach" && event.key === "panel"))
+      assert.ok(tuiEvents.some(event => event.type === "tuiAttach" && event.key === "custom"))
+      assert.ok(tuiEvents.some(event => event.type === "tuiFrame" && event.data?.includes("e2e panel")))
+      assert.ok(tuiEvents.some(event => event.type === "tuiFrame" && event.data?.includes("custom e2e")))
+      assert.ok(tuiEvents.some(event => event.type === "tuiDetach" && event.key === "custom"))
+
+      const result = JSON.parse(readFileSync(path.join(root, "tui-result.json"), "utf8")) as Record<string, unknown>
+      assert.deepEqual(result, { result: "custom-done" })
+      off()
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("streams raw events and persists an offline faux-provider turn", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-sdk-"))
     const { fauxAssistantMessage, fauxProvider, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()

@@ -17,6 +17,7 @@ import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
 import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
 import { extensionUiStore } from './extensionUiStore'
+import { extensionTuiStore } from './extensionTuiStore'
 import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
@@ -53,6 +54,9 @@ type PiExtensionUiEvent =
   | { type: 'state'; sessionId: string; patch: import('@piui/protocol').ExtensionUiStatePatch }
   | { type: 'notify'; sessionId: string; message: string; notifyType?: 'info' | 'warning' | 'error' }
   | { type: 'editor'; sessionId: string; command: import('@piui/protocol').ExtensionUiEditorCommand }
+  | { type: 'tuiAttach'; sessionId: string; attach: import('@piui/protocol').ExtensionTuiAttach }
+  | { type: 'tuiDetach'; sessionId: string; key: string }
+  | { type: 'tuiFrame'; sessionId: string; data: string }
 
 type SessionsUpdatedPayload = {
   sessionId?: string
@@ -419,6 +423,15 @@ class PiEventStream {
         break
       case 'notify':
         // Notifications surface through the extension UI state/status
+        break
+      case 'tuiAttach':
+        extensionTuiStore.attach(event.sessionId, event.attach)
+        break
+      case 'tuiDetach':
+        extensionTuiStore.detach(event.sessionId, event.key)
+        break
+      case 'tuiFrame':
+        extensionTuiStore.frame(event.sessionId, event.data)
         break
     }
   }

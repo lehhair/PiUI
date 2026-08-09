@@ -194,6 +194,15 @@ export type SetExtensionEditorStateParams = {
   text: string
 }
 
+export type ExtensionTuiInputParams = {
+  data: string
+}
+
+export type ExtensionTuiResizeParams = {
+  cols: number
+  rows: number
+}
+
 export type CoreCommandParams = {
   prompt: PromptParams
   steer: SteerParams
@@ -234,4 +243,7 @@ export type CoreCommandParams = {
   reload: Record<string, never>
   respondExtensionUi: RespondExtensionUiParams
   setExtensionEditorState: SetExtensionEditorStateParams
+  "extensionUi.tuiInput": ExtensionTuiInputParams
+  "extensionUi.tuiResize": ExtensionTuiResizeParams
+  "extensionUi.tuiRedraw": Record<string, never>
 }

@@ -73,3 +73,20 @@ export type ExtensionUiMethodCapability = {
   support: ExtensionUiMethodSupport
   reason?: string
 }
+
+/**
+ * Extension TUI mirror — the PiUI-hosted offscreen render of pi-tui
+ * components (component widgets, custom(), footer, header). The worker
+ * renders the component to a virtual terminal and streams ANSI frames to
+ * the app; the app sends raw key input back.
+ */
+export type ExtensionTuiKind = "widget" | "custom" | "footer" | "header"
+
+export type ExtensionTuiAttach = {
+  key: string
+  kind: ExtensionTuiKind
+  placement?: "aboveEditor" | "belowEditor"
+  /** Current virtual terminal dimensions (columns × rows). */
+  width: number
+  height: number
+}

@@ -165,6 +165,16 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     await ctx.requireRuntime().setExtensionEditorState(P.reqStringAllowEmpty(p, "text"))
   },
 
+  "extensionUi.tuiInput": async (ctx, p) => {
+    ctx.requireRuntime().extensionTuiInput(P.reqString(p, "data"))
+  },
+  "extensionUi.tuiResize": async (ctx, p) => {
+    ctx.requireRuntime().extensionTuiResize(P.reqPositiveInteger(p, "cols"), P.reqPositiveInteger(p, "rows"))
+  },
+  "extensionUi.tuiRedraw": async (ctx) => {
+    ctx.requireRuntime().extensionTuiRedraw()
+  },
+
   "state.get": async (ctx) => ctx.requireRuntime().getState(),
   "entries.get": async (ctx, p) =>
     ctx.requireRuntime().getEntriesPage(
