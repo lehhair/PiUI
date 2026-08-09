@@ -177,8 +177,11 @@ fn configure_desktop_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>
 fn finish_desktop_window_setup(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "windows")]
     {
-        use tauri_plugin_decorum::WebviewWindowExt;
-        let _ = window.create_overlay_titlebar();
+        // 不用 decorum 的 create_overlay_titlebar()：它会向页面注入 JS 脚本来动态
+        // 创建最小化/最大化/关闭按钮，这些按钮在运行中（重渲染/容器搬移）经常丢失。
+        // 只去掉系统标题栏，控制按钮由前端 React 自绘（与设置/新建窗口按钮一致），
+        // 直接调用 Tauri window API。
+        let _ = window.set_decorations(false);
     }
 
     #[cfg(target_os = "macos")]
