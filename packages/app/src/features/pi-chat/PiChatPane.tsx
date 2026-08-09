@@ -48,6 +48,8 @@ import {
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
 import { invokePiCommand } from '../../pi/transport/index.js'
+import { layoutStore } from '../../store/layoutStore'
+import { themeStore } from '../../store/themeStore'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
@@ -78,6 +80,8 @@ import {
 } from '../../utils/modelUtils'
 
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+// 这些命令自带界面（选择器/设置/面板），执行后不自动展开扩展面板
+const AUTO_EXPAND_EXCLUDED = new Set(['new', 'settings', 'hotkeys', 'changelog', 'model', 'resume', 'tree'])
 
 /** fork 第一条消息的纯前端特判：不开 SDK 会话，直接落在首页预填 */
 const HOME_FORK_KEY = 'home'
@@ -767,6 +771,7 @@ export function PiChatPane({
 
       // 命令反馈日志：每个命令的执行结果（完整消息）都进扩展面板的"命令反馈"区，
       // 通知只是瞬时的缩略提示。
+      // 自动展开：设置开启时，执行完命令把右侧面板切到扩展 tab（打开自身界面的命令除外）。
       const report = (status: CommandFeedbackStatus, message: string, forSession: string | null = sessionId) => {
         commandFeedbackStore.add({
           sessionId: forSession ?? sessionId ?? '',
@@ -775,6 +780,9 @@ export function PiChatPane({
           status,
           message,
         })
+        if (themeStore.autoExpandExtensionsOnCommand && !AUTO_EXPAND_EXCLUDED.has(command)) {
+          layoutStore.addExtensionsTab('right')
+        }
       }
 
       if (command === 'new') {

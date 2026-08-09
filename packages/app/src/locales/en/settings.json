@@ -158,7 +158,9 @@
     "completedAtFormat": "Completion Time Format",
     "completedAtFormatDesc": "Choose whether to show only time or full date and time",
     "completedAtTimeOnly": "Time Only",
-    "completedAtDateTime": "Date & Time"
+    "completedAtDateTime": "Date & Time",
+    "autoExpandExtensionsOnCommand": "Auto-open Extension Panel on Command",
+    "autoExpandExtensionsOnCommandDesc": "Open the right extension panel after running a slash command, so the Command Feedback log is visible"
   },
   "agent": {
     "behavior": "Agent Behavior",
