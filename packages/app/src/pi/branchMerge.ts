@@ -6,7 +6,15 @@ function hasSameMessageContent(
 ): boolean {
   if (entry.type !== 'message' || entry.message.role !== live.message.role) return false
   if (!('content' in entry.message) || !('content' in live.message)) return false
-  return JSON.stringify(entry.message.content) === JSON.stringify(live.message.content)
+  const a = entry.message.content
+  const b = live.message.content
+  // 快速预筛：长度不同直接不等，避免深序列化（流式落盘时内容通常完全一致）
+  if (a === b) return true
+  const aLen = typeof a === 'string' ? a.length : (a as unknown[]).length
+  const bLen = typeof b === 'string' ? b.length : (b as unknown[]).length
+  if (aLen !== bLen) return false
+  // 内容结构相同时再做深比较（仅在长度相等时触发，成本可控）
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /**
