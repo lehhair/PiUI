@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <!-- 官方 Pi 标志；tauri 会按 android_fg_scale=66 缩放进安全区 -->
-  <g transform="translate(71 71) scale(0.787)" fill="#fafaf9">
+  <!-- 官方 Pi 标志：缩到约 42% 画布，保证被裁成圆形（安全区 66% 直径）后完整可见 -->
+  <g transform="translate(148.5 148.5) scale(0.457)" fill="#fafaf9">
     <path fill-rule="evenodd" clip-rule="evenodd" d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z"/>
     <path d="M352.07 234.71H469.43V469.43H352.07V234.71Z"/>
   </g>
