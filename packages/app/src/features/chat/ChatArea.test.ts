@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   buildChatPages,
   buildExpandedPageSelection,
@@ -16,7 +16,7 @@ import {
   seedMeasuredPageHeightsFromPreviousPages,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
-import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId } from './chatAreaVisibility'
+import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId, clearVisibleTimelineMergeCache } from './chatAreaVisibility'
 import type { Message, MessageError, Part } from '../../types/message'
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent'
 import type { ToolCall, ToolResultMessage } from '@earendil-works/pi-ai'
@@ -155,6 +155,8 @@ function createTextPart(id: string, messageID: string, text: string): Part {
 }
 
 describe('buildVisibleTimelineEntries', () => {
+  beforeEach(() => clearVisibleTimelineMergeCache())
+
   it('keeps source ids for merged assistant tool messages', () => {
     const first = createAssistantItem('assistant-1', [createToolCall('tool-1')])
     const second = createAssistantItem('assistant-2', [createToolCall('tool-2')])
@@ -225,6 +227,32 @@ describe('buildVisibleTimelineEntries', () => {
 
     expect(entries).toHaveLength(1)
     expect(entries[0].item.entryId).toBe('assistant-aborted-with-tool')
+  })
+
+  it('reuses the same merged object when input item references are unchanged (streaming chunks)', () => {
+    const first = createAssistantItem('assistant-1', [createToolCall('tool-1')])
+    const second = createAssistantItem('assistant-2', [createToolCall('tool-2')])
+
+    const entries1 = buildVisibleTimelineEntries([first, second])
+    // 流式 chunk：新数组，但历史 item 引用不变（timelineCache 语义）
+    const entries2 = buildVisibleTimelineEntries([first, second])
+    const entries3 = buildVisibleTimelineEntries([first, second])
+
+    expect(entries1[0].item).toBe(entries2[0].item)
+    expect(entries2[0].item).toBe(entries3[0].item)
+  })
+
+  it('rebuilds the merged object when a participant item reference changes', () => {
+    const first = createAssistantItem('assistant-1', [createToolCall('tool-1')])
+    const second = createAssistantItem('assistant-2', [createToolCall('tool-2')])
+
+    const before = buildVisibleTimelineEntries([first, second])
+    // second 内容更新（新引用）——比如 tool result 落盘
+    const secondUpdated = createAssistantItem('assistant-2', [createToolCall('tool-2'), createTextBlock('done')])
+    const after = buildVisibleTimelineEntries([first, secondUpdated])
+
+    expect(before[0].item).not.toBe(after[0].item)
+    expect((after[0].item as PiAssistantMessageItem).blocks).toHaveLength(3)
   })
 
   it('hides aborted assistant messages without renderable blocks', () => {
