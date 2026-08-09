@@ -592,6 +592,18 @@ export class RealPiSession implements SessionRuntime {
     this.extensionUi.setEditorState(text)
   }
 
+  extensionTuiInput(data: string): void {
+    this.extensionUi.tuiInput(data)
+  }
+
+  extensionTuiResize(cols: number, rows: number): void {
+    this.extensionUi.tuiResize(cols, rows)
+  }
+
+  extensionTuiRedraw(): void {
+    this.extensionUi.tuiRedraw()
+  }
+
   getHead(): SessionHead {
     const manager = this.runtime.session.sessionManager
     const header = toJson(manager.getHeader()) ?? null

@@ -516,6 +516,19 @@ export function setPiExtensionEditorState(sessionId: string, text: string, signa
   return postPiSessionCommand(sessionId, 'setExtensionEditorState', { text }, signal)
 }
 
+// Extension TUI mirror commands (offscreen pi-tui hosted by the worker)
+export function sendExtensionTuiInput(sessionId: string, data: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'extensionUi.tuiInput', { data }, signal)
+}
+
+export function sendExtensionTuiResize(sessionId: string, cols: number, rows: number, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'extensionUi.tuiResize', { cols, rows }, signal)
+}
+
+export function sendExtensionTuiRedraw(sessionId: string, signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'extensionUi.tuiRedraw', undefined, signal)
+}
+
 export type PiForkResult = {
   operation?: string
   sourceSessionId?: string

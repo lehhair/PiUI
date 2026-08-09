@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto"
 import type {
+  ExtensionTuiAttach,
   ExtensionUiDialogRequest,
   ExtensionUiDialogResponse,
   ExtensionUiEditorCommand,
   ExtensionUiStatePatch,
   ExtensionUiSettlementReason,
 } from "@piui/protocol"
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent"
+import type { ExtensionUIContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent"
+import type { Component, TUI } from "@earendil-works/pi-tui"
+import { ExtensionTuiHost } from "./extension-tui.js"
 
 const MAX_TEXT_LENGTH = 256 * 1024
 const MAX_TITLE_LENGTH = 4 * 1024
@@ -19,6 +22,9 @@ export type PiExtensionUiEvent =
   | { type: "state"; sessionId: string; patch: ExtensionUiStatePatch }
   | { type: "notify"; sessionId: string; message: string; notifyType?: "info" | "warning" | "error" }
   | { type: "editor"; sessionId: string; command: ExtensionUiEditorCommand }
+  | { type: "tuiAttach"; sessionId: string; attach: ExtensionTuiAttach }
+  | { type: "tuiDetach"; sessionId: string; key: string }
+  | { type: "tuiFrame"; sessionId: string; data: string }
 
 interface PendingDialog {
   request: ExtensionUiDialogRequest
@@ -37,9 +43,21 @@ export class ExtensionUiBridge {
     private readonly getSessionId: () => string,
     private readonly getWorkerGeneration: () => string | undefined,
     private readonly getAllThemes: () => Array<{ name: string; path: string | undefined }> = () => [],
-  ) {}
+  ) {
+    this.tuiHost = new ExtensionTuiHost(event => {
+      const sessionId = this.getSessionId()
+      if (event.type === "attach") {
+        this.emit({ type: "tuiAttach", sessionId, attach: event.attach })
+      } else if (event.type === "detach") {
+        this.emit({ type: "tuiDetach", sessionId, key: event.key })
+      } else {
+        this.emit({ type: "tuiFrame", sessionId, data: event.data })
+      }
+    })
+  }
 
   readonly context = this.createContext()
+  private readonly tuiHost: ExtensionTuiHost
 
   onEvent(listener: (event: PiExtensionUiEvent) => void): () => void {
     this.listeners.add(listener)
@@ -72,6 +90,26 @@ export class ExtensionUiBridge {
     this.editorText = text
   }
 
+  /** Forward raw key input from the app into the offscreen extension TUI. */
+  tuiInput(data: string): void {
+    this.tuiHost.input(data)
+  }
+
+  /** Resize the offscreen extension TUI. */
+  tuiResize(cols: number, rows: number): void {
+    this.tuiHost.resize(cols, rows)
+  }
+
+  /** Ask the offscreen extension TUI for a full redraw frame. */
+  tuiRedraw(): void {
+    this.tuiHost.redraw()
+  }
+
+  /** Tear down all offscreen extension TUI panels (session replaced/reloaded). */
+  resetTui(): void {
+    this.tuiHost.reset()
+  }
+
   cancelAll(reason: ExtensionUiSettlementReason): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer)
@@ -80,6 +118,7 @@ export class ExtensionUiBridge {
       this.emit({ type: "settled", requestId, sessionId: pending.request.sessionId, reason })
     }
     this.pending.clear()
+    this.tuiHost.reset()
   }
 
   private createContext(): ExtensionUIContext {
@@ -133,8 +172,19 @@ export class ExtensionUiBridge {
         bridge.state({ kind: "hiddenThinkingLabel", label })
       },
       setWidget(key, content, options) {
-        if (content !== undefined && !Array.isArray(content)) throw unsupported("component widgets")
         assertText("widget key", key, MAX_TITLE_LENGTH)
+        if (typeof content === "function") {
+          // Component widget — host it offscreen and stream frames to PiUI.
+          if (content === undefined) {
+            bridge.tuiHost.unmount(key)
+            return
+          }
+          const component = content(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
+          bridge.tuiHost.mount("widget", key, component, options?.placement)
+          return
+        }
+        if (content !== undefined && !Array.isArray(content)) throw unsupported("component widgets")
+        bridge.tuiHost.unmount(key)
         if (content) assertStringArray("widget lines", content, MAX_WIDGET_LINES)
         bridge.state({
           kind: "widget",
@@ -143,18 +193,66 @@ export class ExtensionUiBridge {
           placement: options?.placement,
         })
       },
-      setFooter() {
-        throw unsupported("custom footer")
+      setFooter(factory) {
+        if (factory === undefined) {
+          bridge.tuiHost.unmount("footer")
+          return
+        }
+        const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme(), footerDataProviderStub)
+        bridge.tuiHost.mount("footer", "footer", component)
       },
-      setHeader() {
-        throw unsupported("custom header")
+      setHeader(factory) {
+        if (factory === undefined) {
+          bridge.tuiHost.unmount("header")
+          return
+        }
+        const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
+        bridge.tuiHost.mount("header", "header", component)
       },
       setTitle(title) {
         assertText("title", title, MAX_TITLE_LENGTH)
         bridge.state({ kind: "title", title })
       },
-      async custom() {
-        throw unsupported("custom components")
+      custom<T>(factory: (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: T) => void) => (Component & { dispose?: () => void }) | Promise<Component & { dispose?: () => void }>, options?: { overlay?: boolean; overlayOptions?: unknown; onHandle?: (handle: OverlayHandleStub) => void }): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+          let closed = false
+          const close = (result: T) => {
+            if (closed) return
+            closed = true
+            bridge.tuiHost.unmountCustom()
+            resolve(result)
+          }
+          const handle: OverlayHandleStub = {
+            hide: () => bridge.tuiHost.unmountCustom(),
+            setHidden: () => undefined,
+            isHidden: () => false,
+            focus: () => undefined,
+            unfocus: () => undefined,
+            isFocused: () => true,
+          }
+          try {
+            const created = factory(
+              bridge.tuiHost.getTui(),
+              bridge.tuiHost.getTheme(),
+              bridge.tuiHost.getKeybindings(),
+              close,
+            )
+            Promise.resolve(created).then(component => {
+              if (closed) {
+                component?.dispose?.()
+                return
+              }
+              options?.onHandle?.(handle)
+              bridge.tuiHost.mountCustom(component)
+            }).catch(error => {
+              if (closed) return
+              closed = true
+              reject(error)
+            })
+          } catch (error) {
+            reject(error)
+          }
+        })
       },
       pasteToEditor(text) {
         assertText("editor text", text)
@@ -291,6 +389,26 @@ function unsupported(feature: string): Error {
   return Object.assign(new Error(`${feature} are unavailable in the PiUI RPC host`), {
     code: "EXTENSION_UI_TUI_ONLY",
   })
+}
+
+/** Stub passed to `setFooter` factories — PiUI has no git/status footer. */
+const footerDataProviderStub = {
+  getGitBranch: (): string | null => null,
+  getExtensionStatuses: (): ReadonlyMap<string, string> => new Map(),
+  getAvailableProviderCount: (): number => 0,
+  onBranchChange: (): (() => void) => () => undefined,
+  setCwd: (): void => undefined,
+  dispose: (): void => undefined,
+}
+
+/** Minimal `OverlayHandle` for `custom()` — visibility is owned by the bridge. */
+interface OverlayHandleStub {
+  hide(): void
+  setHidden(hidden: boolean): void
+  isHidden(): boolean
+  focus(): void
+  unfocus(): void
+  isFocused(): boolean
 }
 
 function assertText(name: string, value: unknown, maxLength = MAX_TEXT_LENGTH): asserts value is string {

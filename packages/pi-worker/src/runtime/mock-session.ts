@@ -919,6 +919,10 @@ export class MockPiSession implements SessionRuntime {
 
   async setExtensionEditorState(): Promise<void> {}
 
+  extensionTuiInput(): void {}
+  extensionTuiResize(): void {}
+  extensionTuiRedraw(): void {}
+
   async dispose(): Promise<void> {
     this.streaming = false
     this.compacting = false

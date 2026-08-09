@@ -83,4 +83,31 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus("test:queue", "completed")
     },
   })
+
+  pi.registerCommand("ui-test-tui", {
+    description: "Mount a component widget and a custom() panel (extension TUI mirror)",
+    handler: async (_args, ctx) => {
+      const { Box, Container, Text } = await import("@earendil-works/pi-tui")
+      ctx.ui.setWidget("tui-panel", (tui, theme) => {
+        const container = new Container()
+        container.addChild(new Text(theme.fg("accent", "TUI component widget"), 1, 0))
+        container.addChild(new Text(theme.fg("text", "  interactive panel rendered offscreen"), 1, 0))
+        container.addChild(new Text(theme.fg("muted", "  keystrokes route back to the worker"), 1, 0))
+        return container
+      }, { placement: "aboveEditor" })
+
+      const choice = await ctx.ui.custom<"a" | "b">((tui, theme, keybindings, done) => {
+        const box = new Box(1, 1)
+        box.addChild(new Text(theme.fg("text", "custom() panel — press 1 or 2")))
+        box.addChild(new Text(theme.fg("muted", "1) alpha   2) beta")))
+        tui.addInputListener(data => {
+          if (data === "1") { done("a"); return { consume: true } }
+          if (data === "2") { done("b"); return { consume: true } }
+          return undefined
+        })
+        return box
+      })
+      ctx.ui.setStatus("test:tui", `custom=${choice ?? "cancelled"}`)
+    },
+  })
 }
