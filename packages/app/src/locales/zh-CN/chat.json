@@ -29,7 +29,9 @@
     "sessionBusy": "会话正在使用中",
     "sessionBusyDesc": "另一个 Pi runtime 正在使用这个会话，请关闭其他实例后重试。",
     "backToHome": "返回首页",
-    "openServerSettings": "打开服务器设置"
+    "openServerSettings": "打开服务器设置",
+    "compacting": "正在压缩上下文…",
+    "compactingCancel": "取消"
   },
   "emptyState": {
     "title": "开始新对话",

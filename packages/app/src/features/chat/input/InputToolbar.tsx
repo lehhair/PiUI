@@ -19,6 +19,8 @@ interface InputToolbarProps {
   onFilesSelected: (files: File[]) => void
 
   isStreaming?: boolean
+  /** 上下文压缩进行中：发送按钮变为停止按钮（取消压缩） */
+  isCompacting?: boolean
   isSending?: boolean
   onAbort?: () => void
   deliveryMode?: 'steer' | 'followUp'
@@ -46,6 +48,7 @@ export function InputToolbar({
   fileCapabilities,
   onFilesSelected,
   isStreaming,
+  isCompacting = false,
   isSending = false,
   onAbort,
   deliveryMode = 'followUp',
@@ -424,7 +427,7 @@ export function InputToolbar({
             </IconButton>
           </>
         </AnimatedPresence>
-        {!canSend && isStreaming && !isSending ? (
+        {(isCompacting || (!canSend && isStreaming)) && !isSending ? (
           <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
             <StopIcon />
           </IconButton>
