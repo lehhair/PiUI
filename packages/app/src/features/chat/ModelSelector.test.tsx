@@ -30,6 +30,19 @@ vi.mock('../../hooks/useInputCapabilities', () => ({
   useInputCapabilities: () => ({ preferTouchUi: false }),
 }))
 
+const useHiddenModelKeysMock = vi.hoisted(() => vi.fn<() => string[]>(() => []))
+
+vi.mock('../../store/modelVisibilityStore', () => ({
+  useHiddenModelKeys: useHiddenModelKeysMock,
+  modelVisibilityStore: {
+    isVisible: () => true,
+    setVisible: () => {},
+    setManyVisible: () => {},
+    subscribe: () => () => {},
+    getSnapshot: () => [],
+  },
+}))
+
 vi.mock('../../utils/modelUtils', () => ({
   getModelKey: (model: ModelInfo) => `${model.provider}:${model.id}`,
   groupModelsByProvider: (models: ModelInfo[]) => [
@@ -141,5 +154,17 @@ describe('ModelSelector', () => {
     fireEvent.click(pinButton, { detail: 1 })
 
     expect(pinButton).not.toHaveFocus()
+  })
+
+  it('hides models that are marked hidden in the visibility store', () => {
+    // 模拟隐藏 GPT-4o Mini：hook 返回的隐藏键来自 modelVisibilityStore 快照
+    useHiddenModelKeysMock.mockReturnValue(['openai:gpt-4o-mini'])
+
+    render(<ModelSelector models={MODELS} selectedModelKey={'openai:gpt-4.1'} onSelect={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('GPT-4.1'))
+
+    expect(screen.queryByText('GPT-4o Mini')).not.toBeInTheDocument()
+    expect(screen.getAllByText('GPT-4.1').length).toBeGreaterThan(0)
   })
 })
