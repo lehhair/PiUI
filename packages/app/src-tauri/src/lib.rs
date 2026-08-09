@@ -229,7 +229,7 @@ fn desktop_window_ready(window: Window) -> Result<(), String> {
 
 #[cfg(desktop)]
 #[tauri::command]
-fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(), String> {
+async fn open_new_window(app: tauri::AppHandle, directory: Option<String>) -> Result<(), String> {
     open_new_window_inner(&app, directory)
 }
 
