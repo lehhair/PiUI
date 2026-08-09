@@ -285,7 +285,9 @@ export async function sendPiPrompt(
 export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<JsonValue> {
   try {
     const submitted = await transport.compactPi(sessionId, customInstructions, signal)
-    return await transport.waitHostCommand(submitted.id, signal)
+    // 压缩经常超过默认 30s 的 waitHostCommand 超时（会误报 Command timed out，
+    // 但压缩其实还在跑）。给它 15 分钟，让结果由 compaction_end 事件/轮询正常落地。
+    return await transport.waitHostCommand(submitted.id, signal, 15 * 60_000)
   } catch (error) {
     console.error('Failed to compact session:', error)
     throw error

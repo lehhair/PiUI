@@ -180,5 +180,9 @@
     "outputTokens": "Output",
     "cacheRW": "Cache (r/w)",
     "rawMessages": "Raw Messages"
-  }
+  },
+  "compactingManual": "Compacting context…",
+  "compactingOverflow": "Context overflow detected, compacting…",
+  "compactingAuto": "Auto-compacting…",
+  "compactingCancel": "Cancel"
 }

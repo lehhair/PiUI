@@ -11,6 +11,7 @@ import { FolderProjectDropOverlay } from '../chat/FolderProjectDropOverlay.js'
 import { ChatViewportProvider, useChatViewportMaybe, type ChatViewportValue } from '../chat/chatViewport.js'
 import type { Attachment } from '../attachment/index.js'
 import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
+import { CompactionBanner } from '../chat/CompactionBanner.js'
 import { ProjectTrustPrompt } from './ProjectTrustPrompt'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
@@ -833,6 +834,9 @@ export function PiChatPane({
       const sid = targetSessionId
 
       if (command === 'compact') {
+        // 启动即有反馈（SDK 无压缩进度流，只有 start/end 事件）——先记一条
+        // "已开始"，避免干等；结束再记结果。
+        report('info', 'Compaction started — this can take a while (no progress stream from the SDK)', sid)
         void compactPiSession(sid, args || undefined)
           .then(async result => {
             const details = result && typeof result === 'object' && !Array.isArray(result)
@@ -1403,6 +1407,14 @@ export function PiChatPane({
       />
 
       <ExtensionUiDialogHost sessionId={sessionId} />
+
+      {/* 压缩进行中指示（输入框上方，不遮挡输入）——SDK 无进度流，只有
+          spinner + 取消，对齐 Pi TUI 的 CompactionStatusIndicator */}
+      <div className="absolute left-0 right-0 z-[12] pointer-events-none" style={{ bottom: inputBoxHeight + 8 }}>
+        <div className="pointer-events-auto">
+          <CompactionBanner state={state} sessionId={sessionId} />
+        </div>
+      </div>
 
       <ProjectTrustPrompt cwd={currentDirectory} />
 
