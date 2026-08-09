@@ -14,7 +14,7 @@ import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
 import { ProjectTrustPrompt } from './ProjectTrustPrompt'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
-import { selectPiTimelineItems } from '../../pi/selectors/index.js'
+import { selectPiTimelineItemsCached } from '../../pi/selectors/timelineCache.js'
 import { piEventStream } from '../../pi/eventStream.js'
 import { bashPendingStore } from '../../pi/bashPendingStore'
 import {
@@ -84,6 +84,8 @@ import {
 const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 // 这些命令自带界面（选择器/设置/面板），执行后不自动展开扩展面板
 const AUTO_EXPAND_EXCLUDED = new Set(['new', 'settings', 'hotkeys', 'changelog', 'model', 'resume', 'tree'])
+/** 稳定空数组引用：避免 `?? []` 每次渲染新建数组导致 ChatArea memo 失效 */
+const EMPTY_STRING_ARRAY: readonly string[] = []
 
 /** fork 第一条消息的纯前端特判：不开 SDK 会话，直接落在首页预填 */
 const HOME_FORK_KEY = 'home'
@@ -324,9 +326,15 @@ export function PiChatPane({
   const isStreaming = Boolean(state?.isStreaming)
   const queue = state?.queue as { steering?: string[]; followUp?: string[] } | undefined
 
+  // 稳定队列引用：ChatArea 是 memo 组件，`?? []` 每次渲染新建数组会让它
+  // 每次事件都重渲染（实测 4940 事件 → 10356 次渲染）。内容不变时保持
+  // 旧引用，只有队列实际变化才触发 ChatArea 重渲染。
+  const queuedSteering = useMemo(() => queue?.steering ?? EMPTY_STRING_ARRAY, [queue?.steering])
+  const queuedFollowUps = useMemo(() => queue?.followUp ?? EMPTY_STRING_ARRAY, [queue?.followUp])
+
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
-  const baseItems = useMemo(() => (branch ? selectPiTimelineItems(branch) : []), [branch])
+  const baseItems = useMemo(() => selectPiTimelineItemsCached(sessionId, branch), [sessionId, branch])
   // 用户发起的 bash 乐观条目（执行中显示 + 流式输出，pi TUI 的
   // BashExecutionComponent 对应物）。订阅 pending 数量变化以便渲染合并。
   const pendingBashCount = useSyncExternalStore(
@@ -341,6 +349,11 @@ export function PiChatPane({
   useEffect(() => {
     if (sessionId) bashPendingStore.removeConsumed(baseItems, sessionId)
   }, [baseItems, sessionId])
+  // handleFork 用 items 找第一条 user 消息做 home 特判：用 ref 持有最新值，
+  // 让回调保持 [sessionId] 稳定 —— items 每次流式事件都是新数组，若进依赖，
+  // handleFork 每 token 重建 → VirtualRow memo 的 onFork 比较失配 → 全行重渲染。
+  const itemsRef = useRef(items)
+  itemsRef.current = items
 
   // Current model from runtime state (native SDK shape); on home (no
   // session) fall back to the composer's persisted preferred model.
@@ -429,7 +442,7 @@ export function PiChatPane({
     async (entryId: string, forkMessageId?: string) => {
       if (!sessionId) return
       const targetId = forkMessageId ?? entryId
-      const firstUser = items.find(item => item.kind === 'user_message')
+      const firstUser = itemsRef.current.find(item => item.kind === 'user_message')
       if (firstUser && firstUser.entryId === targetId) {
         const text = firstUser.blocks
           .filter((block): block is Extract<typeof block, { type: 'text' }> => block?.type === 'text')
@@ -453,8 +466,13 @@ export function PiChatPane({
         console.error('Failed to fork session:', error)
       }
     },
-    [sessionId, items],
+    [sessionId],
   )
+
+  // 加载更早历史：稳定引用（ChatArea memo），避免每次渲染新建箭头函数
+  const handleLoadMore = useCallback(() => {
+    if (sessionId) void loadMorePiBranchEntries(sessionId)
+  }, [sessionId])
 
   // ============================================
   // Undo / Redo (pi TUI parity: tree navigation IS the undo).
@@ -1386,15 +1404,14 @@ export function PiChatPane({
             key={chatAreaMountKey}
             ref={chatAreaRef}
             items={items}
-            queuedSteering={queue?.steering ?? []}
-            queuedFollowUps={queue?.followUp ?? []}
+            queuedSteering={queuedSteering}
+            queuedFollowUps={queuedFollowUps}
             sessionId={sessionId}
             isStreaming={isStreaming}
             isCompacting={compacting}
-            allowStreamingLayoutAnimation
             loadState="loaded"
             hasMoreHistory={Boolean(branch?.hasMore)}
-            onLoadMore={() => (sessionId ? loadMorePiBranchEntries(sessionId) : undefined)}
+            onLoadMore={handleLoadMore}
             bottomPadding={inputBoxHeight}
             onVisibleMessageIdsChange={handleVisibleIdsChange}
             onAtBottomChange={setIsAtBottom}

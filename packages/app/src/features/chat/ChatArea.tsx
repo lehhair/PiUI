@@ -31,7 +31,7 @@ import type { PiTimelineItem } from '../../pi/domain/index.js'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
 import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId } from './chatAreaVisibility'
 import { AT_BOTTOM_THRESHOLD_PX } from '../../constants'
-import { useChatViewport } from './chatViewport'
+import { useChatViewportSelect } from './chatViewport'
 import {
   buildProcessTimeline,
   buildTurnDurationMap,
@@ -44,6 +44,7 @@ import { useTheme } from '../../hooks/useTheme'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { useAutoScroll } from './virtual/useAutoScroll'
 import { useEmptyWorkingShellGate } from './virtual/useEmptyWorkingShellGate'
+import { perfMark, perfRecordRender, isPerfEnabled } from '../../utils/perf'
 
 const ROW_ESTIMATE = 60
 /** 过程壳 header 行高（Working / Worked 一行） */
@@ -52,6 +53,24 @@ const PROCESS_SHELL_HEADER = 36
 const EMPTY_WORKING_SHELL_EXTRA_DELAY_MS = 500
 const DEFAULT_BOTTOM_SPACER = 256
 const SESSION_CACHE_LIMIT = 16
+
+/** 内容等价判断：流式 chunk 只换数组引用时，复用旧 Map/Set 引用，
+ *  否则 VirtualRow 的 memo 比较（含这三个引用）会被击穿，历史行跟着重渲染。 */
+function sameMap<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false
+  }
+  return true
+}
+
+function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false
+  for (const value of a) {
+    if (!b.has(value)) return false
+  }
+  return true
+}
 
 const bottomSpacerHeight = (bottomPadding: number) =>
   bottomPadding > 0 ? bottomPadding + 48 : DEFAULT_BOTTOM_SPACER
@@ -247,15 +266,22 @@ const VirtualRow = memo(function VirtualRow({
   onEntryGrowComplete,
 }: RowProps) {
   const rowRef = useRef<HTMLDivElement | null>(null)
+  if (isPerfEnabled()) perfRecordRender('VirtualRow', 0)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
     rowRef.current = el
+    perfMark('piui:measure-row')
     measureElement(el)
+    perfMark('piui:measure-row:end')
   }, [measureElement])
 
   useLayoutEffect(() => {
+    // item 引用变化（打断/折叠/错误条出现，A 步保证只有变化行变）时
+    // 重新测量：virtual-core 的 measureElement 在测量高度与缓存一致
+    // （delta === 0）时不 notify，行会残留旧 transform 与相邻行重叠。
+    // 这里在内容变化后强制重测，让后续行位置按最新高度重算。
     if (rowRef.current) measureElement(rowRef.current)
-  }, [measureElement, virtualItem.index, item.key, rowYClass])
+  }, [measureElement, virtualItem.index, item.key, rowYClass, item])
 
   return (
     <div
@@ -370,28 +396,48 @@ export const ChatArea = memo(
       },
       ref,
     ) => {
+      const renderStart = isPerfEnabled() ? performance.now() : 0
       const { t } = useTranslation('chat')
       const { isWideMode, processCollapseEnabled } = useTheme()
-      const { presentation } = useChatViewport()
-      const atBottomThreshold = presentation.isCompact ? 150 : AT_BOTTOM_THRESHOLD_PX
-      const paddingClass = presentation.isCompact ? 'px-3' : 'px-5'
+      // 只订阅离散的 isCompact：宽度连续变化时该值不变，ChatArea 不重渲染
+      // （对齐 reference 选择器订阅：宽度变化只剩浏览器原生 reflow，无 React 全树重渲染）
+      const isCompact = useChatViewportSelect(value => value.presentation.isCompact)
+      const atBottomThreshold = isCompact ? 150 : AT_BOTTOM_THRESHOLD_PX
+      const paddingClass = isCompact ? 'px-3' : 'px-5'
       const maxWidthClass = isWideMode ? 'max-w-[95%] xl:max-w-6xl' : 'max-w-2xl'
 
       // ── 派生数据 ──
       const entries = useMemo(() => buildVisibleTimelineEntries(items), [items])
       const visibleItems = useMemo(() => entries.map(e => e.item), [entries])
-      const forkMap = useMemo(
-        () => forkTargetIdMapProp ?? new Map(entries.map(e => [e.item.entryId, getVisibleTimelineForkTargetId(e)])),
-        [forkTargetIdMapProp, entries],
-      )
-      const turnDurationMap = useMemo(
-        () => turnDurationMapProp ?? buildTurnDurationMap(items, visibleItems),
-        [items, turnDurationMapProp, visibleItems],
-      )
-      const turnLatestAssistantIds = useMemo(
-        () => turnLatestAssistantIdsProp ?? buildTurnLatestAssistantIdSet(visibleItems),
-        [turnLatestAssistantIdsProp, visibleItems],
-      )
+      const forkMapRef = useRef<Map<string, string | undefined> | null>(null)
+      const forkMap = useMemo(() => {
+        const next = forkTargetIdMapProp
+          ?? new Map(entries.map(e => [e.item.entryId, getVisibleTimelineForkTargetId(e)]))
+        const prev = forkMapRef.current
+        if (prev && sameMap(prev, next)) return prev
+        forkMapRef.current = next
+        return next
+      }, [forkTargetIdMapProp, entries])
+      // 流式期间 items 数组每个 chunk 都是新引用，但这些 map/set 的内容只在
+      // 回合完成/结构变化时才会变（live 行 streaming 无 duration、entryId 稳定）。
+      // 内容等价时复用旧引用，否则每次 token 都会新建 Map/Set，把 VirtualRow
+      // 的 memo 比较（含这三个引用）全部击穿 → 历史行跟着 live 行一起重渲染。
+      const turnDurationMapRef = useRef<Map<string, number> | null>(null)
+      const turnDurationMap = useMemo(() => {
+        const next = turnDurationMapProp ?? buildTurnDurationMap(items, visibleItems)
+        const prev = turnDurationMapRef.current
+        if (prev && sameMap(prev, next)) return prev
+        turnDurationMapRef.current = next
+        return next
+      }, [items, turnDurationMapProp, visibleItems])
+      const turnLatestIdsRef = useRef<Set<string> | null>(null)
+      const turnLatestAssistantIds = useMemo(() => {
+        const next = turnLatestAssistantIdsProp ?? buildTurnLatestAssistantIdSet(visibleItems)
+        const prev = turnLatestIdsRef.current
+        if (prev && sameSet(prev, next)) return prev
+        turnLatestIdsRef.current = next
+        return next
+      }, [turnLatestAssistantIdsProp, visibleItems])
 
       // 空 Working 壳闸门：入场完成 + 额外停顿；idle 清空；有 assistant 立刻挂
       const emptyShellGate = useEmptyWorkingShellGate(isStreaming, EMPTY_WORKING_SHELL_EXTRA_DELAY_MS)
@@ -404,6 +450,7 @@ export const ChatArea = memo(
         items?: ProcessTimelineItem[]
       }>({ processCollapseEnabled })
       const timeline = useMemo<ProcessTimelineItem[]>(() => {
+        perfMark('piui:build-timeline')
         const next = !processCollapseEnabled
           ? visibleItems.map(item => ({
               kind: 'message' as const,
@@ -423,6 +470,7 @@ export const ChatArea = memo(
             : undefined
         const reused = reuseProcessTimelineItems(previous, next)
         previousTimelineRef.current = { processCollapseEnabled, items: reused }
+        perfMark('piui:build-timeline:end')
         return reused
         // emptyShellGate.version：额外延迟到期后强制重算，挂上 Working 壳
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -928,6 +976,10 @@ export const ChatArea = memo(
           virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
         },
       }), [autoForceScroll, autoPause, autoMarkAuto, pinToBottom, virtualizer, timeline, visibleItems, messageIdToTimelineIndex])
+
+      if (isPerfEnabled()) {
+        perfRecordRender('ChatArea', performance.now() - renderStart)
+      }
 
       return (
         <div className="h-full overflow-hidden contain-strict relative">
