@@ -18,7 +18,7 @@ export interface Command {
  * registry 是否返回（打包后的 Bun exe 内联了 SDK，registry 的 commands 可能
  * 为空），斜杠菜单都必须展示它们——否则输入 / 时菜单为空。
  * 'frontend' 选中即立即执行（无参数命令）；'builtin' 走附件插入路径，方便
- * 继续输入参数（如 /bash ls -la）。
+ * 继续输入参数（如 /bash ls -la、/name 新名字）。
  */
 export function getFrontendCommands(): Command[] {
   return [
@@ -34,16 +34,17 @@ export function getFrontendCommands(): Command[] {
     { name: 'clone', description: 'Duplicate the current session at the current position', source: 'frontend' },
     { name: 'copy', description: 'Copy last agent message to clipboard', source: 'frontend' },
     { name: 'fork', description: 'Create a new fork from a previous user message', source: 'frontend' },
-    { name: 'trust', description: 'Save project trust decision for future sessions', source: 'frontend' },
-    { name: 'login', description: 'Configure provider authentication', argumentHint: '<provider>', source: 'frontend' },
-    { name: 'logout', description: 'Remove provider authentication', source: 'frontend' },
-    { name: 'export', description: 'Export session (HTML default, or specify path: .html/.jsonl)', source: 'frontend' },
-    { name: 'import', description: 'Import and resume a session from a JSONL file', source: 'frontend' },
-    { name: 'scoped-models', description: 'Enable/disable models for Ctrl+P cycling', source: 'frontend' },
-    { name: 'name', description: 'Set session display name', source: 'frontend' },
     { name: 'share', description: 'Share session as a secret GitHub gist', source: 'frontend' },
     { name: 'reload', description: 'Reload keybindings, extensions, skills, prompts, themes, and context files', source: 'frontend' },
     { name: 'quit', description: 'Quit Pi', source: 'frontend' },
+    // 带参命令：选中后填入输入框等你输参数再回车（和 TUI 一致）
+    { name: 'name', description: 'Set session display name', argumentHint: '<name>', source: 'builtin' },
+    { name: 'trust', description: 'Save project trust decision for future sessions', argumentHint: '<yes|no|reset>', source: 'builtin' },
+    { name: 'login', description: 'Configure provider authentication', argumentHint: '<provider>', source: 'builtin' },
+    { name: 'logout', description: 'Remove provider authentication', argumentHint: '<provider>', source: 'builtin' },
+    { name: 'export', description: 'Export session (HTML default, or specify path: .html/.jsonl)', argumentHint: '<path>', source: 'builtin' },
+    { name: 'import', description: 'Import and resume a session from a JSONL file', argumentHint: '<path>', source: 'builtin' },
+    { name: 'scoped-models', description: 'Enable/disable models for Ctrl+P cycling', argumentHint: '<patterns>', source: 'builtin' },
     // PiUI 扩展：把 bash 也做成斜杠命令（pi TUI 里 ! 前缀的对应物）
     { name: 'bash', description: 'Run a one-shot bash command', argumentHint: '<command>', source: 'builtin' },
   ]

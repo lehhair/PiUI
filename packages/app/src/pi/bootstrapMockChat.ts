@@ -6,6 +6,7 @@ import { piBranchStore, piModelsStore, piSessionStateStore } from "./state/index
 import { piSessionInfoStore } from "./piSessionInfoStore"
 import { extensionUiStore } from "./extensionUiStore"
 import { extensionTuiStore } from "./extensionTuiStore"
+import { commandFeedbackStore } from "./commandFeedbackStore"
 import { resetWorkspaceResolutionCache } from "./workspaces"
 import { clearAllWorkspaceFileCaches } from "./files"
 import { resetManagementEvents } from "./managementEventStore"
@@ -86,6 +87,7 @@ export function installPiBackendServerSwitch(): void {
     piSessionInfoStore.clear()
     extensionUiStore.reset()
     extensionTuiStore.reset()
+    commandFeedbackStore.reset()
     activeSessionStore.reset()
     resetWorkspaceResolutionCache()
     clearAllWorkspaceFileCaches()

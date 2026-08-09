@@ -2,8 +2,15 @@ import { useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { extensionUiStore } from '../pi/extensionUiStore'
 import { extensionTuiStore } from '../pi/extensionTuiStore'
+import { commandFeedbackStore, type CommandFeedbackEntry, type CommandFeedbackStatus } from '../pi/commandFeedbackStore'
 import { ExtensionUiDialogCard } from '../features/chat/ExtensionUiDialogCard'
 import { ExtensionTuiView } from './ExtensionTuiView'
+
+const feedbackStatusConfig: Record<CommandFeedbackStatus, { label: string; className: string }> = {
+  ok: { label: 'ok', className: 'text-success-100 bg-success-100/10' },
+  error: { label: 'error', className: 'text-danger-100 bg-danger-100/10' },
+  info: { label: 'info', className: 'text-info-100 bg-info-100/10' },
+}
 
 /**
  * Extensions panel — extension UI for the current session: interactive
@@ -23,9 +30,15 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
     extensionTuiStore.getSnapshot,
     extensionTuiStore.getSnapshot,
   )
+  const feedbackSnapshot = useSyncExternalStore(
+    commandFeedbackStore.subscribe,
+    commandFeedbackStore.getSnapshot,
+    commandFeedbackStore.getSnapshot,
+  )
   const state = sessionId ? snapshot.sessions[sessionId]?.state : undefined
   const pending = sessionId ? snapshot.sessions[sessionId]?.pending ?? [] : []
   const panels = sessionId ? tuiSnapshot.sessions[sessionId]?.panels ?? [] : []
+  const feedback = sessionId ? feedbackSnapshot.sessions[sessionId] ?? [] : []
 
   if (!sessionId) {
     return <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('rightPanel.noActiveSession')}</div>
@@ -35,7 +48,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
   const widgets = state ? Object.entries(state.widgets) : []
   const hasWorking = Boolean(state?.workingMessage || state?.workingIndicator || state?.title)
 
-  if (!state && pending.length === 0 && panels.length === 0) {
+  if (!state && pending.length === 0 && panels.length === 0 && feedback.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] px-4 text-center">
         {t('extensionsPanel.empty', 'No extension state')}
@@ -54,6 +67,18 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
           {sortedPending.map(request => (
             <ExtensionUiDialogCard key={request.requestId} request={request} compact />
           ))}
+        </section>
+      )}
+
+      {/* Command feedback log — full detail of every slash command the user ran */}
+      {feedback.length > 0 && (
+        <section>
+          <SectionLabel>{t('extensionsPanel.commandFeedback', 'Command Feedback')}</SectionLabel>
+          <div className="flex flex-col gap-1.5">
+            {feedback.map(entry => (
+              <CommandFeedbackItem key={entry.id} entry={entry} />
+            ))}
+          </div>
         </section>
       )}
 
@@ -119,4 +144,27 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 text-[length:var(--fs-xs)] uppercase tracking-wide text-text-500">{children}</div>
+}
+
+function CommandFeedbackItem({ entry }: { entry: CommandFeedbackEntry }) {
+  const config = feedbackStatusConfig[entry.status]
+  const at = new Date(entry.at)
+  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
+  return (
+    <div className="rounded-md border border-border-200/50 bg-bg-200/30 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[length:var(--fs-xxs)] font-medium ${config.className}`}>
+          {config.label}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-sm)] text-text-100">
+          /{entry.command}
+          {entry.args ? <span className="text-text-400"> {entry.args}</span> : null}
+        </span>
+        <span className="shrink-0 font-mono text-[length:var(--fs-xxs)] text-text-500">{time}</span>
+      </div>
+      <p className="mt-1 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] text-text-200">
+        {entry.message}
+      </p>
+    </div>
+  )
 }

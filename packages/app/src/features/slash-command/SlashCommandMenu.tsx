@@ -52,10 +52,10 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
   const filteredCommands = useMemo(() => {
     if (!isOpen) return []
 
+    // 按命令名过滤（不匹配描述）——输入 /session 时只应出现 /session，
+    // 描述里含 "session" 的 /resume /new /export 等不应混进来。
     const lowerQuery = query.toLowerCase()
-    return commands.filter(
-      cmd => cmd.name.toLowerCase().includes(lowerQuery) || cmd.description?.toLowerCase().includes(lowerQuery),
-    )
+    return commands.filter(cmd => cmd.name.toLowerCase().includes(lowerQuery))
   }, [commands, isOpen, query])
   const commandColumnWidth = useMemo(() => {
     const maxCommandLength = commands.reduce((max, cmd) => Math.max(max, cmd.name.length + 1), 0)

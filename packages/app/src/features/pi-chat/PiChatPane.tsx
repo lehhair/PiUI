@@ -47,11 +47,13 @@ import {
   setPiModel,
   setPiThinkingLevel,
 } from '../../pi/controllers/index.js'
+import { invokePiCommand } from '../../pi/transport/index.js'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
 import { extensionUiStore } from '../../pi/extensionUiStore'
+import { commandFeedbackStore, type CommandFeedbackStatus } from '../../pi/commandFeedbackStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../../pi/workspaces.js'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
@@ -763,32 +765,50 @@ export function PiChatPane({
       const args = spaceIndex > 0 ? withoutSlash.slice(spaceIndex + 1).trim() : ''
       if (!command) return false
 
+      // 命令反馈日志：每个命令的执行结果（完整消息）都进扩展面板的"命令反馈"区，
+      // 通知只是瞬时的缩略提示。
+      const report = (status: CommandFeedbackStatus, message: string, forSession: string | null = sessionId) => {
+        commandFeedbackStore.add({
+          sessionId: forSession ?? sessionId ?? '',
+          command,
+          args: args || undefined,
+          status,
+          message,
+        })
+      }
+
       if (command === 'new') {
+        report('info', 'Started a new session')
         onNewChatRef.current?.()
         return true
       }
 
       if (command === 'settings') {
+        report('info', 'Opened the settings panel')
         onOpenSettings?.()
         return true
       }
 
       if (command === 'hotkeys') {
+        report('info', 'Opened keyboard shortcuts')
         onOpenSettingsTab?.('keybindings')
         return true
       }
 
       if (command === 'changelog') {
+        report('info', 'Opened the changelog (About)')
         onOpenSettingsTab?.('about')
         return true
       }
 
       if (command === 'resume') {
+        report('info', 'Opened the session list — pick a session to resume')
         onOpenSidebar?.()
         return true
       }
 
       if (command === 'model' && !args) {
+        report('info', 'Opened the model selector')
         modelSelectorRef.current?.openMenu()
         return true
       }
@@ -814,6 +834,7 @@ export function PiChatPane({
             const message = typeof details.message === 'string'
               ? details.message
               : skipped ? i18n.t('chat:notification.nothingToCompact') : i18n.t('chat:notification.contextCompacted')
+            report(skipped ? 'info' : 'ok', message, sid)
             notificationStore.push(
               'completed',
               skipped ? i18n.t('chat:notification.compactSkipped') : i18n.t('chat:notification.compactCompleted'),
@@ -828,10 +849,12 @@ export function PiChatPane({
           })
           .catch(error => {
             console.error('Failed to compact session:', error)
+            const message = error instanceof Error ? error.message : String(error)
+            report('error', `Compaction failed: ${message}`, sid)
             notificationStore.push(
               'error',
               i18n.t('chat:notification.compactFailed'),
-              error instanceof Error ? error.message : String(error),
+              message,
               sid,
               currentDirectoryRef.current,
             )
@@ -842,17 +865,21 @@ export function PiChatPane({
       // /bash <command> — 斜杠命令形式的 one-shot bash（pi TUI `!` 前缀的对应物）
       if (command === 'bash') {
         if (!args) {
+          report('error', 'Usage: /bash <command>', sid)
           notificationStore.push('error', '/bash', 'Usage: /bash <command>', sid, currentDirectoryRef.current)
           return true
         }
+        report('ok', `Running: ${args}`, sid)
         const clientId = crypto.randomUUID()
         bashPendingStore.add(sid, clientId, args)
         void executePiBash(sid, args, undefined, clientId).catch(error => {
           console.error('Failed to run bash command:', error)
+          const message = error instanceof Error ? error.message : String(error)
+          report('error', `bash failed: ${message}`, sid)
           notificationStore.push(
             'error',
             '/bash',
-            error instanceof Error ? error.message : String(error),
+            message,
             sid,
             currentDirectoryRef.current,
           )
@@ -863,6 +890,7 @@ export function PiChatPane({
 
       // /share — pi TUI 的 gist 分享依赖本机 gh CLI，Web 客户端暂不提供
       if (command === 'share') {
+        report('info', 'Gist sharing needs the gh CLI on the server host; use /export to save the session instead', sid)
         notificationStore.push(
           'completed',
           '/share',
@@ -876,6 +904,7 @@ export function PiChatPane({
       if (command === 'reload') {
         try {
           await reloadPiSessionResources(sid)
+          report('ok', 'Pi resources reloaded (keybindings, extensions, skills, prompts, themes, context files)', sid)
           notificationStore.push(
             'completed',
             '/reload',
@@ -884,10 +913,12 @@ export function PiChatPane({
             currentDirectoryRef.current,
           )
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          report('error', `Reload failed: ${message}`, sid)
           notificationStore.push(
             'error',
             '/reload',
-            error instanceof Error ? error.message : String(error),
+            message,
             sid,
             currentDirectoryRef.current,
           )
@@ -899,9 +930,11 @@ export function PiChatPane({
         const requested = args.includes(':') ? args : args.split(/\s+/).slice(0, 2).join(':')
         const model = models.find(item => `${item.provider}:${item.id}` === requested)
         if (!model) {
+          report('error', `Unknown model: ${args}`, sid)
           notificationStore.push('error', '/model', `Unknown model: ${args}`, sid, currentDirectoryRef.current)
           return true
         }
+        report('ok', `Switched to ${model.provider}/${model.id}`, sid)
         handleModelChange(requested, model)
         return true
       }
@@ -909,21 +942,25 @@ export function PiChatPane({
       if (command === 'scoped-models') {
         const patterns = args.split(/[\s,]+/).map(value => value.trim()).filter(Boolean)
         if (patterns.length === 0) {
+          report('info', 'Opened scoped-model settings', sid)
           onOpenSettingsTab?.('config')
           return true
         }
         await setPiScopedModels(sid, patterns)
         await refreshPiSessionState(sid)
+        report('ok', `Scoped models: ${patterns.join(', ')}`, sid)
         return true
       }
 
       if (command === 'name') {
         if (!args) {
           const currentName = state?.sessionName
+          report('info', typeof currentName === 'string' && currentName ? `Current name: ${currentName}` : 'Session has no name', sid)
           notificationStore.push('completed', '/name', typeof currentName === 'string' && currentName ? currentName : 'Session has no name', sid, currentDirectoryRef.current)
           return true
         }
         await renamePiSession(sid, args)
+        report('ok', `Renamed session to "${args}"`, sid)
         return true
       }
 
@@ -931,10 +968,12 @@ export function PiChatPane({
         const lastAssistant = [...items].reverse().find(item => item.kind === 'assistant_message')
         const text = lastAssistant ? textFromTimelineItem(lastAssistant) : ''
         if (!text) {
+          report('error', 'No AI response to copy', sid)
           notificationStore.push('error', '/copy', 'No AI response to copy', sid, currentDirectoryRef.current)
           return true
         }
         await copyTextToClipboard(text)
+        report('ok', 'Copied the last AI response to the clipboard', sid)
         notificationStore.push('completed', '/copy', 'AI response copied', sid, currentDirectoryRef.current)
         return true
       }
@@ -942,6 +981,7 @@ export function PiChatPane({
       if (command === 'clone') {
         const result = await newPiSessionFrom(sid)
         if (result.targetSessionId) {
+          report('ok', `Cloned into a new session ${result.targetSessionId}`, sid)
           onEnterSessionRef.current?.(result.targetSessionId, result.targetCwd ?? currentDirectoryRef.current ?? '')
         }
         return true
@@ -950,16 +990,19 @@ export function PiChatPane({
       if (command === 'fork') {
         const target = args || [...items].reverse().find(item => item.kind === 'user_message')?.entryId
         if (!target) {
+          report('error', 'No user message to fork from', sid)
           notificationStore.push('error', '/fork', 'No user message to fork from', sid, currentDirectoryRef.current)
           return true
         }
         await handleFork(target)
+        report('ok', `Forked from entry ${target}`, sid)
         return true
       }
 
       if (command === 'trust') {
         const decision = args.toLowerCase()
         if (!decision) {
+          report('info', 'Opened project trust settings', sid)
           onOpenSettingsTab?.('config')
           return true
         }
@@ -971,33 +1014,42 @@ export function PiChatPane({
               ? null
               : undefined
         if (value === undefined) {
+          report('error', 'Use yes, no, or reset', sid)
           notificationStore.push('error', '/trust', 'Use yes, no, or reset', sid, currentDirectoryRef.current)
           return true
         }
         const cwd = currentDirectoryRef.current
         if (!cwd) {
+          report('error', 'Open a project before changing trust', sid)
           notificationStore.push('error', '/trust', 'Open a project before changing trust', sid, currentDirectoryRef.current)
           return true
         }
         await setPiProjectTrust(cwd, value)
+        report('ok', `Project trust set to ${value === null ? 'ask' : value ? 'trusted' : 'denied'}: ${cwd}`, sid)
         return true
       }
 
       if (command === 'logout') {
         if (!args) {
+          report('info', 'Opened provider settings', sid)
           onOpenSettingsTab?.('config')
           return true
         }
-        await logoutPiProvider(args.split(/\s+/)[0]!)
+        const provider = args.split(/\s+/)[0]!
+        await logoutPiProvider(provider)
+        report('ok', `Logged out of ${provider}`, sid)
         return true
       }
 
       if (command === 'login') {
         if (!args) {
+          report('info', 'Opened provider settings', sid)
           onOpenSettings?.()
           return true
         }
-        await startPiProviderAuth(args.split(/\s+/)[0]!)
+        const provider = args.split(/\s+/)[0]!
+        await startPiProviderAuth(provider)
+        report('ok', `Started login flow for ${provider}`, sid)
         return true
       }
 
@@ -1005,23 +1057,27 @@ export function PiChatPane({
         const outputPath = args || `${(currentDirectoryRef.current || '.').replace(/[\\/]+$/, '')}/pi-session.html`
         const format = outputPath.toLowerCase().endsWith('.jsonl') ? 'jsonl' : 'html'
         await exportPiSession(sid, format, outputPath)
+        report('ok', `Exported session (${format}) to ${outputPath}`, sid)
         notificationStore.push('completed', '/export', outputPath, sid, currentDirectoryRef.current)
         return true
       }
 
       if (command === 'import') {
         if (!args) {
+          report('error', 'Provide a session JSONL path', sid)
           notificationStore.push('error', '/import', 'Provide a session JSONL path', sid, currentDirectoryRef.current)
           return true
         }
         const result = await importPiSession(sid, args)
         if (result.targetSessionId) {
+          report('ok', `Imported session ${result.targetSessionId} from ${args}`, sid)
           onEnterSessionRef.current?.(result.targetSessionId, result.targetCwd ?? currentDirectoryRef.current ?? '')
         }
         return true
       }
 
       if (command === 'tree') {
+        report('info', 'Opened the session tree panel')
         onToggleRightPanel?.()
         return true
       }
@@ -1029,32 +1085,49 @@ export function PiChatPane({
       if (command === 'session') {
         const model = state?.model as { provider?: string; id?: string } | undefined
         const stats = state?.sessionStats as { totalMessages?: number; userMessages?: number; assistantMessages?: number; toolCalls?: number } | undefined
-        notificationStore.push(
-          'completed',
-          '/session',
-          [
-            typeof state?.sessionName === 'string' && state.sessionName ? state.sessionName : sid,
-            model?.provider && model.id ? `${model.provider}/${model.id}` : undefined,
-            stats ? `${stats.totalMessages ?? 0} messages · ${stats.userMessages ?? 0} user · ${stats.assistantMessages ?? 0} assistant · ${stats.toolCalls ?? 0} tool calls` : undefined,
-          ].filter(Boolean).join(' · '),
-          sid,
-          currentDirectoryRef.current,
-        )
+        const summary = [
+          typeof state?.sessionName === 'string' && state.sessionName ? state.sessionName : sid,
+          model?.provider && model.id ? `${model.provider}/${model.id}` : undefined,
+          stats ? `${stats.totalMessages ?? 0} messages · ${stats.userMessages ?? 0} user · ${stats.assistantMessages ?? 0} assistant · ${stats.toolCalls ?? 0} tool calls` : undefined,
+        ].filter(Boolean).join(' · ')
+        report('ok', summary, sid)
+        notificationStore.push('completed', '/session', summary, sid, currentDirectoryRef.current)
         return true
       }
 
       if (command === 'quit') {
+        report('info', 'The web app stays open; close its window to exit', sid)
         notificationStore.push('completed', '/quit', 'The web app stays open; close its window to exit', sid, currentDirectoryRef.current)
         return true
       }
 
       const registry = await loadPiSessionRegistry(sid)
-      const builtin = registry?.commands.find(item => item.name === command && item.sourceInfo && typeof item.sourceInfo === 'object' && !Array.isArray(item.sourceInfo) && item.sourceInfo.builtin === true)
-      if (builtin) {
+      const registered = registry?.commands.find(item => item.name === command)
+      const sourceInfo = registered?.sourceInfo
+      const isBuiltin = Boolean(sourceInfo && typeof sourceInfo === 'object' && !Array.isArray(sourceInfo) && sourceInfo.builtin === true)
+      if (isBuiltin) {
+        report('error', 'This Pi command needs a GUI interaction that is not available here yet', sid)
         notificationStore.push('error', `/${command}`, 'This Pi command needs a GUI interaction that is not available here yet', sid, currentDirectoryRef.current)
         return true
       }
 
+      // 扩展命令（如 /exa /ui-test-*）：真正调用扩展注册的 handler，而不是
+      // 当普通消息发给模型（那只会让模型回答一段"这不是命令"的废话）。
+      if (registered) {
+        report('ok', `Invoking extension command /${command}${args ? ` ${args}` : ''}`, sid)
+        try {
+          const result = await invokePiCommand(sid, command, args)
+          const summary = typeof result === 'string' && result ? result : ''
+          if (summary) report('ok', summary, sid)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          report('error', `/${command} failed: ${message}`, sid)
+        }
+        scheduleDelayedRefresh(sid)
+        return true
+      }
+
+      report('info', `Sent "${trimmed}" to the model (not a known command)`, sid)
       void sendPiPrompt(sid, trimmed, {
         streamingBehavior: isStreaming ? 'followUp' : undefined,
       }).catch(error => {

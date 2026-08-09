@@ -529,6 +529,11 @@ export function sendExtensionTuiRedraw(sessionId: string, signal?: AbortSignal):
   return postPiSessionCommand(sessionId, 'extensionUi.tuiRedraw', undefined, signal)
 }
 
+/** Invoke a registered Pi slash command by name (extension commands). */
+export function invokePiCommand(sessionId: string, name: string, args = '', signal?: AbortSignal): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'invokeCommand', { name, args }, signal)
+}
+
 export type PiForkResult = {
   operation?: string
   sourceSessionId?: string
