@@ -127,4 +127,25 @@ describe('SlashCommandMenu', () => {
       expect(names).toContain(builtin)
     }
   })
+
+  it('filters by command name only, not description', async () => {
+    render(
+      <div>
+        <SlashCommandMenu isOpen={true} query="session" onSelect={vi.fn()} onClose={vi.fn()} />
+      </div>,
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(32)
+      await Promise.resolve()
+    })
+
+    // /session 名字精确匹配
+    expect(screen.getByText('/session')).toBeInTheDocument()
+    // 描述里含 "session" 的 /resume /new /export /import 不应出现
+    expect(screen.queryByText('/resume')).not.toBeInTheDocument()
+    expect(screen.queryByText('/new')).not.toBeInTheDocument()
+    expect(screen.queryByText('/export')).not.toBeInTheDocument()
+    expect(screen.queryByText('/import')).not.toBeInTheDocument()
+  })
 })
