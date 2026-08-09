@@ -4,6 +4,32 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.0] - 2026-08-09
+
+- fix(desktop): strip the system title bar on Windows without decorum button injection (76cb2129)
+- fix(desktop): replace decorum-injected window controls with React buttons (20b3ff5f)
+- fix(desktop): run open_new_window on the async runtime to stop the UI freeze (b6447b6b)
+- style(ui): align the sidebar logo center with the nav button icons (982fbf69)
+- chore(sdk): upgrade the bundled Pi SDK to 0.84.1 (a154628e)
+- fix(icons): shrink the Android adaptive foreground so the mark survives circular masking (1d217f3b)
+- style(ui): shrink the header Pi mark to match the glyph's visual weight (f21d384d)
+- feat(ui): replace the header pi-glyph with the official Pi mark (85d496bf)
+- chore(icons): use the official Pi logo as the app icon (c8c846ce)
+- style(compact): compacting indicator matches the 'history compressed' divider (208893c1)
+- fix(compact): drive the compacting row/button from the activity push, not state polling (534d1897)
+- feat(compact): in-flow compacting row + send button turns into a stop button (1b686bbe)
+- fix(compact): show compaction in the chat flow and mark the session working (104100cb)
+- feat(compact): show a compacting banner with cancel, and stop the 30s false timeout (0160eef3)
+- fix(commands): /tree jumps to the session tree tab instead of toggling the panel (f28ca0bd)
+- feat(extension): auto-open extension panel on command + clear feedback log (e9c3beb1)
+- fix(outline): keep highlight on the current section and make clicks work while streaming (0ff6c040)
+- fix(branch): keep pagination cursors valid across worker restarts (992ecd20)
+- fix(extension): surface ctx.ui.notify output in the command feedback log (e8de8b03)
+- fix(commands): execute extension commands, log feedback, and filter the slash menu (90034b8b)
+- feat(extension): mirror the Pi TUI into the sidebar extension panel (77cf60aa)
+- fix(files): stop directory browsing from freezing the server (35265f2c)
+- fix(markdown): keep single-tilde ranges literal and render \(...\)/\[...\] math (52a28e93)
+
 ## [v0.3.0] - 2026-08-08
 
 - feat: pi TUI parity for slash commands and user bash execution (7bbd9df5)
