@@ -55,3 +55,41 @@ function readTokenFile(file: string): string | undefined {
     throw error
   }
 }
+
+export function cursorSecretPath(): string {
+  return path.join(piuiDataDir(), "cursor-secret")
+}
+
+/**
+ * 分页光标的 HMAC 密钥，持久化到磁盘并在启动时注入 worker 环境。
+ * worker 进程重启（空闲回收后重新 attach 会话）会重新生成各自的随机密钥，
+ * 导致客户端旧光标全部 400（invalid pagination cursor）。持久化密钥让
+ * 光标跨 worker 重启仍然有效。删除文件即可轮换。
+ */
+export function resolveCursorSecret(): string {
+  const fromEnv = process.env.PIUI_CURSOR_SECRET?.trim()
+  if (fromEnv) return fromEnv
+
+  const file = cursorSecretPath()
+  const existing = readTokenFile(file)
+  if (existing) return existing
+
+  const secret = randomBytes(32).toString("base64url")
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  try {
+    // Exclusive create, so two servers starting together cannot each believe
+    // they own a different secret.
+    writeFileSync(file, `${secret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    return secret
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    return readTokenFile(file) ?? secret
+  }
+}
+
+/** 确保光标密钥已注入环境——必须在任何 worker spawn 之前调用。 */
+export function ensureCursorSecretEnv(): string {
+  const secret = resolveCursorSecret()
+  process.env.PIUI_CURSOR_SECRET = secret
+  return secret
+}
