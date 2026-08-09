@@ -1409,6 +1409,7 @@ export function PiChatPane({
             sessionId={sessionId}
             isStreaming={isStreaming}
             isCompacting={compacting}
+            allowStreamingLayoutAnimation
             loadState="loaded"
             hasMoreHistory={Boolean(branch?.hasMore)}
             onLoadMore={handleLoadMore}
