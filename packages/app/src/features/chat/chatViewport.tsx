@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- exports viewport helpers, hooks, and provider */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { themeStore } from '../../store/themeStore'
 
@@ -256,8 +257,59 @@ function computeChatViewport(input: ComputedViewportInput): Omit<ChatViewportVal
 
 const ChatViewportContext = createContext<ChatViewportValue | null>(null)
 
+/**
+ * Viewport 快照 store：Provider 渲染期间同步写引用，供 useChatViewportSelect
+ * 做选择器订阅（对齐 reference 的 useSyncExternalStoreWithSelector）。宽度/布局
+ * 变化时只有真正依赖了变化字段的消费者重渲染：ChatArea 只订阅离散的
+ * isCompact，宽度连续变化时该值不变 → 不重渲染，只剩浏览器原生 reflow。
+ */
+let viewportSnapshot: ChatViewportValue | null = null
+const viewportListeners = new Set<() => void>()
+
+function subscribeViewport(listener: () => void): () => void {
+  viewportListeners.add(listener)
+  return () => viewportListeners.delete(listener)
+}
+
+function getViewportSnapshot(): ChatViewportValue | null {
+  return viewportSnapshot
+}
+
 export function ChatViewportProvider({ value, children }: { value: ChatViewportValue; children: ReactNode }) {
+  // 快照写入放到 effect（React 规则：渲染期间不得写外部变量）。
+  // 选择器 hook 在首次渲染回退到 Context value，effect 后快照就绪。
+  useEffect(() => {
+    viewportSnapshot = value
+    for (const listener of viewportListeners) listener()
+  }, [value])
   return <ChatViewportContext.Provider value={value}>{children}</ChatViewportContext.Provider>
+}
+
+/**
+ * 选择器版 viewport 订阅：只订阅 selector 结果，引用没变（默认 Object.is）
+ * 不重渲染。store 通知时若 selector 结果引用未变（宽度变化但 isCompact
+ * 等离散字段不变），返回缓存值 → 组件不重渲染。
+ *
+ * 首次渲染：快照 store 由 Provider 的 effect 写入，首帧可能尚未就绪，
+ * 用 Context value 兜底（同一 Provider 已提供，值一致）。
+ */
+export function useChatViewportSelect<S>(
+  selector: (value: ChatViewportValue) => S,
+  isEqual: (a: S, b: S) => boolean = Object.is,
+): S {
+  const contextValue = useContext(ChatViewportContext)
+  const initialRef = useRef<ChatViewportValue | null>(null)
+  if (initialRef.current === null && contextValue) initialRef.current = contextValue
+  const getSnapshot = useCallback((): ChatViewportValue => {
+    const snapshot = getViewportSnapshot() ?? initialRef.current
+    if (snapshot === null) {
+      // 理论上不可能：Provider 渲染先于子组件，initialRef 必已设置。
+      // 防御性返回一个空快照，避免类型/运行时崩溃。
+      throw new Error('useChatViewportSelect used outside ChatViewportProvider')
+    }
+    return snapshot
+  }, [])
+  return useSyncExternalStoreWithSelector(subscribeViewport, getSnapshot, getSnapshot, selector, isEqual)
 }
 
 export function useChatViewport() {

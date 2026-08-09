@@ -29,7 +29,7 @@ import {
 } from './input/inputUtils'
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
-import { useChatViewport } from './chatViewport'
+import { useChatViewportSelect } from './chatViewport'
 import type { Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../types/ui'
 
@@ -275,8 +275,10 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const dragCounterRef = useRef(0)
   const lastTauriDropAtRef = useRef(0)
 
-  const { presentation, interaction } = useChatViewport()
-  const isCompact = presentation.isCompact
+  const { isCompact, enableCollapsedDock } = useChatViewportSelect(
+    value => ({ isCompact: value.presentation.isCompact, enableCollapsedDock: value.interaction.enableCollapsedInputDock }),
+    (a, b) => a.isCompact === b.isCompact && a.enableCollapsedDock === b.enableCollapsedDock,
+  )
 
   // Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -317,7 +319,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const hasContent = text.trim().length > 0 || attachments.length > 0
   const { isCollapsed, expandedHeight, handleExpandInput, handleFocus, handleBlur, handleContainerPointerDown } =
     useMobileCollapse({
-      enabled: interaction.enableCollapsedInputDock,
+      enabled: enableCollapsedDock,
       hasContent,
       isAtBottom,
       textareaRef,

@@ -35,7 +35,11 @@ vi.mock('./chatViewport', () => ({
       enableCollapsedInputDock: false,
     },
   }),
-}))
+  useChatViewportSelect: <S,>(selector: (value: any) => S) =>
+    selector({
+      presentation: { surfaceVariant: 'desktop', isCompact: false },
+      interaction: { mode: 'pointer', touchCapable: false, sidebarBehavior: 'docked', rightPanelBehavior: 'docked', bottomPanelBehavior: 'docked', outlineInteraction: 'pointer', enableCollapsedInputDock: false },
+    }),}))
 
 vi.mock('../mention', () => ({
   MentionMenu: () => null,

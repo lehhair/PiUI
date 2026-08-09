@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, SendIcon, StopIcon, PaperclipIcon, ThinkingIcon } from '../../../components/Icons'
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
-import { useChatViewport } from '../chatViewport'
+import { useChatViewportSelect } from '../chatViewport'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
 import type { Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../../types/ui'
@@ -65,8 +65,7 @@ export function InputToolbar({
   modelSelectorRef,
 }: InputToolbarProps) {
   const { t } = useTranslation(['chat', 'common'])
-  const { presentation } = useChatViewport()
-  const isCompact = presentation.isCompact
+  const isCompact = useChatViewportSelect(value => value.presentation.isCompact)
   const useBrowserFileInput = !isTauri() || isTauriMobile()
 
   // 根据模型能力计算支持的文件类型
