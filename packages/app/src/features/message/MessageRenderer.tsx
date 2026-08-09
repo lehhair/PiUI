@@ -17,6 +17,7 @@ import {
 import { PiSystemItemView } from './parts/PiSystemItemViews'
 import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
+import { perfRecordRender, isPerfEnabled } from '../../utils/perf'
 import type { MessageError } from '../../types/message'
 import type {
   PiAssistantMessageItem,
@@ -627,6 +628,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
   processContentScope?: ProcessContentScope
   forkMessageId?: string
 }) {
+  const renderStart = isPerfEnabled() ? performance.now() : 0
   const { t } = useTranslation('message')
   const isStreaming = Boolean(item.isStreaming)
   const { message, blocks } = item
@@ -714,6 +716,10 @@ const AssistantMessageView = memo(function AssistantMessageView({
   // process/final 拆完后可能为空
   if (renderItems.length === 0 && processContentScope !== 'all' && processContentScope !== 'inline') {
     return null
+  }
+
+  if (isPerfEnabled()) {
+    perfRecordRender('AssistantMessageView', performance.now() - renderStart)
   }
 
   return (
