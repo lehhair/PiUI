@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { createAppServer, type AppServer } from "./http.ts"
+import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 
 // 测试进程的 session 租约目录放进独立临时目录，跑完即删，
 // 不污染默认的 piui-session-leases 命名空间。
@@ -293,7 +294,7 @@ describe("http api", () => {
 
     const health = await request(port, "GET", "/api/v1/host/health", { token: "test-token" })
     assert.equal(health.status, 200)
-    assert.equal(health.json.piSdkVersion, "0.84.0")
+    assert.equal(health.json.piSdkVersion, PI_PARITY_SDK_VERSION)
     assert.equal(health.json.piSdkVerified, undefined)
     assert.equal(health.json.piSdkFallback, null)
   })
