@@ -186,6 +186,8 @@ export interface ThemeState {
   externalFileDropMode: ExternalFileDropMode
   /** 是否在对话历史导航中高亮当前对话位置 */
   outlineCurrentHighlight: boolean
+  /** 斜杠命令执行后自动展开右侧扩展面板（命令反馈区） */
+  autoExpandExtensionsOnCommand: boolean
   /** 连续助手消息时，仅在回合末尾显示分叉/复制按钮 */
   actionsOnLatestAssistantOnly: boolean
   /** 桌面端是否启用输入框上滚收起为胶囊 */
@@ -252,6 +254,7 @@ const STORAGE_KEY_GLASS_EFFECT = 'piui-glass-effect'
 const STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES = 'piui-queue-followup-messages'
 const STORAGE_KEY_EXTERNAL_FILE_DROP_MODE = 'piui-external-file-drop-mode'
 const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'piui-outline-current-highlight'
+const STORAGE_KEY_AUTO_EXPAND_EXTENSIONS = 'piui-auto-expand-extensions-on-command'
 const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'piui-actions-on-latest-assistant-only'
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'piui-desktop-collapsed-input-dock'
 const STORAGE_KEY_MANUAL_TERMINAL_TITLES = 'piui-manual-terminal-titles'
@@ -374,6 +377,10 @@ class ThemeStore {
         ? DEFAULT_OUTLINE_CURRENT_HIGHLIGHT
         : savedOutlineCurrentHighlight === 'true'
 
+    const savedAutoExpandExtensions = storageGet(STORAGE_KEY_AUTO_EXPAND_EXTENSIONS)
+    const autoExpandExtensionsOnCommand =
+      savedAutoExpandExtensions === null ? true : savedAutoExpandExtensions === 'true'
+
     const savedActionsOnLatestAssistantOnly = storageGet(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY)
     const actionsOnLatestAssistantOnly =
       savedActionsOnLatestAssistantOnly === null
@@ -427,6 +434,7 @@ class ThemeStore {
       queueFollowupMessages,
       externalFileDropMode,
       outlineCurrentHighlight,
+      autoExpandExtensionsOnCommand,
       actionsOnLatestAssistantOnly,
       desktopCollapsedInputDock,
       processCollapseEnabled,
@@ -510,6 +518,10 @@ class ThemeStore {
   }
   get outlineCurrentHighlight() {
     return this.state.outlineCurrentHighlight
+  }
+
+  get autoExpandExtensionsOnCommand() {
+    return this.state.autoExpandExtensionsOnCommand
   }
 
   get actionsOnLatestAssistantOnly() {
@@ -794,6 +806,13 @@ class ThemeStore {
     this.emit()
   }
 
+  setAutoExpandExtensionsOnCommand(enabled: boolean) {
+    if (this.state.autoExpandExtensionsOnCommand === enabled) return
+    this.state = { ...this.state, autoExpandExtensionsOnCommand: enabled }
+    storageSet(STORAGE_KEY_AUTO_EXPAND_EXTENSIONS, String(enabled))
+    this.emit()
+  }
+
   setActionsOnLatestAssistantOnly(enabled: boolean) {
     if (this.state.actionsOnLatestAssistantOnly === enabled) return
     this.state = { ...this.state, actionsOnLatestAssistantOnly: enabled }
@@ -1069,6 +1088,10 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.outlineCurrentHighlight === 'boolean'
         ? parsed.outlineCurrentHighlight
         : DEFAULT_OUTLINE_CURRENT_HIGHLIGHT,
+    autoExpandExtensionsOnCommand:
+      typeof parsed?.autoExpandExtensionsOnCommand === 'boolean'
+        ? parsed.autoExpandExtensionsOnCommand
+        : true,
     actionsOnLatestAssistantOnly:
       typeof parsed?.actionsOnLatestAssistantOnly === 'boolean'
         ? parsed.actionsOnLatestAssistantOnly
@@ -1129,6 +1152,7 @@ export function importThemeBackup(raw: unknown): void {
   storageSet(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
   storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
   storageSet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
+  storageSet(STORAGE_KEY_AUTO_EXPAND_EXTENSIONS, String(backup.autoExpandExtensionsOnCommand))
   storageSet(
     STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY,
     String(backup.actionsOnLatestAssistantOnly),

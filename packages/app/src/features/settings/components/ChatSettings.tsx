@@ -28,6 +28,8 @@ export function ChatSettings() {
     setOutlineCurrentHighlight,
     actionsOnLatestAssistantOnly,
     setActionsOnLatestAssistantOnly,
+    autoExpandExtensionsOnCommand,
+    setAutoExpandExtensionsOnCommand,
     desktopCollapsedInputDock,
     setDesktopCollapsedInputDock,
     renderUserMarkdown,
@@ -115,6 +117,17 @@ export function ChatSettings() {
           <Toggle
             enabled={outlineCurrentHighlight}
             onChange={() => setOutlineCurrentHighlight(!outlineCurrentHighlight)}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.autoExpandExtensionsOnCommand')}
+          description={t('chat.autoExpandExtensionsOnCommandDesc')}
+          onClick={() => setAutoExpandExtensionsOnCommand(!autoExpandExtensionsOnCommand)}
+        >
+          <Toggle
+            enabled={autoExpandExtensionsOnCommand}
+            onChange={() => setAutoExpandExtensionsOnCommand(!autoExpandExtensionsOnCommand)}
           />
         </SettingRow>
 

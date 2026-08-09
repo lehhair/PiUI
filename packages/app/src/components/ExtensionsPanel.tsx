@@ -73,7 +73,16 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
       {/* Command feedback log — full detail of every slash command the user ran */}
       {feedback.length > 0 && (
         <section>
-          <SectionLabel>{t('extensionsPanel.commandFeedback', 'Command Feedback')}</SectionLabel>
+          <div className="mb-1.5 flex items-center justify-between">
+            <SectionLabel>{t('extensionsPanel.commandFeedback', 'Command Feedback')}</SectionLabel>
+            <button
+              type="button"
+              onClick={() => commandFeedbackStore.remove(sessionId)}
+              className="shrink-0 rounded px-1.5 py-0.5 text-[length:var(--fs-xxs)] text-text-500 hover:text-danger-100 hover:bg-bg-200/60 transition-colors"
+            >
+              {t('extensionsPanel.clear', 'Clear')}
+            </button>
+          </div>
           <div className="flex flex-col gap-1.5">
             {feedback.map(entry => (
               <CommandFeedbackItem key={entry.id} entry={entry} />

@@ -158,7 +158,9 @@
     "completedAtFormat": "完成时刻格式",
     "completedAtFormatDesc": "选择只显示时间，或显示完整日期和时间",
     "completedAtTimeOnly": "仅时间",
-    "completedAtDateTime": "日期时间"
+    "completedAtDateTime": "日期时间",
+    "autoExpandExtensionsOnCommand": "命令后自动展开扩展面板",
+    "autoExpandExtensionsOnCommandDesc": "执行斜杠命令后自动打开右侧扩展面板，方便查看命令反馈日志"
   },
   "agent": {
     "behavior": "Agent 行为",

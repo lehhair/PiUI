@@ -331,6 +331,12 @@ export function useTheme() {
     outlineCurrentHighlight: state.outlineCurrentHighlight,
     setOutlineCurrentHighlight,
 
+    // 斜杠命令执行后自动展开右侧扩展面板
+    autoExpandExtensionsOnCommand: state.autoExpandExtensionsOnCommand,
+    setAutoExpandExtensionsOnCommand: useCallback((enabled: boolean) => {
+      themeStore.setAutoExpandExtensionsOnCommand(enabled)
+    }, []),
+
     // 连续助手消息仅在末尾显示分叉/复制
     actionsOnLatestAssistantOnly: state.actionsOnLatestAssistantOnly,
     setActionsOnLatestAssistantOnly,
