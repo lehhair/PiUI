@@ -176,8 +176,6 @@ export const InputFooter = memo(function InputFooter({
       className="relative flex h-full w-full items-center justify-center gap-2 text-[length:var(--fs-xs)] leading-none text-text-500"
       ref={popoverRef}
     >
-      <span className="text-text-500/30 shrink-0">·</span>
-
       {/* disclaimer / todos */}
       {!hasTodos ? (
         <button onClick={onNewChat} className="hover:text-text-300 transition-colors">

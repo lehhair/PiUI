@@ -22,6 +22,7 @@ import {
   isModelPinned,
   toggleModelPin,
 } from '../../utils/modelUtils'
+import { useHiddenModelKeys } from '../../store/modelVisibilityStore'
 
 // ============================================
 // Public types
@@ -60,6 +61,7 @@ type FlatListItem =
 function useFlatList(
   models: ModelInfo[],
   filteredModels: ModelInfo[],
+  hiddenKeys: Set<string>,
   searchQuery: string,
   refreshTrigger: number,
   t: (key: string) => string,
@@ -67,9 +69,10 @@ function useFlatList(
   return useMemo(() => {
     void refreshTrigger
 
+    const visible = (model: ModelInfo) => !hiddenKeys.has(getModelKey(model))
     const groups = groupModelsByProvider(filteredModels)
-    const recent = searchQuery ? [] : getRecentModels(models, 5)
-    const pinned = searchQuery ? [] : getPinnedModels(models)
+    const recent = searchQuery ? [] : getRecentModels(models, 5).filter(visible)
+    const pinned = searchQuery ? [] : getPinnedModels(models).filter(visible)
 
     const flat: FlatListItem[] = []
     const addedKeys = new Set<string>()
@@ -96,7 +99,7 @@ function useFlatList(
     }
 
     groups.forEach(g => {
-      const groupModels = g.models.filter(m => !addedKeys.has(getModelKey(m)))
+      const groupModels = g.models.filter(m => !addedKeys.has(getModelKey(m)) && visible(m))
       if (groupModels.length > 0) {
         flat.push({ type: 'header', data: { name: g.providerName }, key: `header-${g.providerId}` })
         groupModels.forEach(m => flat.push({ type: 'item', data: m, key: getModelKey(m) }))
@@ -104,7 +107,7 @@ function useFlatList(
     })
 
     return flat
-  }, [filteredModels, models, searchQuery, refreshTrigger, t])
+  }, [filteredModels, models, hiddenKeys, searchQuery, refreshTrigger, t])
 }
 
 // ============================================
@@ -379,19 +382,23 @@ export const ModelSelector = memo(
 
     // ---- Derived data ----
 
+    const hiddenModelKeys = useHiddenModelKeys()
+    const hiddenModelKeySet = useMemo(() => new Set(hiddenModelKeys), [hiddenModelKeys])
+
     const filteredModels = useMemo(() => {
-      if (!searchQuery.trim()) return models
+      const visibleModels = models.filter(m => !hiddenModelKeySet.has(getModelKey(m)))
+      if (!searchQuery.trim()) return visibleModels
       const query = searchQuery.toLowerCase()
       const normalize = (value: unknown) => (typeof value === 'string' ? value : '').toLowerCase()
-      return models.filter(
+      return visibleModels.filter(
         m =>
           normalize(m.name).includes(query) ||
           normalize(m.id).includes(query) ||
           normalize(m.provider).includes(query),
       )
-    }, [models, searchQuery])
+    }, [models, searchQuery, hiddenModelKeySet])
 
-    const flatList = useFlatList(models, filteredModels, searchQuery, refreshTrigger, t)
+    const flatList = useFlatList(models, filteredModels, hiddenModelKeySet, searchQuery, refreshTrigger, t)
 
     const itemIndices = useMemo(() => {
       return flatList.map((item, index) => (item.type === 'item' ? index : -1)).filter(i => i !== -1)
