@@ -25,8 +25,7 @@ import {
   assistantHasProcessContent,
 } from '../message'
 import { MessageErrorView } from '../message/parts'
-import { CloseIcon, SpinnerIcon } from '../../components/Icons'
-import { abortPiCompaction } from '../../pi/controllers/index.js'
+import { SpinnerIcon } from '../../components/Icons'
 import type { MessageError } from '../../types/message'
 import type { PiTimelineItem } from '../../pi/domain/index.js'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
@@ -1038,23 +1037,17 @@ export const ChatArea = memo(
               </div>
             )}
 
-            {/* 压缩进行中：消息流底部的行内指示（压缩条目要等完成后才进时间线，
-                这里给一个 TUI 状态条对应物）+ 取消 */}
+            {/* 压缩进行中：消息流底部的行内指示——沿用"历史已压缩"分隔线视觉
+                （居中标签 + 两侧细线），中间换成 spinner；取消走输入框停止按钮 */}
             {isCompacting && sessionId && (
               <div className={`w-full ${maxWidthClass} mx-auto ${paddingClass}`}>
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-lg border border-border-200/60 bg-bg-200/40 px-3 py-2 text-[length:var(--fs-sm)] text-text-200">
-                    <SpinnerIcon className="shrink-0 animate-spin text-accent-main-100" size={14} />
-                    <span className="min-w-0 flex-1 truncate">{t('chatArea.compacting')}</span>
-                    <button
-                      type="button"
-                      onClick={() => void abortPiCompaction(sessionId).catch(() => undefined)}
-                      className="shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[length:var(--fs-xxs)] text-text-400 hover:text-danger-100 hover:bg-bg-200/60 transition-colors"
-                    >
-                      <CloseIcon size={12} />
-                      {t('chatArea.compactingCancel')}
-                    </button>
-                  </div>
+                <div className="flex w-full items-center gap-2 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-500">
+                  <span className="flex-1 h-px bg-border-200/70" />
+                  <span className="shrink-0 inline-flex items-center gap-1.5 text-[length:var(--fs-xs)] leading-none text-text-400">
+                    <SpinnerIcon className="animate-spin" size={12} />
+                    {t('chatArea.compacting')}
+                  </span>
+                  <span className="flex-1 h-px bg-border-200/70" />
                 </div>
               </div>
             )}
