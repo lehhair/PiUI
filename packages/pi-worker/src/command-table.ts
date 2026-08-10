@@ -4,6 +4,7 @@ import * as P from "./params.js"
 
 export interface ProviderAuthGateway {
   listProviders(): Promise<JsonValue>
+  listActiveFlows(): JsonValue
   listModels(): Promise<JsonValue>
   start(providerId: string, authType: "api_key" | "oauth"): Promise<JsonValue>
   respond(flowId: string, promptId: string, value: string): void
@@ -223,6 +224,7 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
   },
 
   "providers.list": async (ctx) => ctx.auth.listProviders(),
+  "providers.activeFlows": async (ctx) => ctx.auth.listActiveFlows(),
   "providers.startAuth": async (ctx, p) =>
     ctx.auth.start(P.reqString(p, "providerId"), P.optEnum(p, "authType", ["api_key", "oauth"] as const) ?? "api_key"),
   "providers.respondAuth": async (ctx, p) => {

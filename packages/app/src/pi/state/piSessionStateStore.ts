@@ -1,5 +1,6 @@
 import type { ExtensionUiDialogRequest, ExtensionUiStatePatch, JsonObject } from '@piui/protocol'
 import { extensionUiStore } from '../extensionUiStore'
+import { extensionTuiStore } from '../extensionTuiStore'
 import { activeSessionStore } from '../../store/activeSessionStore'
 
 interface StateEntry {
@@ -109,6 +110,17 @@ class PiSessionStateStore {
         editorText: typeof mirror.editorText === 'string' ? mirror.editorText : '',
         toolsExpanded: mirror.toolsExpanded === true,
       })
+    }
+    // offscreen 扩展 TUI 面板：组件在 worker 侧仍挂着，用全量快照替换恢复
+    //（之后的新 attach/detach 实时事件继续增量修正），ExtensionTuiView
+    // 挂载时自动请求一次全量重绘取回画面。
+    const tuiPanels = state.extensionTuiPanels
+    if (Array.isArray(tuiPanels)) {
+      const attaches = tuiPanels.filter(raw => {
+        const attach = raw as { key?: unknown; kind?: unknown } | null
+        return attach !== null && typeof attach === 'object' && typeof attach.key === 'string' && typeof attach.kind === 'string'
+      }) as never[]
+      extensionTuiStore.replacePanels(sessionId, attaches)
     }
   }
 }

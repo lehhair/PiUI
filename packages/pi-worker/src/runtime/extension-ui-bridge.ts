@@ -41,6 +41,8 @@ export class ExtensionUiBridge {
   private readonly listeners = new Set<(event: PiExtensionUiEvent) => void>()
   private editorText = ""
   private toolsExpanded = false
+  /** 当前挂载的 offscreen TUI 面板（key → attach），刷新/重连恢复用。 */
+  private readonly tuiPanels = new Map<string, ExtensionTuiAttach>()
   /**
    * 状态镜像：状态 patch 的追加式记录，供客户端刷新/重连后重建 status /
    * widget / working 指示等增量状态（这些值原本只存在前端内存里）。
@@ -56,8 +58,10 @@ export class ExtensionUiBridge {
     this.tuiHost = new ExtensionTuiHost(event => {
       const sessionId = this.getSessionId()
       if (event.type === "attach") {
+        this.tuiPanels.set(event.attach.key, event.attach)
         this.emit({ type: "tuiAttach", sessionId, attach: event.attach })
       } else if (event.type === "detach") {
+        this.tuiPanels.delete(event.key)
         this.emit({ type: "tuiDetach", sessionId, key: event.key })
       } else {
         this.emit({ type: "tuiFrame", sessionId, data: event.data })
@@ -149,6 +153,14 @@ export class ExtensionUiBridge {
       editorText: this.editorText,
       toolsExpanded: this.toolsExpanded,
     }
+  }
+
+  /**
+   * 当前挂载的 offscreen TUI 面板清单。客户端刷新后重新 attach（组件在
+   * worker 侧仍挂着），面板视图挂载时自会请求一次全量重绘取回画面。
+   */
+  listTuiPanels(): ExtensionTuiAttach[] {
+    return [...this.tuiPanels.values()]
   }
 
   private createContext(): ExtensionUIContext {

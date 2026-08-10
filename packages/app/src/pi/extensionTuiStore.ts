@@ -73,6 +73,22 @@ export const extensionTuiStore = {
     updateSession(sessionId, { panels: session.panels.filter(panel => panel.key !== key) })
   },
 
+  /**
+   * 刷新/重连恢复：用 worker 侧全量快照替换该 session 的面板集合
+   * （快照是权威基线；之后的新 attach/detach 实时事件继续增量修正）。
+   */
+  replacePanels(sessionId: string, attaches: ExtensionTuiAttach[]): void {
+    updateSession(sessionId, {
+      panels: attaches.map(attach => ({
+        key: attach.key,
+        kind: attach.kind,
+        placement: attach.placement,
+        width: attach.width,
+        height: attach.height,
+      })),
+    })
+  },
+
   frame(sessionId: string, data: string): void {
     for (const listener of frameListeners) listener(sessionId, data)
   },

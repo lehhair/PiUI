@@ -690,6 +690,9 @@ export class RealPiSession implements SessionRuntime {
       // 刷新/重连恢复：扩展增量 UI 状态（status/widget/working 指示等）的
       // 镜像，前端重放 patch 重建显示。
       extensionUiState: this.extensionUi.getStateMirror(),
+      // 刷新/重连恢复：offscreen 扩展 TUI 面板清单（组件在 worker 侧仍
+      // 挂着），前端重新 attach 后由视图挂载时请求一次全量重绘。
+      extensionTuiPanels: this.extensionUi.listTuiPanels(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
       activeTools: session.getActiveToolNames?.() ?? [],
       scopedModels: toJson(session.scopedModels) ?? [],

@@ -129,6 +129,7 @@ export const PI_COMMAND_SPECS = [
   { name: "trust.get", scope: "global", description: "Read Pi project trust state", paramsSchema: CWD_PARAMS, queue: "immediate", idempotent: true },
   { name: "trust.set", scope: "global", description: "Set Pi project trust state", paramsSchema: objectSchema({ cwd: STRING, decision: nullable(BOOLEAN) }, ["cwd", "decision"]), queue: "serialized" },
   { name: "providers.list", scope: "global", description: "List Pi providers", queue: "immediate", idempotent: true },
+  { name: "providers.activeFlows", scope: "global", description: "List in-flight provider auth flows (refresh/reconnect recovery)", queue: "immediate", idempotent: true },
   { name: "providers.startAuth", scope: "global", description: "Start provider authentication", paramsSchema: objectSchema({ providerId: STRING, authType: { enum: ["api_key", "oauth"] } }, ["providerId"]), queue: "serialized" },
   { name: "providers.respondAuth", scope: "global", description: "Respond to provider authentication prompt", paramsSchema: objectSchema({ flowId: STRING, promptId: STRING, value: STRING }, ["flowId", "promptId", "value"]), queue: "immediate" },
   { name: "providers.cancelAuth", scope: "global", description: "Cancel provider authentication", paramsSchema: objectSchema({ flowId: STRING }, ["flowId"]), queue: "immediate" },

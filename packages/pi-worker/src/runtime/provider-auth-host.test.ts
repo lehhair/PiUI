@@ -134,4 +134,49 @@ describe("ProviderAuthHost", () => {
     await host.logout("fixture")
     assert.equal(loggedOut, "fixture")
   })
+
+  it("lists in-flight auth flows with pending prompts (refresh recovery)", async () => {
+    let promptHandler: ((prompt: { type: "text"; message: string }) => Promise<string>) | undefined
+    const provider = {
+      id: "fixture",
+      name: "Fixture",
+      auth: { apiKey: { name: "Fixture key", login: async () => ({}) } },
+    }
+    const runtime = {
+      getProviders: () => [provider],
+      getProvider: () => provider,
+      hasConfiguredAuth: () => false,
+      getProviderAuthStatus: () => ({ configured: false }),
+      login: async (_providerId: string, _type: string, interaction: {
+        prompt(prompt: { type: "text"; message: string }): Promise<string>
+      }) => {
+        promptHandler = interaction.prompt
+        await new Promise(() => undefined) // 模拟 SDK login 阻塞等应答
+      },
+    } as unknown as ModelRuntime
+    const host = new ProviderAuthHost(async () => runtime)
+
+    await host.start("fixture", "api_key")
+    await new Promise(resolve => setImmediate(resolve))
+    // 不 await：prompt 会阻塞到 respond 才解析
+    void promptHandler?.({ type: "text", message: "Enter token" })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const flows = await host.listActiveFlows() as Array<{
+      flowId: string
+      providerId: string
+      authType: string
+      prompts: Array<{ promptId: string; type: string; message: string }>
+    }>
+    assert.equal(flows.length, 1)
+    assert.equal(flows[0].providerId, "fixture")
+    assert.equal(flows[0].authType, "api_key")
+    assert.deepEqual(flows[0].prompts.map(prompt => [prompt.type, prompt.message]), [["text", "Enter token"]])
+
+    // 应答后 prompt 从快照消失，flow 仍在（SDK login 可能还有后续交互）
+    host.respond(flows[0].flowId, flows[0].prompts[0].promptId, "answer")
+    const after = await host.listActiveFlows() as Array<{ prompts: unknown[] }>
+    assert.equal(after[0].prompts.length, 0)
+    host.dispose()
+  })
 })

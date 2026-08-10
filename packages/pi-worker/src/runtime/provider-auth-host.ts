@@ -18,10 +18,13 @@ interface PendingPrompt {
   resolve: (value: string) => void
   reject: (error: Error) => void
   removeAbort?: () => void
+  /** 可 JSON 化的 prompt 描述（刷新/重连后恢复 UI 用） */
+  description: JsonObject
 }
 
 interface AuthFlow {
   providerId: string
+  authType: "api_key" | "oauth"
   controller: AbortController
   promptIds: Set<string>
   timer?: NodeJS.Timeout
@@ -67,6 +70,22 @@ export class ProviderAuthHost {
     return safeJson(await (await this.runtime()).getAvailable()) as JsonValue
   }
 
+  /**
+   * 进行中的 auth 流程快照（flow + 待应答 prompts）。客户端刷新/重连后
+   * 拉取并重建 UI——流程在 worker 侧继续存活（SDK login 仍阻塞等待），
+   * 5 分钟超时兜底不变。
+   */
+  listActiveFlows(): JsonValue {
+    return [...this.flows.entries()].map(([flowId, flow]) => ({
+      flowId,
+      providerId: flow.providerId,
+      authType: flow.authType,
+      prompts: [...this.prompts.entries()]
+        .filter(([, pending]) => pending.flowId === flowId)
+        .map(([promptId, pending]) => ({ promptId, ...pending.description })),
+    }))
+  }
+
   async start(providerId: string, authType: "api_key" | "oauth"): Promise<JsonValue> {
     const runtime = await this.runtime()
     const provider = runtime.getProvider(providerId)
@@ -77,7 +96,7 @@ export class ProviderAuthHost {
       })
     }
     const flowId = randomUUID()
-    const flow: AuthFlow = { providerId, controller: new AbortController(), promptIds: new Set() }
+    const flow: AuthFlow = { providerId, authType, controller: new AbortController(), promptIds: new Set() }
     this.flows.set(flowId, flow)
     flow.timer = setTimeout(() => {
       // The SDK login never settled (network hang, no prompt). Abort it so
@@ -209,8 +228,14 @@ export class ProviderAuthHost {
   }): Promise<string> {
     if (prompt.signal?.aborted) return Promise.reject(new Error("provider auth prompt aborted"))
     const promptId = randomUUID()
+    const description: JsonObject = {
+      type: prompt.type,
+      message: prompt.message,
+      placeholder: prompt.placeholder ?? null,
+      options: prompt.options?.map(option => ({ ...option })) ?? null,
+    }
     return new Promise((resolve, reject) => {
-      const pending: PendingPrompt = { flowId, resolve, reject }
+      const pending: PendingPrompt = { flowId, resolve, reject, description }
       if (prompt.signal) {
         const onAbort = () => {
           this.prompts.delete(promptId)
@@ -227,12 +252,7 @@ export class ProviderAuthHost {
         flowId,
         promptId,
         providerId,
-        prompt: {
-          type: prompt.type,
-          message: prompt.message,
-          placeholder: prompt.placeholder ?? null,
-          options: prompt.options?.map(option => ({ ...option })) ?? null,
-        },
+        prompt: description,
       })
     })
   }

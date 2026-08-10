@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ExtensionUiDialogRequest, JsonObject } from '@piui/protocol'
 import { extensionUiStore } from '../extensionUiStore.js'
+import { extensionTuiStore } from '../extensionTuiStore.js'
 import { activeSessionStore } from '../../store/activeSessionStore.js'
 import { piSessionStateStore } from './piSessionStateStore.js'
 
@@ -25,6 +26,7 @@ describe('piSessionStateStore pending dialog recovery', () => {
   afterEach(() => {
     piSessionStateStore.clearAll()
     extensionUiStore.reset()
+    extensionTuiStore.reset()
     activeSessionStore.reset()
   })
 
@@ -93,5 +95,24 @@ describe('piSessionStateStore pending dialog recovery', () => {
     const snapshot = extensionUiStore.getSnapshot().sessions['session-1']
     expect(snapshot?.pending).toHaveLength(1)
     expect(snapshot?.state.statuses.mode).toBe('Planning')
+  })
+
+  it('restores offscreen extension TUI panels after a refresh', () => {
+    const tuiStore = extensionTuiStore
+    piSessionStateStore.setState('session-1', {
+      extensionTuiPanels: [
+        { key: 'plan', kind: 'widget', placement: 'aboveEditor', width: 64, height: 10 },
+        { key: 'custom', kind: 'custom', width: 64, height: 10 },
+      ],
+    } as unknown as JsonObject)
+
+    const panels = tuiStore.getSnapshot().sessions['session-1']?.panels ?? []
+    expect(panels.map(panel => panel.key).sort()).toEqual(['custom', 'plan'])
+    // 重复恢复（多次 state 落地）幂等
+    piSessionStateStore.setState('session-1', {
+      extensionTuiPanels: [{ key: 'plan', kind: 'widget', placement: 'aboveEditor', width: 64, height: 10 }],
+    } as unknown as JsonObject)
+    const after = tuiStore.getSnapshot().sessions['session-1']?.panels ?? []
+    expect(after.map(panel => panel.key)).toEqual(['plan'])
   })
 })

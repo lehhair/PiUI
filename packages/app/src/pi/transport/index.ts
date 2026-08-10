@@ -285,6 +285,11 @@ export function listPiProviders(signal?: AbortSignal): Promise<PiProviderAuthInf
   return postPiGlobalCommand('providers.list', undefined, signal)
 }
 
+/** In-flight provider auth flows (refresh/reconnect recovery). */
+export function listActiveProviderFlows(signal?: AbortSignal): Promise<JsonValue> {
+  return postPiGlobalCommand('providers.activeFlows', undefined, signal)
+}
+
 export function startProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<{ flowId: string }> {
   return postPiGlobalCommand('providers.startAuth', { providerId, authType }, signal)
 }

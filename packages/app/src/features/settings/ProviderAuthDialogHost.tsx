@@ -1,18 +1,53 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/Button'
 import { Dialog } from '../../components/ui/Dialog'
 import {
   clearProviderAuthEvent,
   dismissProviderAuthFlow,
+  receiveProviderAuthEvent,
+  registerProviderAuthFlow,
   useManagementEvents,
   type ProviderAuthFlowState,
 } from '../../pi/managementEventStore'
 import type { ProviderAuthPrompt } from '@piui/protocol'
-import { cancelProviderAuth, respondProviderAuth } from '../../pi/transport/index.js'
+import {
+  cancelProviderAuth,
+  listActiveProviderFlows,
+  respondProviderAuth,
+} from '../../pi/transport/index.js'
 
 export function ProviderAuthDialogHost() {
   const { flows } = useManagementEvents()
+  // 刷新/重连恢复：进行中的 auth 流程在 worker 侧继续存活（SDK login 仍
+  // 阻塞等待应答，5 分钟超时兜底），这里拉一次快照重建 dialog UI。
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    void listActiveProviderFlows()
+      .then(snapshot => {
+        if (!Array.isArray(snapshot)) return
+        for (const flow of snapshot) {
+          if (!flow || typeof flow !== 'object' || typeof flow.flowId !== 'string' || typeof flow.providerId !== 'string') {
+            continue
+          }
+          registerProviderAuthFlow(flow.flowId, flow.providerId)
+          const prompts = Array.isArray(flow.prompts) ? flow.prompts : []
+          for (const prompt of prompts) {
+            if (!prompt || typeof prompt !== 'object' || typeof prompt.promptId !== 'string') continue
+            receiveProviderAuthEvent({
+              type: 'prompt',
+              flowId: flow.flowId,
+              promptId: prompt.promptId,
+              providerId: flow.providerId,
+              prompt: prompt as ProviderAuthPrompt,
+            })
+          }
+        }
+      })
+      .catch(() => undefined)
+  }, [])
   const flow = useMemo(() => Object.values(flows).find(item => item.event), [flows])
   if (!flow) return null
   return <ProviderAuthDialog key={`${flow.flowId}:${flow.event?.type}`} flow={flow} />
