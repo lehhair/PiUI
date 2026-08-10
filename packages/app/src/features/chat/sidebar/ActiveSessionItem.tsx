@@ -5,10 +5,10 @@ import { startInternalDrag } from '../../../lib/internalDragCore'
 
 interface ActiveSessionItemProps {
   entry: ActiveSessionEntry
-  /** 从 sessions 列表或 API 拉取到的完整 session 对象 */
+  /** 从 sessions 列表（可能被工作区过滤）拿到的完整 session 对象 */
   resolvedSession?: UiSession
   isSelected: boolean
-  onSelect: (session: UiSession) => void
+  onSelect: (session: { id: string; directory?: string }) => void
 }
 
 export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect }: ActiveSessionItemProps) {
@@ -36,15 +36,17 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
           : { label: t('activeSession.working'), color: 'text-success-100', dotColor: 'bg-success-100', pulse: true }
 
   const handleClick = () => {
-    if (resolvedSession) {
-      onSelect(resolvedSession)
-    }
-    // 如果没有 resolvedSession（极端情况：API 拉取失败），不做任何事
-    // 用户可以等 session 数据加载完，或从 Recents tab 找到
+    // 侧边栏按工作区过滤时，活跃 session 可能不在当前列表（resolvedSession 缺失）。
+    // entry 自带 id + directory（App 的 handleSelectSession 只需这两个字段），
+    // 总能切过去；title/目录展示已有 entry 层面的 fallback。
+    onSelect({
+      id: entry.sessionId,
+      directory: entry.directory || resolvedSession?.directory,
+    })
   }
 
   // 拖拽到主信息流进行分屏 / 替换会话
-  const isDraggable = !!resolvedSession
+  const isDraggable = !!(entry.directory || resolvedSession)
   const handlePointerDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDraggable) return
     startInternalDrag(
@@ -61,9 +63,9 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
     <div
       onPointerDown={handlePointerDragStart}
       onClick={handleClick}
-      className={`group relative flex items-start pl-[6px] pr-3 py-2 rounded-lg cursor-default select-none transition-all duration-200 border border-transparent ${
+      className={`group relative flex items-start pl-[6px] pr-3 py-2 rounded-lg cursor-pointer select-none transition-all duration-200 border border-transparent ${
         isSelected ? 'bg-bg-000 shadow-sm ring-1 ring-border-200/50' : 'hover:bg-bg-200/50'
-      } ${!resolvedSession ? 'opacity-50 cursor-default' : ''}`}
+      }`}
     >
       {/* Content */}
       <div className="flex-1 min-w-0 pr-1">

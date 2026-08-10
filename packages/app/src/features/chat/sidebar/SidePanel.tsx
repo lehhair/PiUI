@@ -639,18 +639,27 @@ export function SidePanel({
     [currentDirectory, addDirectory, onSelectSession, onCloseMobile],
   )
 
-  // Active tab 专用：跨目录的 session 需要确保目录在项目列表中
+  // Active tab 专用：跨目录的 session 需要确保目录在项目列表中。
+  // 当前列表可能因工作区过滤拿不到完整 session（resolvedSession 缺失），
+  // 由 entry 携带的 id/directory 合成可用的 UiSession（App 只需这两个字段）。
   const handleSelectActive = useCallback(
-    (session: UiSession) => {
+    (session: { id: string; directory?: string }) => {
       if (session.directory) {
         addDirectory(session.directory)
       }
-      onSelectSession(session)
+      const selectable: UiSession = sessionLookup.get(session.id) ?? {
+        id: session.id,
+        directory: session.directory ?? '',
+        title: '',
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      onSelectSession(selectable)
       if (window.innerWidth < 768 && onCloseMobile) {
         onCloseMobile()
       }
     },
-    [addDirectory, onSelectSession, onCloseMobile],
+    [sessionLookup, addDirectory, onSelectSession, onCloseMobile],
   )
 
   const handleRename = useCallback(
