@@ -170,7 +170,6 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const hub = options.eventHub ?? new EventHub()
   const supervisor = options.supervisor ?? new RuntimeSupervisor()
   const sessions = options.sessionHost ?? new SessionHost(supervisor, hub)
-  void sessions.prewarm(defaultWorkspaceRoot()).catch(() => undefined)
   const watcher = new WorkspaceWatcher(hub)
   const terminals = new TerminalManager({
     publish: (workspacePath, channel, payload) => {

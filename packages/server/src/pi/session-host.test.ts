@@ -167,47 +167,6 @@ test("SessionHost reuses an idle runtime for a session switch", async () => {
   host.dispose()
 })
 
-test("SessionHost claims a warm runtime and replenishes the slot", async () => {
-  let opened = 0
-  let prewarmed = 0
-  let claimed = false
-  const worker = {
-    command: async (type: string) => type === "state.get" ? { sessionId: "warm-session" } : {},
-    getSessionId: () => "warm-session",
-    getSessionFile: () => "warm-session.jsonl",
-    getCwd: () => ".",
-    updateSessionIdentity: () => {},
-    onEvent: () => () => {},
-    onCrash: () => () => {},
-    onClose: () => () => {},
-    dispose: async () => {},
-  } as unknown as WorkerSession
-  const supervisor = {
-    onEvent: () => () => {},
-    open: async () => {
-      opened += 1
-      return worker
-    },
-    takeWarmRuntime: async () => {
-      if (claimed) return undefined
-      claimed = true
-      return worker
-    },
-    prewarm: async () => {
-      prewarmed += 1
-    },
-  } as unknown as RuntimeSupervisor
-  const host = new SessionHost(supervisor, new EventHub())
-
-  const result = await host.openSession(".")
-
-  assert.equal(result.sessionId, "warm-session")
-  assert.equal(opened, 0)
-  assert.equal(prewarmed, 1)
-  assert.equal(host.getAttached("warm-session")?.sessionFile, "warm-session.jsonl")
-  host.dispose()
-})
-
 test("SessionHost routes extension commands by name through the runtime registry", async () => {
   const executed: Array<{ type: string; params?: unknown }> = []
   const worker = {
@@ -330,58 +289,7 @@ test("SessionHost validates extension tool arguments against Pi's own tool schem
   host.dispose()
 })
 
-test("SessionHost replenishes the warm slot even when adopting it fails", async () => {
-  let opened = 0
-  let prewarmed = 0
-  let claimed = false
-  let stateCalls = 0
-  const worker = {
-    command: async (type: string) => {
-      if (type !== "state.get") return {}
-      stateCalls += 1
-      // 第一次是 adopt 已领走的 warm（抛错），第二次是回退的冷启动（成功）
-      if (stateCalls === 1) throw new Error("state.get failed")
-      return { sessionId: "cold-session" }
-    },
-    getSessionId: () => "warm-session",
-    getSessionFile: () => "warm-session.jsonl",
-    getCwd: () => ".",
-    updateSessionIdentity: () => {},
-    onEvent: () => () => {},
-    onCrash: () => () => {},
-    onClose: () => () => {},
-    dispose: async () => {},
-  } as unknown as WorkerSession
-  const supervisor = {
-    onEvent: () => () => {},
-    open: async () => {
-      opened += 1
-      return worker
-    },
-    takeWarmRuntime: async () => {
-      if (claimed) return undefined
-      claimed = true
-      return worker
-    },
-    prewarm: async () => {
-      prewarmed += 1
-    },
-  } as unknown as RuntimeSupervisor
-  const host = new SessionHost(supervisor, new EventHub())
-
-  // warm 的 state.get 失败 → adopt 失败 → 回退冷启动；但 warm 已被消费，
-  // 必须立即补预热，保证下一个会话仍是热启动。
-  await host.openSession(".")
-
-  assert.equal(claimed, true)
-  assert.equal(prewarmed, 1)
-  assert.equal(opened, 1)
-  // 回退冷启动成功：attach 用的是 worker.getSessionId()
-  assert.equal(host.getAttached("warm-session")?.sessionId, "warm-session")
-  host.dispose()
-})
-
-test("SessionHost prewarms a workspace after reaping its idle runtime", async () => {
+test("SessionHost reaps an idle runtime without prewarming", async () => {
   let prewarmed = 0
   const worker = {
     command: async (type: string) => type === "state.get" ? { sessionId: "idle-session" } : {},
@@ -392,7 +300,9 @@ test("SessionHost prewarms a workspace after reaping its idle runtime", async ()
     onEvent: () => () => {},
     onCrash: () => () => {},
     onClose: () => () => {},
-    dispose: async () => {},
+    dispose: async () => {
+      // 句柄 dispose = session.close（关 runtime，不杀进程）
+    },
   } as unknown as WorkerSession
   const supervisor = {
     onEvent: () => () => {},
@@ -417,7 +327,7 @@ test("SessionHost prewarms a workspace after reaping its idle runtime", async ()
   }
 
   assert.equal(host.getAttached("idle-session"), undefined)
-  // 回收后补了预热
-  assert.equal(prewarmed, 1)
+  // 单共享进程架构：回收后不再补预热（worker 常驻，无需预热进程）
+  assert.equal(prewarmed, 0)
   host.dispose()
 })

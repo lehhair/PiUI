@@ -196,9 +196,6 @@ const HOST_COMMAND_HANDLERS: Record<string, HostCommandHandler> = {
   "workspaces.open": (ctx, params) => {
     const record = ctx.store.resolve(optString(params, "rootPath") ?? defaultWorkspaceRoot(), optString(params, "displayName"))
     const result = { workspace: workspaceDto(record) }
-    // 用户打开目录后紧接着就会开会话：后台预热该目录的 Pi 运行时，
-    // 不阻塞响应（预热失败静默，首次开会话时仍会冷启动）。
-    void ctx.sessions.prewarm(record.canonicalRoot).catch(() => undefined)
     return result
   },
   "workspaces.close": (ctx, params) => {

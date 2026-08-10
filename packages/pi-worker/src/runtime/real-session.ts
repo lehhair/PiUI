@@ -6,6 +6,7 @@ import type {
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
   LoadExtensionsResult,
+  ModelRuntime,
   ProjectTrustContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent"
@@ -42,6 +43,8 @@ export interface RealPiSessionOpenOptions {
   createRuntime?: CreateAgentSessionRuntimeFactory
   createSessionManager?: (cwd: string, sessionFile?: string) => unknown
   hostActions?: ExtensionHostActions
+  /** 进程级共享 ModelRuntime：多个会话 runtime 共享同一个模型/认证实例 */
+  modelRuntime?: ModelRuntime
 }
 
 interface LiveMessageCheckpoint {
@@ -184,42 +187,41 @@ export function verifySdkSessionContract(runtime: AgentSessionRuntime, version =
   verifiedSessionContractSdkVersion = version
 }
 
-const createDefaultRuntime: CreateAgentSessionRuntimeFactory = async ({
-  cwd,
-  agentDir,
-  sessionManager,
-  sessionStartEvent,
-}) => {
-  const {
-    SettingsManager,
-    createAgentSessionServices,
-    createAgentSessionFromServices,
-  } = getLoadedSdk().sdk
-  const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-  const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-  const services = await createAgentSessionServices({
-    cwd,
-    agentDir,
-    settingsManager,
-    resourceLoaderReloadOptions: {
-      resolveProjectTrust: async ({ extensionsResult }) => resolveProjectTrustFromExtensions(
-        cwd,
-        agentDir,
-        extensionsResult,
-        globalSettings.getDefaultProjectTrust(),
-      ),
-    },
-  })
-  return {
-    ...(await createAgentSessionFromServices({
+const createDefaultRuntime = (modelRuntime?: ModelRuntime): CreateAgentSessionRuntimeFactory =>
+  async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+    const {
+      SettingsManager,
+      createAgentSessionServices,
+      createAgentSessionFromServices,
+    } = getLoadedSdk().sdk
+    const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      settingsManager,
+      // 共享 ModelRuntime：同一进程内所有会话复用同一个模型/认证实例
+      // （SDK 原生支持，见 createAgentSessionServices 的 modelRuntime 参数）。
+      modelRuntime,
+      resourceLoaderReloadOptions: {
+        resolveProjectTrust: async ({ extensionsResult }) => resolveProjectTrustFromExtensions(
+          cwd,
+          agentDir,
+          extensionsResult,
+          globalSettings.getDefaultProjectTrust(),
+        ),
+      },
+    })
+    return {
+      ...(await createAgentSessionFromServices({
+        services,
+        sessionManager,
+        sessionStartEvent,
+      })),
       services,
-      sessionManager,
-      sessionStartEvent,
-    })),
-    services,
-    diagnostics: services.diagnostics,
+      diagnostics: services.diagnostics,
+    }
   }
-}
 
 function projectTrustContextForRpc(cwd: string): ProjectTrustContext {
   return {
@@ -287,7 +289,7 @@ export class RealPiSession implements SessionRuntime {
         code: "SESSION_IDENTITY_MISMATCH",
       })
     }
-    const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime, {
+    const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime(options.modelRuntime), {
       cwd: sessionManager.getCwd(),
       agentDir,
       sessionManager,

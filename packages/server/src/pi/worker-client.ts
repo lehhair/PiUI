@@ -42,28 +42,42 @@ export interface WorkerCatalog {
   dispose(): Promise<void>
 }
 
+/**
+ * 共享 runtime 进程句柄。一个进程承载所有会话 runtime + 全局 catalog
+ * 命令——pi SDK 原生支持单进程多 runtime（共享 ModelRuntime），每个会话
+ * 一个独立进程会让每进程 ~300MB 的 SDK 基线线性叠加。
+ */
 export interface WorkerHost {
   getHandshake(): Promise<WorkerHello>
+  /** 在共享进程内打开一个会话 runtime，返回每会话句柄 */
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession>
+  /** 无会话归属的全局事件（provider.auth / packages.progress / resources.updated） */
+  onEvent(listener: (event: WorkerEvent) => void): () => void
+  onCrash(listener: (error: Error) => void): () => void
+  /** 全局命令（catalog 语义：registry.describe / session.listAll / packages.* 等） */
+  command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined>
+  /** 销毁整个共享进程（关掉所有 runtime） */
   dispose(): Promise<void>
 }
 
 const HEARTBEAT_MISS_LIMIT = 3
 
-export class WorkerSession {
+/**
+ * 一个 worker 进程的客户端核心：持有进程、pending 请求、心跳看门狗，
+ * 并把事件/hostCall 按 sessionId 路由到对应的 WorkerSession 句柄。
+ */
+class WorkerHostCore {
   private readonly pending = new Map<string, PendingRequest>()
-  private readonly eventListeners = new Set<(event: WorkerEvent) => void>()
+  private readonly hostEventListeners = new Set<(event: WorkerEvent) => void>()
   private readonly crashListeners = new Set<(error: Error) => void>()
-  private readonly closeListeners = new Set<() => void>()
-  private readonly replacementListeners = new Set<(replacement: JsonObject) => void | Promise<void>>()
-  private hostCallHandler?: (call: WorkerHostCall) => void | Promise<void>
+  /** sessionId → 句柄（runtime 替换后 key 随 updateSessionIdentity 迁移） */
+  private readonly handles = new Map<string, WorkerSession>()
+  private readonly hostCallHandlers = new Map<string, (call: WorkerHostCall) => void | Promise<void>>()
+  /** reservationId → sessionId：commit/abort 没有会话字段，靠 reserve 时的归属路由 */
+  private readonly reservationOwners = new Map<string, string>()
   private child: ChildProcess
-  private sessionId?: string
-  private sessionFile?: string
-  private cwd?: string
   private disposed = false
   private exitHandled = false
-  private closeNotified = false
   private heartbeatTimer?: NodeJS.Timeout
   private heartbeatMisses = 0
   private exitError?: Error
@@ -74,7 +88,7 @@ export class WorkerSession {
   private resolveExited!: () => void
   private readySettled = false
 
-  private constructor(
+  constructor(
     private readonly workerEntry: URL,
     private readonly options: WorkerClientOptions = {},
   ) {
@@ -86,26 +100,6 @@ export class WorkerSession {
       this.resolveExited = resolve
     })
     this.child = this.spawn()
-  }
-
-  static createHost(workerEntry: URL, options?: WorkerClientOptions): WorkerHost {
-    const session = new WorkerSession(workerEntry, options)
-    return {
-      getHandshake: () => session.ready,
-      open: (cwd, sessionFile, signal) => session.openRuntime(cwd, sessionFile, signal),
-      dispose: () => session.dispose(),
-    }
-  }
-
-  static createCatalog(workerEntry: URL, options?: WorkerClientOptions): WorkerCatalog {
-    const session = new WorkerSession(workerEntry, options)
-    return {
-      command: (type, params, signal) => session.request({ type, params }, signal),
-      getHandshake: () => session.ready,
-      onEvent: listener => session.onEvent(listener),
-      onCrash: listener => session.onCrash(listener),
-      dispose: () => session.dispose(),
-    }
   }
 
   private spawn(): ChildProcess {
@@ -170,11 +164,16 @@ export class WorkerSession {
       return
     }
     if (message.kind === "event") {
-      for (const listener of this.eventListeners) {
-        try {
-          listener(message)
-        } catch {
-          /* one failed listener must not break the others */
+      // 带 sessionId 的事件路由到对应句柄；无归属的全局事件广播给 host 监听者
+      if ("sessionId" in message && message.sessionId) {
+        this.handles.get(message.sessionId)?.dispatchEvent(message)
+      } else {
+        for (const listener of this.hostEventListeners) {
+          try {
+            listener(message)
+          } catch {
+            /* one failed listener must not break the others */
+          }
         }
       }
       return
@@ -186,14 +185,31 @@ export class WorkerSession {
   }
 
   private async answerHostCall(id: string, generation: string, call: WorkerHostCall): Promise<void> {
-    if (!this.hostCallHandler) {
+    let sessionId: string | undefined
+    if ("sourceSessionId" in call) {
+      sessionId = call.sourceSessionId
+    } else if (call.type === "extensionShutdown") {
+      sessionId = call.sessionId
+    } else {
+      sessionId = this.reservationOwners.get(call.reservationId)
+    }
+    const handler = sessionId ? this.hostCallHandlers.get(sessionId) : undefined
+    if (!handler) {
       this.child.send({ kind: "hostReply", id, generation, ok: false, error: { code: "CAPABILITY_DISABLED", message: "no host call handler" } })
       return
     }
     try {
-      await this.hostCallHandler(call)
+      await handler(call)
+      if (call.type === "extensionReplacement.reserve") {
+        this.reservationOwners.set(call.reservationId, call.sourceSessionId)
+      }
       if (call.type === "extensionReplacement.commit" && call.replacement.cancelled === false) {
-        for (const listener of this.replacementListeners) await listener(call.replacement)
+        const handle = this.handles.get(sessionId!)
+        if (handle) await handle.dispatchReplacement(call.replacement)
+        this.reservationOwners.delete(call.reservationId)
+      }
+      if (call.type === "extensionReplacement.abort") {
+        this.reservationOwners.delete(call.reservationId)
       }
       this.child.send({ kind: "hostReply", id, generation, ok: true })
     } catch (error) {
@@ -243,6 +259,10 @@ export class WorkerSession {
       }))
     }
     this.pending.clear()
+    // 共享进程崩溃 = 所有会话 runtime 一起失效：逐个句柄通知
+    const handles = [...this.handles.values()]
+    this.handles.clear()
+    this.hostCallHandlers.clear()
     if (!this.disposed) {
       for (const listener of this.crashListeners) {
         try {
@@ -252,7 +272,7 @@ export class WorkerSession {
         }
       }
     }
-    this.notifyClose()
+    for (const handle of handles) handle.dispatchCrash(this.exitError)
   }
 
   private settleReadyError(error: Error): void {
@@ -261,60 +281,79 @@ export class WorkerSession {
     this.rejectReady(error)
   }
 
-  private notifyClose(): void {
-    if (this.closeNotified) return
-    this.closeNotified = true
-    for (const listener of this.closeListeners) {
-      try {
-        listener()
-      } catch {
-        /* ignore */
-      }
-    }
+  getHandshake(): Promise<WorkerHello> {
+    return this.ready
   }
 
-  private async openRuntime(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
+  async open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     await this.ready
     const data = await this.request({
       type: "session.open",
       params: { cwd, sessionFile: sessionFile ?? null },
     }, signal)
     const opened = data as { sessionId?: string; sessionFile?: string; cwd?: string } | undefined
-    this.sessionId = opened?.sessionId
-    this.sessionFile = opened?.sessionFile ?? sessionFile
-    this.cwd = opened?.cwd ?? cwd
-    return this
+    const sessionId = opened?.sessionId
+    if (!sessionId) {
+      throw Object.assign(new Error("Pi worker session.open returned no session id"), { code: "WORKER_RESULT_UNKNOWN" })
+    }
+    const handle = new WorkerSession(this, {
+      sessionId,
+      sessionFile: opened?.sessionFile ?? sessionFile,
+      cwd: opened?.cwd ?? cwd,
+    })
+    this.handles.set(handle.getSessionId(), handle)
+    return handle
   }
 
-  getSessionId(): string {
-    return this.sessionId ?? ""
+  /** 迁移句柄在路由表里的 key（runtime 替换后 sessionId 变化时由句柄调用） */
+  rebindHandle(handle: WorkerSession, previousSessionId: string, nextSessionId: string): void {
+    if (this.handles.get(previousSessionId) === handle) {
+      this.handles.delete(previousSessionId)
+      this.handles.set(nextSessionId, handle)
+    }
+    const hostCallHandler = this.hostCallHandlers.get(previousSessionId)
+    if (hostCallHandler) {
+      this.hostCallHandlers.delete(previousSessionId)
+      this.hostCallHandlers.set(nextSessionId, hostCallHandler)
+    }
   }
 
-  /** After a runtime replacement (fork/clone/new/import), the worker owns a
-   * different session — requests must carry the new id or the worker
-   * rejects them as RUNTIME_REPLACED. */
-  updateSessionIdentity(sessionId: string, sessionFile?: string | null, cwd?: string): void {
-    this.sessionId = sessionId
-    if (sessionFile !== undefined) this.sessionFile = sessionFile ?? undefined
-    if (cwd !== undefined) this.cwd = cwd
+  setHostCallHandler(sessionId: string, handler: (call: WorkerHostCall) => void | Promise<void>): void {
+    this.hostCallHandlers.set(sessionId, handler)
   }
 
-  getSessionFile(): string | undefined {
-    return this.sessionFile
+  /** 句柄关闭后从路由表注销（session.close 或句柄主动销毁） */
+  unregisterHandle(handle: WorkerSession, sessionId: string): void {
+    if (this.handles.get(sessionId) === handle) this.handles.delete(sessionId)
+    this.hostCallHandlers.delete(sessionId)
   }
 
-  getCwd(): string {
-    return this.cwd ?? ""
+  /** 进程已退出/被销毁（句柄 dispose 时不再发命令） */
+  isGone(): boolean {
+    return this.exitHandled
   }
 
-  async command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
+  onEvent(listener: (event: WorkerEvent) => void): () => void {
+    this.hostEventListeners.add(listener)
+    return () => this.hostEventListeners.delete(listener)
+  }
+
+  onCrash(listener: (error: Error) => void): () => void {
+    this.crashListeners.add(listener)
+    return () => this.crashListeners.delete(listener)
+  }
+
+  command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
     return this.request({ type, params }, signal)
   }
 
-  private request(
+  /**
+   * 发送请求（仅 WorkerSession 句柄调用；命令带 sessionId 路由到对应 runtime）。
+   */
+  request(
     command: { type: string; params?: JsonObject },
     signal?: AbortSignal,
-    includeSessionId = true,
+    sessionId?: string,
   ): Promise<JsonValue | undefined> {
     if (this.exitHandled) return Promise.reject(this.exitError ?? new Error("Pi worker is not available"))
     const id = randomUUID()
@@ -327,18 +366,11 @@ export class WorkerSession {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.removeAbort?.()
-        const timeoutError = Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
+        // 超时不再杀进程：共享进程里还有其他会话 runtime 在跑。卡住的
+        // SDK 调用只废弃这一条命令；进程级死锁由心跳看门狗兜底。
+        reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
           code: "WORKER_RESULT_UNKNOWN",
-        })
-        reject(timeoutError)
-        // A timed-out IPC request has no cancellation protocol in the worker.
-        // Kill this worker so a stuck SDK call cannot poison every later request.
-        this.handleExit(null, null, timeoutError)
-        try {
-          this.child.kill("SIGKILL")
-        } catch {
-          /* already gone */
-        }
+        }))
       }, this.options.requestTimeoutMs ?? 10 * 60_000)
       timer.unref()
       let pending: PendingRequest
@@ -367,7 +399,7 @@ export class WorkerSession {
           kind: "request",
           id,
           generation: helloMessage.generation,
-          sessionId: includeSessionId ? this.sessionId : undefined,
+          sessionId,
           command,
         }, error => {
           if (!error) return
@@ -386,6 +418,145 @@ export class WorkerSession {
     })
   }
 
+  async dispose(): Promise<void> {
+    if (this.disposed) return
+    this.disposed = true
+    if (this.exitHandled) return
+    try {
+      // The worker replies only after runtime cleanup. Still wait for the
+      // process exit so the parent never kills a worker between its ACK and
+      // its final JSONL/provider cleanup.
+      const timeout = new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, 5_000)
+        timer.unref()
+      })
+      await Promise.race([
+        this.request({ type: "dispose" }, undefined, undefined).then(() => this.exited, () => this.exited),
+        this.exited,
+        timeout,
+      ])
+    } finally {
+      if (!this.exitHandled) {
+        this.child.kill("SIGKILL")
+        this.handleExit(null, "SIGKILL")
+      }
+    }
+  }
+}
+
+/**
+ * 每会话 runtime 句柄：公共接口与旧版“每会话一进程”的 WorkerSession 一致，
+ * 但背后是共享进程内的一个 runtime（session.close 只关该 runtime，不杀进程）。
+ */
+export class WorkerSession {
+  private readonly eventListeners = new Set<(event: WorkerEvent) => void>()
+  private readonly crashListeners = new Set<(error: Error) => void>()
+  private readonly closeListeners = new Set<() => void>()
+  private readonly replacementListeners = new Set<(replacement: JsonObject) => void | Promise<void>>()
+  private sessionId: string
+  private sessionFile?: string
+  private cwd?: string
+  private disposed = false
+  private closeNotified = false
+  /** 句柄自己的 hostCall handler（注册到 core 路由表，key = 当前 sessionId） */
+  private readonly hostCallHandler: (call: WorkerHostCall) => void | Promise<void>
+
+  /** @internal 由 WorkerHostCore.open 创建 */
+  constructor(
+    private readonly core: WorkerHostCore,
+    identity: { sessionId: string; sessionFile?: string; cwd?: string },
+  ) {
+    this.sessionId = identity.sessionId
+    this.sessionFile = identity.sessionFile
+    this.cwd = identity.cwd
+    this.hostCallHandler = async (call) => {
+      await this.hostCallHandlerImpl?.(call)
+      // replacementListeners 由 core.answerHostCall 在 commit 成功后统一触发
+      // （dispatchReplacement），这里只做原始 hostCall 应答。
+    }
+  }
+
+  private hostCallHandlerImpl?: (call: WorkerHostCall) => void | Promise<void>
+
+  static createHost(workerEntry: URL, options?: WorkerClientOptions): WorkerHost {
+    const core = new WorkerHostCore(workerEntry, options)
+    return {
+      getHandshake: () => core.getHandshake(),
+      open: (cwd, sessionFile, signal) => core.open(cwd, sessionFile, signal),
+      onEvent: listener => core.onEvent(listener),
+      onCrash: listener => core.onCrash(listener),
+      command: (type, params, signal) => core.command(type, params, signal),
+      dispose: () => core.dispose(),
+    }
+  }
+
+  static createCatalog(workerEntry: URL, options?: WorkerClientOptions): WorkerCatalog {
+    const core = new WorkerHostCore(workerEntry, options)
+    return {
+      command: (type, params, signal) => core.command(type, params, signal),
+      getHandshake: () => core.getHandshake(),
+      onEvent: listener => core.onEvent(listener),
+      onCrash: listener => core.onCrash(listener),
+      dispose: () => core.dispose(),
+    }
+  }
+
+  getSessionId(): string {
+    return this.sessionId
+  }
+
+  /** After a runtime replacement (fork/clone/new/import), the worker owns a
+   * different session — requests must carry the new id or the worker
+   * rejects them as RUNTIME_REPLACED. */
+  updateSessionIdentity(sessionId: string, sessionFile?: string | null, cwd?: string): void {
+    const previous = this.sessionId
+    this.sessionId = sessionId
+    if (sessionFile !== undefined) this.sessionFile = sessionFile ?? undefined
+    if (cwd !== undefined) this.cwd = cwd
+    this.core.rebindHandle(this, previous, sessionId)
+  }
+
+  getSessionFile(): string | undefined {
+    return this.sessionFile
+  }
+
+  getCwd(): string {
+    return this.cwd ?? ""
+  }
+
+  async command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
+    return this.core.request({ type, params }, signal, this.sessionId)
+  }
+
+  /** 事件分发入口（core 调用，仅本会话事件） */
+  dispatchEvent(event: WorkerEvent): void {
+    for (const listener of this.eventListeners) {
+      try {
+        listener(event)
+      } catch {
+        /* one failed listener must not break the others */
+      }
+    }
+  }
+
+  /** 替换提交事件（core 在 extensionReplacement.commit 成功后调用） */
+  async dispatchReplacement(replacement: JsonObject): Promise<void> {
+    for (const listener of this.replacementListeners) await listener(replacement)
+  }
+
+  /** 进程崩溃（core 调用）：crash + close 都通知 */
+  dispatchCrash(error: Error): void {
+    if (this.disposed) return
+    for (const listener of this.crashListeners) {
+      try {
+        listener(error)
+      } catch {
+        /* ignore */
+      }
+    }
+    this.notifyClose()
+  }
+
   onEvent(listener: (event: WorkerEvent) => void): () => void {
     this.eventListeners.add(listener)
     return () => this.eventListeners.delete(listener)
@@ -402,7 +573,8 @@ export class WorkerSession {
   }
 
   setHostCallHandler(handler: (call: WorkerHostCall) => void | Promise<void>): void {
-    this.hostCallHandler = handler
+    this.hostCallHandlerImpl = handler
+    this.core.setHostCallHandler(this.sessionId, this.hostCallHandler)
   }
 
   onReplacementCommitted(listener: (replacement: JsonObject) => void | Promise<void>): () => void {
@@ -410,27 +582,31 @@ export class WorkerSession {
     return () => this.replacementListeners.delete(listener)
   }
 
+  /**
+   * 关闭本句柄对应的 runtime（session.close 命令），不杀共享进程。
+   * 幂等：进程已崩溃/已关闭时只做本地清理。
+   */
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
-    if (this.exitHandled) return
+    this.core.unregisterHandle(this, this.sessionId)
+    if (this.core.isGone()) return
     try {
-      // The worker replies only after runtime cleanup. Still wait for the
-      // process exit so the parent never kills a worker between its ACK and
-      // its final JSONL/provider cleanup.
-      const timeout = new Promise<void>(resolve => {
-        const timer = setTimeout(resolve, 5_000)
-        timer.unref()
-      })
-      await Promise.race([
-        this.request({ type: "dispose" }, undefined, false).then(() => this.exited, () => this.exited),
-        this.exited,
-        timeout,
-      ])
-    } finally {
-      if (!this.exitHandled) {
-        this.child.kill("SIGKILL")
-        this.handleExit(null, "SIGKILL")
+      await this.core.request({ type: "session.close" }, undefined, this.sessionId)
+    } catch {
+      // runtime 已不可用（进程崩溃/命令失败）：本地清理即可
+    }
+    this.notifyClose()
+  }
+
+  private notifyClose(): void {
+    if (this.closeNotified) return
+    this.closeNotified = true
+    for (const listener of this.closeListeners) {
+      try {
+        listener()
+      } catch {
+        /* ignore */
       }
     }
   }

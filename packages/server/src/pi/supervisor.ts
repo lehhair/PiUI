@@ -3,7 +3,6 @@ import { resolve } from "node:path"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import {
   WorkerSession,
-  type WorkerCatalog,
   type WorkerClientOptions,
   type WorkerHost,
 } from "./worker-client.ts"
@@ -17,7 +16,6 @@ export interface RuntimeSupervisorOptions {
   workerEntry?: URL
   worker?: WorkerClientOptions
   leases?: RuntimeLeaseManager
-  standbySize?: number
 }
 
 export interface RuntimeLeaseManager {
@@ -25,86 +23,59 @@ export interface RuntimeLeaseManager {
   dispose(): void
 }
 
-interface WarmRuntimeSlot {
-  promise: Promise<WorkerSession>
-  claimed: boolean
-  timer?: NodeJS.Timeout
-}
-
-const DEFAULT_WARM_RUNTIME_TTL_MS = 5 * 60_000
-
-function warmRuntimeTtlMs(): number {
-  const configured = Number(process.env.PIUI_WARM_RUNTIME_TTL_MS)
-  return Number.isFinite(configured) && configured >= 30_000
-    ? configured
-    : DEFAULT_WARM_RUNTIME_TTL_MS
-}
-
+/**
+ * 运行时监督者：所有 pi runtime（catalog 全局命令 + 每个会话的 runtime）
+ * 共享**一个** worker 进程。pi SDK 原生支持单进程多 runtime——每会话一个
+ * 独立进程会让 ~300MB 的 SDK 基线（bun 打包的完整依赖）线性叠加。
+ *
+ * 进程崩溃 = 全部会话失效（worker 侧有 uncaughtException 兜底只记录不退出），
+ * 由 session-host 逐个清理，前端自愈重新 attach。
+ */
 export class RuntimeSupervisor {
   private readonly workerEntry: URL
   private readonly workerOptions?: WorkerClientOptions
   private readonly leases: RuntimeLeaseManager
-  private catalog?: WorkerCatalog
+  private runtimeHost?: WorkerHost
   private readonly eventListeners = new Set<(event: WorkerEvent) => void>()
-  private readonly standbyPool: WorkerHost[] = []
-  private readonly standbySize: number
   private readonly active = new Set<WorkerSession>()
-  private readonly opening = new Set<WorkerHost>()
-  private readonly runtimeLeases = new Map<WorkerSession, SessionLease>()
-  private readonly warmSlots = new Map<string, WarmRuntimeSlot>()
   private readonly pendingOpens = new Set<Promise<WorkerSession>>()
+  private readonly runtimeLeases = new Map<WorkerSession, SessionLease>()
   private disposed = false
 
   constructor(options: RuntimeSupervisorOptions = {}) {
     this.workerEntry = options.workerEntry ?? getPiWorkerEntryUrl()
     this.workerOptions = options.worker
     this.leases = options.leases ?? new SessionLeaseManager()
-    // A standby worker is expensive: the compiled server starts another copy
-    // of itself for every worker. Create session workers on demand instead of
-    // keeping two idle Pi runtimes alive from server startup. Advanced setups
-    // can opt in via PIUI_STANDBY_SIZE to trade memory for faster first-open.
-    const configuredStandby = Number(process.env.PIUI_STANDBY_SIZE)
-    this.standbySize = Math.max(0, options.standbySize ?? (Number.isFinite(configuredStandby) ? configuredStandby : 0))
-    this.catalog = this.createCatalog()
-    this.replenishStandby()
   }
 
-  private replenishStandby(): void {
-    if (this.disposed) return
-    while (this.standbyPool.length < this.standbySize) {
-      const host = this.createHost()
-      this.standbyPool.push(host)
-      void host.getHandshake().catch(() => {
-        const index = this.standbyPool.indexOf(host)
-        if (index < 0) return
-        this.standbyPool.splice(index, 1)
-        void host.dispose()
-      })
-    }
-  }
-
-  private takeStandby(): WorkerHost {
-    const host = this.standbyPool.shift() ?? this.createHost()
-    this.replenishStandby()
+  private ensureRuntimeHost(): WorkerHost {
+    if (this.runtimeHost) return this.runtimeHost
+    const host = WorkerSession.createHost(this.workerEntry, this.workerOptions)
+    host.onCrash(() => {
+      // 进程崩溃：丢弃句柄，下次命令/open 重新孵化新进程（会话由
+      // session-host 的 onCrash 逐个清理，这里只负责重建基础设施）。
+      if (this.runtimeHost === host) this.runtimeHost = undefined
+      void host.dispose().catch(() => undefined)
+    })
+    host.onEvent(event => {
+      for (const listener of this.eventListeners) listener(event)
+    })
+    this.runtimeHost = host
     return host
   }
 
   async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean; idempotent?: boolean; signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
     if (this.disposed) throw new Error("Runtime supervisor is disposed")
-    const catalog = this.catalog ?? (this.catalog = this.createCatalog())
     try {
-      return await catalog.command(type, params, options.signal)
+      return await this.ensureRuntimeHost().command(type, params, options.signal)
     } catch (error) {
       const code = errorCode(error)
       if (code !== "WORKER_RESULT_UNKNOWN" && code !== "REQUEST_ABORTED") throw error
-      // 失败的 catalog（握手超时、崩溃）立刻丢弃，下次命令重新孵化——
-      // 握不上手的 worker ready 已拒，留着只会无限 500
-      if (this.catalog === catalog) this.catalog = undefined
-      void catalog.dispose().catch(() => undefined)
       if (this.disposed) throw error
       if (code === "REQUEST_ABORTED" || !options.retry || !options.idempotent) throw error
-      const replacement = this.catalog ?? (this.catalog = this.createCatalog())
-      return replacement.command(type, params)
+      // 命令失败（超时/进程崩溃）：崩溃时 runtimeHost 已被 onCrash 丢弃，
+      // 重试会自动孵化新进程；进程还活着时（纯超时）重试同一进程。
+      return this.ensureRuntimeHost().command(type, params, options.signal)
     }
   }
 
@@ -113,11 +84,10 @@ export class RuntimeSupervisor {
     return () => this.eventListeners.delete(listener)
   }
 
-  /** Catalog worker 的握手（真实 SDK 版本、verified、回退标记），供 health 上报。 */
+  /** 共享 worker 进程的握手（真实 SDK 版本、verified、回退标记），供 health 上报。 */
   getCatalogHandshake(): Promise<WorkerHello> {
     if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
-    const catalog = this.catalog ?? (this.catalog = this.createCatalog())
-    return catalog.getHandshake()
+    return this.ensureRuntimeHost().getHandshake()
   }
 
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
@@ -128,71 +98,20 @@ export class RuntimeSupervisor {
     return opening
   }
 
-  /** Start one already-open, empty Pi runtime for a workspace. */
-  prewarm(cwd: string): Promise<void> {
-    if (this.disposed) return Promise.resolve()
-    const key = workspaceKey(cwd)
-    if (this.warmSlots.has(key)) return Promise.resolve()
-
-    // 全局单槽：已有其他目录的 warm 先释放，槽始终绑定最新预热的目录。
-    // 避免每个打开过的目录都常驻一个空闲 worker（空闲堆积）。
-    for (const [existingKey, existingSlot] of this.warmSlots) {
-      if (existingKey === key) continue
-      existingSlot.claimed = true
-      this.warmSlots.delete(existingKey)
-      if (existingSlot.timer) clearTimeout(existingSlot.timer)
-      void existingSlot.promise.then(runtime => runtime.dispose()).catch(() => undefined)
-    }
-
-    const slot = { claimed: false } as WarmRuntimeSlot
-    slot.promise = this.open(cwd).then(runtime => {
-      const current = this.warmSlots.get(key)
-      if (current !== slot || slot.claimed || this.disposed) {
-        void runtime.dispose()
-        throw new Error("warm runtime was discarded")
-      }
-      return runtime
-    }).catch(error => {
-      if (this.warmSlots.get(key) === slot) this.warmSlots.delete(key)
-      throw error
-    })
-    this.warmSlots.set(key, slot)
-    slot.timer = setTimeout(() => {
-      if (this.warmSlots.get(key) !== slot || slot.claimed) return
-      slot.claimed = true
-      this.warmSlots.delete(key)
-      void slot.promise.then(runtime => runtime.dispose()).catch(() => undefined)
-    }, warmRuntimeTtlMs())
-    slot.timer.unref?.()
-    void slot.promise.catch(() => undefined)
-    return Promise.resolve()
-  }
-
-  /** Claim a warm runtime; the caller becomes responsible for its lifecycle. */
-  async takeWarmRuntime(cwd: string): Promise<WorkerSession | undefined> {
-    const key = workspaceKey(cwd)
-    const slot = this.warmSlots.get(key)
-    if (!slot) return undefined
-    slot.claimed = true
-    this.warmSlots.delete(key)
-    if (slot.timer) clearTimeout(slot.timer)
-    try {
-      return await slot.promise
-    } catch {
-      return undefined
-    }
-  }
-
   private async performOpen(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     let lease: SessionLease | undefined = sessionFile ? await this.leases.acquire(sessionFile) : undefined
     if (this.disposed) {
       lease?.release()
       throw new Error("Runtime supervisor is disposed")
     }
-    const host = this.takeStandby()
-    this.opening.add(host)
+    let runtime: WorkerSession
     try {
-      const runtime = await host.open(cwd, sessionFile, signal)
+      runtime = await this.ensureRuntimeHost().open(cwd, sessionFile, signal)
+    } catch (error) {
+      lease?.release()
+      throw error
+    }
+    try {
       if (this.disposed) {
         await runtime.dispose()
         lease?.release()
@@ -266,12 +185,10 @@ export class RuntimeSupervisor {
         release()
       })
       this.active.add(runtime)
-      this.opening.delete(host)
       return runtime
     } catch (error) {
-      this.opening.delete(host)
       try {
-        await host.dispose()
+        await runtime.dispose()
       } finally {
         lease?.release()
       }
@@ -295,62 +212,23 @@ export class RuntimeSupervisor {
     if (this.disposed) return
     this.disposed = true
     const pendingOpens = [...this.pendingOpens]
-    const warmPromises = [...this.warmSlots.values()].map(slot => {
-      slot.claimed = true
-      if (slot.timer) clearTimeout(slot.timer)
-      return slot.promise
-    })
-    this.warmSlots.clear()
-    const standby = this.standbyPool.splice(0, this.standbyPool.length)
     await Promise.allSettled([
       ...[...this.active].map(runtime => runtime.dispose()),
-      ...[...this.opening].map(host => host.dispose()),
-      this.catalog?.dispose() ?? Promise.resolve(),
-      ...standby.map(host => host.dispose()),
+      this.runtimeHost?.dispose() ?? Promise.resolve(),
       ...pendingOpens,
-      ...warmPromises,
     ])
     if (this.active.size > 0) {
       await Promise.allSettled([...this.active].map(runtime => runtime.dispose()))
     }
     this.active.clear()
-    this.opening.clear()
     this.pendingOpens.clear()
-    this.catalog = undefined
+    this.runtimeHost = undefined
     this.leases.dispose()
-  }
-
-  private createHost(): WorkerHost {
-    return WorkerSession.createHost(this.workerEntry, this.workerOptions)
-  }
-
-  private createCatalog(): WorkerCatalog {
-    const configuredTimeout = Number(process.env.PIUI_CATALOG_REQUEST_TIMEOUT_MS)
-    const requestTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 5_000
-      ? configuredTimeout
-      : 30_000
-    const catalog = WorkerSession.createCatalog(this.workerEntry, {
-      ...this.workerOptions,
-      requestTimeoutMs,
-    })
-    catalog.onCrash(() => {
-      if (this.catalog === catalog) this.catalog = undefined
-      void catalog.dispose()
-    })
-    catalog.onEvent(event => {
-      for (const listener of this.eventListeners) listener(event)
-    })
-    return catalog
   }
 }
 
 function errorCode(error: unknown): string | undefined {
   return error && typeof error === "object" && "code" in error ? String(error.code) : undefined
-}
-
-function workspaceKey(cwd: string): string {
-  const normalized = resolve(cwd).replace(/\\/g, "/")
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized
 }
 
 function once(run: () => void): () => void {

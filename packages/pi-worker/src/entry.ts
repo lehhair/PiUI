@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
-import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, type LoadedSdk } from "./sdk-host.js"
+import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
@@ -23,12 +24,18 @@ import type { SessionRuntime } from "./runtime.js"
 import * as P from "./params.js"
 
 const workerGeneration = randomUUID()
-let runtime: SessionRuntime | undefined
+/**
+ * 同一 worker 进程内的多会话 runtime：key = 当前 sessionId。
+ * runtime 替换（newSession/switchSession/fork/import）后 key 迁移到新
+ * sessionId。pi SDK 原生支持单进程多 runtime（共享 ModelRuntime）。
+ */
+const runtimes = new Map<string, SessionRuntime>()
+/** 进程级共享 ModelRuntime（provider 认证/模型池本来就该全局共享一份） */
+let sharedModelRuntime: ModelRuntime | undefined
 let loadedSdkInfo: LoadedSdk | undefined
 let registryRevision = 1
-let runtimeRegistryDigest: string | undefined
+const registryDigests = new Map<string, string | undefined>()
 let registryCheck: Promise<void> = Promise.resolve()
-const runtimeUnsubs: Array<() => void> = []
 
 const driver = getDriverMode()
 
@@ -42,11 +49,11 @@ function send(message: WorkerMessage): void {
 const catalog = driver === "pi"
   ? new PiCatalog(undefined, event => send({ kind: "event", generation: workerGeneration, channel: "packages.progress", event }))
   : new MockCatalog()
-const providerAuth = new ProviderAuthHost(() => {
-  const sessionRuntime = runtime as RealPiSession | undefined
-  const fromSession = sessionRuntime instanceof RealPiSession ? sessionRuntime.getModelRuntime() : undefined
-  if (fromSession) return Promise.resolve(fromSession)
-  return import("./sdk-host.js").then(m => m.getLoadedSdk().sdk.ModelRuntime.create())
+const providerAuth = new ProviderAuthHost(async () => {
+  // 共享 ModelRuntime：所有会话 runtime + provider 认证共用同一个实例
+  // （SDK 的 createAgentSessionServices 接受注入的 modelRuntime）。
+  sharedModelRuntime ??= await getLoadedSdk().sdk.ModelRuntime.create()
+  return sharedModelRuntime
 })
 
 const pendingHostCalls = new Map<string, {
@@ -88,8 +95,9 @@ const hostActions: ExtensionHostActions = {
   },
 }
 
-function subscribeRuntimeEvents(current: SessionRuntime): void {
-  runtimeUnsubs.push(current.onPiEvent((event, meta) => send({
+function subscribeRuntimeEvents(current: SessionRuntime): Array<() => void> {
+  const unsubs: Array<() => void> = []
+  unsubs.push(current.onPiEvent((event, meta) => send({
     kind: "event",
     generation: workerGeneration,
     sessionId: current.getSessionId(),
@@ -97,7 +105,7 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
     event,
     meta,
   })))
-  runtimeUnsubs.push(current.onHead(head => send({
+  unsubs.push(current.onHead(head => send({
     kind: "event",
     generation: workerGeneration,
     sessionId: current.getSessionId(),
@@ -105,7 +113,7 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
     head: head as unknown as JsonObject,
   })))
   if (current.onActivity) {
-    runtimeUnsubs.push(current.onActivity(status => send({
+    unsubs.push(current.onActivity(status => send({
       kind: "event",
       generation: workerGeneration,
       sessionId: current.getSessionId(),
@@ -114,7 +122,7 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
     })))
   }
   if (current.onExtensionUi) {
-    runtimeUnsubs.push(current.onExtensionUi(event => send({
+    unsubs.push(current.onExtensionUi(event => send({
       kind: "event",
       generation: workerGeneration,
       sessionId: current.getSessionId(),
@@ -123,20 +131,21 @@ function subscribeRuntimeEvents(current: SessionRuntime): void {
     })))
   }
   if (current.onResourcesChanged) {
-    runtimeUnsubs.push(current.onResourcesChanged(() => send({
+    unsubs.push(current.onResourcesChanged(() => send({
       kind: "event",
       generation: workerGeneration,
       channel: "resources.updated",
       workspacePath: current.getCwd(),
     })))
-    runtimeUnsubs.push(current.onResourcesChanged(() => {
+    unsubs.push(current.onResourcesChanged(() => {
       void queueRegistryChangeCheck(current, "resources.updated")
     }))
   }
+  return unsubs
 }
 
-async function setRuntimeRegistryBaseline(current: SessionRuntime): Promise<void> {
-  runtimeRegistryDigest = stableStringify(await current.getRegistry())
+async function setRuntimeRegistryBaseline(sessionId: string, current: SessionRuntime): Promise<void> {
+  registryDigests.set(sessionId, stableStringify(await current.getRegistry()))
 }
 
 function queueRegistryChangeCheck(current: SessionRuntime, reason: string): Promise<void> {
@@ -145,21 +154,23 @@ function queueRegistryChangeCheck(current: SessionRuntime, reason: string): Prom
 }
 
 async function detectRegistryChange(current: SessionRuntime, reason: string): Promise<void> {
-  if (runtime !== current) return
+  const sessionId = current.getSessionId()
+  if (runtimes.get(sessionId) !== current) return
   const next = stableStringify(await current.getRegistry())
-  if (runtimeRegistryDigest === undefined) {
-    runtimeRegistryDigest = next
+  const digest = registryDigests.get(sessionId)
+  if (digest === undefined) {
+    registryDigests.set(sessionId, next)
     return
   }
-  if (next === runtimeRegistryDigest) return
-  runtimeRegistryDigest = next
+  if (next === digest) return
+  registryDigests.set(sessionId, next)
   registryRevision += 1
   send({
     kind: "event",
     generation: workerGeneration,
-    sessionId: current.getSessionId(),
+    sessionId,
     channel: "registry.updated",
-    event: { revision: registryRevision, sessionId: current.getSessionId(), reason },
+    event: { revision: registryRevision, sessionId, reason },
   })
 }
 
@@ -176,89 +187,120 @@ function sortJson(value: JsonValue): JsonValue {
 }
 
 async function openRuntime(params: JsonObject): Promise<JsonValue> {
-  if (runtime) throw Object.assign(new Error("Pi runtime is already open"), { code: "SESSION_BUSY" })
   const cwd = P.reqString(params, "cwd")
   const sessionFile = P.optString(params, "sessionFile")
   const opened = driver === "pi"
-    ? await RealPiSession.open(cwd, sessionFile, { hostActions })
+    ? await RealPiSession.open(cwd, sessionFile, {
+      hostActions,
+      modelRuntime: sharedModelRuntime,
+    })
     : await MockPiSession.open(cwd, sessionFile)
-  runtime = opened
-  // Provider auth may have initialized a standalone runtime before the
-  // session opened. Rebind it to the session runtime; temporary API keys are
-  // retained by ProviderAuthHost and reapplied there.
-  providerAuth.resetRuntime()
-  subscribeRuntimeEvents(opened)
+  const sessionId = opened.getSessionId()
+  const unsubs = subscribeRuntimeEvents(opened)
+  runtimes.set(sessionId, opened)
   try {
     if (opened instanceof RealPiSession) await opened.initializeExtensions()
-    await setRuntimeRegistryBaseline(opened)
+    await setRuntimeRegistryBaseline(sessionId, opened)
   } catch (error) {
-    runtimeUnsubs.splice(0).forEach(unsub => unsub())
-    runtime = undefined
-    runtimeRegistryDigest = undefined
+    runtimes.delete(sessionId)
+    registryDigests.delete(sessionId)
+    unsubs.forEach(unsub => unsub())
     await opened.dispose()
     throw error
   }
   return {
-    sessionId: opened.getSessionId(),
+    sessionId,
     sessionFile: opened.getSessionFile() ?? null,
     cwd: opened.getCwd(),
     state: await opened.getState(),
   }
 }
 
-async function closeRuntime(): Promise<void> {
-  runtimeUnsubs.splice(0).forEach(unsub => unsub())
-  const current = runtime
-  runtime = undefined
-  runtimeRegistryDigest = undefined
-  await current?.dispose()
+async function closeRuntime(sessionId: string | undefined): Promise<void> {
+  if (!sessionId) return
+  const current = runtimes.get(sessionId)
+  if (!current) return
+  runtimes.delete(sessionId)
+  registryDigests.delete(sessionId)
+  await current.dispose()
 }
 
 const ctx: CommandContext = {
   get runtime() {
-    return runtime
+    return undefined
   },
   driver,
   catalog,
   auth: providerAuth,
   packages: catalog,
   requireRuntime(): SessionRuntime {
-    if (!runtime) throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
-    return runtime
+    throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
   },
 }
 
-async function execute(command: { type: string; params?: JsonObject }): Promise<JsonValue | undefined | void> {
+async function execute(command: { type: string; params?: JsonObject; sessionId?: string }): Promise<JsonValue | undefined | void> {
   const params = command.params ?? {}
   if (command.type === "registry.describe") return describeRegistry()
   if (command.type === "session.open") return openRuntime(params)
   if (command.type === "session.close") {
-    await closeRuntime()
+    await closeRuntime(command.sessionId)
     return undefined
+  }
+  // 会话命令按 sessionId 路由到对应 runtime；找不到即 RUNTIME_REPLACED
+  // （替换后 server 尚未同步新身份，或 runtime 已关闭）。
+  const current = command.sessionId ? runtimes.get(command.sessionId) : undefined
+  if (command.sessionId && !current) {
+    throw Object.assign(new Error("Pi runtime no longer owns the requested session"), { code: "RUNTIME_REPLACED" })
+  }
+  const commandCtx: CommandContext = {
+    get runtime() {
+      return current
+    },
+    driver,
+    catalog,
+    auth: providerAuth,
+    packages: catalog,
+    requireRuntime(): SessionRuntime {
+      if (!current) throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
+      return current
+    },
   }
   const handler = COMMAND_HANDLERS[command.type]
   if (!handler) {
     // 静态表未命中：对照 Pi 运行时自己的注册表原生分发扩展命令/工具。
-    if (runtime) {
-      const registry = await runtime.getRegistry()
+    if (current) {
+      const registry = await current.getRegistry()
       const target = resolveExtensionTarget(registry, command.type)
       if (target === "tool") {
         // 工具参数 schema 来自 Pi 自己的工具定义（typebox 序列化后的 JSON
         // Schema）——在分发边界校验，畸形入参响亮 INVALID_REQUEST。
         const tool = registry.tools.find(item => item.name === command.type)
         if (tool?.parameters) validateParams(tool.parameters, params ?? {})
-        return runtime.invokeTool(command.type, params)
+        return current.invokeTool(command.type, params)
       }
       if (target === "command") {
         const args = typeof params?.args === "string" ? params.args : undefined
-        return runtime.invokeCommand(command.type, args)
+        return current.invokeCommand(command.type, args)
       }
     }
     throw Object.assign(new Error(`unknown command: ${command.type}`), { code: "UNKNOWN_COMMAND" })
   }
-  const result = await handler(ctx, params)
-  if (runtime && shouldCheckRegistryAfter(command.type)) {
-    await queueRegistryChangeCheck(runtime, `command:${command.type}`)
+  const result = await handler(commandCtx, params)
+  // Runtime replacement (newSession/switchSession/fork/import) changes the
+  // session identity inside the SDK; migrate the map key so subsequent
+  // requests with the new sessionId find the same runtime.
+  if (current) {
+    const currentId = current.getSessionId()
+    if (command.sessionId !== currentId) {
+      runtimes.delete(command.sessionId!)
+      runtimes.set(currentId, current)
+      const digest = registryDigests.get(command.sessionId!)
+      registryDigests.delete(command.sessionId!)
+      registryDigests.set(currentId, digest)
+    }
+  }
+  if (current && shouldCheckRegistryAfter(command.type)) {
+    await queueRegistryChangeCheck(current, `command:${command.type}`)
   }
   return result
 }
@@ -266,7 +308,6 @@ async function execute(command: { type: string; params?: JsonObject }): Promise<
 const REGISTRY_READ_COMMANDS = new Set(["state.get", "entries.get", "branch.get", "tree.get", "registry.get", "attachment.get", "waitForIdle"])
 
 function shouldCheckRegistryAfter(type: string): boolean {
-  if (!runtime) return false
   if (type.startsWith("session.") || type.startsWith("models.") || type.startsWith("settings.") ||
     type.startsWith("trust.") || type.startsWith("providers.") || type.startsWith("modelRuntime.") ||
     type.startsWith("packages.")) return false
@@ -293,12 +334,7 @@ function describeRegistry(): PiRegistrySnapshot {
   }
 }
 
-const schedule = createWorkerCommandScheduler(async command => {
-  if (command.sessionId && runtime && runtime.getSessionId() !== command.sessionId) {
-    throw Object.assign(new Error("Pi runtime no longer owns the requested session"), { code: "RUNTIME_REPLACED" })
-  }
-  return execute(command)
-})
+const schedule = createWorkerCommandScheduler(async command => execute(command))
 
 function toJsonObject(value: unknown): JsonObject {
   const json = JSON.parse(JSON.stringify(value)) as unknown
@@ -312,7 +348,9 @@ async function cleanupWorker(): Promise<void> {
   clearInterval(heartbeatTimer)
   unsubscribeProviderAuth()
   providerAuth.dispose()
-  await closeRuntime()
+  for (const sessionId of [...runtimes.keys()]) {
+    await closeRuntime(sessionId).catch(() => undefined)
+  }
 }
 
 const unsubscribeProviderAuth = providerAuth.onEvent(event => send({
@@ -365,16 +403,6 @@ process.on("message", (value: unknown) => {
     })
     return
   }
-  if (request.sessionId && runtime && runtime.getSessionId() !== request.sessionId) {
-    send({
-      kind: "response",
-      id: request.id,
-      generation: workerGeneration,
-      ok: false,
-      error: { code: "RUNTIME_REPLACED", message: "Pi runtime no longer owns the requested session" },
-    })
-    return
-  }
   if (!request.command || typeof request.command.type !== "string") {
     send({
       kind: "response",
@@ -405,7 +433,9 @@ process.on("message", (value: unknown) => {
     return
   }
   if (request.command.type === "session.close") {
-    void schedule.close(closeRuntime).then(
+    // 多 runtime 共享调度器：session.close 只是普通命令（关一个 runtime），
+    // 不能 closing 整个调度器；只有 dispose（进程退出）才排空调度器。
+    void schedule({ ...request.command, sessionId: request.sessionId }).then(
       () => {
         send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
       },
