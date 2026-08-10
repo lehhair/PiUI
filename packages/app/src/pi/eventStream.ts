@@ -64,6 +64,9 @@ type SessionsUpdatedPayload = {
   sessionId?: string
   attached?: boolean
   detached?: boolean
+  materialized?: boolean
+  /** 会话活跃期间 head 推进（新条目），节流后通知列表刷新 */
+  updated?: boolean
   replaced?: boolean
   sourceSessionId?: string
   targetSessionId?: string

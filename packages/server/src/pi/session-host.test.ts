@@ -5,6 +5,57 @@ import type { WorkerSession } from "./worker-client.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionHost } from "./session-host.ts"
 
+test("SessionHost notifies the session list as the session head advances", async () => {
+  let emitEvent!: (event: { channel: string; head?: unknown }) => void
+  const worker = {
+    command: async () => ({}),
+    getSessionId: () => "session-1",
+    getSessionFile: () => "session-1.jsonl",
+    getCwd: () => ".",
+    updateSessionIdentity: () => {},
+    onEvent: (listener: (event: { channel: string; head?: unknown }) => void) => {
+      emitEvent = listener
+      return () => {}
+    },
+    onCrash: () => () => {},
+    onClose: () => () => {},
+    dispose: async () => {},
+  } as unknown as WorkerSession
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async () => worker,
+  } as unknown as RuntimeSupervisor
+  const hub = new EventHub()
+  // 短节流窗口（50ms）便于测试：真实窗口是 1s
+  const host = new SessionHost(supervisor, hub, 50)
+
+  const updated: unknown[] = []
+  const off = hub.subscribe(event => {
+    if (event.channel === "sessions.updated") updated.push(event.payload)
+  })
+
+  await host.openSession(".", "session-1.jsonl")
+  // attach 会发一条 attached；清掉，只观察 head 推进的通知
+  updated.length = 0
+  // 首次持久化条目：materialized 必发
+  emitEvent({ channel: "session.head", head: { revision: 1 } })
+  assert.equal(updated.length, 1)
+  assert.deepEqual(updated[0], { sessionId: "session-1", materialized: true })
+
+  // 节流窗口内（同一轮连续条目）：合并，不重复通知
+  emitEvent({ channel: "session.head", head: { revision: 2 } })
+  assert.equal(updated.length, 1)
+
+  // 窗口外（新消息到达）：updated 通知，列表可刷新排序/消息数
+  await new Promise(resolve => setTimeout(resolve, 60))
+  emitEvent({ channel: "session.head", head: { revision: 3 } })
+  assert.equal(updated.length, 2)
+  assert.deepEqual(updated[1], { sessionId: "session-1", updated: true })
+
+  off()
+  host.dispose()
+})
+
 test("SessionHost rejects reopening a runtime while it is closing", async () => {
   let releaseAbort!: () => void
   let opens = 0
