@@ -2,7 +2,7 @@ import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo, useCallbac
 import { useTranslation } from 'react-i18next'
 import { animate } from 'motion/mini'
 import { ChevronDownIcon, ChevronRightIcon, SplitIcon, SpinnerIcon, UndoIcon } from '../../components/Icons'
-import { CopyButton, SmoothHeight } from '../../components/ui'
+import { CopyButton } from '../../components/ui'
 import { MarkdownRenderer } from '../../components/MarkdownRenderer'
 import { useDisclosureScrollLock } from '../../hooks'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
@@ -266,7 +266,6 @@ export function assistantHasFinalContent(item: PiAssistantMessageItem): boolean 
 
 interface MessageRendererProps {
   item: PiTimelineItem
-  allowStreamingLayoutAnimation?: boolean
   /** 回合总时长（毫秒），仅在回合最后一条 assistant 消息上有值 */
   turnDuration?: number
   /**
@@ -287,7 +286,6 @@ interface MessageRendererProps {
 
 export const MessageRenderer = memo(function MessageRenderer({
   item,
-  allowStreamingLayoutAnimation = false,
   turnDuration,
   isTurnLatestAssistant = true,
   processContentScope = 'all',
@@ -314,7 +312,6 @@ export const MessageRenderer = memo(function MessageRenderer({
     return (
       <AssistantMessageView
         item={item}
-        allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
         turnDuration={turnDuration}
         isTurnLatestAssistant={isTurnLatestAssistant}
         processContentScope={processContentScope}
@@ -629,13 +626,11 @@ const UserMessageView = memo(function UserMessageView({
 
 const AssistantMessageView = memo(function AssistantMessageView({
   item,
-  allowStreamingLayoutAnimation = false,
   turnDuration,
   isTurnLatestAssistant = true,
   processContentScope = 'all',
 }: {
   item: PiAssistantMessageItem
-  allowStreamingLayoutAnimation?: boolean
   turnDuration?: number
   isTurnLatestAssistant?: boolean
   processContentScope?: ProcessContentScope
@@ -745,9 +740,9 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
   return (
     <div ref={wrapperRef} className={`flex flex-col ${MSG_SPACING.stack} w-full group`}>
-      {/* 流式增高走自然撑开 + 贴底 scroll，默认不做 height 补间，避免每帧 layout/remeasure */}
-      <SmoothHeight isActive={!!isStreaming && allowStreamingLayoutAnimation && processContentScope === 'all'}>
-        <div className={`flex flex-col ${MSG_SPACING.stack}`}>
+      {/* 流式增高走自然撑开 + 贴底 scroll：不做 height 补间，避免每帧
+          layout/remeasure 以及锁高追赶造成的内容重叠/空白 */}
+      <div className={`flex flex-col ${MSG_SPACING.stack}`}>
           {renderItems.map((renderItem: RenderItem) => {
             if (renderItem.type === 'tool-group') {
               return (
@@ -788,7 +783,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
             }
           })}
         </div>
-      </SmoothHeight>
 
       {/* Message-level error：过程壳内不重复挂错误 */}
       {messageError && processContentScope !== 'process' && processContentScope !== 'inline' && (

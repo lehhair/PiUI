@@ -106,7 +106,6 @@ interface ChatAreaProps {
   isStreaming?: boolean
   /** 上下文压缩进行中：在消息流底部显示行内指示 + 取消（对齐 Pi TUI 的状态条） */
   isCompacting?: boolean
-  allowStreamingLayoutAnimation?: boolean
   loadState?: 'idle' | 'loading' | 'loaded' | 'error'
   loadError?: MessageError
   connectionError?: MessageError
@@ -142,7 +141,6 @@ interface MessageBodyProps {
   forkMessageId?: string
   turnDuration?: number
   isTurnLatestAssistant?: boolean
-  allowStreamingLayoutAnimation: boolean
   processContentScope?: 'all' | 'process' | 'final' | 'inline'
   onEntryGrowComplete?: (messageId: string) => void
 }
@@ -156,13 +154,11 @@ const MessageBody = memo(function MessageBody({
   forkMessageId,
   turnDuration,
   isTurnLatestAssistant,
-  allowStreamingLayoutAnimation,
   processContentScope = 'all',
   onEntryGrowComplete,
 }: MessageBodyProps) {
   const messageId = item.renderKey ?? item.entryId
   const isUser = item.kind === 'user_message'
-  const itemStreaming = item.kind === 'assistant_message' && item.isStreaming
   return (
     <div
       ref={node => registerMessage?.(messageId, node as HTMLDivElement | null)}
@@ -173,7 +169,6 @@ const MessageBody = memo(function MessageBody({
         <div className={`message-renderer-shell min-w-0 group ${!isUser ? 'w-full' : ''}`}>
           <MessageRenderer
             item={item}
-            allowStreamingLayoutAnimation={itemStreaming ? allowStreamingLayoutAnimation : false}
             turnDuration={turnDuration}
             isTurnLatestAssistant={isTurnLatestAssistant}
             processContentScope={processContentScope}
@@ -244,7 +239,6 @@ interface RowProps {
   forkMap: Map<string, string | undefined>
   turnDurationMap: Map<string, number>
   turnLatestAssistantIds: Set<string>
-  allowStreamingLayoutAnimation: boolean
   measureElement: (el: HTMLElement | null) => void
   onEntryGrowComplete?: (messageId: string) => void
 }
@@ -262,7 +256,6 @@ const VirtualRow = memo(function VirtualRow({
   forkMap,
   turnDurationMap,
   turnLatestAssistantIds,
-  allowStreamingLayoutAnimation,
   measureElement,
   onEntryGrowComplete,
 }: RowProps) {
@@ -306,7 +299,6 @@ const VirtualRow = memo(function VirtualRow({
                 ? turnLatestAssistantIds.has(item.item.entryId)
                 : undefined
             }
-            allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
             processContentScope={item.processContentScope ?? 'all'}
             onEntryGrowComplete={onEntryGrowComplete}
           />
@@ -330,7 +322,6 @@ const VirtualRow = memo(function VirtualRow({
                     forkMessageId={forkMap.get(child.item.entryId)}
                     turnDuration={turnDurationMap.get(child.item.entryId)}
                     isTurnLatestAssistant={turnLatestAssistantIds.has(child.item.entryId)}
-                    allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
                     processContentScope={child.processContentScope}
                   />
                 ))}
@@ -346,7 +337,6 @@ const VirtualRow = memo(function VirtualRow({
                   forkMessageId={forkMap.get(item.finalItem.entryId)}
                   turnDuration={turnDurationMap.get(item.finalItem.entryId)}
                   isTurnLatestAssistant
-                  allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
                   processContentScope="final"
                 />
               )}
@@ -371,7 +361,6 @@ const VirtualRow = memo(function VirtualRow({
   prev.forkMap === next.forkMap &&
   prev.turnDurationMap === next.turnDurationMap &&
   prev.turnLatestAssistantIds === next.turnLatestAssistantIds &&
-  prev.allowStreamingLayoutAnimation === next.allowStreamingLayoutAnimation &&
   prev.measureElement === next.measureElement &&
   prev.onEntryGrowComplete === next.onEntryGrowComplete
 )
@@ -389,7 +378,7 @@ export const ChatArea = memo(
         items, queuedSteering = [], queuedFollowUps = [],
         forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
-        sessionId, isStreaming = false, isCompacting = false, allowStreamingLayoutAnimation = false,
+        sessionId, isStreaming = false, isCompacting = false,
         loadState = 'idle', loadError, connectionError, onOpenSettings,
         hasMoreHistory = false, onLoadMore, onUndo, onFork, canUndo,
         registerMessage, retryStatus = null, bottomPadding = 0,
@@ -1053,7 +1042,6 @@ export const ChatArea = memo(
                     forkMap={forkMap}
                     turnDurationMap={turnDurationMap}
                     turnLatestAssistantIds={turnLatestAssistantIds}
-                    allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
                     measureElement={virtualizer.measureElement as (el: HTMLElement | null) => void}
                     onEntryGrowComplete={emptyShellGate.onEntryGrowComplete}
                   />
