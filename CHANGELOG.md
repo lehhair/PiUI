@@ -4,6 +4,39 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.3] - 2026-08-10
+
+- fix(chat): register pane controller so global shortcuts work again (5538af23)
+- fix(runtime): session management commands (rename/model) bypass the busy lane (ccc0ee91)
+- feat(chat): input send button stays Stop while session is in active list (dbc89287)
+- fix(chat): unify queue action icon sizes with user-message action bar (72de9cfe)
+- fix(chat): clearPiQueue returns the cleared snapshot so queue-item ops can replay the rest (5f5389c5)
+- fix(chat): queue action buttons below the bubble, matching user-message layout (80ca2616)
+- feat(chat): queue bubbles use user-message action-bar layout with clear/move/edit (e615df83)
+- feat(chat): queue messages support undo-to-input and switch steer/followUp mode (c93b6a90)
+- fix(chat): useChatViewportSelect reads nearest provider, not shared global snapshot (1e862d2d)
+- fix(chat): dialog header style unified across floating host and sidebar inline (3ad826bb)
+- fix(chat): dialog header groups title+collapse in one block; select check uses accent-secondary (3662aab2)
+- fix(chat): align extension dialog width with composer on compact layout (32290c77)
+- feat(chat): extension dialogs collapse into pill above the composer (4d3c01cf)
+- fix(outline): highlight section from scroll position + previous user message (8175a7a6)
+- fix(chat): keep shouldRender state true after expand so collapse delays unmount (24e24cf4)
+- fix(chat): ProcessCollapseBlock collapse should animate, matching expand feel (f938c3ab)
+- feat(chat): stream with natural layout, drop SmoothHeight activation chain (9537d787)
+- revert(chat): restore original SmoothHeight streaming height animation (d40ff618)
+- fix(tools): show tool call substance in header instead of duplicating the name (94392163)
+- feat(runtime): reuse idle workers on session switch, single warm slot, reap double-check (673cfa9c)
+- fix(chat): cut transition lag once growth becomes continuous (9a566581)
+- fix(chat): keep smooth transitions for block-level growth, instant for token-level (0393cdd2)
+- fix(chat): stop SmoothHeight transition lag during streaming growth (1244629b)
+- refactor(sidebar): move workspace filtering to display layer, shrink SessionContext (d1ad83a6)
+- refactor(sidebar): active sessions resolve globally, drop workspace-scoped workarounds (0daa07c5)
+- perf(sidebar): coalesce session-list refreshes to stop request storms (3448c660)
+- fix(events): pull runtime state on subscribe/resync so active sessions survive refresh (b79ea773)
+- fix(sidebar): active sessions from other workspaces stay clickable (c7055da3)
+- fix(changes): kill diff refresh storm while agent is writing (bfe49607)
+- chore(app): resolve all eslint errors and warnings (103 → 0) (4d28d130)
+
 ## [v0.4.2] - 2026-08-09
 
 - feat(chat): restore streaming height-grow animation for the live row (d655203f)
