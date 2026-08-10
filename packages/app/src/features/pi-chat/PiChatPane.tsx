@@ -58,6 +58,7 @@ import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
 import { extensionUiStore } from '../../pi/extensionUiStore'
+import { paneControllerStore } from '../../store/paneControllerStore'
 import { commandFeedbackStore, type CommandFeedbackStatus } from '../../pi/commandFeedbackStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../../pi/workspaces.js'
@@ -223,7 +224,7 @@ export function PiChatPane({
   const onEnterSessionRef = useRef(onEnterSession)
   const onNewChatRef = useRef(onNewChat)
   const { currentDirectory, addDirectory } = useDirectory()
-  const { registerSession } = useSessionContext()
+  const { sessions: allSessions, registerSession } = useSessionContext()
   const { activeServer, activeServerGeneration } = useServerStore()
   const { providerRevision } = useManagementEvents()
   const registerSessionRef = useRef(registerSession)
@@ -422,6 +423,7 @@ export function PiChatPane({
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
   const baseItems = useMemo(() => selectPiTimelineItemsCached(sessionId, branch), [sessionId, branch])
+
   // 用户发起的 bash 乐观条目（执行中显示 + 流式输出，pi TUI 的
   // BashExecutionComponent 对应物）。订阅 pending 数量变化以便渲染合并。
   const pendingBashCount = useSyncExternalStore(
@@ -435,6 +437,71 @@ export function PiChatPane({
     const pendingItems = sessionId ? bashPendingStore.toItems(baseItems, sessionId) : []
     return pendingItems.length > 0 ? [...baseItems, ...pendingItems] : baseItems
   }, [baseItems, sessionId, pendingBashCount])
+
+  // ── Pane controller 注册（全局快捷键/命令入口）──
+  // paneControllerStore 由 OpenCodeUI 迁移保留但从未注册：App 的
+  // usePaneController 恒 null，导致 selectModel/newSession/cancelMessage/
+  // copyLastResponse/focusNextPane 等快捷键全部失效。对齐 OpenCodeUI
+  // ChatPane，把本 pane 的动作注册进 store。archiveSession/toggleAgent/
+  // toggleFullAuto 在 Pi 无对应能力，置空实现。
+  const controllerActionsRef = useRef<Record<string, () => void>>({})
+  // latest-value：effect 里同步最新闭包（渲染期不得写 ref）
+  useEffect(() => {
+    controllerActionsRef.current = {
+      newSession: () => onNewChatRef.current?.(),
+      previousSession: () => {
+        if (!sessionId) return
+        const idx = allSessions.findIndex(s => s.id === sessionId)
+        if (idx > 0 && allSessions[idx - 1]) {
+          navigatePaneToSession?.(paneId, allSessions[idx - 1].id, allSessions[idx - 1].directory)
+        }
+      },
+      nextSession: () => {
+        if (!sessionId) return
+        const idx = allSessions.findIndex(s => s.id === sessionId)
+        if (idx >= 0 && idx < allSessions.length - 1 && allSessions[idx + 1]) {
+          navigatePaneToSession?.(paneId, allSessions[idx + 1].id, allSessions[idx + 1].directory)
+        }
+      },
+      cancelMessage: () => {
+        if (!sessionId) return
+        void (compacting ? abortPiCompaction(sessionId) : abortPiOperation(sessionId)).catch(() => undefined)
+      },
+      openModelSelector: () => modelSelectorRef.current?.openMenu(),
+      copyLastResponse: () => {
+        const lastAssistant = [...items].reverse().find(item => item.kind === 'assistant_message')
+        const text = lastAssistant ? textFromTimelineItem(lastAssistant) : ''
+        if (text) void copyTextToClipboard(text).catch(() => undefined)
+      },
+      archiveSession: () => undefined,
+      toggleAgent: () => undefined,
+      toggleFullAuto: () => undefined,
+    }
+  })
+  const contextLimit = useMemo(() => {
+    const usage = (state as { contextUsage?: { contextWindow?: number } } | null)?.contextUsage
+    return typeof usage?.contextWindow === 'number' ? usage.contextWindow : undefined
+  }, [state])
+  useEffect(() => {
+    paneControllerStore.setController(paneId, {
+      paneId,
+      sessionId,
+      effectiveDirectory: currentDirectoryRef.current ?? '',
+      contextLimit,
+      isStreaming,
+      newSession: () => controllerActionsRef.current.newSession?.(),
+      archiveSession: () => controllerActionsRef.current.archiveSession?.(),
+      previousSession: () => controllerActionsRef.current.previousSession?.(),
+      nextSession: () => controllerActionsRef.current.nextSession?.(),
+      toggleAgent: () => controllerActionsRef.current.toggleAgent?.(),
+      copyLastResponse: () => controllerActionsRef.current.copyLastResponse?.(),
+      cancelMessage: () => controllerActionsRef.current.cancelMessage?.(),
+      openModelSelector: () => controllerActionsRef.current.openModelSelector?.(),
+      toggleFullAuto: () => controllerActionsRef.current.toggleFullAuto?.(),
+    })
+    return () => paneControllerStore.removeController(paneId)
+  }, [paneId, sessionId, contextLimit, isStreaming])
+
   // 扩展 UI 弹窗（权限/问题/选择/输入）：可收起为输入框上方胶囊（FloatingActions）
   const extensionDialogSnapshot = useSyncExternalStore(
     extensionUiStore.subscribe,

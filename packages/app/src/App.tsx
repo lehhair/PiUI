@@ -572,7 +572,12 @@ function App() {
       toggleSidebar: handleToggleSidebar,
       toggleRightPanel: handleToggleRightPanel,
       focusInput: () => {
-        const input = document.querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
+        // 优先聚焦 focused pane 的输入框（分屏时多个输入框）
+        const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
+        const root = pid
+          ? document.querySelector<HTMLElement>(`[data-pane-id="${pid}"]`)
+          : document
+        const input = (root ?? document).querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
         input?.focus()
       },
       newSession: () => focusedController?.newSession(),
