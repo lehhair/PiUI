@@ -4,6 +4,12 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.4] - 2026-08-10
+
+- style(chat): narrow collapsed dialog capsule to 240px (5869798b)
+- fix(chat): send button returns when user types while session is active (cfcec447)
+- feat(chat): rework extension dialog card UI (944bd779)
+
 ## [v0.4.3] - 2026-08-10
 
 - fix(chat): register pane controller so global shortcuts work again (5538af23)
