@@ -40,6 +40,17 @@ async function request(port: number, method: string, path: string, body?: unknow
   return { status: response.status, json: await response.json().catch(() => undefined) }
 }
 
+/**
+ * 命令提交后立即执行（原生语义，无排队）：HTTP 响应返回时记录可能已推进
+ * 到 running/completed。只要求“已接受并正在推进”，不锁死具体状态。
+ */
+function assertAcceptedOrBeyond(command: { status?: string }): void {
+  assert.ok(
+    command.status === "accepted" || command.status === "running" || command.status === "completed",
+    `expected command status accepted/running/completed, got ${command.status}`,
+  )
+}
+
 describe("event websocket", () => {
   const cleanups: Array<() => Promise<void> | void> = []
   after(async () => {
@@ -93,7 +104,7 @@ describe("event websocket", () => {
       params: { text: "hello mock" },
     })
     assert.equal(prompted.status, 202)
-    assert.equal(prompted.json.command.status, "accepted")
+    assertAcceptedOrBeyond(prompted.json.command)
 
     const deadline = Date.now() + 10_000
     let sawAgentEnd = false
@@ -137,7 +148,7 @@ describe("event websocket", () => {
       params: { outputPath: path.join(mockHome, "export.jsonl") },
     })
     assert.equal(jsonlExport.status, 202)
-    assert.equal(jsonlExport.json.command.status, "accepted")
+    assertAcceptedOrBeyond(jsonlExport.json.command)
     await waitForCommand(ws, envelopes, "cmd-export-jsonl")
     assert.equal(existsSync(path.join(mockHome, "export.jsonl")), true)
     const htmlExport = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/exportHtml`, {
@@ -145,7 +156,7 @@ describe("event websocket", () => {
       params: { outputPath: path.join(mockHome, "export.html") },
     })
     assert.equal(htmlExport.status, 202)
-    assert.equal(htmlExport.json.command.status, "accepted")
+    assertAcceptedOrBeyond(htmlExport.json.command)
     await waitForCommand(ws, envelopes, "cmd-export-html")
     assert.equal(existsSync(path.join(mockHome, "export.html")), true)
 
