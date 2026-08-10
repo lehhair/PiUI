@@ -277,6 +277,15 @@ class PiEventStream {
       if (cursor) cursors[eventStreamKey(stream)] = cursor
     }
     this.send({ type: 'subscribe', protocolVersion: PROTOCOL_VERSION, streams, cursors })
+
+    // 主动把订阅中 session 的运行时 state 拿回来：页面刷新 / ws 重连后
+    // state store 是空的，而它只依赖“新事件到达后被动拉取” —— 活跃中的
+    // worker 不推新事件（等待权限 / 单条消息在队列里）时 isStreaming、队列、
+    // 上下文用量永远不恢复。每次订阅建立都主动 pull 一次（有防抖合并），
+    // 让打开/刷新会话时立即拿到正在工作的 runtime 的真实状态。
+    for (const sessionId of this.refCounts.keys()) {
+      this.scheduleStateRefresh(sessionId)
+    }
   }
 
   private send(message: unknown): void {
@@ -570,6 +579,8 @@ class PiEventStream {
     if (cursor) this.cursors.set(key, cursor)
     if (stream.kind === 'session') {
       void loadPiSessionData(stream.id).catch(() => undefined)
+      // resync 时同样主动拉一次运行时 state（branch 与 state 一起恢复）
+      this.scheduleStateRefresh(stream.id)
     } else if (stream.kind === 'server') {
       void loadPiSessions().catch(() => undefined)
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
