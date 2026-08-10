@@ -19,6 +19,10 @@ type SessionsChangedDetail = {
   updated?: boolean
   materialized?: boolean
   deleted?: boolean
+  /** head 推进带的会话摘要（/name 设置的标题） */
+  name?: string
+  /** 条目数（近似消息数） */
+  messageCount?: number
 }
 
 interface UseSessionsOptions {
@@ -82,7 +86,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const queuedReconnectRefreshRef = useRef(false)
   const retryTimerRef = useRef<number | null>(null)
   const fetchSessionsRef = useRef<
-    (params?: SessionListParams & { append?: boolean; retryAttempt?: number }) => Promise<void>
+    (params?: SessionListParams & { append?: boolean; retryAttempt?: number; silent?: boolean }) => Promise<void>
   >(() => Promise.resolve())
 
   useEffect(() => {
@@ -248,12 +252,21 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         return
       }
       if ((detail?.updated || detail?.materialized) && detail.sessionId) {
-        // head 推进：本地有条目则移到最前并刷新 updatedAt（排序跟随活动）；
-        // 没有条目说明磁盘已可见（materialized 即落盘），静默重拉补齐。
+        // head 推进：本地有条目则移到最前、刷新 updatedAt，并用事件带的
+        // 摘要补全标题/消息数；没有条目说明磁盘已可见（materialized 即
+        // 落盘），静默重拉补齐。
         setSessions(prev => {
           const index = prev.findIndex(session => session.id === detail.sessionId)
           if (index === -1) return prev
-          const session = { ...prev[index], updatedAt: now }
+          const current = prev[index]
+          const session: UiSession = {
+            ...current,
+            updatedAt: now,
+            ...(typeof detail.messageCount === 'number' && detail.messageCount > 0
+              ? { messageCount: detail.messageCount }
+              : {}),
+            ...(typeof detail.name === 'string' && detail.name ? { title: detail.name, isNamed: true } : {}),
+          }
           return [session, ...prev.filter(item => item.id !== detail.sessionId)]
         })
         return

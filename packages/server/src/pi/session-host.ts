@@ -590,9 +590,14 @@ export class SessionHost {
         now - (this.lastHeadListNotify.get(session.sessionId) ?? 0) >= this.sessionsListThrottleMs) {
         this.lastHeadListNotify.set(session.sessionId, now)
         this.materialized.add(session.sessionId)
+        // 事件带会话摘要（名称/条目数），前端列表本地增量更新标题/消息数，
+        // 无需全量重拉。
+        const head = event.head as { sessionName?: unknown; entryCount?: unknown } | undefined
         this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
           sessionId: session.sessionId,
           ...(firstMaterialization ? { materialized: true } : { updated: true }),
+          name: typeof head?.sessionName === "string" ? head.sessionName : undefined,
+          messageCount: typeof head?.entryCount === "number" ? head.entryCount : undefined,
         })
       }
       return

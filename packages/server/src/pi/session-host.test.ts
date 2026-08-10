@@ -37,10 +37,15 @@ test("SessionHost notifies the session list as the session head advances", async
   await host.openSession(".", "session-1.jsonl")
   // attach 会发一条 attached；清掉，只观察 head 推进的通知
   updated.length = 0
-  // 首次持久化条目：materialized 必发
-  emitEvent({ channel: "session.head", head: { revision: 1 } })
+  // 首次持久化条目：materialized 必发，并带会话摘要（name/messageCount）
+  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 3, sessionName: "my chat" } })
   assert.equal(updated.length, 1)
-  assert.deepEqual(updated[0], { sessionId: "session-1", materialized: true })
+  assert.deepEqual(updated[0], {
+    sessionId: "session-1",
+    materialized: true,
+    name: "my chat",
+    messageCount: 3,
+  })
 
   // 节流窗口内（同一轮连续条目）：合并，不重复通知
   emitEvent({ channel: "session.head", head: { revision: 2 } })
@@ -48,9 +53,14 @@ test("SessionHost notifies the session list as the session head advances", async
 
   // 窗口外（新消息到达）：updated 通知，列表可刷新排序/消息数
   await new Promise(resolve => setTimeout(resolve, 60))
-  emitEvent({ channel: "session.head", head: { revision: 3 } })
+  emitEvent({ channel: "session.head", head: { revision: 3, entryCount: 4 } })
   assert.equal(updated.length, 2)
-  assert.deepEqual(updated[1], { sessionId: "session-1", updated: true })
+  assert.deepEqual(updated[1], {
+    sessionId: "session-1",
+    updated: true,
+    name: undefined,
+    messageCount: 4,
+  })
 
   off()
   host.dispose()
