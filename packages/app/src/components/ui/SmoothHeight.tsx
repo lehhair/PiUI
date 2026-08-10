@@ -34,6 +34,14 @@ export function SmoothHeight({
       return
     }
 
+    // 系统设置减少动效：不锁高，内容自然撑开
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      outer.style.height = ''
+      outer.style.clipPath = ''
+      outer.style.transition = ''
+      return
+    }
+
     // 锁定 outer 为当前内容高度 — 之后内容增长不会自动撑开 outer，
     // 必须改 height + CSS transition 驱动 outer 增长
     const initial = inner.scrollHeight
@@ -50,6 +58,11 @@ export function SmoothHeight({
 
     const applyHeight = (target: number) => {
       if (Math.abs(target - lastApplied) < 0.5) return
+      const growing = target > lastApplied
+      // 增长：内容在 inner 已自然撑开，outer 必须同帧跟上——否则 transition
+      // 追赶会让 inner 溢出盖住下方内容（流式高频增长时重叠/错位）。
+      // 收缩：保留过渡平滑收起，避免高度骤减造成下方空白跳动。
+      outer.style.transition = growing ? 'none' : 'height 120ms linear'
       lastApplied = target
       outer.style.height = `${target}px`
     }
