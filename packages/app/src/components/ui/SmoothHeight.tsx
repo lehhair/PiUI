@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
 
+/** 块级高度变化阈值：>= 此值（约一行行高）走平滑过渡，否则即时同步 */
+const HEIGHT_SMOOTH_THRESHOLD = 24
+
 /**
  * SmoothHeight - 内容高度变化时平滑过渡
  *
@@ -9,6 +12,12 @@ import { useEffect, useRef } from 'react'
  *
  * 不用 motion animate().stop()+restart：流式时每帧重启 easeOut 会让整块（含已登场内容）发颤。
  * CSS transition 中途改目标会从当前计算值接着插值，已登场区域更稳。
+ *
+ * 按变化幅度分流：
+ * - 块级大变化（新代码块/工具块/整段换行，>= HEIGHT_SMOOTH_THRESHOLD）：
+ *   transition 平滑展开/收起，保留丝滑观感
+ * - 逐字/单行小增长（流式 token 刷新）：同帧即时同步 —— 增量小本来就顺滑，
+ *   且避免 transition 追赶滞后让 inner 溢出盖住下方内容（重叠/错位）
  */
 export function SmoothHeight({
   isActive,
@@ -57,12 +66,11 @@ export function SmoothHeight({
     let lastApplied = initial
 
     const applyHeight = (target: number) => {
-      if (Math.abs(target - lastApplied) < 0.5) return
-      const growing = target > lastApplied
-      // 增长：内容在 inner 已自然撑开，outer 必须同帧跟上——否则 transition
-      // 追赶会让 inner 溢出盖住下方内容（流式高频增长时重叠/错位）。
-      // 收缩：保留过渡平滑收起，避免高度骤减造成下方空白跳动。
-      outer.style.transition = growing ? 'none' : 'height 120ms linear'
+      const delta = Math.abs(target - lastApplied)
+      if (delta < 0.5) return
+      // 块级大变化（新代码块/工具块/整段换行）→ 平滑过渡，保留丝滑观感；
+      // 逐字/单行小增长 → 即时同步（增量小本就顺滑，且零滞后不重叠）
+      outer.style.transition = delta >= HEIGHT_SMOOTH_THRESHOLD ? 'height 120ms linear' : 'none'
       lastApplied = target
       outer.style.height = `${target}px`
     }
