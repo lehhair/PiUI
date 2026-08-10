@@ -357,6 +357,21 @@ export function PiChatPane({
     const pendingItems = sessionId ? bashPendingStore.toItems(baseItems, sessionId) : []
     return pendingItems.length > 0 ? [...baseItems, ...pendingItems] : baseItems
   }, [baseItems, sessionId, pendingBashCount])
+  // 扩展 UI 弹窗（权限/问题/选择/输入）：可收起为输入框上方胶囊（FloatingActions）
+  const extensionDialogSnapshot = useSyncExternalStore(
+    extensionUiStore.subscribe,
+    extensionUiStore.getSnapshot,
+    extensionUiStore.getSnapshot,
+  )
+  const pendingDialogs = useMemo(
+    () => (sessionId ? extensionDialogSnapshot.sessions[sessionId]?.pending ?? [] : []),
+    [sessionId, extensionDialogSnapshot],
+  )
+  const dialogRequest = useMemo(
+    () => [...pendingDialogs].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null,
+    [pendingDialogs],
+  )
+  const [dialogCollapsed, setDialogCollapsed] = useState(false)
   // 真实条目落盘后清理已被吸收的乐观条目（toItems 已过滤，这里防泄漏）
   useEffect(() => {
     if (sessionId) bashPendingStore.removeConsumed(baseItems, sessionId)
@@ -1450,7 +1465,11 @@ export function PiChatPane({
         onScrollToMessageId={handleOutlineScrollToMessage}
       />
 
-      <ExtensionUiDialogHost sessionId={sessionId} />
+      <ExtensionUiDialogHost
+        sessionId={sessionId}
+        collapsed={dialogCollapsed}
+        onCollapsedChange={setDialogCollapsed}
+      />
 
       <ProjectTrustPrompt cwd={currentDirectory} />
 
@@ -1489,6 +1508,15 @@ export function PiChatPane({
             revertSteps={revertSteps}
             onRedo={() => void handleRedoStep()}
             onRedoAll={() => void handleRedoAll()}
+            collapsedPermission={
+              dialogRequest && dialogCollapsed
+                ? {
+                    label: dialogRequest.title,
+                    queueLength: pendingDialogs.length,
+                    onExpand: () => setDialogCollapsed(false),
+                  }
+                : undefined
+            }
           />
         </div>
       </div>

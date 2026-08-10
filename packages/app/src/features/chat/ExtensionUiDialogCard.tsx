@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ExtensionUiDialogRequest, ExtensionUiDialogResponse } from '@piui/protocol'
-import { QuestionIcon, CheckIcon } from '../../components/Icons'
+import { QuestionIcon, CheckIcon, ChevronDownIcon } from '../../components/Icons'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { respondPiExtensionUi } from '../../pi/controllers/index.js'
 
@@ -14,12 +14,15 @@ export function ExtensionUiDialogCard({
   request,
   queueLength = 1,
   compact = false,
+  onCollapse,
 }: {
   request: ExtensionUiDialogRequest
   queueLength?: number
   compact?: boolean
+  /** 悬浮宿主传入时显示收起按钮（收起为输入框上方的胶囊）；inline 列表不传 */
+  onCollapse?: () => void
 }) {
-  const { t } = useTranslation(['common'])
+  const { t } = useTranslation(['common', 'components'])
   const [value, setValue] = useState(() =>
     request.kind === 'select'
       ? request.options[0] ?? ''
@@ -81,6 +84,16 @@ export function ExtensionUiDialogCard({
           <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
             +{queueLength - 1}
           </span>
+        )}
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            title={t('components:minimize')}
+            className="ml-auto shrink-0 rounded-md p-1 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
+          >
+            <ChevronDownIcon size={14} />
+          </button>
         )}
       </div>
 
