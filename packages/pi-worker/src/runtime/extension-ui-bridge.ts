@@ -16,6 +16,9 @@ const MAX_TITLE_LENGTH = 4 * 1024
 const MAX_OPTIONS = 200
 const MAX_WIDGET_LINES = 500
 
+/** 状态镜像的 patch 上限：超出丢最老（覆盖式 patch，重放子序列仍一致）。 */
+const MAX_STATE_MIRROR_PATCHES = 512
+
 export type PiExtensionUiEvent =
   | { type: "requested"; request: ExtensionUiDialogRequest }
   | { type: "settled"; requestId: string; sessionId: string; reason: ExtensionUiSettlementReason }
@@ -38,6 +41,12 @@ export class ExtensionUiBridge {
   private readonly listeners = new Set<(event: PiExtensionUiEvent) => void>()
   private editorText = ""
   private toolsExpanded = false
+  /**
+   * 状态镜像：状态 patch 的追加式记录，供客户端刷新/重连后重建 status /
+   * widget / working 指示等增量状态（这些值原本只存在前端内存里）。
+   * cancelAll 时清空——会话替换/重载后新会话从零开始。
+   */
+  private stateMirror: ExtensionUiStatePatch[] = []
 
   constructor(
     private readonly getSessionId: () => string,
@@ -118,6 +127,7 @@ export class ExtensionUiBridge {
       this.emit({ type: "settled", requestId, sessionId: pending.request.sessionId, reason })
     }
     this.pending.clear()
+    this.stateMirror = []
     this.tuiHost.reset()
   }
 
@@ -127,6 +137,18 @@ export class ExtensionUiBridge {
    */
   listPending(): ExtensionUiDialogRequest[] {
     return [...this.pending.values()].map(pending => pending.request)
+  }
+
+  /**
+   * 状态镜像快照（patch 序列 + 编辑器文本 + 折叠状态）。客户端刷新后
+   * 重放 patch 即可重建 status/widget/working 指示等增量 UI 状态。
+   */
+  getStateMirror(): { patches: ExtensionUiStatePatch[]; editorText: string; toolsExpanded: boolean } {
+    return {
+      patches: [...this.stateMirror],
+      editorText: this.editorText,
+      toolsExpanded: this.toolsExpanded,
+    }
   }
 
   private createContext(): ExtensionUIContext {
@@ -376,6 +398,10 @@ export class ExtensionUiBridge {
   }
 
   private state(patch: ExtensionUiStatePatch): void {
+    this.stateMirror.push(patch)
+    if (this.stateMirror.length > MAX_STATE_MIRROR_PATCHES) {
+      this.stateMirror.splice(0, this.stateMirror.length - MAX_STATE_MIRROR_PATCHES)
+    }
     this.emit({ type: "state", sessionId: this.getSessionId(), patch })
   }
 

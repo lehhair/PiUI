@@ -63,4 +63,35 @@ describe('piSessionStateStore pending dialog recovery', () => {
 
     expect(extensionUiStore.getSnapshot().sessions['session-1']?.pending ?? []).toHaveLength(0)
   })
+
+  it('restores the extension UI state mirror (status/widget/editorText)', () => {
+    piSessionStateStore.setState('session-1', {
+      pendingExtensionUiRequests: [],
+      extensionUiState: {
+        patches: [
+          { kind: 'status', key: 'mode', text: 'Planning' },
+          { kind: 'widget', key: 'plan', lines: ['1. Inspect', '2. Fix'], placement: 'aboveEditor' },
+        ],
+        editorText: 'prefill',
+        toolsExpanded: false,
+      },
+    } as unknown as JsonObject)
+
+    const snapshot = extensionUiStore.getSnapshot().sessions['session-1']
+    expect(snapshot?.state.statuses.mode).toBe('Planning')
+    expect(snapshot?.state.widgets.plan?.lines).toEqual(['1. Inspect', '2. Fix'])
+    expect(snapshot?.state.editorText).toBe('prefill')
+  })
+
+  it('keeps pending dialogs when restoring the state mirror (live events first)', () => {
+    extensionUiStore.requestOpened(dialogRequest())
+    piSessionStateStore.setState('session-1', {
+      pendingExtensionUiRequests: [],
+      extensionUiState: { patches: [{ kind: 'status', key: 'mode', text: 'Planning' }], editorText: '', toolsExpanded: false },
+    } as unknown as JsonObject)
+
+    const snapshot = extensionUiStore.getSnapshot().sessions['session-1']
+    expect(snapshot?.pending).toHaveLength(1)
+    expect(snapshot?.state.statuses.mode).toBe('Planning')
+  })
 })

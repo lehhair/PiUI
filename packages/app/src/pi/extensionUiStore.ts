@@ -95,6 +95,24 @@ export const extensionUiStore = {
     update(sessionId, { ...snapshot, pending: snapshot.pending.filter(item => item.requestId !== requestId) })
   },
 
+  /**
+   * 刷新/重连恢复：重放 worker 侧状态镜像（status/widget/working 指示等
+   * 增量 patch），重建显示。覆盖式 patch 全量重放幂等，多次恢复无害；
+   * 只重建 state，不动 pending（实时 dialog 事件可能已先到）。
+   */
+  restore(
+    sessionId: string,
+    mirror: { patches: ExtensionUiStatePatch[]; editorText: string; toolsExpanded: boolean },
+  ): void {
+    const snapshot = existing(sessionId)
+    let state = emptyState()
+    for (const patch of mirror.patches) state = applyStatePatch(state, patch)
+    update(sessionId, {
+      ...snapshot,
+      state: { ...state, editorText: mirror.editorText },
+    })
+  },
+
   statePatched(sessionId: string, patch: ExtensionUiStatePatch): void {
     const snapshot = existing(sessionId)
     update(sessionId, { ...snapshot, state: applyStatePatch(snapshot.state, patch) })

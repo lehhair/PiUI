@@ -258,6 +258,10 @@ export default function (pi) {
           [next.kind],
         )
         assert.equal(pendingState[0]?.requestId, next.requestId)
+        // 刷新/重连恢复：增量 UI 状态镜像（setStatus 的 patch）同样可见
+        const uiState = session.getState().extensionUiState as { patches?: Array<{ kind: string; key?: string; text?: string }> }
+        const statusPatches = (uiState.patches ?? []).filter(patch => patch.kind === "status")
+        assert.deepEqual(statusPatches.map(patch => patch.text), ["Planning"])
         const response = next.kind === "select" ? { value: "beta" }
           : next.kind === "confirm" ? { confirmed: true }
           : next.kind === "input" ? { value: "typed" }
@@ -274,6 +278,12 @@ export default function (pi) {
       assert.deepEqual(notifications, ["started", "finished"])
       // 全部应答后 pending 清空（settled）
       assert.deepEqual(session.getState().pendingExtensionUiRequests, [])
+      // 状态镜像完整：Planning -> Done
+      const doneState = session.getState().extensionUiState as { patches?: Array<{ kind: string; key?: string; text?: string }> }
+      assert.deepEqual(
+        (doneState.patches ?? []).filter(patch => patch.kind === "status").map(patch => patch.text),
+        ["Planning", "Done"],
+      )
       off()
     } finally {
       await session?.dispose()

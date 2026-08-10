@@ -1,4 +1,4 @@
-import type { ExtensionUiDialogRequest, JsonObject } from '@piui/protocol'
+import type { ExtensionUiDialogRequest, ExtensionUiStatePatch, JsonObject } from '@piui/protocol'
 import { extensionUiStore } from '../extensionUiStore'
 import { activeSessionStore } from '../../store/activeSessionStore'
 
@@ -44,7 +44,7 @@ class PiSessionStateStore {
     entry.state = state
     entry.error = null
     entry.loading = false
-    this.restorePendingExtensionUi(sessionId, state)
+    this.restoreExtensionUi(sessionId, state)
     this.notify()
   }
 
@@ -78,27 +78,37 @@ class PiSessionStateStore {
   }
 
   /**
-   * 刷新/重连后恢复扩展 dialog：worker 侧 ExtensionUiBridge 的 pending
-   * 请求跨刷新存活（扩展仍在阻塞等应答），state.get 把它们带回这里重新
-   * 喂给 dialog store——弹窗重新出现，用户可继续应答或取消，会话不会因
-   * 无人应答的弹窗而永久卡死。requestOpened / addPendingRequest 都按
-   * requestId 幂等，与实时事件重复投递无害；settled 事件会照常清理。
+   * 刷新/重连后恢复扩展 UI：worker 侧的未应答 dialog 请求 + 增量状态镜像
+   * 都跨刷新存活（扩展仍在阻塞/状态仍在推进），state.get 把它们带回这里
+   * 重新喂给对应 store——弹窗重新出现、status/widget 指示重建，会话不会
+   * 因无人应答的弹窗而永久卡死，显示也不会因刷新归零。requestOpened /
+   * addPendingRequest / restore 都按 requestId 或覆盖式语义幂等，与实时
+   * 事件重复投递无害；settled 事件会照常清理。
    */
-  private restorePendingExtensionUi(sessionId: string, state: JsonObject): void {
+  private restoreExtensionUi(sessionId: string, state: JsonObject): void {
     const pending = state.pendingExtensionUiRequests
-    if (!Array.isArray(pending)) return
-    for (const raw of pending) {
-      const request = raw as Partial<ExtensionUiDialogRequest> | null
-      if (!request || typeof request !== 'object' || typeof request.requestId !== 'string') continue
-      if (typeof request.sessionId === 'string' && request.sessionId !== sessionId) continue
-      if (!request.kind || !['select', 'confirm', 'input', 'editor'].includes(request.kind)) continue
-      extensionUiStore.requestOpened(request as ExtensionUiDialogRequest)
-      activeSessionStore.addPendingRequest(
-        request.requestId,
-        sessionId,
-        request.kind === 'confirm' ? 'permission' : 'question',
-        request.title,
-      )
+    if (Array.isArray(pending)) {
+      for (const raw of pending) {
+        const request = raw as Partial<ExtensionUiDialogRequest> | null
+        if (!request || typeof request !== 'object' || typeof request.requestId !== 'string') continue
+        if (typeof request.sessionId === 'string' && request.sessionId !== sessionId) continue
+        if (!request.kind || !['select', 'confirm', 'input', 'editor'].includes(request.kind)) continue
+        extensionUiStore.requestOpened(request as ExtensionUiDialogRequest)
+        activeSessionStore.addPendingRequest(
+          request.requestId,
+          sessionId,
+          request.kind === 'confirm' ? 'permission' : 'question',
+          request.title,
+        )
+      }
+    }
+    const mirror = state.extensionUiState as { patches?: unknown; editorText?: unknown } | null | undefined
+    if (mirror && typeof mirror === 'object' && Array.isArray(mirror.patches)) {
+      extensionUiStore.restore(sessionId, {
+        patches: mirror.patches as ExtensionUiStatePatch[],
+        editorText: typeof mirror.editorText === 'string' ? mirror.editorText : '',
+        toolsExpanded: mirror.toolsExpanded === true,
+      })
     }
   }
 }

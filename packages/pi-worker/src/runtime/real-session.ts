@@ -687,6 +687,9 @@ export class RealPiSession implements SessionRuntime {
       // 刷新/重连恢复：未应答的扩展 dialog 请求快照（请求仍挂起，扩展在
       // 阻塞等应答），前端据此重新渲染弹窗，避免无人应答卡死会话。
       pendingExtensionUiRequests: this.extensionUi.listPending(),
+      // 刷新/重连恢复：扩展增量 UI 状态（status/widget/working 指示等）的
+      // 镜像，前端重放 patch 重建显示。
+      extensionUiState: this.extensionUi.getStateMirror(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
       activeTools: session.getActiveToolNames?.() ?? [],
       scopedModels: toJson(session.scopedModels) ?? [],
