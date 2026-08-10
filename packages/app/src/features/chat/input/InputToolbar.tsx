@@ -429,7 +429,9 @@ export function InputToolbar({
             </IconButton>
           </>
         </AnimatedPresence>
-        {(isCompacting || sessionActive || (!canSend && isStreaming)) && !isSending ? (
+        {/* 停止按钮条件：压缩中；或输入框为空且（流式中 / session 活跃兜底）。
+            用户输入内容（canSend）后必须回到发送按钮 */}
+        {(isCompacting || (!canSend && (isStreaming || sessionActive))) && !isSending ? (
           <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
             <StopIcon />
           </IconButton>

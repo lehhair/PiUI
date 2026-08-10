@@ -177,4 +177,37 @@ describe('InputToolbar file selection', () => {
     fireEvent.click(trigger)
     expect(onDeliveryModeChange).toHaveBeenCalledWith('steer')
   })
+
+  it('shows Stop while session is active and the input is empty', () => {
+    render(
+      <InputToolbar
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        sessionActive
+        canSend={false}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /stop|停止/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /send|发送/i })).toBeNull()
+  })
+
+  it('switches back to Send once the user types content (canSend) even if session is active', () => {
+    const onSend = vi.fn()
+    render(
+      <InputToolbar
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        sessionActive
+        canSend
+        onSend={onSend}
+        onAbort={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /send|发送/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /stop|停止/i })).toBeNull()
+  })
 })
