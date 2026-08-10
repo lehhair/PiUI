@@ -75,9 +75,9 @@ export function ExtensionUiDialogCard({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float">
-      <div className={`flex items-center justify-between gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-2.5'}`}>
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
         <div className="flex min-w-0 items-start gap-2">
-          <QuestionIcon size={16} className={`shrink-0 text-text-400 ${compact ? '' : 'mt-0.5'}`} />
+          <QuestionIcon size={16} className="shrink-0 text-text-400 mt-0.5" />
           <h3 className="min-w-0 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium text-text-100">
             {request.title}
           </h3>
