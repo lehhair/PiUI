@@ -121,6 +121,14 @@ export class ExtensionUiBridge {
     this.tuiHost.reset()
   }
 
+  /**
+   * 未应答 dialog 请求快照。客户端刷新/重连后通过 state.get 带回重新
+   * 渲染（请求仍挂在这里，扩展还在阻塞，数据没有丢）。
+   */
+  listPending(): ExtensionUiDialogRequest[] {
+    return [...this.pending.values()].map(pending => pending.request)
+  }
+
   private createContext(): ExtensionUIContext {
     const bridge = this
     return {

@@ -684,6 +684,9 @@ export class RealPiSession implements SessionRuntime {
         steeringMode: String(session.steeringMode),
         followUpMode: String(session.followUpMode),
       },
+      // 刷新/重连恢复：未应答的扩展 dialog 请求快照（请求仍挂起，扩展在
+      // 阻塞等应答），前端据此重新渲染弹窗，避免无人应答卡死会话。
+      pendingExtensionUiRequests: this.extensionUi.listPending(),
       supportsThinking: Boolean(session.supportsThinking?.() ?? true),
       activeTools: session.getActiveToolNames?.() ?? [],
       scopedModels: toJson(session.scopedModels) ?? [],

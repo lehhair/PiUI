@@ -249,6 +249,15 @@ export default function (pi) {
           continue
         }
         kinds.push(next.kind)
+        // 刷新/重连恢复：dialog 挂起期间 state.get 必须能带回未应答的
+        // pending 请求（worker 侧请求仍在，扩展仍在阻塞等应答——数据没有
+        // 丢）。已应答的已被 respond() 移除，所以快照只含当前未应答的。
+        const pendingState = (session.getState().pendingExtensionUiRequests ?? []) as Array<{ requestId: string; kind: string }>
+        assert.deepEqual(
+          pendingState.map(request => request.kind),
+          [next.kind],
+        )
+        assert.equal(pendingState[0]?.requestId, next.requestId)
         const response = next.kind === "select" ? { value: "beta" }
           : next.kind === "confirm" ? { confirmed: true }
           : next.kind === "input" ? { value: "typed" }
@@ -263,6 +272,8 @@ export default function (pi) {
       // 状态事件：setStatus 先后推送 Planning / Done，notify 推送 started / finished
       assert.deepEqual(states, ["Planning", "Done"])
       assert.deepEqual(notifications, ["started", "finished"])
+      // 全部应答后 pending 清空（settled）
+      assert.deepEqual(session.getState().pendingExtensionUiRequests, [])
       off()
     } finally {
       await session?.dispose()
