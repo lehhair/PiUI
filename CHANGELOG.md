@@ -4,6 +4,14 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.5] - 2026-08-10
+
+- fix(sidebar): refresh the session list as an active session advances (089e4e18)
+- fix(chat): recover provider auth flows and extension TUI panels after refresh (3e76077a)
+- fix(chat): recover extension UI state (status/widget) after refresh (eccbe7f7)
+- fix(chat): recover extension dialogs after page refresh (11e44ef9)
+- refactor: dispatch pi commands concurrently like the native SDK (2942a75b)
+
 ## [v0.4.4] - 2026-08-10
 
 - style(chat): narrow collapsed dialog capsule to 240px (5869798b)
