@@ -28,6 +28,7 @@ export class SessionExecutor {
   submit(
     envelope: CommandEnvelope,
     run: () => Promise<JsonValue | undefined>,
+    options: { immediate?: boolean } = {},
   ): SubmittedCommand {
     if (envelope.sessionId && (this.closing.has(envelope.sessionId) || this.closed.has(envelope.sessionId))) {
       throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
@@ -52,7 +53,7 @@ export class SessionExecutor {
     }
     const laneId = envelope.sessionId ? `session:${envelope.sessionId}` : undefined
     const crashEpoch = envelope.sessionId ? (this.crashEpochs.get(envelope.sessionId) ?? 0) : 0
-    const previous = laneId ? (this.tails.get(laneId) ?? Promise.resolve()) : Promise.resolve()
+    const previous = laneId && !options.immediate ? (this.tails.get(laneId) ?? Promise.resolve()) : Promise.resolve()
     const promise = previous
       .catch(() => undefined)
       .then(async () => {
@@ -89,7 +90,7 @@ export class SessionExecutor {
         }
       })
 
-    if (laneId) {
+    if (laneId && !options.immediate) {
       const tail = promise.then(() => undefined, () => undefined)
       this.tails.set(laneId, tail)
       tail.finally(() => {
