@@ -312,7 +312,11 @@ export class SessionHost {
       let lastError: unknown
       for (let attempt = 0; attempt <= ATTACH_BUSY_RETRIES; attempt += 1) {
         try {
-          await this.openSession(found.cwd, found.sessionFile, signal)
+          // 复用现有进程：目标未 attach 时，优先把同目录空闲的已 attach worker
+          // 切身份过去（switchSession），而不是新开一个——切 session 不单开。
+          // 源 worker 忙/异目录时 switch 自动失败，回落正常 open（不影响正在工作）。
+          const reusable = this.findReusableRuntime(found.sessionFile)
+          await this.openSession(found.cwd, found.sessionFile, signal, reusable?.sessionId)
           return this.requireAttached(sessionId)
         } catch (error) {
           lastError = error
@@ -324,6 +328,25 @@ export class SessionHost {
       }
       throw lastError
     })
+  }
+
+  /**
+   * 找一个可以复用的已 attach 空闲 worker：同目录、未在工作、不在关闭中。
+   * 用它承载目标 session（switchSession 切身份），避免每次切 session 新开进程。
+   */
+  private findReusableRuntime(sessionFile: string): AttachedSession | undefined {
+    const targetPath = pathKey(sessionFile)
+    const targetDir = pathKey(dirname(sessionFile))
+    for (const session of this.runtimes.values()) {
+      if (!session.sessionFile) continue
+      if (pathKey(session.sessionFile) === targetPath) continue // 目标自己已 attach：幂等复用，不走 switch
+      if (pathKey(dirname(session.sessionFile)) !== targetDir) continue // 异目录：worker 绑定 cwd，不可切
+      if (this.activity.has(session.sessionId)) continue
+      if (this.executor.hasPendingWork(session.sessionId)) continue
+      if (this.executor.isClosing(session.sessionId)) continue
+      return session
+    }
+    return undefined
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
@@ -632,6 +655,25 @@ export class SessionHost {
     })
 
     for (const session of candidates) {
+      // 双保险：向 worker 确认确实无未完成工作再回收。activity 是事件驱动
+      // 上报（可能有延迟/遗漏），state.get 是 SDK 同步真相源——isStreaming
+      // （agent run 活跃）、isBashRunning（长 bash 在跑）、pendingMessageCount
+      // （队列有消息）任一成立都跳过，绝不误杀正在工作的会话。
+      let stillBusy = false
+      try {
+        const state = await session.worker.command("state.get") as JsonObject | undefined
+        if (state) {
+          stillBusy = state.isStreaming === true
+            || state.isBashRunning === true
+            || Number(state.pendingMessageCount ?? 0) > 0
+        }
+      } catch {
+        // worker 已不可用（崩溃/断开）：回收无妨
+      }
+      if (stillBusy) {
+        this.touch(session.sessionId)
+        continue
+      }
       const cwd = session.cwd
       await this.closeSession(session.sessionId).catch(() => undefined)
       // 空闲回收后给该工作目录补一个 warm runtime：用户切回来时

@@ -134,6 +134,16 @@ export class RuntimeSupervisor {
     const key = workspaceKey(cwd)
     if (this.warmSlots.has(key)) return Promise.resolve()
 
+    // 全局单槽：已有其他目录的 warm 先释放，槽始终绑定最新预热的目录。
+    // 避免每个打开过的目录都常驻一个空闲 worker（空闲堆积）。
+    for (const [existingKey, existingSlot] of this.warmSlots) {
+      if (existingKey === key) continue
+      existingSlot.claimed = true
+      this.warmSlots.delete(existingKey)
+      if (existingSlot.timer) clearTimeout(existingSlot.timer)
+      void existingSlot.promise.then(runtime => runtime.dispose()).catch(() => undefined)
+    }
+
     const slot = { claimed: false } as WarmRuntimeSlot
     slot.promise = this.open(cwd).then(runtime => {
       const current = this.warmSlots.get(key)
