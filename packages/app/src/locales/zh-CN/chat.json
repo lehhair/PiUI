@@ -31,9 +31,10 @@
     "backToHome": "返回首页",
     "openServerSettings": "打开服务器设置",
     "compacting": "正在压缩上下文…",
-    "backToInput": "回到输入框",
     "moveQueueToNext": "移到下一轮",
-    "moveQueueToCurrent": "移到本轮"
+    "moveQueueToCurrent": "移到本轮",
+    "clearQueueItem": "清除该条",
+    "editQueueItem": "修改（回到输入框）"
   },
   "emptyState": {
     "title": "开始新对话",

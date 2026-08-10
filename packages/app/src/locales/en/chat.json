@@ -31,9 +31,10 @@
     "backToHome": "Back to home",
     "openServerSettings": "Open server settings",
     "compacting": "Compacting context…",
-    "backToInput": "Back to input",
     "moveQueueToNext": "Move to next turn",
-    "moveQueueToCurrent": "Move to current turn"
+    "moveQueueToCurrent": "Move to current turn",
+    "clearQueueItem": "Remove from queue",
+    "editQueueItem": "Edit (back to input)"
   },
   "emptyState": {
     "title": "Start a new conversation",

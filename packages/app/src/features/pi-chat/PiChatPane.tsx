@@ -393,6 +393,27 @@ export function PiChatPane({
     },
     [sessionId, queue],
   )
+  /** 直接清除队列中的一条（不回输入框） */
+  const handleQueueClear = useCallback(
+    async (kind: 'steering' | 'followUp', index: number) => {
+      if (!sessionId) return
+      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as
+        | { steering?: string[]; followUp?: string[] }
+        | null
+      if (!cleared) return
+      const restSteering = [...(cleared.steering ?? [])]
+      if (kind === 'steering') restSteering.splice(index, 1)
+      const restFollowUp = [...(cleared.followUp ?? [])]
+      if (kind === 'followUp') restFollowUp.splice(index, 1)
+      for (const t of restSteering) {
+        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
+      }
+      for (const t of restFollowUp) {
+        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
+      }
+    },
+    [sessionId],
+  )
 
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
@@ -1499,6 +1520,7 @@ export function PiChatPane({
             queuedFollowUps={queuedFollowUps}
             onQueueBackToInput={handleQueueBackToInput}
             onQueueMoveMode={handleQueueMoveMode}
+            onQueueClear={handleQueueClear}
             sessionId={sessionId}
             isStreaming={isStreaming}
             isCompacting={compacting}
