@@ -103,7 +103,7 @@ class PiSessionStateStore {
         )
       }
     }
-    const mirror = state.extensionUiState as { patches?: unknown; editorText?: unknown } | null | undefined
+    const mirror = state.extensionUiState as { patches?: unknown; editorText?: unknown; toolsExpanded?: unknown } | null | undefined
     if (mirror && typeof mirror === 'object' && Array.isArray(mirror.patches)) {
       extensionUiStore.restore(sessionId, {
         patches: mirror.patches as ExtensionUiStatePatch[],

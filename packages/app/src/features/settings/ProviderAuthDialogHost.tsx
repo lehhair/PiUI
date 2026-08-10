@@ -28,10 +28,10 @@ export function ProviderAuthDialogHost() {
     void listActiveProviderFlows()
       .then(snapshot => {
         if (!Array.isArray(snapshot)) return
-        for (const flow of snapshot) {
-          if (!flow || typeof flow !== 'object' || typeof flow.flowId !== 'string' || typeof flow.providerId !== 'string') {
-            continue
-          }
+        for (const raw of snapshot) {
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+          const flow = raw as { flowId?: unknown; providerId?: unknown; prompts?: unknown }
+          if (typeof flow.flowId !== 'string' || typeof flow.providerId !== 'string') continue
           registerProviderAuthFlow(flow.flowId, flow.providerId)
           const prompts = Array.isArray(flow.prompts) ? flow.prompts : []
           for (const prompt of prompts) {
