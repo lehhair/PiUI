@@ -529,10 +529,12 @@ export class SessionHost {
     }
     if (event.channel === "session.head") {
       this.hub.publish({ kind: "session", id: session.sessionId }, "session.head", event.head)
-      if (!this.materialized.has(session.sessionId)) {
+      // 列表 = 磁盘扫描：只有会话文件真的存在（首个条目落盘）才广播
+      // materialized。head 事件来自内存 entries（setSessionName 等操作
+      // 只改内存不改文件），不能当作落盘信号——否则前端重拉后磁盘还是
+      // 扫不到，列表永远不出现。
+      if (!this.materialized.has(session.sessionId) && session.sessionFile && existsSync(session.sessionFile)) {
         this.materialized.add(session.sessionId)
-        // First persisted entry: the session file now exists on disk and the
-        // catalog's session.list can finally see it — tell list subscribers.
         this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
           sessionId: session.sessionId,
           materialized: true,

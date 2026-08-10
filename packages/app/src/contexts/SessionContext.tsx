@@ -168,6 +168,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     pendingRef.current.delete(id)
     allSessionsRef.current = allSessionsRef.current.filter(item => item.id !== id)
     setSessions(filterPiSessionList(allSessionsRef.current, search))
+    // 广播删除：其他列表消费者（useSessions 等独立实例）不共享本 context
+    // 的状态，需要事件触发重拉，否则删除后它们的列表一直显示旧数据。
+    window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }, [search])
 
   const value = useMemo<SessionContextValue>(() => ({

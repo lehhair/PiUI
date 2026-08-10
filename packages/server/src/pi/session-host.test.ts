@@ -1,16 +1,21 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { randomUUID } from "node:crypto"
+import { rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { EventHub } from "../event-hub.ts"
 import type { WorkerSession } from "./worker-client.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionHost } from "./session-host.ts"
 
-test("SessionHost notifies the session list as the session head advances", async () => {
+test("SessionHost notifies the session list when the session file materializes on disk", async () => {
+  const sessionFile = join(tmpdir(), `piui-session-host-${randomUUID()}.jsonl`)
   let emitEvent!: (event: { channel: string; head?: unknown }) => void
   const worker = {
     command: async () => ({}),
     getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
+    getSessionFile: () => sessionFile,
     getCwd: () => ".",
     updateSessionIdentity: () => {},
     onEvent: (listener: (event: { channel: string; head?: unknown }) => void) => {
@@ -26,7 +31,6 @@ test("SessionHost notifies the session list as the session head advances", async
     open: async () => worker,
   } as unknown as RuntimeSupervisor
   const hub = new EventHub()
-  // 短节流窗口（50ms）便于测试：真实窗口是 1s
   const host = new SessionHost(supervisor, hub)
 
   const updated: unknown[] = []
@@ -34,11 +38,17 @@ test("SessionHost notifies the session list as the session head advances", async
     if (event.channel === "sessions.updated") updated.push(event.payload)
   })
 
-  await host.openSession(".", "session-1.jsonl")
+  await host.openSession(".", sessionFile)
   // attach 会发一条 attached；清掉，只观察 head 推进的通知
   updated.length = 0
-  // 首次持久化条目：materialized 必发（会话文件首次落盘，列表可扫到）
-  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 3 } })
+  // head 但文件未落盘（setSessionName 等只改内存）：不是 materialized，
+  // 列表磁盘扫描看不到它——不能广播，否则前端重拉后列表永远不出现。
+  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 1 } })
+  assert.equal(updated.length, 0)
+
+  // 文件首次落盘 + head：materialized 必发（列表可扫到）
+  writeFileSync(sessionFile, '{"type":"session","version":1}\n')
+  emitEvent({ channel: "session.head", head: { revision: 2, entryCount: 2 } })
   assert.equal(updated.length, 1)
   assert.deepEqual(updated[0], {
     sessionId: "session-1",
@@ -48,12 +58,13 @@ test("SessionHost notifies the session list as the session head advances", async
   // 原生语义：后续 head 推进（新消息）不再广播列表事件——列表 = 磁盘扫描，
   // 文件已存在，重扫结果不会变；排序/消息数由下一次生命周期事件或显式
   // 刷新时更新。
-  emitEvent({ channel: "session.head", head: { revision: 2 } })
-  emitEvent({ channel: "session.head", head: { revision: 3, entryCount: 4 } })
+  emitEvent({ channel: "session.head", head: { revision: 3 } })
+  emitEvent({ channel: "session.head", head: { revision: 4, entryCount: 4 } })
   assert.equal(updated.length, 1)
 
   off()
   host.dispose()
+  rmSync(sessionFile, { force: true })
 })
 
 test("SessionHost rejects reopening a runtime while it is closing", async () => {
