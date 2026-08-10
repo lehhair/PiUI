@@ -124,6 +124,8 @@ export function useGitWorkspaceCatalog(directories: string[]) {
     }
   }, [directories, setCatalogState])
 
+  // 工作区目录变化时刷新：请求-响应模式，loading 与请求同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     mountedRef.current = true
     void refresh()
@@ -131,6 +133,7 @@ export function useGitWorkspaceCatalog(directories: string[]) {
       mountedRef.current = false
     }
   }, [refresh])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     let previousState: string | null = null

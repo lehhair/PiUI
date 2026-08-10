@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ModelSelector } from './ModelSelector'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 
-type ModelInfo = Model<any>
+type ModelInfo = Model<Api>
 
 function sdkModel(id: string, name: string, reasoning = true): ModelInfo {
   return {

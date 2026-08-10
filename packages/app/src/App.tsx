@@ -856,6 +856,7 @@ function App() {
     paneLayout.isSplit,
     splitPaneEnabled,
     handleToggleFocusedPaneFullscreen,
+    capabilities.sessionArchive,
   ])
 
 

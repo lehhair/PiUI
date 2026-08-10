@@ -17,6 +17,7 @@ import {
   useVirtualizer, elementScroll, defaultRangeExtractor,
   type VirtualItem,
 } from '@tanstack/react-virtual'
+import type { Virtualizer as CoreVirtualizer } from '@tanstack/virtual-core'
 import { useTranslation } from 'react-i18next'
 import {
   MessageRenderer,
@@ -529,7 +530,7 @@ export const ChatArea = memo(
       const spacerHeight = bottomSpacerHeight(bottomPadding)
       // 贴底判断必须读 ref：wheel→stop 后 state 还没 re-render，
       // 若仍用 state，同一帧的 ResizeObserver 会误判仍可贴底。
-      const shouldAnchorBottom = () => !userScrolledRef.current
+      const shouldAnchorBottom = useCallback(() => !userScrolledRef.current, [userScrolledRef])
 
       // ── 滚动状态（同步计算，不使用 rAF） ──
       // prevState.bottom 仍是几何贴底，给 scrollToBottomIfAtBottom 用。
@@ -615,10 +616,20 @@ export const ChatArea = memo(
       // 一次性 overrides（resizeItem + shouldAdjust）——对齐 oc
       const overridesApplied = useRef(false)
       if (!overridesApplied.current) {
+        // virtual-core 未在公开类型中暴露的内部字段，按需声明（仅此块内使用）
+        type VirtualizerInternals = {
+          measurementsCache: (VirtualItem | undefined)[]
+          itemSizeCache: Map<VirtualItem['key'], number>
+          options: { anchorTo?: 'start' | 'end' }
+          getScrollOffset?: () => number
+          scrollAdjustments?: number
+          isAtEnd?: (offset?: number) => boolean
+        }
+        const vInternals = virtualizer as unknown as VirtualizerInternals
         const origResize = virtualizer.resizeItem
         virtualizer.resizeItem = (index: number, size: number) => {
-          const item = (virtualizer as any).measurementsCache[index]
-          const prev = item ? ((virtualizer as any).itemSizeCache.get(item.key) ?? item.size) : undefined
+          const item = vInternals.measurementsCache[index]
+          const prev = item ? (vInternals.itemSizeCache.get(item.key) ?? item.size) : undefined
           const root = scrollRef.current
           if (root && prev !== undefined && Math.abs(size - prev) > root.clientHeight) {
             const view = root.getBoundingClientRect()
@@ -644,7 +655,7 @@ export const ChatArea = memo(
           // userScrolledRef 由 handleWheel 上滚设 true，只由 handleWheel 下滚回底设 false，
           // handleScroll 不清它（避免流式增长推回时误清）。
           if (userScrolledRef.current) {
-            const opts = (virtualizer as any).options
+            const opts = vInternals.options
             const origAnchor = opts.anchorTo
             opts.anchorTo = 'start'
             origResize(index, size)
@@ -656,13 +667,13 @@ export const ChatArea = memo(
             root
             && shouldAnchorBottom()
             && !resizeAnchorScheduled.current
-            && (virtualizer as any).isAtEnd?.(80)
+            && vInternals.isAtEnd?.(80)
           ) {
             resizeAnchorScheduled.current = true
             queueMicrotask(() => {
               resizeAnchorScheduled.current = false
               if (!shouldAnchorBottom()) return
-              if (!(virtualizer as any).isAtEnd?.(80)) return
+              if (!vInternals.isAtEnd?.(80)) return
               const el = scrollRef.current
               if (!el) return
               autoMarkAuto(el)
@@ -671,9 +682,14 @@ export const ChatArea = memo(
             })
           }
         }
-        virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item: VirtualItem, _delta: number, instance: any) => {
+        virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
+          item: VirtualItem,
+          _delta: number,
+          instance: CoreVirtualizer<HTMLDivElement, HTMLDivElement>,
+        ) => {
           if (shouldAnchorBottom()) return false
-          return item.end <= (instance.getScrollOffset?.() ?? 0) + (instance.scrollAdjustments ?? 0)
+          const v = instance as unknown as VirtualizerInternals
+          return item.end <= (v.getScrollOffset?.() ?? 0) + (v.scrollAdjustments ?? 0)
         }
         overridesApplied.current = true
       }
@@ -848,7 +864,7 @@ export const ChatArea = memo(
           if (shouldAnchorBottom()) pinToBottom()
         })
         return () => cancelAnimationFrame(frame)
-      }, [timeline.length, timelineStructureKey, pinToBottom])
+      }, [timeline.length, timelineStructureKey, pinToBottom, shouldAnchorBottom])
 
       // retry/error 出现消失、输入框高度变 → 底部 footer 高度变，贴底时要跟着滚
       // 否则重试条进出后 scrollTop 停在旧位置，看起来没贴底
@@ -861,7 +877,7 @@ export const ChatArea = memo(
           if (shouldAnchorBottom()) pinToBottom()
         })
         return () => cancelAnimationFrame(frame)
-      }, [footerPinKey, pinToBottom])
+      }, [footerPinKey, pinToBottom, shouldAnchorBottom])
 
       // 用户返回底部时重新贴底
       const userScrolledInit = useRef(false)
@@ -975,7 +991,7 @@ export const ChatArea = memo(
           autoPause()
           virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
         },
-      }), [autoForceScroll, autoPause, autoMarkAuto, pinToBottom, virtualizer, timeline, visibleItems, messageIdToTimelineIndex])
+      }), [autoForceScroll, autoPause, autoMarkAuto, pinToBottom, userScrolledRef, virtualizer, timeline, visibleItems, messageIdToTimelineIndex])
 
       if (isPerfEnabled()) {
         perfRecordRender('ChatArea', performance.now() - renderStart)

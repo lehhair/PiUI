@@ -74,12 +74,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     fetchSessionsRef.current = fetchSessions
   }, [fetchSessions])
 
+  // 初始加载会话：请求-响应模式，loading 状态需与请求同步设置（无法用渲染期调整表达）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     void fetchSessions()
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
     }
   }, [fetchSessions])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     searchRef.current = search

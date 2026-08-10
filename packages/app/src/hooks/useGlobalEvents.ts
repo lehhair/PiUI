@@ -73,7 +73,9 @@ export function hasOtherConsumerForSession(sessionId: string, consumerId: string
 export function useGlobalEvents(_directories?: string[]) {
   const focusedSessionId = useFocusedSessionId()
   const focusedSessionIdRef = useRef(focusedSessionId)
-  focusedSessionIdRef.current = focusedSessionId
+  useEffect(() => {
+    focusedSessionIdRef.current = focusedSessionId
+  }, [focusedSessionId])
   const { sendNotification } = useNotification()
 
   useEffect(() => {

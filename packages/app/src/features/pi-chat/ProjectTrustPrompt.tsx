@@ -5,6 +5,9 @@ import { Dialog } from '../../components/ui/Dialog'
 import { getProjectTrust, setProjectTrust } from '../../pi/transport/index.js'
 import type { PiProjectTrust } from '../../pi/domain'
 
+// hook 与组件同文件导出：信任确认逻辑与弹窗组件内聚，fast refresh 会降级为整页刷新，可接受。
+/* eslint-disable react-refresh/only-export-components */
+
 /**
  * 首次打开项目时的信任确认：Pi 判定该工作区需要信任且用户尚未决定时，
  * 弹出对话框让用户选择允许 / 拒绝 / 暂不决定（结果写回 trust.set）。
@@ -16,6 +19,8 @@ export function useProjectTrustPrompt(cwd: string | undefined) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 查询项目信任状态：请求-响应模式，同步重置/loading 需与请求一起设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let cancelled = false
     setPending(false)

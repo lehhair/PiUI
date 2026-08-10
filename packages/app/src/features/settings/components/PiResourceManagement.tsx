@@ -55,7 +55,7 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
       window.clearTimeout(timer)
       window.removeEventListener('piui:registry-updated', onRegistryUpdated)
     }
-  }, [load, resourceRevision])
+  }, [load, resourceRevision, sessionId])
 
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key)

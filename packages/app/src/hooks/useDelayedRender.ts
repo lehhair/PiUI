@@ -27,12 +27,12 @@ export function useDelayedRender(
 
   useEffect(() => {
     if (show) {
-      if (mountDelayMs <= 0) {
-        setShouldRender(true)
-        return
+      // mountDelayMs<=0 时渲染期已直接返回 true（见下方），无需在此同步 setState
+      if (mountDelayMs > 0) {
+        const timer = window.setTimeout(() => setShouldRender(true), mountDelayMs)
+        return () => clearTimeout(timer)
       }
-      const timer = window.setTimeout(() => setShouldRender(true), mountDelayMs)
-      return () => clearTimeout(timer)
+      return
     }
 
     const timer = window.setTimeout(() => setShouldRender(false), delayMs)

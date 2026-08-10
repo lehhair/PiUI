@@ -213,7 +213,7 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
         </>
       )
     },
-    [directory, normalizedDirectory, workspacePath, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
+    [directory, workspacePath, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
   )
 
   return (

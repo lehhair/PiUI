@@ -67,9 +67,13 @@ export function PiSessionManagement({ sessionId, workspacePath }: { sessionId: s
     return () => window.clearTimeout(timer)
   }, [load])
 
+  // 模型 pattern 同步到编辑区：响应 prop 变化的重置（prop 引用可能不稳定，
+  // 渲染期调整会引发循环重渲染，保留 effect 同步）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setScopedModels(scopedModelPatterns.join('\n'))
   }, [scopedModelPatterns])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key)

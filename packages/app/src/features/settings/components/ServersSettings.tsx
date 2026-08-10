@@ -229,6 +229,8 @@ function SharePanel({ server }: { server: ServerConfig }) {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
 
+  // 拉取分享信息：请求-响应模式，同步状态需与请求一起设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let cancelled = false
     if (server.isDefault) {

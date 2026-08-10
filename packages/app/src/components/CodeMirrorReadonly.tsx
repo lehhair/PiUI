@@ -58,17 +58,11 @@ export function CodeMirrorReadonly({
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const initialCodeRef = useRef(code)
-  const initialTokensRef = useRef(tokensRef.current)
+  const initialTokensRef = useRef<HighlightTokens | null>(null)
   const initialOnChangeRef = useRef(onChange)
   const changeCompartment = useMemo(() => new Compartment(), [])
   const constrainedHeight = maxHeight !== undefined
   const lineNumberWidth = useMemo(() => getLineNumberColumnWidth(getLineCount(code)), [code])
-
-  useLayoutEffect(() => {
-    initialCodeRef.current = code
-    initialTokensRef.current = tokensRef.current
-    initialOnChangeRef.current = onChange
-  }, [code, onChange, tokensRef])
 
   const extensions = useMemo(
     () =>
@@ -84,6 +78,13 @@ export function CodeMirrorReadonly({
       }),
     [wordWrap, lineHeight, showLineNumbers, maxHeight, constrainedHeight, lineNumberWidth, extraExtensions, readOnly],
   )
+
+  // 同步初始值缓存（置于创建 view 的 layout effect 之前，挂载时已就绪）
+  useLayoutEffect(() => {
+    initialCodeRef.current = code
+    initialTokensRef.current = tokensRef.current
+    initialOnChangeRef.current = onChange
+  }, [code, onChange, tokensRef])
 
   useLayoutEffect(() => {
     const host = hostRef.current

@@ -1,11 +1,11 @@
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 
 /**
  * Available Pi models store (from models.list).
  * Follows app store convention: subscribe/notify + stable snapshots.
  */
 class PiModelsStore {
-  private models: Model<any>[] = []
+  private models: Model<Api>[] = []
   private loading = false
   private error: Error | null = null
   private listeners = new Set<() => void>()
@@ -24,7 +24,7 @@ class PiModelsStore {
     this.notify()
   }
 
-  setModels(models: Model<any>[]): void {
+  setModels(models: Model<Api>[]): void {
     this.models = models
     this.error = null
     this.loading = false
@@ -44,7 +44,7 @@ class PiModelsStore {
     this.notify()
   }
 
-  getModels(): readonly Model<any>[] {
+  getModels(): readonly Model<Api>[] {
     return this.models
   }
 

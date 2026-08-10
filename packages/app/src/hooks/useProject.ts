@@ -70,10 +70,12 @@ export function useProject(): UseProjectResult {
     }
   }, [t])
 
-  // 初始加载
+  // 初始加载项目：请求-响应模式，loading/error 与请求同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     return serverStore.onServerChange(() => void loadProjects())

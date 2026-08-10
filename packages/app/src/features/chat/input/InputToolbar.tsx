@@ -5,10 +5,10 @@ import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../c
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
 import { useChatViewportSelect } from '../chatViewport'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../../types/ui'
 
-type ModelInfo = Model<any>
+type ModelInfo = Model<Api>
 
 interface InputToolbarProps {
   variants?: string[]

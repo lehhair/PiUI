@@ -66,6 +66,13 @@ export function PaneHeader({
   const sessionTitle = usePiSessionTitle(sessionId)
   const { rightPanelOpen, bottomPanelOpen } = useLayoutStore()
   const [isEditing, setIsEditing] = useState(false)
+
+  // 会话切换时重置编辑状态（渲染期间调整 state，避免 effect 级联渲染）
+  const [editSessionId, setEditSessionId] = useState(sessionId)
+  if (sessionId !== editSessionId) {
+    setEditSessionId(sessionId)
+    setIsEditing(false)
+  }
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -75,11 +82,6 @@ export function PaneHeader({
 
   const title = sessionTitle || t('header.newChat')
   const splitEnabled = canSplitPane ?? canUseSplitPane(viewport)
-
-  // Reset editing when session changes
-  useEffect(() => {
-    setIsEditing(false)
-  }, [sessionId])
 
   // Focus input when editing starts
   useEffect(() => {

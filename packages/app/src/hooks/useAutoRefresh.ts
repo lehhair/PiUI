@@ -18,7 +18,9 @@ export function useAutoRefresh(
   enabled: boolean = true,
 ): void {
   const refreshRef = useRef(refresh)
-  refreshRef.current = refresh
+  useEffect(() => {
+    refreshRef.current = refresh
+  }, [refresh])
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 

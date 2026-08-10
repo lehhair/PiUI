@@ -74,14 +74,18 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   const { t } = useTranslation('message')
   const now = useNow(1000, isActive && startedAt != null)
   const liveMs = isActive && startedAt != null ? Math.max(0, now - startedAt) : null
-  const lastLiveMsRef = useRef(0)
-  if (liveMs != null) lastLiveMsRef.current = liveMs
+  // 记住最后一次 live 时长：活动结束后（durationMs 缺省）仍显示最后计时值
+  // 渲染期间有条件地调整 state（React 官方「adjusting state during render」模式）
+  const [lastLiveMs, setLastLiveMs] = useState(0)
+  if (liveMs != null && liveMs !== lastLiveMs) {
+    setLastLiveMs(liveMs)
+  }
   const displayMs =
     liveMs != null
       ? liveMs
       : durationMs != null && durationMs > 0
         ? durationMs
-        : lastLiveMsRef.current
+        : lastLiveMs
   // Working/Worked：整秒无小数；超过 1 分钟带 m（如 3m 12s）
   const durationLabel = formatProcessDuration(displayMs)
   const label = isActive
@@ -175,6 +179,11 @@ export function ProcessCollapseBlock({
  * - final: 只渲染尾部最终 text
  * - inline: 完整渲染（已在外层过程块内）
  */
+// 本文件混合导出组件与消息拆分/判断工具函数。这些纯函数与文件内部
+// helper（groupBlocksForRender / RenderItem）强耦合，保持同文件导出；
+// fast refresh 会因混合导出降级为整页刷新，可接受。
+/* eslint-disable react-refresh/only-export-components */
+
 export type ProcessContentScope = 'all' | 'process' | 'final' | 'inline'
 
 type ProcessSplit = {
@@ -253,6 +262,8 @@ export function assistantHasFinalContent(item: PiAssistantMessageItem): boolean 
   return splitProcessRenderItems(groupBlocksForRender(item)).hasFinal
 }
 
+/* eslint-enable react-refresh/only-export-components */
+
 interface MessageRendererProps {
   item: PiTimelineItem
   allowStreamingLayoutAnimation?: boolean
@@ -327,7 +338,9 @@ function useEntryGrowAnimation(
 ) {
   const ref = useRef<HTMLDivElement>(null)
   const onCompleteRef = useRef(onComplete)
-  onCompleteRef.current = onComplete
+  useEffect(() => {
+    onCompleteRef.current = onComplete
+  }, [onComplete])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -628,7 +641,19 @@ const AssistantMessageView = memo(function AssistantMessageView({
   processContentScope?: ProcessContentScope
   forkMessageId?: string
 }) {
-  const renderStart = isPerfEnabled() ? performance.now() : 0
+  // 渲染耗时埋点：渲染函数体内不能调用 performance.now()（React 纯度规则）。
+  // 改为在 layout effect 中记录两次渲染提交之间的间隔作为耗时代理指标，
+  // 对诊断流式渲染节奏等价；仅 ?piuiPerf=1 时产生实际开销。
+  const perfPrevCommitRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (!isPerfEnabled()) return
+    const now = performance.now()
+    const prev = perfPrevCommitRef.current
+    if (prev !== null) {
+      perfRecordRender('AssistantMessageView', now - prev)
+    }
+    perfPrevCommitRef.current = now
+  })
   const { t } = useTranslation('message')
   const isStreaming = Boolean(item.isStreaming)
   const { message, blocks } = item
@@ -716,10 +741,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
   // process/final 拆完后可能为空
   if (renderItems.length === 0 && processContentScope !== 'all' && processContentScope !== 'inline') {
     return null
-  }
-
-  if (isPerfEnabled()) {
-    perfRecordRender('AssistantMessageView', performance.now() - renderStart)
   }
 
   return (

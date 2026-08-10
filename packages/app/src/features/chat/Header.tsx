@@ -18,9 +18,9 @@ import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport } from './chatViewport'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 
-type ModelInfo = Model<any>
+type ModelInfo = Model<Api>
 
 interface HeaderProps {
   /** Owning pane's session (null on home) — drives title/meta */
@@ -162,9 +162,13 @@ export function Header({
     }
   }, [currentSessionTitle, listedTitle])
 
+  // 会话切换时重置标题编辑状态：setIsEditingTitle 是父组件的 setter，
+  // 无法用渲染期调整表达，属「响应 prop 变化的外部同步」
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setIsEditingTitle(false)
   }, [sessionId])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (isEditingTitle && titleInputRef.current) {

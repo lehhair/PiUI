@@ -44,7 +44,9 @@ export function useFolderProjectDrop(
   const [isActive, setIsActive] = useState(false)
   const pathsRef = useRef<string[] | null>(null)
   const addDirectoryRef = useRef(addDirectory)
-  addDirectoryRef.current = addDirectory
+  useEffect(() => {
+    addDirectoryRef.current = addDirectory
+  }, [addDirectory])
   const lastTauriDropAtRef = useRef(0)
 
   useEffect(() => {

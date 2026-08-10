@@ -152,7 +152,9 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   // Tauri: 启动时获取 CLI 传入的目录 + 监听后续 open-directory 事件
   // 用 ref 持有最新的 addDirectory 避免 stale closure
   const addDirectoryRef = useRef(addDirectory)
-  addDirectoryRef.current = addDirectory
+  useEffect(() => {
+    addDirectoryRef.current = addDirectory
+  }, [addDirectory])
 
   useEffect(() => {
     if (!isTauri()) return

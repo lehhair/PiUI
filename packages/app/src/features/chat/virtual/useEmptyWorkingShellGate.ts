@@ -11,7 +11,9 @@ export function useEmptyWorkingShellGate(isStreaming: boolean, extraDelayMs: num
   const readyRef = useRef(new Set<string>())
   const timersRef = useRef(new Map<string, number>())
   const streamingRef = useRef(isStreaming)
-  streamingRef.current = isStreaming
+  useEffect(() => {
+    streamingRef.current = isStreaming
+  }, [isStreaming])
   const [version, setVersion] = useState(0)
 
   const clear = useCallback(() => {
@@ -49,9 +51,10 @@ export function useEmptyWorkingShellGate(isStreaming: boolean, extraDelayMs: num
   }, [isStreaming, clear])
 
   useEffect(() => {
+    const timers = timersRef.current
     return () => {
-      for (const timer of timersRef.current.values()) window.clearTimeout(timer)
-      timersRef.current.clear()
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
     }
   }, [])
 

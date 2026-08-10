@@ -9,9 +9,9 @@ import { useState, useRef, useEffect, useMemo, useCallback, memo, forwardRef, us
 import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, SearchIcon, ThinkingIcon, EyeIcon, CheckIcon, PinIcon } from '../../components/Icons'
 import { DropdownMenu } from '../../components/ui'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 
-type ModelInfo = Model<any>
+type ModelInfo = Model<Api>
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import {
   getModelKey,

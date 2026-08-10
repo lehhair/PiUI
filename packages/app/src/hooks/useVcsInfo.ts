@@ -56,7 +56,8 @@ export function useVcsInfo(directory?: string): UseVcsInfoResult {
     }
   }, [directory])
 
-  // 初始加载 + 目录变化时重新获取
+  // 初始加载 + 目录变化时重新获取：请求-响应模式，重置/loading 与请求同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     mountedRef.current = true
     setVcsInfo(null)

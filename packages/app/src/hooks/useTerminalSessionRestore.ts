@@ -23,6 +23,8 @@ export function useTerminalSessionRestore(directory?: string) {
   // 面板会把已挂载的 Terminal 卸载掉，连接一断一连造成状态闪烁
   const hasRestoredRef = useRef(false)
 
+  // 同步 workspace：目录/服务端变化时重置路径并逐出事件流（状态与副作用同源）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let active = true
     workspacePathRef.current = undefined

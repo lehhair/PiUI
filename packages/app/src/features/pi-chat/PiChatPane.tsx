@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../../i18n'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 import { ChatArea, Header, InputBox, type ChatAreaHandle, type InputBoxHandle } from '../chat/index.js'
 import type { ModelSelectorHandle } from '../chat/ModelSelector.js'
 import { PaneHeader } from '../chat/PaneHeader.js'
@@ -220,17 +220,20 @@ export function PiChatPane({
 }: PiChatPaneProps) {
   const { t } = useTranslation(['chat', 'common'])
   const onEnterSessionRef = useRef(onEnterSession)
-  onEnterSessionRef.current = onEnterSession
   const onNewChatRef = useRef(onNewChat)
-  onNewChatRef.current = onNewChat
   const { currentDirectory, addDirectory } = useDirectory()
   const { registerSession } = useSessionContext()
   const { activeServer, activeServerGeneration } = useServerStore()
   const { providerRevision } = useManagementEvents()
   const registerSessionRef = useRef(registerSession)
-  registerSessionRef.current = registerSession
   const currentDirectoryRef = useRef(currentDirectory)
-  currentDirectoryRef.current = currentDirectory
+  useEffect(() => {
+    // latest-value refs：事件回调保持稳定依赖的同时总能读到最新值
+    onEnterSessionRef.current = onEnterSession
+    onNewChatRef.current = onNewChat
+    registerSessionRef.current = registerSession
+    currentDirectoryRef.current = currentDirectory
+  })
 
   // ============================================
   // Pi data layer: event stream + keyed stores
@@ -253,7 +256,9 @@ export function PiChatPane({
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
   const sessionLoadError = Boolean(sessionId && !branch && branchError && !sessionUnavailable)
   const sessionBusy = Boolean(sessionId && !branch && branchError && isSessionBusyError(branchError))
-  sessionUnavailableRef.current = sessionUnavailable || sessionLoadError
+  useEffect(() => {
+    sessionUnavailableRef.current = sessionUnavailable || sessionLoadError
+  })
 
   const retrySession = useCallback(async () => {
     if (!sessionId || isRetryingSession) return
@@ -285,6 +290,9 @@ export function PiChatPane({
   const forkSeedAppliedForRef = useRef<string | null>(null)
   const forkSeedHomeAppliedRef = useRef(false)
   const lastEditorTextRef = useRef<string | undefined>(undefined)
+  // fork stash 是外部 store：取到一次性种子后同步进本地 state（订阅外部系统同步，
+  // 一次性消费语义无法用“渲染期间调整 state”表达，这里保留 effect 同步）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!sessionId) {
       // fork 第一条消息的纯前端特判会落在 home：一次性取走 home 种子
@@ -314,6 +322,7 @@ export function PiChatPane({
       if (sid === sessionId) applySeed(sid)
     })
   }, [sessionId])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 树导航的编辑器草稿（undo 语义：回到用户消息前，文本进输入框）。
   // 树面板写 draft store，这里消费并同步到 worker 编辑器状态
@@ -342,6 +351,9 @@ export function PiChatPane({
     () => bashPendingStore.getForSession(sessionId ?? '').length,
   )
   const items = useMemo(() => {
+    // pendingBashCount 仅作为 bashPendingStore 变化的订阅信号：store 变化会
+    // 触发重渲染，这里显式引用以把它算进依赖，确保乐观条目被重新合并。
+    void pendingBashCount
     const pendingItems = sessionId ? bashPendingStore.toItems(baseItems, sessionId) : []
     return pendingItems.length > 0 ? [...baseItems, ...pendingItems] : baseItems
   }, [baseItems, sessionId, pendingBashCount])
@@ -353,7 +365,9 @@ export function PiChatPane({
   // 让回调保持 [sessionId] 稳定 —— items 每次流式事件都是新数组，若进依赖，
   // handleFork 每 token 重建 → VirtualRow memo 的 onFork 比较失配 → 全行重渲染。
   const itemsRef = useRef(items)
-  itemsRef.current = items
+  useEffect(() => {
+    itemsRef.current = items
+  })
 
   // Current model from runtime state (native SDK shape); on home (no
   // session) fall back to the composer's persisted preferred model.
@@ -382,13 +396,19 @@ export function PiChatPane({
     homeModelKey ? getModelVariantPref(homeModelKey) : undefined,
   )
   const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | undefined>(undefined)
-  useEffect(() => {
+  // home 模型切换时重读持久化 variant 偏好（渲染期间调整 state）
+  const [homeVariantForModel, setHomeVariantForModel] = useState(homeModelKey)
+  if (homeModelKey !== homeVariantForModel) {
+    setHomeVariantForModel(homeModelKey)
+    if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
+  }
+  // sessionId 变化时重置 pending 状态（渲染期间调整 state，避免 effect 级联渲染）
+  const [resetSessionId, setResetSessionId] = useState(sessionId)
+  if (sessionId !== resetSessionId) {
+    setResetSessionId(sessionId)
     setPendingModelKey(null)
     setPendingThinkingLevel(undefined)
-  }, [sessionId])
-  useEffect(() => {
-    if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
-  }, [sessionId, homeModelKey])
+  }
   const thinkingLevel =
     pendingThinkingLevel ?? (typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined) ?? homeVariant
 
@@ -413,7 +433,7 @@ export function PiChatPane({
   )
 
   const handleModelChange = useCallback(
-    (_modelKey: string, model: Model<any>) => {
+    (_modelKey: string, model: Model<Api>) => {
       recordModelUsage(model)
       const key = `${model.provider}:${model.id}`
       setHomeModelKey(key)
@@ -527,7 +547,7 @@ export function PiChatPane({
       ...plan.checkpoints.slice(0, plan.restored),
     ])
     if (plan.epoch !== head?.epoch || !positions.has(headLeafId)) redoPlanStore.setPlan(sessionId, null)
-  }, [sessionId, state, headLeafId])
+  }, [sessionId, state, headLeafId, head?.epoch])
 
   // Positions the leaf may legitimately sit at while the plan is alive:
   // the undo point plus the already-restored checkpoints.
@@ -628,11 +648,12 @@ export function PiChatPane({
   // the bottom on mount. Home mounts immediately with an empty flow.
   const chatAreaMountKey = sessionId ? (branch ? sessionId : null) : 'home'
   // Assume at-bottom on session remount so the scroll-to-bottom button
-  // doesn't flash.
-  useEffect(() => {
-    if (chatAreaMountKey == null) return
+  // doesn't flash.（渲染期间调整 state，避免 effect 级联渲染）
+  const [lastMountKey, setLastMountKey] = useState(chatAreaMountKey)
+  if (chatAreaMountKey !== lastMountKey) {
+    setLastMountKey(chatAreaMountKey)
     setIsAtBottom(true)
-  }, [chatAreaMountKey])
+  }
 
   // Input box height -> ChatArea bottom spacer (messages scroll under the
   // dock). Seed with the typical expanded height so the spacer never falls
@@ -678,13 +699,14 @@ export function PiChatPane({
   }, [])
 
   useEffect(() => {
+    const timerRefs = refreshTimerRefs.current
     return () => {
       if (editorSyncTimerRef.current !== null) {
         window.clearTimeout(editorSyncTimerRef.current)
         editorSyncTimerRef.current = null
       }
-      for (const timer of refreshTimerRefs.current) window.clearTimeout(timer)
-      refreshTimerRefs.current.clear()
+      for (const timer of timerRefs) window.clearTimeout(timer)
+      timerRefs.clear()
     }
   }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId])
 

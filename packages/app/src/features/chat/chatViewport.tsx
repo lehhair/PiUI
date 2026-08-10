@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- exports viewport helpers, hooks, and provider */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { themeStore } from '../../store/themeStore'
@@ -298,17 +298,18 @@ export function useChatViewportSelect<S>(
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
   const contextValue = useContext(ChatViewportContext)
-  const initialRef = useRef<ChatViewportValue | null>(null)
-  if (initialRef.current === null && contextValue) initialRef.current = contextValue
+  // 首次渲染的 context 快照，供 getSnapshot 在 store 未就绪时兜底（不可变缓存，
+  // 用 useState 惰性初始化替代渲染期间写 ref）
+  const [initialSnapshot] = useState<ChatViewportValue | null>(() => contextValue)
   const getSnapshot = useCallback((): ChatViewportValue => {
-    const snapshot = getViewportSnapshot() ?? initialRef.current
+    const snapshot = getViewportSnapshot() ?? initialSnapshot
     if (snapshot === null) {
       // 理论上不可能：Provider 渲染先于子组件，initialRef 必已设置。
       // 防御性返回一个空快照，避免类型/运行时崩溃。
       throw new Error('useChatViewportSelect used outside ChatViewportProvider')
     }
     return snapshot
-  }, [])
+  }, [initialSnapshot])
   return useSyncExternalStoreWithSelector(subscribeViewport, getSnapshot, getSnapshot, selector, isEqual)
 }
 

@@ -423,12 +423,10 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     terminalRightClickPasteRef.current = terminalRightClickPaste
   }, [terminalRightClickPaste])
 
-  // 当 tab 第一次变为活动状态时，标记它
-  useEffect(() => {
-    if (isActive && !hasBeenActive) {
-      setHasBeenActive(true)
-    }
-  }, [isActive, hasBeenActive])
+  // 当 tab 第一次变为活动状态时，标记它（渲染期间调整 state，避免 effect 级联渲染）
+  if (isActive && !hasBeenActive) {
+    setHasBeenActive(true)
+  }
 
   // 初始化终端
   useEffect(() => {
@@ -459,6 +457,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     let wsConnectTimeout: number | null = null
     let disposeData: { dispose: () => void } | null = null
     const terminalWorkspacePath = workspacePath
+    const pendingInput = pendingInputRef.current
 
     const touchUi = preferTouchUi
     const theme = getTerminalTheme(isDarkMode())
@@ -823,7 +822,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
 
       transportDisconnectRef.current?.()
       socketRef.current = null
-      pendingInputRef.current.length = 0
+      pendingInput.length = 0
       disposeData?.dispose()
       textarea?.removeEventListener('blur', handleTextareaBlur)
       terminalElement?.removeEventListener('mouseup', handleSelectionCopy)
@@ -1037,11 +1036,15 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     }
   }, [isActive])
 
+  // isActive 变 false 时重置键盘修饰状态（clearStickyModifiers 内部同步 setState，
+  // 属响应状态变化的外部重置）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isActive) {
       clearStickyModifiers()
     }
   }, [isActive, clearStickyModifiers])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 监听面板 resize 结束事件
   useEffect(() => {

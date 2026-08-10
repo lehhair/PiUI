@@ -8,6 +8,10 @@ import { useDelayedRender } from '../../hooks/useDelayedRender'
  * - delayed unmount 略长于动画，避免收起中途卸 DOM
  * - clip 横向放行，防止流光 / 阴影被竖向裁切
  */
+// 本文件混合导出展开动画工具（常量/class 生成函数/hook/组件），
+// 保持同文件导出；fast refresh 会因混合导出降级为整页刷新，可接受。
+/* eslint-disable react-refresh/only-export-components */
+
 export const MSG_EXPAND = {
   durationMs: EXPAND_MOTION.durationMs,
   unmountDelayMs: EXPAND_MOTION.unmountDelayMs,

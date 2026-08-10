@@ -30,10 +30,10 @@ import {
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
 import { useChatViewportSelect } from './chatViewport'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../types/ui'
 
-type ModelInfo = Model<any>
+type ModelInfo = Model<Api>
 import { usePiCapabilities } from '../../pi/capabilities'
 import {
   getDroppedPathsInfo,

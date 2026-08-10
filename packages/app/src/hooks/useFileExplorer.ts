@@ -83,7 +83,9 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const { activeServer } = useServerStore()
   const changeMode = useSessionChangeScope(sessionId ?? null)
   const directoryRef = useRef(directory)
-  directoryRef.current = directory
+  useEffect(() => {
+    directoryRef.current = directory
+  }, [directory])
   const canonicalWorkspaceRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -453,6 +455,8 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   }, [directory, expandedPaths, loadChildren, loadPreview, loadRoot, loadStatuses, softRefresh])
 
   // 初始加载
+  // 初始加载文件树/状态：请求-响应模式，loading 与请求同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (autoLoad && directory) {
       loadRoot()
@@ -464,7 +468,11 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       loadStatuses()
     }
   }, [autoLoad, directory, loadStatuses])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
+  // 目录变化时恢复保存的展开路径：读缓存 ref 后同步重置（含目录级联），
+  // 渲染期调整会触发 ref 读取违规，保留 effect 同步
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!directory) {
       setExpandedPaths(new Set())
@@ -474,6 +482,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     const storedPaths = expandedPathsByDirectoryRef.current.get(directory)
     setExpandedPaths(storedPaths ? new Set(storedPaths) : new Set())
   }, [directory])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!directory || tree.length === 0 || expandedPaths.size === 0) return
@@ -486,6 +495,8 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     })
   }, [directory, expandedPaths, loadChildren, tree])
 
+  // 目录/会话变化时重置预览状态（含缓存 ref 清理，无法用渲染期调整表达）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     previewCacheRef.current.clear()
     previewLoadIdRef.current += 1
@@ -493,6 +504,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     setPreviewError(null)
     setPreviewLoading(false)
   }, [directory, sessionId])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return {
     tree,

@@ -218,8 +218,13 @@ export const MentionMenu = forwardRef<MentionMenuHandle, MentionMenuProps>(funct
   // 搜索逻辑 - 基于 query prop
   // 依赖里故意排除 excludeValues：流式输出期间这些引用可能变化，
   // 但它们只影响过滤结果（在 setItems 时已处理），不应触发重新搜索和重置 selectedIndex。
-  const excludeValuesRef = useRef(excludeValues)
-  excludeValuesRef.current = excludeValues
+  // excludeValues 仅影响过滤结果（在 setItems 时已处理），依赖里故意排除它，
+  // 避免流式输出期间触发重新搜索和重置 selectedIndex；用 ref 持有最新值
+  const excludeValuesRef = useRef<Set<string> | undefined>(undefined)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- 同步最新值到 ref.current（官方 latest-value 模式）
+    excludeValuesRef.current = excludeValues
+  }, [excludeValues])
 
   useEffect(() => {
     if (!isOpen) return

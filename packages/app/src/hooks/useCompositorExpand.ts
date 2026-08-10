@@ -27,9 +27,8 @@ export function useCompositorExpand(open: boolean) {
 
   useLayoutEffect(() => {
     if (!enabled) {
-      setLayoutOpen(open)
-      setUseGridTransition(true)
-      setKeepAnimating(false)
+      // 非 Android：下列 state 在渲染期已由派生值直接覆盖（见函数末尾分支），
+      // 无需同步 setState，只同步 ref 与清理展开样式
       prevOpenRef.current = open
       clearExpandStyles(contentRef.current)
       return
@@ -43,6 +42,8 @@ export function useCompositorExpand(open: boolean) {
     const timers: number[] = []
     const rafs: number[] = []
 
+    // 展开/收起是 layout effect 驱动的动画状态机：必须与 open 变化同帧同步 setState
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (open) {
       setUseGridTransition(false)
       setKeepAnimating(true)
@@ -97,6 +98,7 @@ export function useCompositorExpand(open: boolean) {
       timers.forEach(id => window.clearTimeout(id))
     }
   }, [enabled, open])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!enabled) {
     return {

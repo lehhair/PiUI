@@ -238,10 +238,14 @@ export function useStreamingSyntaxHighlight(
   const [isLoading, setIsLoading] = useState(false)
   const workerKeyRef = useRef('')
   const codeRef = useRef(code)
-  codeRef.current = code
+  useEffect(() => {
+    codeRef.current = code
+  }, [code])
 
   const key = `${instanceId}:${normalizedLang}:${resolvedTheme.key}`
 
+  // Shiki worker 生命周期：禁用时释放 worker 并同步 loading 状态
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!enabled) {
       if (workerKeyRef.current) {
@@ -334,6 +338,8 @@ export function useSyntaxHighlight(code: string, options: HighlightOptions & { m
   const [isLoading, setIsLoading] = useState(false)
   const prevKeyRef = useRef<{ code: string; lang: string; themeKey: string } | null>(null)
 
+  // Shiki worker 高亮：worker 请求-响应模式，缓存命中/loading 需同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const cachedResult = mode === 'html' ? htmlCache.get(cacheKey) : tokensCache.get(cacheKey)
     if (cachedResult !== undefined) {
@@ -408,6 +414,7 @@ export function useSyntaxHighlight(code: string, options: HighlightOptions & { m
       cancelSchedule()
     }
   }, [cacheKey, code, delayMs, enabled, mode, normalizedLang, outputKey, resolvedTheme])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return { output: outputState?.key === outputKey ? outputState.value : null, isLoading }
 }

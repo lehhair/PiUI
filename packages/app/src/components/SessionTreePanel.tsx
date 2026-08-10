@@ -248,10 +248,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     : undefined
   const selectedRole = typeof selectedMessage?.role === 'string' ? selectedMessage.role : undefined
   const selectedIsLeaf = treeGraph.nodes.some(node => node.id === selectedEntryId && node.data.currentLeaf)
-  const selectedDetailEntries = selectedEntryId ? treeGraph.detailEntriesById.get(selectedEntryId) ?? [] : []
   const selectedDetailItems = useMemo(
-    () => selectPiTimelineItems({ items: selectedDetailEntries as unknown as SessionEntry[] } as unknown as PiBranchPage),
-    [selectedDetailEntries],
+    () =>
+      selectPiTimelineItems({
+        items: (selectedEntryId ? treeGraph.detailEntriesById.get(selectedEntryId) ?? [] : []) as unknown as SessionEntry[],
+      } as unknown as PiBranchPage),
+    [selectedEntryId, treeGraph],
   )
   const splitMaxHeight = Math.max(0, (containerRef.current?.clientHeight ?? 500) - 160)
   const splitMinHeight = Math.min(180, splitMaxHeight)

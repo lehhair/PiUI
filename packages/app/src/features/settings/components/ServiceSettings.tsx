@@ -80,6 +80,8 @@ export function ServiceSettings() {
     return () => window.clearTimeout(timer)
   }, [refresh])
 
+  // 加载主机 shells：请求-响应模式，loading/选中值需与请求同步设置
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let cancelled = false
     setSelectedShell(serverStorage.get(TERMINAL_SHELL_STORAGE_KEY) ?? '')

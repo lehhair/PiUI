@@ -127,7 +127,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
             if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
             retryTimerRef.current = window.setTimeout(() => {
               if (requestId !== requestIdRef.current) return
-              void fetchSessions({ ...queryParams, retryAttempt: retryAttempt + 1 })
+              void fetchSessionsRef.current({ ...queryParams, retryAttempt: retryAttempt + 1 })
             }, [500, 1500, 3000][retryAttempt])
           } else {
             setSessions([])
@@ -147,18 +147,22 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
       }
     },
-    [matchesDirectory, enabled],
+    [matchesDirectory, enabled, normalizedDirectory],
   )
 
-  fetchSessionsRef.current = fetchSessions
+  useEffect(() => {
+    fetchSessionsRef.current = fetchSessions
+  }, [fetchSessions])
+
+  // enabled 关闭时停止加载（渲染期间调整 state，避免 effect 级联渲染）
+  if (!enabled && (isLoading || isLoadingMore)) {
+    setIsLoading(false)
+    setIsLoadingMore(false)
+  }
 
   // 初始加载和搜索变化时重新加载
   useEffect(() => {
-    if (!enabled) {
-      setIsLoading(false)
-      setIsLoadingMore(false)
-      return
-    }
+    if (!enabled) return
 
     // 搜索或 enabled 变化时重置 limit
     currentLimitRef.current = pageSize

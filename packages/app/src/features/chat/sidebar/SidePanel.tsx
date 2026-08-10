@@ -663,7 +663,7 @@ export function SidePanel({
         uiErrorHandler('rename session', e)
       }
     },
-    [currentDirectory, refresh],
+    [refresh],
   )
 
   const handleDeleteSession = useCallback(

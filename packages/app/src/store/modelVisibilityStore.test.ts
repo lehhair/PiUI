@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 
-function model(provider: string, id: string): Model<any> {
+function model(provider: string, id: string): Model<Api> {
   return {
     id,
     name: id,
@@ -13,7 +13,7 @@ function model(provider: string, id: string): Model<any> {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 0,
     maxTokens: 0,
-  } as Model<any>
+  } as Model<Api>
 }
 
 function readHiddenKeys(): string[] {

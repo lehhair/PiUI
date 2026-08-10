@@ -1,6 +1,6 @@
 import type { CommandRecord, ExtensionUiDialogResponse, JsonObject, JsonValue, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Api } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
 import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
 import { mergeLatestBranchPage } from '../branchMerge.js'
@@ -568,9 +568,9 @@ export async function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at
 /**
  * Load available models from the Pi model runtime into the models store.
  */
-const modelFlights = new Map<number, Promise<Model<any>[]>>()
+const modelFlights = new Map<number, Promise<Model<Api>[]>>()
 
-export async function loadPiModels(signal?: AbortSignal): Promise<Model<any>[]> {
+export async function loadPiModels(signal?: AbortSignal): Promise<Model<Api>[]> {
   const serverGeneration = serverStore.getActiveServerGeneration()
   const existing = modelFlights.get(serverGeneration)
   if (existing) return existing
@@ -595,11 +595,11 @@ export async function startPiProviderAuth(providerId: string, authType?: 'api_ke
   await transport.startProviderAuth(providerId, authType, signal)
 }
 
-async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<any>[]> {
+async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<Api>[]> {
   piModelsStore.setLoading(true)
   try {
     const result = await retryUnavailable(() => transport.listPiModels(signal), signal)
-    const models = (Array.isArray(result) ? result : []) as unknown as Model<any>[]
+    const models = (Array.isArray(result) ? result : []) as unknown as Model<Api>[]
     if (serverStore.getActiveServerGeneration() !== serverGeneration) return models
     piModelsStore.setModels(models)
     return models
