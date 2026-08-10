@@ -263,7 +263,6 @@ const ChatViewportContext = createContext<ChatViewportValue | null>(null)
  * 变化时只有真正依赖了变化字段的消费者重渲染：ChatArea 只订阅离散的
  * isCompact，宽度连续变化时该值不变 → 不重渲染，只剩浏览器原生 reflow。
  */
-let viewportSnapshot: ChatViewportValue | null = null
 const viewportListeners = new Set<() => void>()
 
 function subscribeViewport(listener: () => void): () => void {
@@ -271,15 +270,11 @@ function subscribeViewport(listener: () => void): () => void {
   return () => viewportListeners.delete(listener)
 }
 
-function getViewportSnapshot(): ChatViewportValue | null {
-  return viewportSnapshot
-}
-
 export function ChatViewportProvider({ value, children }: { value: ChatViewportValue; children: ReactNode }) {
-  // 快照写入放到 effect（React 规则：渲染期间不得写外部变量）。
-  // 选择器 hook 在首次渲染回退到 Context value，effect 后快照就绪。
+  // 只广播通知，不写共享快照——useChatViewportSelect 取最近 Provider 的
+  // context 值（各 Provider 隔离）。多 Provider 嵌套时（App 全局 + PiChatPane
+  // 分屏 shell）不再互相覆盖，分屏 pane 拿到自己的固定 PANE_VIEWPORT。
   useEffect(() => {
-    viewportSnapshot = value
     for (const listener of viewportListeners) listener()
   }, [value])
   return <ChatViewportContext.Provider value={value}>{children}</ChatViewportContext.Provider>
@@ -298,18 +293,18 @@ export function useChatViewportSelect<S>(
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
   const contextValue = useContext(ChatViewportContext)
-  // 首次渲染的 context 快照，供 getSnapshot 在 store 未就绪时兜底（不可变缓存，
-  // 用 useState 惰性初始化替代渲染期间写 ref）
-  const [initialSnapshot] = useState<ChatViewportValue | null>(() => contextValue)
-  const getSnapshot = useCallback((): ChatViewportValue => {
-    const snapshot = getViewportSnapshot() ?? initialSnapshot
-    if (snapshot === null) {
-      // 理论上不可能：Provider 渲染先于子组件，initialRef 必已设置。
-      // 防御性返回一个空快照，避免类型/运行时崩溃。
-      throw new Error('useChatViewportSelect used outside ChatViewportProvider')
-    }
-    return snapshot
-  }, [initialSnapshot])
+  if (!contextValue) {
+    throw new Error('useChatViewportSelect must be used within ChatViewportProvider')
+  }
+  // 快照 = 最近 Provider 的 context 值（各 Provider 隔离，不互相覆盖）。
+  // context 变化时渲染期同步 state（React 官方 adjusting-state-during-render
+  // 模式）；全局 viewportListeners 负责订阅通知——任一 Provider 变化都触发
+  // 重渲染，selector 结果引用未变则被 useSyncExternalStoreWithSelector 缓存。
+  const [snapshot, setSnapshot] = useState<ChatViewportValue>(contextValue)
+  if (contextValue !== snapshot) {
+    setSnapshot(contextValue)
+  }
+  const getSnapshot = useCallback((): ChatViewportValue => snapshot, [snapshot])
   return useSyncExternalStoreWithSelector(subscribeViewport, getSnapshot, getSnapshot, selector, isEqual)
 }
 
