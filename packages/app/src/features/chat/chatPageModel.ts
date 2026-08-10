@@ -959,7 +959,7 @@ export function buildProcessTimeline(
   let activeUserId: string | null = null
   for (let i = 0; i < userTurns.length; i++) {
     if (isTurnPending(userTurns[i], i)) {
-      activeUserId = userTurns[i].user.entryId
+      activeUserId = userTurns[i].user.renderKey ?? userTurns[i].user.entryId
       break
     }
   }
@@ -980,7 +980,7 @@ export function buildProcessTimeline(
       continue
     }
 
-    const userId = turn.user.entryId
+    const userId = turn.user.renderKey ?? turn.user.entryId
     const turnIsActive = activeUserId != null && userId === activeUserId
 
     const finalAssistant = assistants.length > 0 ? assistants[assistants.length - 1] : null

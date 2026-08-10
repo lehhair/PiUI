@@ -907,39 +907,73 @@ export const ChatArea = memo(
 
       // ── 渲染数据 ──
       const virtualItems = virtualizer.getVirtualItems()
-      const mountedMessageIdsKey = useMemo(
-        () => virtualItems.map(virtualItem => timeline[virtualItem.index]?.key).filter(Boolean).join(','),
-        [virtualItems, timeline],
-      )
 
-      // Outline 可见消息：跟随虚拟行挂载变化
+      // ── Outline 当前区块：视口锚定的用户消息 ──
+      // 不依赖 IntersectionObserver（虚拟行挂载/滚动/流式重建会丢可见集），
+      // 直接按 scroll 位置 → 视口顶部的行 → 它所属的上一条用户消息。
+      // 助手长文占满视口时也能正确高亮当前区块。
+      const currentSectionRef = useRef<string | null>(null)
+      const updateVisibleSection = useCallback(() => {
+        const root = scrollRef.current
+        if (!root) return
+        const scrollTop = root.scrollTop
+        const rows = virtualizer.getVirtualItems()
+        // 视口顶部对应的行：start <= scrollTop 的最后一行（内容坐标）
+        let targetIndex = 0
+        for (const row of rows) {
+          if (row.start <= scrollTop) targetIndex = row.index
+          else break
+        }
+        const row = timeline[targetIndex]
+        if (!row) return
+        let sectionId: string | null = null
+        if (row.kind === 'process-shell') {
+          sectionId = row.userMessageId
+        } else if (row.item.kind === 'user_message') {
+          sectionId = row.item.renderKey ?? row.item.entryId
+        } else {
+          // assistant/bash/工具行 → 往上找最近的上一条用户消息
+          for (let i = targetIndex - 1; i >= 0; i--) {
+            const r = timeline[i]
+            if (r.kind === 'process-shell' && r.userMessageId) {
+              sectionId = r.userMessageId
+              break
+            }
+            if (r.kind === 'message' && r.item.kind === 'user_message') {
+              sectionId = r.item.renderKey ?? r.item.entryId
+              break
+            }
+          }
+        }
+        if (sectionId && sectionId !== currentSectionRef.current) {
+          currentSectionRef.current = sectionId
+          onVisibleIdsRef.current?.([sectionId])
+        }
+      }, [timeline, virtualizer])
+
+      // scroll 驱动（rAF 节流：一帧内只算一次）
       useEffect(() => {
         const root = scrollRef.current
         if (!root) return
-        const visible = new Set<string>()
-        const observer = new IntersectionObserver(
-          entries => {
-            let changed = false
-            for (const entry of entries) {
-              const id = entry.target.getAttribute('data-message-id')
-              if (!id) continue
-              if (entry.isIntersecting) {
-                if (!visible.has(id)) {
-                  visible.add(id)
-                  changed = true
-                }
-              } else if (visible.has(id)) {
-                visible.delete(id)
-                changed = true
-              }
-            }
-            if (changed) onVisibleIdsRef.current?.(Array.from(visible))
-          },
-          { root, rootMargin: '100% 0px' },
-        )
-        root.querySelectorAll<HTMLElement>('[data-message-id]').forEach(el => observer.observe(el))
-        return () => observer.disconnect()
-      }, [mountedMessageIdsKey])
+        let raf = 0
+        const onScroll = () => {
+          if (raf) return
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            updateVisibleSection()
+          })
+        }
+        root.addEventListener('scroll', onScroll, { passive: true })
+        return () => {
+          root.removeEventListener('scroll', onScroll)
+          if (raf) cancelAnimationFrame(raf)
+        }
+      }, [updateVisibleSection])
+
+      // timeline/流式变化时重算（scroll 位置没变但行内容/位置变了）
+      useEffect(() => {
+        updateVisibleSection()
+      }, [updateVisibleSection, timeline])
 
       // ── 命令式接口 ──
       useImperativeHandle(ref, () => ({
