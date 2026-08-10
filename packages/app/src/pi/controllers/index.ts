@@ -552,9 +552,12 @@ export async function abortPiRetry(sessionId: string, signal?: AbortSignal): Pro
   await transport.abortPiRetry(sessionId, signal)
 }
 
-/** Clear pending steering/follow-up queues (immediate). */
-export async function clearPiQueue(sessionId: string, signal?: AbortSignal): Promise<void> {
-  await transport.clearPiQueue(sessionId, signal)
+/** Clear pending steering/follow-up queues (immediate); returns the cleared snapshot. */
+export async function clearPiQueue(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<{ steering: string[]; followUp: string[] } | null> {
+  return (await transport.clearPiQueue(sessionId, signal)) as { steering: string[]; followUp: string[] } | null
 }
 
 export async function setPiSteeringMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<void> {

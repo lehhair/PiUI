@@ -571,7 +571,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
             <button
               type="button"
               disabled={runtimePending !== null || queuedCount === 0}
-              onClick={() => void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId))}
+              onClick={() => void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId).then(() => undefined))}
               className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[length:var(--fs-sm)] text-text-400 transition-colors hover:bg-bg-200/60 hover:text-text-100 disabled:opacity-40"
             >
               <TrashIcon size={13} />
