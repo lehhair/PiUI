@@ -4,6 +4,10 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.6] - 2026-08-10
+
+- refactor(worker): one shared worker process for all Pi runtimes (0f538454)
+
 ## [v0.4.5] - 2026-08-10
 
 - fix(sidebar): refresh the session list as an active session advances (089e4e18)
