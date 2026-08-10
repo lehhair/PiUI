@@ -7,24 +7,6 @@ import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } fro
 import { trackPiSession } from '../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../pi/workspaces.js'
 
-/**
- * piui:sessions-changed 事件的结构化 detail：带具体会话信息的事件由列表
- * 本地增量合并（不重拉）；只有无 detail 的纯刷新信号才回退全量重拉。
- */
-type SessionsChangedDetail = {
-  created?: UiSession
-  sessionId?: string
-  cwd?: string
-  attached?: boolean
-  updated?: boolean
-  materialized?: boolean
-  deleted?: boolean
-  /** head 推进带的会话摘要（/name 设置的标题） */
-  name?: string
-  /** 条目数（近似消息数） */
-  messageCount?: number
-}
-
 interface UseSessionsOptions {
   /** 每页数量 */
   pageSize?: number
@@ -212,66 +194,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   useEffect(() => {
     if (!enabled) return
 
-    /**
-     * 结构化增量合并（对齐 opencode 上游的 session.created/updated/deleted
-     * 语义）：带具体会话信息的事件直接本地改列表——新建立即可见（不依赖
-     * 磁盘落盘）、消息推进只移动条目（无 loading 闪烁、无全量扫描）。
-     * 只有无结构信息的纯刷新信号才回退静默全量重拉。
-     */
-    const refreshFromEvent = (event: Event) => {
-      const detail = (event as CustomEvent<SessionsChangedDetail | undefined>).detail
-      const now = Date.now()
-      if (detail?.created && matchesDirectory(detail.created)) {
-        // 本地新建（尚未落盘，磁盘扫描不可见）：直接插入，排最前
-        setSessions(prev => {
-          if (prev.some(session => session.id === detail.created!.id)) return prev
-          return [detail.created!, ...prev].sort((a, b) => b.updatedAt - a.updatedAt)
-        })
-        return
-      }
-      if (detail?.attached && detail.sessionId && typeof detail.cwd === 'string') {
-        // attach：插入占位（新会话文件可能还没落盘）；title/messageCount
-        // 等真实数据由后续全量重拉补齐
-        const placeholder: UiSession = {
-          id: detail.sessionId,
-          directory: detail.cwd,
-          title: '',
-          createdAt: now,
-          updatedAt: now,
-          messageCount: 0,
-          isNamed: false,
-        }
-        setSessions(prev => {
-          if (prev.some(session => session.id === detail.sessionId)) return prev
-          return [placeholder, ...prev]
-        })
-        return
-      }
-      if (detail?.deleted && detail.sessionId) {
-        setSessions(prev => prev.filter(session => session.id !== detail.sessionId))
-        return
-      }
-      if ((detail?.updated || detail?.materialized) && detail.sessionId) {
-        // head 推进：本地有条目则移到最前、刷新 updatedAt，并用事件带的
-        // 摘要补全标题/消息数；没有条目说明磁盘已可见（materialized 即
-        // 落盘），静默重拉补齐。
-        setSessions(prev => {
-          const index = prev.findIndex(session => session.id === detail.sessionId)
-          if (index === -1) return prev
-          const current = prev[index]
-          const session: UiSession = {
-            ...current,
-            updatedAt: now,
-            ...(typeof detail.messageCount === 'number' && detail.messageCount > 0
-              ? { messageCount: detail.messageCount }
-              : {}),
-            ...(typeof detail.name === 'string' && detail.name ? { title: detail.name, isNamed: true } : {}),
-          }
-          return [session, ...prev.filter(item => item.id !== detail.sessionId)]
-        })
-        return
-      }
-      // 纯刷新信号（无结构信息）：静默重拉，不清空不闪烁
+    // pi 原生列表模型：列表 = 磁盘扫描结果（SessionManager.list/listAll）。
+    // 事件只作为“该重扫了”的信号，静默全量重拉——不切换 loading、不清空
+    // 列表（否则列表被 spinner 行替换、高度塌缩，整个侧边栏抖动）。
+    const refreshFromEvent = () => {
       if (isFetchingRef.current) {
         queuedReconnectRefreshRef.current = true
         return
@@ -329,9 +255,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         })
       }
 
-      window.dispatchEvent(new CustomEvent('piui:sessions-changed', {
-        detail: { created: newSession },
-      }))
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
 
       return newSession
     },
@@ -346,9 +270,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       await deletePiSession(session.directory, session.path)
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
-      window.dispatchEvent(new CustomEvent('piui:sessions-changed', {
-        detail: { sessionId, deleted: true },
-      }))
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     },
     [sessions],
   )

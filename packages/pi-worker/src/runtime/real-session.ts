@@ -620,7 +620,6 @@ export class RealPiSession implements SessionRuntime {
       header: isJsonObject(header) ? header : null,
       leafId: manager.getLeafId(),
       entryCount: manager.getEntries().length,
-      sessionName: manager.getSessionName() ?? null,
     }, manager.getSessionId())
   }
 

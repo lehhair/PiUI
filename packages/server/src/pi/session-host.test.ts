@@ -27,7 +27,7 @@ test("SessionHost notifies the session list as the session head advances", async
   } as unknown as RuntimeSupervisor
   const hub = new EventHub()
   // 短节流窗口（50ms）便于测试：真实窗口是 1s
-  const host = new SessionHost(supervisor, hub, 50)
+  const host = new SessionHost(supervisor, hub)
 
   const updated: unknown[] = []
   const off = hub.subscribe(event => {
@@ -37,30 +37,20 @@ test("SessionHost notifies the session list as the session head advances", async
   await host.openSession(".", "session-1.jsonl")
   // attach 会发一条 attached；清掉，只观察 head 推进的通知
   updated.length = 0
-  // 首次持久化条目：materialized 必发，并带会话摘要（name/messageCount）
-  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 3, sessionName: "my chat" } })
+  // 首次持久化条目：materialized 必发（会话文件首次落盘，列表可扫到）
+  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 3 } })
   assert.equal(updated.length, 1)
   assert.deepEqual(updated[0], {
     sessionId: "session-1",
     materialized: true,
-    name: "my chat",
-    messageCount: 3,
   })
 
-  // 节流窗口内（同一轮连续条目）：合并，不重复通知
+  // 原生语义：后续 head 推进（新消息）不再广播列表事件——列表 = 磁盘扫描，
+  // 文件已存在，重扫结果不会变；排序/消息数由下一次生命周期事件或显式
+  // 刷新时更新。
   emitEvent({ channel: "session.head", head: { revision: 2 } })
-  assert.equal(updated.length, 1)
-
-  // 窗口外（新消息到达）：updated 通知，列表可刷新排序/消息数
-  await new Promise(resolve => setTimeout(resolve, 60))
   emitEvent({ channel: "session.head", head: { revision: 3, entryCount: 4 } })
-  assert.equal(updated.length, 2)
-  assert.deepEqual(updated[1], {
-    sessionId: "session-1",
-    updated: true,
-    name: undefined,
-    messageCount: 4,
-  })
+  assert.equal(updated.length, 1)
 
   off()
   host.dispose()

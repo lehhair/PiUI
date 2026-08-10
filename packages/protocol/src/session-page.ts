@@ -9,8 +9,6 @@ export type SessionHead = {
   leafId: string | null
   entryCount: number
   epoch: string
-  /** 会话显示名（/name 设置），供列表增量更新用 */
-  sessionName?: string | null
 }
 
 export type LiveMessage = {

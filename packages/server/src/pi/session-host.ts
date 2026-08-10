@@ -57,26 +57,17 @@ function idleRuntimeTtlMs(): number {
     : DEFAULT_IDLE_RUNTIME_TTL_MS
 }
 
-/**
- * 会话活跃期间 head 变化（新条目）触发列表刷新的节流窗口。
- * 消息流中条目追加间隔通常大于 1s；窗口内合并，避免高频条目（同一轮
- * 连续工具结果）把侧边栏列表刷爆（前端还有 300ms 防抖兜底）。
- */
-const SESSIONS_LIST_THROTTLE_MS = 5_000
-
 export class SessionHost {
   private readonly runtimes = new SessionRuntimeRegistry()
   private readonly activity = new Map<string, SessionActivityStatus>()
   private readonly lastAccess = new Map<string, number>()
   private readonly materialized = new Set<string>()
-  private readonly lastHeadListNotify = new Map<string, number>()
   private readonly runtimeReaper: NodeJS.Timeout
   readonly executor: SessionExecutor
 
   constructor(
     private readonly supervisor: RuntimeSupervisor,
     private readonly hub: EventHub,
-    private readonly sessionsListThrottleMs: number = SESSIONS_LIST_THROTTLE_MS,
   ) {
     this.executor = new SessionExecutor(record => this.emitCommandUpdate(record))
     this.supervisor.onEvent(event => this.routeCatalogEvent(event))
@@ -237,7 +228,6 @@ export class SessionHost {
       const wasAttached = this.runtimes.delete(session.sessionId)
       const hadActivity = this.activity.delete(session.sessionId)
       this.lastAccess.delete(session.sessionId)
-      this.lastHeadListNotify.delete(session.sessionId)
       if (!wasAttached && !hadActivity) return
       this.publishActivity()
       this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
@@ -428,11 +418,6 @@ export class SessionHost {
         const live = this.runtimes.findBySessionFile(sessionFile)
         if (live) await this.closeSession(live.sessionId)
       }
-      // 删除广播：前端列表本地移除，无需等磁盘扫描（文件可能已被删）。
-      this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
-        sessionId: typeof params?.sessionId === "string" ? params.sessionId : undefined,
-        deleted: true,
-      })
     }
     const capability = getCommandCapability(type)
     if (SERVER_SESSION_CAPABILITIES.some(item => item.name === type) || capability?.scope === "session") {
@@ -581,23 +566,13 @@ export class SessionHost {
     }
     if (event.channel === "session.head") {
       this.hub.publish({ kind: "session", id: session.sessionId }, "session.head", event.head)
-      // 新条目（消息/工具结果/改名等）会推进 head。首次 materialized 必发；
-      // 之后按节流发 sessions.updated，让侧边栏列表（updatedAt 排序、消息
-      // 数）跟随会话活动刷新，而不是停在打开/切换时刻。
-      const now = Date.now()
-      const firstMaterialization = !this.materialized.has(session.sessionId)
-      if (firstMaterialization ||
-        now - (this.lastHeadListNotify.get(session.sessionId) ?? 0) >= this.sessionsListThrottleMs) {
-        this.lastHeadListNotify.set(session.sessionId, now)
+      if (!this.materialized.has(session.sessionId)) {
         this.materialized.add(session.sessionId)
-        // 事件带会话摘要（名称/条目数），前端列表本地增量更新标题/消息数，
-        // 无需全量重拉。
-        const head = event.head as { sessionName?: unknown; entryCount?: unknown } | undefined
+        // First persisted entry: the session file now exists on disk and the
+        // catalog's session.list can finally see it — tell list subscribers.
         this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
           sessionId: session.sessionId,
-          ...(firstMaterialization ? { materialized: true } : { updated: true }),
-          name: typeof head?.sessionName === "string" ? head.sessionName : undefined,
-          messageCount: typeof head?.entryCount === "number" ? head.entryCount : undefined,
+          materialized: true,
         })
       }
       return

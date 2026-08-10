@@ -410,10 +410,8 @@ class PiEventStream {
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
     // 事件驱动刷新：SessionContext/useSessions 订阅 piui:sessions-changed 会
-    // 各自重新拉列表（并更新 piSessionInfoStore）。detail 携带结构化信息
-    // （created/attached/updated/deleted），列表消费者做本地增量合并，
-    // 只有无结构信息的纯刷新信号才回退全量重拉。
-    window.dispatchEvent(new CustomEvent('piui:sessions-changed', { detail: payload }))
+    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次
+    window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }
 
   private handleExtensionUiEvent(sessionId: string, event: PiExtensionUiEvent): void {
