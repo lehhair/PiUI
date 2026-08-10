@@ -1,24 +1,22 @@
 import { useTranslation } from 'react-i18next'
 import type { ActiveSessionEntry } from '../../../store/activeSessionStore'
-import type { UiSession } from '../../../types/session'
 import { startInternalDrag } from '../../../lib/internalDragCore'
 
 interface ActiveSessionItemProps {
   entry: ActiveSessionEntry
-  /** 从 sessions 列表（可能被工作区过滤）拿到的完整 session 对象 */
-  resolvedSession?: UiSession
   isSelected: boolean
   onSelect: (session: { id: string; directory?: string }) => void
 }
 
-export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect }: ActiveSessionItemProps) {
+export function ActiveSessionItem({ entry, isSelected, onSelect }: ActiveSessionItemProps) {
   const { t } = useTranslation(['chat', 'common'])
   const isRetry = entry.status.type === 'retry'
   const pending = entry.pendingAction
-  // 标题优先从 resolvedSession 取，然后 fallback 到 entry.title（sessionMeta），最后截取 ID
-  const displayTitle = resolvedSession?.title || entry.title || entry.sessionId.slice(0, 12) + '...'
-  // 目录优先从 resolvedSession 取
-  const directory = resolvedSession?.directory || entry.directory
+  // 活跃 session 元信息由全局同步提供：SessionContext 始终拉全局列表并
+  // syncPiSummaries 到 activeSessionStore，因此 entry.title/directory 对
+  // 任意工作区的活跃 session 都是完整的，无需再依赖列表解析。
+  const displayTitle = entry.title || entry.sessionId.slice(0, 12) + '...'
+  const directory = entry.directory
 
   // 状态显示：permission > question > retry > working
   const statusConfig =
@@ -36,17 +34,11 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
           : { label: t('activeSession.working'), color: 'text-success-100', dotColor: 'bg-success-100', pulse: true }
 
   const handleClick = () => {
-    // 侧边栏按工作区过滤时，活跃 session 可能不在当前列表（resolvedSession 缺失）。
-    // entry 自带 id + directory（App 的 handleSelectSession 只需这两个字段），
-    // 总能切过去；title/目录展示已有 entry 层面的 fallback。
-    onSelect({
-      id: entry.sessionId,
-      directory: entry.directory || resolvedSession?.directory,
-    })
+    onSelect({ id: entry.sessionId, directory })
   }
 
   // 拖拽到主信息流进行分屏 / 替换会话
-  const isDraggable = !!(entry.directory || resolvedSession)
+  const isDraggable = Boolean(directory)
   const handlePointerDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDraggable) return
     startInternalDrag(

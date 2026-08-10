@@ -58,16 +58,37 @@ describe('SessionProvider', () => {
     expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'Keep me' })
   })
 
-  it('loads sessions scoped to the current directory when one is selected', async () => {
+  it('always loads the global list and filters the visible list to the current directory', async () => {
     mocks.currentDirectory = '/workspace/demo'
-    mocks.loadPiSessionsForCwd.mockResolvedValue([sessionInfo('session-1', '/workspace/demo', 'Scoped')])
+    mocks.loadPiSessions.mockResolvedValue([
+      sessionInfo('session-1', '/workspace/demo', 'In workspace'),
+      sessionInfo('session-2', '/other/project', 'Elsewhere'),
+    ])
     const { result } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
 
     await waitFor(() => expect(result.current?.isLoading).toBe(false))
-    expect(mocks.loadPiSessionsForCwd).toHaveBeenCalledWith('/workspace/demo')
-    expect(mocks.loadPiSessions).not.toHaveBeenCalled()
+    // 数据源始终是全局列表；显示层按当前目录过滤
+    expect(mocks.loadPiSessions).toHaveBeenCalled()
+    expect(mocks.loadPiSessionsForCwd).not.toHaveBeenCalled()
     expect(result.current?.sessions).toHaveLength(1)
-    expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'Scoped' })
+    expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'In workspace' })
+  })
+
+  it('shows all sessions again when switching to global workspace', async () => {
+    mocks.currentDirectory = '/workspace/demo'
+    mocks.loadPiSessions.mockResolvedValue([
+      sessionInfo('session-1', '/workspace/demo', 'In workspace'),
+      sessionInfo('session-2', '/other/project', 'Elsewhere'),
+    ])
+    const { result, rerender } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
+    await waitFor(() => expect(result.current?.sessions).toHaveLength(1))
+
+    await act(async () => {
+      mocks.currentDirectory = null
+    })
+    rerender()
+
+    await waitFor(() => expect(result.current?.sessions).toHaveLength(2))
   })
 
   it('keeps a session visible when durable deletion fails', async () => {

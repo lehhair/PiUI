@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import i18n from '../i18n'
 import type { UiSession } from '../types/session'
-import { createPiSession, loadPiSessions, loadPiSessionsForCwd, deletePiSession } from '../pi/controllers/index.js'
+import { createPiSession, loadPiSessions, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -9,6 +9,7 @@ import { paneLayoutStore } from '../store/paneLayoutStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { useDirectory } from './useDirectory'
 import { resolveWorkspacePath } from '../pi/workspaces.js'
+import { isSameDirectory } from '../utils/directoryUtils'
 import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
@@ -35,6 +36,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const pendingRef = useRef(new Map<string, number>())
   const PENDING_TTL_MS = 60_000
 
+  // ── 数据源策略 ──
+  // 始终拉全局 session 列表：activeSessionStore（活跃 tab）需要跨工作区解析
+  // 任意活跃 session 的 id/directory；列表显示则在前端按当前工作区过滤
+  //（“只看当前项目”）。目录切换仅重过滤，不再重发请求。
+  const currentDirectoryRef = useRef(currentDirectory)
+  useEffect(() => {
+    currentDirectoryRef.current = currentDirectory
+  }, [currentDirectory])
+
+  const applyDirectoryFilter = useCallback((list: UiSession[]): UiSession[] => {
+    const cwd = currentDirectoryRef.current
+    return cwd ? list.filter(session => isSameDirectory(session.directory, cwd)) : list
+  }, [])
+
   const fetchSessions = useCallback(async (retryAttempt = 0) => {
     if (fetchInFlightRef.current) {
       // 上一次还没结束：合并到完成后补刷（尾合并）
@@ -45,10 +60,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      // 按当前项目目录过滤数据源（全局模式才拉全量）
-      const nativeSessions = currentDirectory
-        ? await loadPiSessionsForCwd(currentDirectory)
-        : await loadPiSessions()
+      const nativeSessions = await loadPiSessions()
       const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
       const onDisk = new Set(mapped.map(session => session.id))
       const now = Date.now()
@@ -64,7 +76,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         title: session.title,
         directory: session.directory,
       })))
-      setSessions(filterPiSessionList(next, searchRef.current))
+      setSessions(filterPiSessionList(applyDirectoryFilter(next), searchRef.current))
     } catch (error) {
       if (requestId !== requestIdRef.current) return
       if (retryAttempt < 3) {
@@ -88,7 +100,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [currentDirectory])
+  }, [applyDirectoryFilter])
 
   // 事件驱动刷新：防抖合并（300ms 窗口内多事件只拉一次）
   const scheduleFetch = useCallback(() => {
@@ -112,8 +124,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [fetchSessions])
   useEffect(() => {
     searchRef.current = search
-    setSessions(filterPiSessionList(allSessionsRef.current, search))
-  }, [search])
+    setSessions(filterPiSessionList(applyDirectoryFilter(allSessionsRef.current), search))
+  }, [search, applyDirectoryFilter])
+
+  // 工作区切换：数据已是全局的，只重新过滤显示，不发请求
+  useEffect(() => {
+    setSessions(filterPiSessionList(applyDirectoryFilter(allSessionsRef.current), searchRef.current))
+  }, [currentDirectory, applyDirectoryFilter])
 
   useEffect(() => {
     window.addEventListener('piui:sessions-changed', scheduleFetch)
@@ -132,13 +149,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const registerSession = useCallback((session: UiSession) => {
     pendingRef.current.set(session.id, Date.now())
     allSessionsRef.current = [session, ...allSessionsRef.current.filter(item => item.id !== session.id)]
-    setSessions(filterPiSessionList(allSessionsRef.current, searchRef.current))
+    setSessions(filterPiSessionList(applyDirectoryFilter(allSessionsRef.current), searchRef.current))
     // 落盘广播丢失（消息发送失败、worker 崩了）时，靠延迟对账把幽灵
     // 条目清出列表
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     }, 15_000)
-  }, [])
+  }, [applyDirectoryFilter])
 
   const createSession = useCallback(async (title?: string) => {
     // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
