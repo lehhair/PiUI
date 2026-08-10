@@ -150,10 +150,9 @@ export function ProcessCollapseBlock({
     setExpanded(!expanded)
   }, [expanded, setExpanded])
 
-  // 进行中默认展开：不要跑 grid 展开动画（否则每条新消息都带动画高度重排）
-  // 用户手动折叠/展开、或结束后自动收起时再开动画
-  // 挂载本身不另做入场生长——像普通消息一样直接出现
-  const animateGrid = !(!isActive && !touched) && expanded !== isActive
+  // 动画：仅「进行中 + 用户未操作」的默认展开不开动画（避免每条新消息都带动画高度重排）；
+  // 用户手动折叠/展开、或结束后自动收起时都开动画——展开/收起手感对称。
+  const animateGrid = touched || !isActive
 
   return (
     <div ref={rootRef} className="flex flex-col">
