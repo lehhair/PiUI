@@ -250,6 +250,10 @@ export function PiChatPane({
   // 压缩中：优先用活动状态（worker 推送、已验证可靠），state.isCompacting 兜底
   const sessionEntry = useSessionActiveEntry(sessionId ?? '')
   const compacting = sessionEntry?.status.type === 'compacting' || state?.isCompacting === true
+  // 兜底：session 在活跃列表中（GET /session/status 全量快照驱动，可靠）→
+  // 即使 piSessionStateStore 因无事件流而 stale（如 bash 等待期），
+  // 输入框发送按钮也保持「停止」状态，避免按钮变暗。
+  const sessionActive = Boolean(sessionEntry)
   const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
   // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端
@@ -1568,6 +1572,7 @@ export function PiChatPane({
               : undefined)}
             onNewChat={onNewChat}
             isStreaming={isStreaming}
+            sessionActive={sessionActive}
             isCompacting={compacting}
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}

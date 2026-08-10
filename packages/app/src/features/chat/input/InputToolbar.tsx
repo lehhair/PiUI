@@ -19,6 +19,8 @@ interface InputToolbarProps {
   onFilesSelected: (files: File[]) => void
 
   isStreaming?: boolean
+  /** 兜底：session 在活跃列表中时即使 isStreaming 为 false 也显示停止按钮 */
+  sessionActive?: boolean
   /** 上下文压缩进行中：发送按钮变为停止按钮（取消压缩） */
   isCompacting?: boolean
   isSending?: boolean
@@ -48,6 +50,7 @@ export function InputToolbar({
   fileCapabilities,
   onFilesSelected,
   isStreaming,
+  sessionActive,
   isCompacting = false,
   isSending = false,
   onAbort,
@@ -426,7 +429,7 @@ export function InputToolbar({
             </IconButton>
           </>
         </AnimatedPresence>
-        {(isCompacting || (!canSend && isStreaming)) && !isSending ? (
+        {(isCompacting || sessionActive || (!canSend && isStreaming)) && !isSending ? (
           <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
             <StopIcon />
           </IconButton>

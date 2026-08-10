@@ -133,6 +133,8 @@ export interface InputBoxProps {
   onNewChat?: () => void // 新建对话回调
   disabled?: boolean
   isStreaming?: boolean
+  /** 兜底：session 在活跃列表中时即使 isStreaming 为 false 也显示停止按钮 */
+  sessionActive?: boolean
   /** 上下文压缩进行中：发送按钮变为停止按钮（取消压缩） */
   isCompacting?: boolean
   variants?: string[]
@@ -187,6 +189,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   onNewChat,
   disabled,
   isStreaming,
+  sessionActive,
   isCompacting = false,
   variants = [],
   selectedVariant,
@@ -1451,6 +1454,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                       fileCapabilities={fileCaps}
                       onFilesSelected={handleFilesSelected}
                       isStreaming={isStreaming}
+                      sessionActive={sessionActive}
                       isCompacting={isCompacting}
                       isSending={isSubmitting}
                       onAbort={onAbort}
