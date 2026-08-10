@@ -62,7 +62,7 @@ function idleRuntimeTtlMs(): number {
  * 消息流中条目追加间隔通常大于 1s；窗口内合并，避免高频条目（同一轮
  * 连续工具结果）把侧边栏列表刷爆（前端还有 300ms 防抖兜底）。
  */
-const SESSIONS_LIST_THROTTLE_MS = 1_000
+const SESSIONS_LIST_THROTTLE_MS = 5_000
 
 export class SessionHost {
   private readonly runtimes = new SessionRuntimeRegistry()
@@ -428,6 +428,11 @@ export class SessionHost {
         const live = this.runtimes.findBySessionFile(sessionFile)
         if (live) await this.closeSession(live.sessionId)
       }
+      // 删除广播：前端列表本地移除，无需等磁盘扫描（文件可能已被删）。
+      this.hub.publish({ kind: "server", id: "server" }, "sessions.updated", {
+        sessionId: typeof params?.sessionId === "string" ? params.sessionId : undefined,
+        deleted: true,
+      })
     }
     const capability = getCommandCapability(type)
     if (SERVER_SESSION_CAPABILITIES.some(item => item.name === type) || capability?.scope === "session") {

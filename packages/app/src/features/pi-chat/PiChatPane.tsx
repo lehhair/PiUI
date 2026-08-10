@@ -915,8 +915,21 @@ export function PiChatPane({
           path: opened.sessionFile ?? undefined,
         })
         onEnterSessionRef.current?.(targetSessionId, directory)
-        // 刷新其他列表消费者（文件夹分组等）；挂起合并保证新会话不被冲掉
-        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+        // 刷新其他列表消费者（文件夹分组等）；结构化 detail 让列表本地插入，
+        // 新会话立即可见（磁盘要等首条消息落盘才能扫到）
+        window.dispatchEvent(new CustomEvent('piui:sessions-changed', {
+          detail: {
+            created: {
+              id: targetSessionId,
+              directory: opened.cwd ?? directory,
+              title: text.trim().slice(0, 60) || i18n.t('chat:sidebar.newChat'),
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              messageCount: 0,
+              isNamed: Boolean(text.trim()),
+            },
+          },
+        }))
         // Apply the composer's preferred model and thinking level BEFORE the
         // first prompt — afterwards they'd queue behind the active turn and
         // the first turn would run with defaults.
