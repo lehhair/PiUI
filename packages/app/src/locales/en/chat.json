@@ -30,7 +30,10 @@
     "sessionBusyDesc": "Another Pi runtime is using this session. Close it or try again later.",
     "backToHome": "Back to home",
     "openServerSettings": "Open server settings",
-    "compacting": "Compacting context…"
+    "compacting": "Compacting context…",
+    "backToInput": "Back to input",
+    "moveQueueToNext": "Move to next turn",
+    "moveQueueToCurrent": "Move to current turn"
   },
   "emptyState": {
     "title": "Start a new conversation",

@@ -47,6 +47,7 @@ import {
   setPiExtensionEditorState,
   setPiModel,
   setPiThinkingLevel,
+  clearPiQueue,
 } from '../../pi/controllers/index.js'
 import { invokePiCommand } from '../../pi/transport/index.js'
 import { layoutStore } from '../../store/layoutStore'
@@ -340,6 +341,58 @@ export function PiChatPane({
   // 旧引用，只有队列实际变化才触发 ChatArea 重渲染。
   const queuedSteering = useMemo(() => queue?.steering ?? EMPTY_STRING_ARRAY, [queue?.steering])
   const queuedFollowUps = useMemo(() => queue?.followUp ?? EMPTY_STRING_ARRAY, [queue?.followUp])
+
+  // ── 队列消息操作（撤销回输入框 / 切换 steer↔followUp 模式）──
+  // SDK 无单条队列移除：用 clearQueue（返回清空快照）+ 按目标重放其余实现。
+  const handleQueueBackToInput = useCallback(
+    async (kind: 'steering' | 'followUp', index: number) => {
+      if (!sessionId) return
+      const source = (kind === 'steering' ? queue?.steering : queue?.followUp) ?? []
+      const text = source[index]
+      if (!text) return
+      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as
+        | { steering?: string[]; followUp?: string[] }
+        | null
+      if (!cleared) return
+      // 回填输入框
+      setSessionEditorDraft(sessionId, text)
+      // 其余按原模式重放（保持顺序），被撤销的那条不再入队
+      const restSteering = [...(cleared.steering ?? [])]
+      if (kind === 'steering') restSteering.splice(index, 1)
+      const restFollowUp = [...(cleared.followUp ?? [])]
+      if (kind === 'followUp') restFollowUp.splice(index, 1)
+      for (const t of restSteering) {
+        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
+      }
+      for (const t of restFollowUp) {
+        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
+      }
+    },
+    [sessionId, queue],
+  )
+  const handleQueueMoveMode = useCallback(
+    async (kind: 'steering' | 'followUp', index: number) => {
+      if (!sessionId) return
+      const source = (kind === 'steering' ? queue?.steering : queue?.followUp) ?? []
+      const text = source[index]
+      if (!text) return
+      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as
+        | { steering?: string[]; followUp?: string[] }
+        | null
+      if (!cleared) return
+      // 该条以目标模式重放；其余保持原模式（排除该条）
+      void sendPiUserMessage(sessionId, text, undefined, kind === 'steering' ? 'followUp' : 'steer').catch(() => undefined)
+      const restSteering = [...(cleared.steering ?? [])].filter(t => t !== text)
+      const restFollowUp = [...(cleared.followUp ?? [])].filter(t => t !== text)
+      for (const t of restSteering) {
+        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
+      }
+      for (const t of restFollowUp) {
+        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
+      }
+    },
+    [sessionId, queue],
+  )
 
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
@@ -799,6 +852,7 @@ export function PiChatPane({
         return true
       }
 
+      // Fire and refresh: the prompt command stays open for the whole turn,
       // Fire and refresh: the prompt command stays open for the whole turn,
       // so awaiting it would block the composer until the turn ends. Return
       // immediately; the event stream drives updates, and we kick the first
@@ -1443,6 +1497,8 @@ export function PiChatPane({
             items={items}
             queuedSteering={queuedSteering}
             queuedFollowUps={queuedFollowUps}
+            onQueueBackToInput={handleQueueBackToInput}
+            onQueueMoveMode={handleQueueMoveMode}
             sessionId={sessionId}
             isStreaming={isStreaming}
             isCompacting={compacting}

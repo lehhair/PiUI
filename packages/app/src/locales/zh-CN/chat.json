@@ -30,7 +30,10 @@
     "sessionBusyDesc": "另一个 Pi runtime 正在使用这个会话，请关闭其他实例后重试。",
     "backToHome": "返回首页",
     "openServerSettings": "打开服务器设置",
-    "compacting": "正在压缩上下文…"
+    "compacting": "正在压缩上下文…",
+    "backToInput": "回到输入框",
+    "moveQueueToNext": "移到下一轮",
+    "moveQueueToCurrent": "移到本轮"
   },
   "emptyState": {
     "title": "开始新对话",

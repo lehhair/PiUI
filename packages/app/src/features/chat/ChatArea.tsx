@@ -26,7 +26,7 @@ import {
   assistantHasProcessContent,
 } from '../message'
 import { MessageErrorView } from '../message/parts'
-import { SpinnerIcon } from '../../components/Icons'
+import { SpinnerIcon, ArrowDownIcon, ArrowUpIcon, PencilIcon } from '../../components/Icons'
 import type { MessageError } from '../../types/message'
 import type { PiTimelineItem } from '../../pi/domain/index.js'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
@@ -98,6 +98,9 @@ interface ChatAreaProps {
   items: PiTimelineItem[]
   queuedSteering?: readonly string[]
   queuedFollowUps?: readonly string[]
+  /** 队列消息操作：撤销回输入框 / 切换 steer↔followUp 模式 */
+  onQueueBackToInput?: (kind: 'steering' | 'followUp', index: number) => void | Promise<void>
+  onQueueMoveMode?: (kind: 'steering' | 'followUp', index: number) => void | Promise<void>
   pageRecords?: StableChatPage[]
   forkTargetIdMap?: Map<string, string | undefined>
   turnDurationMap?: Map<string, number>
@@ -189,15 +192,23 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
   items,
   maxWidthClass,
   paddingClass,
+  onBackToInput,
+  onMoveMode,
 }: {
   kind: 'current' | 'next'
   items: readonly string[]
   maxWidthClass: string
   paddingClass: string
+  /** 撤销该条（回到输入框）——不传则不显示操作按钮 */
+  onBackToInput?: (queueKind: 'steering' | 'followUp', index: number) => void | Promise<void>
+  /** 切换该条队列模式（steer ↔ followUp） */
+  onMoveMode?: (queueKind: 'steering' | 'followUp', index: number) => void | Promise<void>
 }) {
   const { t } = useTranslation('chat')
   if (items.length === 0) return null
 
+  const queueKind = kind === 'current' ? 'steering' : 'followUp'
+  const moveTitle = t(kind === 'current' ? 'chatArea.moveQueueToNext' : 'chatArea.moveQueueToCurrent')
   const label = t(kind === 'current' ? 'chatArea.currentTurnQueue' : 'chatArea.nextTurnQueue', {
     count: items.length,
   })
@@ -216,9 +227,33 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
         {items.map((text, index) => (
           <div
             key={`${index}:${text}`}
-            className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200"
+            className="group/msg relative max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200"
           >
             {text}
+            {(onBackToInput || onMoveMode) && (
+              <div className="absolute -left-2 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                {onBackToInput && (
+                  <button
+                    type="button"
+                    onClick={() => void onBackToInput(queueKind, index)}
+                    title={t('chatArea.backToInput')}
+                    className="flex h-6 w-6 items-center justify-center rounded-md bg-bg-100 border border-border-200 text-text-400 hover:text-text-100 hover:border-border-300 shadow-sm transition-colors"
+                  >
+                    <PencilIcon size={12} />
+                  </button>
+                )}
+                {onMoveMode && (
+                  <button
+                    type="button"
+                    onClick={() => void onMoveMode(queueKind, index)}
+                    title={moveTitle}
+                    className="flex h-6 w-6 items-center justify-center rounded-md bg-bg-100 border border-border-200 text-text-400 hover:text-text-100 hover:border-border-300 shadow-sm transition-colors"
+                  >
+                    {kind === 'current' ? <ArrowDownIcon size={12} /> : <ArrowUpIcon size={12} />}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -376,6 +411,7 @@ export const ChatArea = memo(
     (
       {
         items, queuedSteering = [], queuedFollowUps = [],
+        onQueueBackToInput, onQueueMoveMode,
         forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
         sessionId, isStreaming = false, isCompacting = false,
@@ -1088,12 +1124,16 @@ export const ChatArea = memo(
               items={queuedSteering}
               maxWidthClass={maxWidthClass}
               paddingClass={paddingClass}
+              onBackToInput={onQueueBackToInput}
+              onMoveMode={onQueueMoveMode}
             />
             <QueuedUserMessageQueue
               kind="next"
               items={queuedFollowUps}
               maxWidthClass={maxWidthClass}
               paddingClass={paddingClass}
+              onBackToInput={onQueueBackToInput}
+              onMoveMode={onQueueMoveMode}
             />
 
             {/* 顺序必须是：消息 → 下一轮队列 → 重试/错误提示 → 输入框占位。
