@@ -60,7 +60,10 @@ export const ToolPartView = memo(function ToolPartView({
   const { call, result } = execution
   const toolName = call.name
   const status = result ? (result.isError ? 'error' : 'completed') : 'pending'
-  const title = toolName || getInputDescription(execution) || ''
+  // title 显示工具调用实质（命令/路径/模式），而不是重复工具名——
+  // pi SDK 的工具调用事件只有 toolName + args，没有工具描述字段；
+  // formatToolName(toolName) 已展示工具名，title 再显示同名就是冗余。
+  const title = extractToolTitle(toolName, execution)
 
   const isActive = status === 'pending'
   const isError = status === 'error'
@@ -468,10 +471,34 @@ const ToolBody = memo(function ToolBody({
   return <DefaultRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
 })
 
-/** Extract description from tool input as title fallback (available while running) */
-function getInputDescription(execution: PiToolExecution): string | undefined {
-  const input = execution.call.arguments as Record<string, unknown> | undefined
-  return (input?.description as string) || undefined
+/**
+ * 从工具调用参数提取有信息量的 title（header 副标题）。
+ * pi SDK 调用事件不携带工具描述（只有 toolName + args），工具定义的
+ * label/description 也不随调用下发，因此按内置工具提取实质内容：
+ * bash→命令、read/write/edit/ls→路径、grep/find→模式；
+ * 自定义工具 fallback 到 agent 可能传入的 description 参数。
+ */
+function extractToolTitle(toolName: string, execution: PiToolExecution): string | undefined {
+  const input = execution.call.arguments
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const args = input as Record<string, unknown>
+  switch (toolName) {
+    case 'bash':
+      return typeof args.command === 'string' && args.command ? args.command : undefined
+    case 'read':
+    case 'write':
+    case 'edit':
+    case 'ls':
+      return typeof args.path === 'string' ? args.path : undefined
+    case 'grep':
+    case 'find':
+      if (typeof args.pattern === 'string' && args.pattern) {
+        return typeof args.path === 'string' ? `${args.pattern} · ${args.path}` : args.pattern
+      }
+      return undefined
+    default:
+      return typeof args.description === 'string' ? args.description : undefined
+  }
 }
 
 // ============================================
