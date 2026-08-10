@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ExtensionUiDialogRequest } from '@piui/protocol'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { usePresence } from '../../hooks'
+import { useChatViewport } from '../chat/chatViewport'
 import { ExtensionUiDialogCard } from './ExtensionUiDialogCard'
 
 /**
@@ -66,12 +67,20 @@ function ExtensionUiDialogCardWrapper({
     to: { opacity: 1, transform: 'translateY(0px)' },
     duration: 0.2,
   })
+  // 与 InputBox 同一宽度基准：桌面 px-4 / 移动端(compact) px-2，
+  // 卡片与输入框对齐，避免露出背景输入框
+  const { presentation } = useChatViewport()
+  const isCompact = presentation.isCompact
 
   if (!shouldRender) return null
 
   return (
     <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[11]">
-      <div className="mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out px-3.5 pb-2">
+      <div
+        className={`mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out ${
+          isCompact ? 'px-2' : 'px-4'
+        } pb-2`}
+      >
         <ExtensionUiDialogCard request={request} queueLength={queueLength} onCollapse={onCollapse} />
       </div>
     </div>

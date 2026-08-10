@@ -9,6 +9,9 @@ vi.mock('../../pi/controllers/index.js', () => ({ respondPiExtensionUi }))
 vi.mock('../../hooks', () => ({
   usePresence: () => ({ shouldRender: true, ref: () => undefined }),
 }))
+vi.mock('../chat/chatViewport', () => ({
+  useChatViewport: () => ({ presentation: { isCompact: false } }),
+}))
 
 function selectRequest(overrides?: Partial<import('@piui/protocol').ExtensionUiDialogRequest>) {
   return {
