@@ -7,7 +7,7 @@ function envelope(id: string, sessionId: string | undefined, type: string, param
   return { id, sessionId, type, params }
 }
 
-test("SessionExecutor serializes session commands and keeps sessions independent", async () => {
+test("SessionExecutor runs session commands immediately without lanes", async () => {
   const executor = new SessionExecutor()
   const order: string[] = []
   let release!: () => void
@@ -28,13 +28,15 @@ test("SessionExecutor serializes session commands and keeps sessions independent
     return 3
   })
 
+  // Native semantics: no per-session queue — every command starts immediately,
+  // even while another session command is still running.
+  await second.promise
   await other.promise
-  assert.deepEqual(order, ["a1:start", "b1"])
-  assert.equal(second.record.status === "completed", false)
+  assert.deepEqual(order, ["a1:start", "a2", "b1"])
+  assert.equal(second.record.status, "completed")
   release()
   await first.promise
-  await second.promise
-  assert.deepEqual(order, ["a1:start", "b1", "a1:end", "a2"])
+  assert.deepEqual(order, ["a1:start", "a2", "b1", "a1:end"])
   assert.equal(first.record.status, "completed")
   assert.equal(first.record.result, 1)
 })
@@ -101,7 +103,7 @@ test("SessionExecutor bounds retained commands and keeps unfinished ones", async
   void pending
 })
 
-test("SessionExecutor invalidates running and queued commands after a runtime crash", async () => {
+test("SessionExecutor invalidates running and accepted commands after a runtime crash", async () => {
   const executor = new SessionExecutor()
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
@@ -109,23 +111,23 @@ test("SessionExecutor invalidates running and queued commands after a runtime cr
     await gate
     return "done"
   })
-  const queued = executor.submit(envelope("queued", "a", "compact"), async () => "queued")
   await new Promise(resolve => setImmediate(resolve))
+  const accepted = executor.submit(envelope("accepted", "a", "compact"), async () => "accepted")
 
   executor.markRuntimeCrashed("a")
   assert.equal(running.record.status, "unknown_after_crash")
-  assert.equal(queued.record.status, "cancelled")
+  assert.equal(accepted.record.status, "cancelled")
   assert.equal(running.record.error?.retryable, true)
   release()
   await assert.rejects(running.promise)
-  await assert.rejects(queued.promise)
+  await assert.rejects(accepted.promise)
 
   const after = executor.submit(envelope("after", "a", "prompt"), async () => "after")
   await after.promise
   assert.equal(after.record.status, "completed")
 })
 
-test("SessionExecutor closes a lane by cancelling queued work and interrupting the active command", async () => {
+test("SessionExecutor closes a session by cancelling accepted work and interrupting the active command", async () => {
   const executor = new SessionExecutor()
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
@@ -139,8 +141,8 @@ test("SessionExecutor closes a lane by cancelling queued work and interrupting t
     await gate
     return "active"
   })
-  const queued = executor.submit(envelope("queued", "a", "compact"), async () => "queued")
   await activeStarted
+  const accepted = executor.submit(envelope("accepted", "a", "compact"), async () => "accepted")
   const closing = executor.close("a", {
     interrupt: async () => {
       interrupted = true
@@ -155,7 +157,7 @@ test("SessionExecutor closes a lane by cancelling queued work and interrupting t
   assert.equal(interrupted, true)
   assert.equal(disposed, true)
   assert.equal(await active.promise, "active")
-  await assert.rejects(queued.promise, { code: "RUNTIME_CLOSING" })
+  await assert.rejects(accepted.promise, { code: "RUNTIME_CLOSING" })
   assert.equal(executor.isClosing("a"), true)
   assert.throws(
     () => executor.submit(envelope("after", "a", "prompt"), async () => "after"),

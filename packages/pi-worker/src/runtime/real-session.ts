@@ -748,7 +748,6 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async invokeTool(name: string, args?: JsonObject): Promise<JsonValue | undefined> {
-    await this.runtime.session.waitForIdle()
     const runner = this.runtime.session.extensionRunner
     if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
     const registered = runner.getAllRegisteredTools().find(tool => tool.definition.name === name)
@@ -856,7 +855,6 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async newSession(parentSession?: string): Promise<JsonObject> {
-    await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.newSession({ parentSession })
     if (!result.cancelled) this.emitHeadIfChanged()
@@ -871,7 +869,6 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async switchSession(sessionPath: string, cwdOverride?: string): Promise<JsonObject> {
-    await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const targetPath = resolveUserPath(sessionPath)
     await assertSessionFileInside(this.runtime.session.sessionManager.getSessionDir(), targetPath)
@@ -888,7 +885,6 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async fork(entryId: string, position: "before" | "at"): Promise<JsonObject> {
-    await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.fork(entryId, { position })
     if (!result.cancelled) this.emitHeadIfChanged()
@@ -904,7 +900,6 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async importSession(inputPath: string, cwdOverride?: string): Promise<JsonObject> {
-    await this.runtime.session.waitForIdle()
     const sourceSessionId = this.getSessionId()
     const sourcePath = resolveUserPath(inputPath)
     if (!existsSync(sourcePath)) {
@@ -1078,7 +1073,6 @@ export class RealPiSession implements SessionRuntime {
       label?: string
     } = {},
   ): Promise<JsonObject> {
-    await this.runtime.session.waitForIdle()
     if (options.summarize) {
       this.isCompactingFlag = true
       this.compactionShadow = {

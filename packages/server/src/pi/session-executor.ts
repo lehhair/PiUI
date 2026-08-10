@@ -16,7 +16,6 @@ export interface SubmittedCommand {
 }
 
 export class SessionExecutor {
-  private readonly tails = new Map<string, Promise<void>>()
   private readonly commands = new Map<string, CommandEntry>()
   private readonly crashEpochs = new Map<string, number>()
   private readonly closing = new Set<string>()
@@ -28,7 +27,6 @@ export class SessionExecutor {
   submit(
     envelope: CommandEnvelope,
     run: () => Promise<JsonValue | undefined>,
-    options: { immediate?: boolean } = {},
   ): SubmittedCommand {
     if (envelope.sessionId && (this.closing.has(envelope.sessionId) || this.closed.has(envelope.sessionId))) {
       throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
@@ -51,11 +49,8 @@ export class SessionExecutor {
       status: "accepted",
       submittedAt: new Date().toISOString(),
     }
-    const laneId = envelope.sessionId ? `session:${envelope.sessionId}` : undefined
     const crashEpoch = envelope.sessionId ? (this.crashEpochs.get(envelope.sessionId) ?? 0) : 0
-    const previous = laneId && !options.immediate ? (this.tails.get(laneId) ?? Promise.resolve()) : Promise.resolve()
-    const promise = previous
-      .catch(() => undefined)
+    const promise = Promise.resolve()
       .then(async () => {
         if (
           record.status === "cancelled" ||
@@ -90,13 +85,6 @@ export class SessionExecutor {
         }
       })
 
-    if (laneId && !options.immediate) {
-      const tail = promise.then(() => undefined, () => undefined)
-      this.tails.set(laneId, tail)
-      tail.finally(() => {
-        if (this.tails.get(laneId) === tail) this.tails.delete(laneId)
-      })
-    }
     this.commands.set(envelope.id, { record, promise, requestFingerprint })
     this.pruneFinishedCommands()
     this.emit(record)
@@ -172,22 +160,16 @@ export class SessionExecutor {
       this.emit(entry.record)
     }
 
-    const lane = `session:${sessionId}`
-    const previous = this.tails.get(lane) ?? Promise.resolve()
     const flight = Promise.resolve()
       .then(() => options.interrupt?.())
-      .catch(() => undefined)
-      .then(() => previous)
       .catch(() => undefined)
       .then(() => options.dispose())
       .finally(() => {
         this.closing.delete(sessionId)
         this.closed.add(sessionId)
         this.closeFlights.delete(sessionId)
-        if (this.tails.get(lane) === flight) this.tails.delete(lane)
       })
     this.closeFlights.set(sessionId, flight)
-    this.tails.set(lane, flight)
     return flight
   }
 

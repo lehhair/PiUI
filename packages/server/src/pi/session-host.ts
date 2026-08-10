@@ -50,19 +50,6 @@ const RUNTIME_REAPER_INTERVAL_MS = 30_000
 const ATTACH_BUSY_RETRIES = 12
 const ATTACH_BUSY_DELAY_MS = 100
 
-// 会话管理命令：不依赖 turn 执行顺序，即使 agent 正在工作也立即执行
-//（绕过 executor 的 per-session lane，避免被 prompt 命令排队卡住）。
-const IMMEDIATE_SESSION_COMMANDS = new Set([
-  "setSessionName",
-  "setModel",
-  "cycleModel",
-  "setScopedModels",
-  "setThinkingLevel",
-  "cycleThinkingLevel",
-  "abort",
-  "abortBash",
-])
-
 function idleRuntimeTtlMs(): number {
   const configured = Number(process.env.PIUI_SESSION_IDLE_TTL_MS)
   return Number.isFinite(configured) && configured >= 30_000
@@ -486,10 +473,6 @@ export class SessionHost {
         const data = await session.worker.command(full.type, full.params)
         await this.trackReplacement(session, data)
         return data
-      }, {
-        // 会话管理命令（改标题/模型等）不依赖 turn 顺序：turn 进行中（prompt
-        // 占着 lane）也立即执行，否则改名/换模型会被串行队列卡到回合结束。
-        immediate: IMMEDIATE_SESSION_COMMANDS.has(full.type),
       })
     }
     const existing = this.runtimes.get(sessionId)

@@ -9,7 +9,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("createWorkerCommandScheduler", () => {
-  it("serializes ordinary commands", async () => {
+  it("executes commands immediately without serializing", async () => {
     const gate = deferred()
     const started: string[] = []
     const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
@@ -21,14 +21,39 @@ describe("createWorkerCommandScheduler", () => {
     const prompt = schedule({ type: "prompt", params: { text: "hello" } })
     const model = schedule({ type: "setModel", params: { provider: "test", modelId: "offline" } })
     await Promise.resolve()
-    assert.deepEqual(started, ["prompt"])
+    // Native pi RPC semantics: a slow turn never blocks other commands.
+    assert.deepEqual(started, ["prompt", "setModel"])
     gate.resolve()
     await prompt
     await model
     assert.deepEqual(started, ["prompt", "setModel"])
   })
 
-  it("lets steering controls run alongside an active prompt", async () => {
+  it("runs concurrent prompts without a barrier (SDK enforces its own constraints)", async () => {
+    const firstGate = deferred()
+    const secondGate = deferred()
+    const started: string[] = []
+    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
+      started.push(command.params?.text ?? command.type)
+      if (command.params?.text === "one") await firstGate.promise
+      if (command.params?.text === "two") await secondGate.promise
+      return undefined
+    })
+
+    const first = schedule({ type: "prompt", params: { text: "one" } })
+    const second = schedule({ type: "prompt", params: { text: "two" } })
+    await Promise.resolve()
+    // Both prompts start immediately; whether the second is accepted is the
+    // SDK's streamingBehavior decision, not a host-side queue.
+    assert.deepEqual(started, ["one", "two"])
+
+    secondGate.resolve()
+    await second
+    firstGate.resolve()
+    await first
+  })
+
+  it("lets every command type run alongside an active prompt", async () => {
     const gate = deferred()
     const started: string[] = []
     const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
@@ -40,73 +65,13 @@ describe("createWorkerCommandScheduler", () => {
     const prompt = schedule({ type: "prompt", params: { text: "hello" } })
     await Promise.resolve()
     await schedule({ type: "abort" })
-    gate.resolve()
-    await prompt
-    assert.deepEqual(started, ["prompt", "abort"])
-  })
-
-  it("lets read-only queries run alongside an active prompt", async () => {
-    const gate = deferred()
-    const started: string[] = []
-    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
-      started.push(command.type)
-      if (command.type === "prompt") await gate.promise
-      return undefined
-    })
-
-    const prompt = schedule({ type: "prompt", params: { text: "hello" } })
-    await Promise.resolve()
     await schedule({ type: "branch.get", params: {} })
+    await schedule({ type: "setSessionName", params: { name: "renamed" } })
+    await schedule({ type: "compact" })
+    await schedule({ type: "bash", params: { command: "ls" } })
+    assert.deepEqual(started, ["prompt", "abort", "branch.get", "setSessionName", "compact", "bash"])
     gate.resolve()
     await prompt
-    assert.deepEqual(started, ["prompt", "branch.get"])
-  })
-
-  it("serializes two prompts", async () => {
-    const gate = deferred()
-    const started: string[] = []
-    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
-      started.push(command.type)
-      if (command.type === "prompt") await gate.promise
-      return undefined
-    })
-
-    const first = schedule({ type: "prompt", params: { text: "one" } })
-    const second = schedule({ type: "prompt", params: { text: "two" } })
-    await Promise.resolve()
-    assert.deepEqual(started, ["prompt"])
-    gate.resolve()
-    await first
-    await second
-    assert.deepEqual(started, ["prompt", "prompt"])
-  })
-
-  it("waits for a concurrent slash prompt before starting a plain prompt", async () => {
-    const firstGate = deferred()
-    const slashGate = deferred()
-    const started: string[] = []
-    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
-      started.push(command.params?.text ?? command.type)
-      if (command.params?.text === "one") await firstGate.promise
-      if (command.params?.text === "/help") await slashGate.promise
-      return undefined
-    })
-
-    const first = schedule({ type: "prompt", params: { text: "one" } })
-    await Promise.resolve()
-    const slash = schedule({ type: "prompt", params: { text: "/help" } })
-    await Promise.resolve()
-    const plain = schedule({ type: "prompt", params: { text: "two" } })
-
-    firstGate.resolve()
-    await first
-    await Promise.resolve()
-    assert.deepEqual(started, ["one", "/help"])
-
-    slashGate.resolve()
-    await slash
-    await plain
-    assert.deepEqual(started, ["one", "/help", "two"])
   })
 
   it("rejects new commands and waits for active work during close", async () => {
@@ -131,40 +96,14 @@ describe("createWorkerCommandScheduler", () => {
     assert.equal(cleaned, true)
   })
 
-  it("lets queries and abort run alongside an active sendUserMessage turn", async () => {
-    const gate = deferred()
-    const started: string[] = []
-    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
-      started.push(command.type)
-      if (command.type === "sendUserMessage" && command.params?.deliverAs === undefined) await gate.promise
-      return undefined
-    })
-
-    const turn = schedule({ type: "sendUserMessage", params: { text: "hello" } })
-    await Promise.resolve()
-    // While the sendUserMessage turn is active, queries and abort must not block
-    await schedule({ type: "state.get", params: {} })
-    await schedule({ type: "branch.get", params: {} })
-    await schedule({ type: "abort" })
-    assert.deepEqual(started, ["sendUserMessage", "state.get", "branch.get", "abort"])
-    gate.resolve()
-    await turn
-  })
-
-  it("lets a queued sendUserMessage (deliverAs) run alongside an active turn", async () => {
-    const gate = deferred()
-    const started: string[] = []
-    const schedule = createWorkerCommandScheduler(async (command: SchedulerCommand) => {
-      started.push(command.type)
-      if (command.type === "sendUserMessage" && command.params?.deliverAs === undefined) await gate.promise
-      return undefined
-    })
-
-    const turn = schedule({ type: "sendUserMessage", params: { text: "hello" } })
-    await Promise.resolve()
-    await schedule({ type: "sendUserMessage", params: { text: "more", deliverAs: "followUp" } })
-    assert.deepEqual(started, ["sendUserMessage", "sendUserMessage"])
-    gate.resolve()
-    await turn
+  it("runs cleanup once when close is called repeatedly", async () => {
+    let cleaned = 0
+    const schedule = createWorkerCommandScheduler(async () => undefined)
+    await schedule({ type: "state.get" })
+    const first = schedule.close(async () => { cleaned += 1 })
+    const second = schedule.close(async () => { cleaned += 1 })
+    await first
+    await second
+    assert.equal(cleaned, 1)
   })
 })
