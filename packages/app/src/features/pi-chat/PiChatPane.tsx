@@ -933,6 +933,17 @@ export function PiChatPane({
       }
       const sid = targetSessionId
 
+      // 发送前清空两侧的编辑器状态，防止输入框被回填：
+      // 1. 取消挂起的输入同步防抖（否则 500ms 后旧文本被写回 worker）
+      // 2. 清 worker 扩展编辑器状态（否则下一次 state 刷新经 extension
+      //    bridge 的 setEditorText 把旧文本回填输入框——表现为发送后输入
+      //    框不清空，快速输入+发送时必现）
+      if (editorSyncTimerRef.current !== null) {
+        window.clearTimeout(editorSyncTimerRef.current)
+        editorSyncTimerRef.current = null
+      }
+      void setPiExtensionEditorState(sid, '').catch(() => undefined)
+
       // pi TUI parity: `!command` runs one-shot bash through the runtime
       if (text.startsWith('!') && text.length > 1) {
         const clientId = crypto.randomUUID()
