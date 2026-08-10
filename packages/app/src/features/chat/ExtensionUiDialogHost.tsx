@@ -33,10 +33,20 @@ export function ExtensionUiDialogHost({
     () => (sessionId ? snapshot.sessions[sessionId]?.pending ?? [] : []),
     [sessionId, snapshot],
   )
-  const request = useMemo(
-    () => [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0],
+  const sorted = useMemo(
+    () => [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [pending],
   )
+  // 队列分页：当前显示第几个（0-based）。切换只是换显示，请求仍在队列里；
+  // 处理（提交/取消）当前后队列前移，自然显示下一个；全部处理完回到 0。
+  // 越界/清空在渲染期校正（React 调整 state 的官方模式，避免 effect 级联渲染）
+  const [queueIndex, setQueueIndex] = useState(0)
+  if (sorted.length === 0) {
+    if (queueIndex !== 0) setQueueIndex(0)
+  } else if (queueIndex >= sorted.length) {
+    setQueueIndex(sorted.length - 1)
+  }
+  const request = sorted[queueIndex]
   // 受控优先；未受控时内部自管（独立使用）
   const [internalCollapsed, setInternalCollapsed] = useState(false)
   const isCollapsed = collapsed ?? internalCollapsed
@@ -49,17 +59,30 @@ export function ExtensionUiDialogHost({
 
   if (!request || isCollapsed) return null
 
-  return <ExtensionUiDialogCardWrapper request={request} queueLength={pending.length} onCollapse={() => setCollapsed(true)} />
+  return (
+    <ExtensionUiDialogCardWrapper
+      key={request.requestId}
+      request={request}
+      queueLength={sorted.length}
+      queueIndex={queueIndex}
+      onCollapse={() => setCollapsed(true)}
+      onQueueNav={delta => setQueueIndex(index => Math.min(Math.max(index + delta, 0), sorted.length - 1))}
+    />
+  )
 }
 
 function ExtensionUiDialogCardWrapper({
   request,
   queueLength,
+  queueIndex,
   onCollapse,
+  onQueueNav,
 }: {
   request: ExtensionUiDialogRequest
   queueLength: number
+  queueIndex: number
   onCollapse?: () => void
+  onQueueNav?: (delta: -1 | 1) => void
 }) {
   // 弹出动画
   const { shouldRender, ref: animRef } = usePresence<HTMLDivElement>(true, {
@@ -81,7 +104,13 @@ function ExtensionUiDialogCardWrapper({
           isCompact ? 'px-2' : 'px-4'
         } pb-2`}
       >
-        <ExtensionUiDialogCard request={request} queueLength={queueLength} onCollapse={onCollapse} />
+        <ExtensionUiDialogCard
+          request={request}
+          queueLength={queueLength}
+          queueIndex={queueIndex}
+          onCollapse={onCollapse}
+          onQueueNav={onQueueNav}
+        />
       </div>
     </div>
   )

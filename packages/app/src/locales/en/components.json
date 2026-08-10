@@ -218,6 +218,11 @@
     "fileCount_one": "{{count}} file",
     "fileCount_other": "{{count}} files"
   },
+  "dialog": {
+    "minimize": "Minimize",
+    "previous": "Previous",
+    "next": "Next"
+  },
   "contentBlock": {
     "fullscreen": "Fullscreen",
     "exitCode": "exit {{code}}",

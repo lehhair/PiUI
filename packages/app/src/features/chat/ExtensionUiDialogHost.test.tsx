@@ -126,7 +126,44 @@ describe('ExtensionUiDialogHost', () => {
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     expect(screen.getByText('Choose mode')).toBeInTheDocument()
-    expect(screen.getByText('+1')).toBeInTheDocument()
+    expect(screen.getByText('1/2')).toBeInTheDocument()
+  })
+
+  it('switches to the next queued request via the pager', () => {
+    extensionUiStore.requestOpened(selectRequest())
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-2',
+      title: 'Second question',
+      createdAt: '2026-01-01T00:01:00.000Z',
+    }))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    // 切换到下一个：只是换显示，两个请求都还在队列里
+    fireEvent.click(screen.getByTitle(/next|下一个/i))
+    expect(screen.getByText('Second question')).toBeInTheDocument()
+    expect(screen.getByText('2/2')).toBeInTheDocument()
+    expect(respondPiExtensionUi).not.toHaveBeenCalled()
+
+    // 切回上一个
+    fireEvent.click(screen.getByTitle(/previous|上一个/i))
+    expect(screen.getByText('Choose mode')).toBeInTheDocument()
+  })
+
+  it('processing the current request advances to the next one', async () => {
+    extensionUiStore.requestOpened(selectRequest())
+    extensionUiStore.requestOpened(selectRequest({
+      requestId: 'request-2',
+      title: 'Second question',
+      createdAt: '2026-01-01T00:01:00.000Z',
+    }))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+    // 处理第一个（提交选择），队列前移后自动显示下一个
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByText('Second question')).toBeInTheDocument())
+    // 队列只剩一个时不再显示分页器
+    expect(screen.queryByText(/^\d+\/\d+$/)).toBeNull()
   })
 
   it('clears the settled request from the store after submit', async () => {

@@ -81,12 +81,12 @@ export const FloatingActions = memo(function FloatingActions({
           <button
             type="button"
             onClick={collapsedPermission.onExpand}
-            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-accent-main-100/10 backdrop-blur-md border border-accent-main-100/20 text-[length:var(--fs-sm)] leading-[14px] text-accent-main-000 hover:bg-accent-main-100/20 transition-colors"
+            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-accent-main-100/10 backdrop-blur-md border border-accent-main-100/20 text-[length:var(--fs-sm)] leading-[14px] text-accent-main-000 hover:bg-accent-main-100/20 transition-colors max-w-[min(360px,80vw)]"
           >
-            <PermissionListIcon size={14} />
-            <span className="whitespace-nowrap">{collapsedPermission.label}</span>
+            <PermissionListIcon size={14} className="shrink-0" />
+            <span className="truncate min-w-0">{collapsedPermission.label}</span>
             {collapsedPermission.queueLength > 1 && (
-              <span className="text-[length:var(--fs-xxs)] opacity-70">+{collapsedPermission.queueLength - 1}</span>
+              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">+{collapsedPermission.queueLength - 1}</span>
             )}
           </button>
         )}
@@ -98,12 +98,12 @@ export const FloatingActions = memo(function FloatingActions({
           <button
             type="button"
             onClick={collapsedQuestion.onExpand}
-            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-accent-main-100/10 backdrop-blur-md border border-accent-main-100/20 text-[length:var(--fs-sm)] leading-[14px] text-accent-main-000 hover:bg-accent-main-100/20 transition-colors"
+            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-accent-main-100/10 backdrop-blur-md border border-accent-main-100/20 text-[length:var(--fs-sm)] leading-[14px] text-accent-main-000 hover:bg-accent-main-100/20 transition-colors max-w-[min(360px,80vw)]"
           >
-            <QuestionIcon size={14} />
-            <span className="whitespace-nowrap">{collapsedQuestion.label}</span>
+            <QuestionIcon size={14} className="shrink-0" />
+            <span className="truncate min-w-0">{collapsedQuestion.label}</span>
             {collapsedQuestion.queueLength > 1 && (
-              <span className="text-[length:var(--fs-xxs)] opacity-70">+{collapsedQuestion.queueLength - 1}</span>
+              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">+{collapsedQuestion.queueLength - 1}</span>
             )}
           </button>
         )}
