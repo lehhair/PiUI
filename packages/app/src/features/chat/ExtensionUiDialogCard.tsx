@@ -75,22 +75,24 @@ export function ExtensionUiDialogCard({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float">
-      <div className={`flex items-start gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-2.5'}`}>
-        <QuestionIcon size={16} className={`shrink-0 text-text-400 ${compact ? '' : 'mt-0.5'}`} />
-        <h3 className="min-w-0 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium text-text-100">
-          {request.title}
-        </h3>
-        {queueLength > 1 && (
-          <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
-            +{queueLength - 1}
-          </span>
-        )}
+      <div className={`flex items-center justify-between gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-2.5'}`}>
+        <div className="flex min-w-0 items-start gap-2">
+          <QuestionIcon size={16} className={`shrink-0 text-text-400 ${compact ? '' : 'mt-0.5'}`} />
+          <h3 className="min-w-0 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium text-text-100">
+            {request.title}
+          </h3>
+          {queueLength > 1 && (
+            <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
+              +{queueLength - 1}
+            </span>
+          )}
+        </div>
         {onCollapse && (
           <button
             type="button"
             onClick={onCollapse}
             title={t('components:minimize')}
-            className="ml-auto shrink-0 rounded-md p-1 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
+            className="shrink-0 rounded-md p-1 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
           >
             <ChevronDownIcon size={14} />
           </button>
@@ -119,7 +121,7 @@ export function ExtensionUiDialogCard({
                       : 'border-border-200/60 bg-bg-100 text-text-300 hover:border-border-300 hover:text-text-100'
                   }`}
                 >
-                  <span className={`flex h-4 w-4 items-center justify-center shrink-0 mt-0.5 ${selected ? 'text-accent-main-100' : 'text-text-500'}`}>
+                  <span className={`flex h-4 w-4 items-center justify-center shrink-0 mt-0.5 ${selected ? 'text-accent-secondary-100' : 'text-text-500'}`}>
                     {selected && <CheckIcon size={14} />}
                   </span>
                   <span className="flex-1 whitespace-pre-wrap break-words">{option}</span>
