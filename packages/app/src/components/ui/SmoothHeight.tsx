@@ -13,11 +13,12 @@ const HEIGHT_SMOOTH_THRESHOLD = 24
  * 不用 motion animate().stop()+restart：流式时每帧重启 easeOut 会让整块（含已登场内容）发颤。
  * CSS transition 中途改目标会从当前计算值接着插值，已登场区域更稳。
  *
- * 按变化幅度分流：
- * - 块级大变化（新代码块/工具块/整段换行，>= HEIGHT_SMOOTH_THRESHOLD）：
+ * 按变化幅度 + 连续性分流：
+ * - 首次块级大变化（新代码块/工具块/整段换行，>= HEIGHT_SMOOTH_THRESHOLD）：
  *   transition 平滑展开/收起，保留丝滑观感
- * - 逐字/单行小增长（流式 token 刷新）：同帧即时同步 —— 增量小本来就顺滑，
- *   且避免 transition 追赶滞后让 inner 溢出盖住下方内容（重叠/错位）
+ * - 连续增长（transition 追赶中内容又长高）：同帧即时同步 —— 追赶中的
+ *   动画是溢出重叠（盖住下方内容）的来源，连续流下绝不让 outer 滞后 inner
+ * - 逐字/单行小增长（流式 token 刷新）：即时同步，增量小本就顺滑
  */
 export function SmoothHeight({
   isActive,
@@ -64,13 +65,21 @@ export function SmoothHeight({
     // 同帧内合并为一次 scrollHeight 读取 + 设 height，避免 layout thrash
     let updateRafId: number | null = null
     let lastApplied = initial
+    // 连续增长计数：追赶中的动画是溢出重叠的来源。首次大变化平滑过渡
+    //（一次性目标，追得上）；一旦进入连续增长流就转即时，绝不让 outer
+    // 滞后 inner。增长暂停/方向反转后重置，下次大变化再恢复平滑。
+    let consecutiveGrowth = 0
 
     const applyHeight = (target: number) => {
-      const delta = Math.abs(target - lastApplied)
-      if (delta < 0.5) return
-      // 块级大变化（新代码块/工具块/整段换行）→ 平滑过渡，保留丝滑观感；
-      // 逐字/单行小增长 → 即时同步（增量小本就顺滑，且零滞后不重叠）
-      outer.style.transition = delta >= HEIGHT_SMOOTH_THRESHOLD ? 'height 120ms linear' : 'none'
+      const delta = target - lastApplied
+      const abs = Math.abs(delta)
+      if (abs < 0.5) return
+      const growing = delta > 0
+      consecutiveGrowth = growing ? consecutiveGrowth + 1 : 0
+      // 首次块级大变化（新代码块/工具块/整段换行）→ 平滑过渡保留丝滑；
+      // 连续增长（transition 追赶中又长高）→ 同帧即时，零滞后不重叠
+      const smooth = abs >= HEIGHT_SMOOTH_THRESHOLD && consecutiveGrowth <= 1
+      outer.style.transition = smooth ? 'height 120ms linear' : 'none'
       lastApplied = target
       outer.style.height = `${target}px`
     }
