@@ -23,12 +23,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const searchRef = useRef('')
   const retryTimerRef = useRef<number | null>(null)
   const fetchSessionsRef = useRef<(retryAttempt?: number) => Promise<void>>(() => Promise.resolve())
+  // ── 事件刷新合并 ──
+  // piui:sessions-changed 在会话生命周期/事件流重连时可能高频触发，每个订阅者
+  // 各自全量拉取会形成请求风暴（侧边栏抽搐）。防抖窗口内合并为一次；
+  // 请求进行中再来变更则在完成后补刷一次（尾合并，避免丢最后一次变化）。
+  const fetchTimerRef = useRef<number | null>(null)
+  const fetchInFlightRef = useRef(false)
+  const fetchQueuedRef = useRef(false)
   // 本地创建但还没落盘的会话：pi 要等首个条目才写文件，磁盘扫描在这之前
   // 看不到它们。挂起期内刷新列表时保留，落盘或超时后交给磁盘数据。
   const pendingRef = useRef(new Map<string, number>())
   const PENDING_TTL_MS = 60_000
 
   const fetchSessions = useCallback(async (retryAttempt = 0) => {
+    if (fetchInFlightRef.current) {
+      // 上一次还没结束：合并到完成后补刷（尾合并）
+      fetchQueuedRef.current = true
+      return
+    }
+    fetchInFlightRef.current = true
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
@@ -66,34 +79,52 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       sessionErrorHandler('fetch sessions', error)
     } finally {
-      if (requestId === requestIdRef.current) setIsLoading(false)
+      fetchInFlightRef.current = false
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false)
+        if (fetchQueuedRef.current) {
+          fetchQueuedRef.current = false
+          void fetchSessionsRef.current()
+        }
+      }
     }
   }, [currentDirectory])
+
+  // 事件驱动刷新：防抖合并（300ms 窗口内多事件只拉一次）
+  const scheduleFetch = useCallback(() => {
+    if (fetchTimerRef.current !== null) return
+    fetchTimerRef.current = window.setTimeout(() => {
+      fetchTimerRef.current = null
+      void fetchSessionsRef.current()
+    }, 300)
+  }, [])
 
   useEffect(() => {
     fetchSessionsRef.current = fetchSessions
   }, [fetchSessions])
 
-  // 初始加载会话：请求-响应模式，loading 状态需与请求同步设置（无法用渲染期调整表达）
-  /* eslint-disable react-hooks/set-state-in-effect */
+  // 初始加载会话
   useEffect(() => {
     void fetchSessions()
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
     }
   }, [fetchSessions])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
   useEffect(() => {
     searchRef.current = search
     setSessions(filterPiSessionList(allSessionsRef.current, search))
   }, [search])
 
   useEffect(() => {
-    const refresh = () => void fetchSessionsRef.current()
-    window.addEventListener('piui:sessions-changed', refresh)
-    return () => window.removeEventListener('piui:sessions-changed', refresh)
-  }, [])
+    window.addEventListener('piui:sessions-changed', scheduleFetch)
+    return () => {
+      window.removeEventListener('piui:sessions-changed', scheduleFetch)
+      if (fetchTimerRef.current !== null) {
+        clearTimeout(fetchTimerRef.current)
+        fetchTimerRef.current = null
+      }
+    }
+  }, [scheduleFetch])
 
   const refresh = useCallback(() => fetchSessions(), [fetchSessions])
   const loadMore = useCallback(async () => {}, [])

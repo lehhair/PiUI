@@ -37,7 +37,6 @@ import {
 import type { SessionStatus } from '../types/session'
 import {
   loadPiSessionData,
-  loadPiSessions,
   refreshPiBranch,
   refreshPiSessionState,
 } from './controllers/index.js'
@@ -407,7 +406,8 @@ class PiEventStream {
       piCommandStore.clearSession(payload.sourceSessionId)
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
-    void loadPiSessions().catch(() => undefined)
+    // 事件驱动刷新：SessionContext/useSessions 订阅 piui:sessions-changed 会
+    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次
     window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }
 
@@ -582,7 +582,6 @@ class PiEventStream {
       // resync 时同样主动拉一次运行时 state（branch 与 state 一起恢复）
       this.scheduleStateRefresh(stream.id)
     } else if (stream.kind === 'server') {
-      void loadPiSessions().catch(() => undefined)
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     } else if (stream.kind === 'provider') {
       receiveProviderAuthUpdated()
