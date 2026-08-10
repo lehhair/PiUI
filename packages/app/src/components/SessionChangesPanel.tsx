@@ -24,6 +24,7 @@ import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
 import { DropdownMenu } from './ui'
 import { changeScopeStore, useSessionChangeScope, type ChangeScopeMode } from '../store/changeScopeStore'
+import { useBusySessions } from '../store/activeSessionStore'
 import { layoutStore, type PanelPosition } from '../store/layoutStore'
 import { useFullscreenLayer } from '../contexts'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
@@ -124,6 +125,20 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const diffRequestIdRef = useRef({ git: 0, branch: 0, staged: 0, unstaged: 0 })
   const diffAbortRef = useRef<Partial<Record<ChangeMode, AbortController>>>({})
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // ── 刷新风暴防护 ──
+  // workspace.git 在 agent 写文件时可能高频触发。策略（对齐 codex review panel）：
+  // 1) busy 抑制：当前 session 还在工作中时不刷新（diff 未定稿），只打 dirty 标记；
+  //    agent 完成一轮（idle）后由 useAutoRefresh 的 onSessionIdle 统一补刷一次
+  // 2) 互斥合并：刷新进行中收到新事件只标 dirty，当前请求结束后再跑一次，
+  //    避免在旧请求未完成时叠加新请求（旧请求由 diffAbortRef/requestId 放弃）
+  const busySessions = useBusySessions()
+  const busySessionsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    busySessionsRef.current = new Set(busySessions.map(s => s.sessionId))
+  }, [busySessions])
+  const gitDirtyRef = useRef(false)
+  const gitRefreshingRef = useRef(false)
+  const wasBusyRef = useRef(false)
   const openDiffFilesRef = useRef<string[]>([])
   const selectedFileRef = useRef<string | null>(null)
   const changeMenuTriggerRef = useRef<HTMLButtonElement>(null)
@@ -460,26 +475,60 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     }
   }, [diffs, resetSplitHeight])
 
-  // 刷新
-  const handleRefresh = useCallback(async () => {
-    const nextVcs = await loadVcsState()
-    if (!nextVcs) return
-    await loadDiffMode(changeMode, { force: true, vcs: nextVcs })
+  // 刷新入口：串行 + 合并（一次刷新完成前重复触发只标 dirty，攒到下一轮）
+  const runGitRefresh = useCallback(async () => {
+    if (gitRefreshingRef.current) return
+    gitRefreshingRef.current = true
+    try {
+      do {
+        gitDirtyRef.current = false
+        const nextVcs = await loadVcsState()
+        if (!nextVcs) return
+        await loadDiffMode(changeMode, { force: true, vcs: nextVcs })
+      } while (gitDirtyRef.current)
+    } finally {
+      gitRefreshingRef.current = false
+    }
   }, [changeMode, loadDiffMode, loadVcsState])
 
-  // 自动刷新：session idle / 窗口聚焦 / SSE 重连
-  useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId)
+  // 防抖调度：250ms 窗口内重复事件合并；刷新中则只标 dirty
+  const scheduleGitRefresh = useCallback(() => {
+    if (gitRefreshingRef.current) {
+      gitDirtyRef.current = true
+      return
+    }
+    if (gitRefreshTimerRef.current) return
+    gitRefreshTimerRef.current = setTimeout(() => {
+      gitRefreshTimerRef.current = null
+      void runGitRefresh()
+    }, 250)
+  }, [runGitRefresh])
+
+  // 自动刷新：session idle / 窗口聚焦 / SSE 重连（统一走合并串行入口）
+  useAutoRefresh(consumerId, sessionId ?? null, scheduleGitRefresh, !!sessionId)
+
+  // busy → idle 时补刷被抑制的 diff（不依赖 idle 通知的时序）
+  useEffect(() => {
+    const wasBusy = wasBusyRef.current
+    const isBusy = sessionId ? busySessionsRef.current.has(sessionId) : false
+    wasBusyRef.current = isBusy
+    if (wasBusy && !isBusy && gitDirtyRef.current) {
+      scheduleGitRefresh()
+    }
+    // busySessions 引用由 store 缓存复用，内容不变时不触发
+  }, [busySessions, scheduleGitRefresh, sessionId])
 
   useEffect(() => {
     const onGitChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ workspacePath: string }>).detail
       if (!canonicalWorkspaceRef.current || detail?.workspacePath !== canonicalWorkspaceRef.current) return
       setLoadedModes(prev => ({ ...prev, git: false, branch: false, staged: false, unstaged: false }))
-      if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current)
-      gitRefreshTimerRef.current = setTimeout(() => {
-        gitRefreshTimerRef.current = null
-        void handleRefresh()
-      }, 250)
+      // agent 活跃中不刷新（diff 高频变动，拉取无意义且昂贵）：只标 dirty，idle 后统一补刷
+      if (sessionId && busySessionsRef.current.has(sessionId)) {
+        gitDirtyRef.current = true
+        return
+      }
+      scheduleGitRefresh()
     }
     window.addEventListener('piui:workspace-git-updated', onGitChanged)
     return () => {
@@ -489,7 +538,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         gitRefreshTimerRef.current = null
       }
     }
-  }, [handleRefresh])
+  }, [scheduleGitRefresh, sessionId])
 
   // 选中文件
   const handleSelectFile = useCallback((file: string) => {
@@ -841,7 +890,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
             {/* Refresh */}
             <button
               type="button"
-              onClick={handleRefresh}
+              onClick={() => void runGitRefresh()}
               disabled={loading}
               aria-label={t('common:refresh')}
               className="inline-flex h-6 w-6 items-center justify-center text-text-400 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors disabled:opacity-50"
