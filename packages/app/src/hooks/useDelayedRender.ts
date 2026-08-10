@@ -25,9 +25,16 @@ export function useDelayedRender(
   const mountDelayMs = options?.mountDelayMs ?? 0
   const [shouldRender, setShouldRender] = useState(() => show && mountDelayMs <= 0)
 
+  // 展开（无 mount 延迟）时同步 shouldRender state：收起时靠它做延迟卸载
+  // （grid 收起动画跑完再卸 DOM）。渲染期条件 setState 是 React 官方
+  // 「adjusting state during render」模式——只设一次，不产生循环。
+  if (show && mountDelayMs <= 0 && !shouldRender) {
+    setShouldRender(true)
+  }
+
   useEffect(() => {
     if (show) {
-      // mountDelayMs<=0 时渲染期已直接返回 true（见下方），无需在此同步 setState
+      // mountDelayMs>0 时延迟挂载；<=0 已由渲染期同步（见上）
       if (mountDelayMs > 0) {
         const timer = window.setTimeout(() => setShouldRender(true), mountDelayMs)
         return () => clearTimeout(timer)
