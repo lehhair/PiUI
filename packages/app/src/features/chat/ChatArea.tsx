@@ -224,7 +224,7 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
     ? 'flex items-center gap-0.5 transition-opacity'
     : 'flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity'
   const actionBtnClass =
-    'flex h-6 w-6 items-center justify-center rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
+    'p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
   return (
     <section
       data-message-queue={kind}
@@ -254,7 +254,7 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
                     title={t('chatArea.clearQueueItem')}
                     className={actionBtnClass}
                   >
-                    <TrashIcon size={14} />
+                    <TrashIcon />
                   </button>
                 )}
                 {onMoveMode && (
@@ -264,7 +264,7 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
                     title={moveTitle}
                     className={actionBtnClass}
                   >
-                    {kind === 'current' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
+                    {kind === 'current' ? <ArrowDownIcon /> : <ArrowUpIcon />}
                   </button>
                 )}
                 {onBackToInput && (
@@ -274,7 +274,7 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
                     title={t('chatArea.editQueueItem')}
                     className={actionBtnClass}
                   >
-                    <PencilIcon size={14} />
+                    <PencilIcon />
                   </button>
                 )}
               </div>
