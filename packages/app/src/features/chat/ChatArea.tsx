@@ -238,15 +238,14 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
       </div>
       <div className="flex flex-col items-end gap-2">
         {items.map((text, index) => (
-          <div
-            key={`${index}:${text}`}
-            className="group/msg max-w-[85%] rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5"
-          >
-            <div className="whitespace-pre-wrap break-words text-[length:var(--fs-base)] leading-relaxed text-text-200">
+          <div key={`${index}:${text}`} className="group/msg flex flex-col items-end gap-1 max-w-[85%]">
+            {/* 气泡：仅文本（对齐用户消息布局） */}
+            <div className="whitespace-pre-wrap break-words rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200">
               {text}
             </div>
+            {/* 操作行：气泡下方（对齐用户消息 action bar） */}
             {(onBackToInput || onMoveMode || onClear) && (
-              <div className={`mt-1 ${actionBarClass}`}>
+              <div className={`px-1 ${actionBarClass}`}>
                 <CopyButton text={text} position="static" />
                 {onClear && (
                   <button
