@@ -311,34 +311,44 @@ export function SidePanel({
   )
   const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
+  // 列表显示按当前工作区过滤；数据本身是全局的（活跃 tab / 标题解析都需全局）
+  const visibleSessions = useMemo(
+    () =>
+      currentDirectory
+        ? sessions.filter(session => isSameDirectory(session.directory, currentDirectory))
+        : sessions,
+    [sessions, currentDirectory],
+  )
+  const visibleLookup = useMemo(() => new Map(visibleSessions.map(session => [session.id, session])), [visibleSessions])
+
   const orderedSessions = useMemo(() => {
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
     const pinned = pinnedEntries
-      .map(entry => sessionLookup.get(entry.sessionId))
+      .map(entry => visibleLookup.get(entry.sessionId))
       .filter((session): session is UiSession => Boolean(session))
-    const rest = sessions.filter(s => !pinnedSet.has(s.id))
+    const rest = visibleSessions.filter(s => !pinnedSet.has(s.id))
     return [...pinned, ...rest]
-  }, [pinnedEntries, sessionLookup, sessions])
+  }, [pinnedEntries, visibleLookup, visibleSessions])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
-      .map(entry => sessionLookup.get(entry.sessionId))
+      .map(entry => visibleLookup.get(entry.sessionId))
       .filter((session): session is UiSession => Boolean(session))
       .at(-1)
     if (!lastPinned) return undefined
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
-    return sessions.some(s => !pinnedSet.has(s.id)) ? new Set([lastPinned.id]) : undefined
-  }, [pinnedEntries, sessionLookup, sessions])
+    return visibleSessions.some(s => !pinnedSet.has(s.id)) ? new Set([lastPinned.id]) : undefined
+  }, [pinnedEntries, visibleLookup, visibleSessions])
   const resolvedPinnedSessions = useMemo(
     () =>
       pinnedEntries
-        .map(entry => sessionLookup.get(entry.sessionId))
+        .map(entry => visibleLookup.get(entry.sessionId))
         .filter((session): session is UiSession => Boolean(session)),
-    [pinnedEntries, sessionLookup],
+    [pinnedEntries, visibleLookup],
   )
   // 当前 lookup 里没有的置顶：灰色展示，始终可取消
   const unavailablePinnedEntries = useMemo(
-    () => pinnedEntries.filter(entry => !sessionLookup.has(entry.sessionId)),
-    [pinnedEntries, sessionLookup],
+    () => pinnedEntries.filter(entry => !visibleLookup.has(entry.sessionId)),
+    [pinnedEntries, visibleLookup],
   )
 
   const buildProjectGroups = useCallback(

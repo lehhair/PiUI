@@ -58,7 +58,7 @@ describe('SessionProvider', () => {
     expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'Keep me' })
   })
 
-  it('always loads the global list and filters the visible list to the current directory', async () => {
+  it('always returns the global list even when a directory is selected (display filtering lives in SidePanel)', async () => {
     mocks.currentDirectory = '/workspace/demo'
     mocks.loadPiSessions.mockResolvedValue([
       sessionInfo('session-1', '/workspace/demo', 'In workspace'),
@@ -67,28 +67,11 @@ describe('SessionProvider', () => {
     const { result } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
 
     await waitFor(() => expect(result.current?.isLoading).toBe(false))
-    // 数据源始终是全局列表；显示层按当前目录过滤
+    // 数据源始终是全局列表，不做目录过滤（活跃 tab / 标题解析都依赖全局）
     expect(mocks.loadPiSessions).toHaveBeenCalled()
     expect(mocks.loadPiSessionsForCwd).not.toHaveBeenCalled()
-    expect(result.current?.sessions).toHaveLength(1)
+    expect(result.current?.sessions).toHaveLength(2)
     expect(result.current?.sessions[0]).toMatchObject({ id: 'session-1', title: 'In workspace' })
-  })
-
-  it('shows all sessions again when switching to global workspace', async () => {
-    mocks.currentDirectory = '/workspace/demo'
-    mocks.loadPiSessions.mockResolvedValue([
-      sessionInfo('session-1', '/workspace/demo', 'In workspace'),
-      sessionInfo('session-2', '/other/project', 'Elsewhere'),
-    ])
-    const { result, rerender } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
-    await waitFor(() => expect(result.current?.sessions).toHaveLength(1))
-
-    await act(async () => {
-      mocks.currentDirectory = null
-    })
-    rerender()
-
-    await waitFor(() => expect(result.current?.sessions).toHaveLength(2))
   })
 
   it('keeps a session visible when durable deletion fails', async () => {
