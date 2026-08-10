@@ -244,6 +244,7 @@ export type PiCommandParams = CoreCommandParams & {
   "trust.get": { cwd: string }
   "trust.set": { cwd: string; decision: boolean | null }
   "providers.list": Record<string, never>
+  "providers.activeFlows": Record<string, never>
   "providers.startAuth": { providerId: string; authType?: "api_key" | "oauth" }
   "providers.respondAuth": { flowId: string; promptId: string; value: string }
   "providers.cancelAuth": { flowId: string }
