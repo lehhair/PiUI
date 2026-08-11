@@ -7,6 +7,11 @@ import type { PiBranchPage } from '../../pi/domain'
 
 let slashCommands: Command[] = []
 let historyTexts: string[] = []
+const completionsMock = vi.fn()
+
+vi.mock('../../pi/transport/index.js', () => ({
+  getPiCommandCompletions: (...args: unknown[]) => completionsMock(...args),
+}))
 
 function historyBranch(): PiBranchPage {
   return {
@@ -148,6 +153,76 @@ describe('InputBox slash command selection', () => {
     await waitFor(() => {
       expect(onCommand).not.toHaveBeenCalled()
       expect(textarea.value).toBe('/review ')
+    })
+  })
+
+  it('auto-opens completions after selecting a command and applies on Enter', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([
+      { value: 'workspace-write', label: 'workspace-write' },
+      { value: 'read-only', label: 'read-only' },
+    ])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '/', selectionStart: 1 } })
+    fireEvent.click(screen.getByRole('button', { name: 'permission' }))
+
+    // 选中命令后无需 Tab，自动弹出全部候选
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', '')
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+
+    // Enter 应用选中的补全
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(textarea.value).toBe('/permission workspace-write'))
+  })
+
+  it('filters completions live as the user types the argument prefix', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([
+      { value: 'workspace-write', label: 'workspace-write' },
+      { value: 'read-only', label: 'read-only' },
+      { value: 'danger-full-access', label: 'danger-full-access' },
+    ])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '/', selectionStart: 1 } })
+    fireEvent.click(screen.getByRole('button', { name: 'permission' }))
+
+    // 自动弹出全部候选
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', '')
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+
+    // 输入前缀 w：防抖后按新前缀重新请求
+    completionsMock.mockResolvedValue([{ value: 'workspace-write', label: 'workspace-write' }])
+    fireEvent.change(textarea, { target: { value: '/permission w' } })
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', 'w')
+    })
+  })
+
+  it('keeps Tab as a fallback trigger for argument completions', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([{ value: 'workspace-write', label: 'workspace-write' }])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    // 手输命令（无 attachment 路径）后按 Tab 触发
+    fireEvent.change(textarea, { target: { value: '/permission w' } })
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    fireEvent.keyDown(textarea, { key: 'Tab' })
+
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', 'w')
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
     })
   })
 

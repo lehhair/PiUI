@@ -124,6 +124,8 @@ const COMMAND_IMPLEMENTATIONS: Record<string, CommandHandler> = {
     ctx.requireRuntime().invokeTool(P.reqString(p, "name"), P.optObject(p, "arguments")),
   invokeCommand: async (ctx, p) =>
     ctx.requireRuntime().invokeCommand(P.reqString(p, "name"), P.optString(p, "args")),
+  "commands.completions": async (ctx, p) =>
+    ctx.requireRuntime().getCommandCompletions(P.reqString(p, "name"), P.optString(p, "prefix") ?? ""),
 
   navigateTree: async (ctx, p) =>
     ctx.requireRuntime().navigateTree(P.reqString(p, "entryId"), {

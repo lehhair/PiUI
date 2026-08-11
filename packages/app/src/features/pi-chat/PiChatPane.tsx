@@ -1049,6 +1049,16 @@ export function PiChatPane({
       }
       const sid = targetSessionId
 
+      // 与 handleSend 相同的发送前清理：斜杠命令路径同样要取消挂起的输入
+      // 同步防抖并清空 worker 的扩展编辑器状态——否则 500ms 后旧文本被写回
+      // worker，下一次 extensionUiStore 刷新经 editor bridge 回填输入框
+      // （表现为发送 /permission 这类命令后输入框又被旧文本填回）。
+      if (editorSyncTimerRef.current !== null) {
+        window.clearTimeout(editorSyncTimerRef.current)
+        editorSyncTimerRef.current = null
+      }
+      void setPiExtensionEditorState(sid, '').catch(() => undefined)
+
       if (command === 'compact') {
         // 启动即有反馈（SDK 无压缩进度流，只有 start/end 事件）——先记一条
         // "已开始"，避免干等；结束再记结果。

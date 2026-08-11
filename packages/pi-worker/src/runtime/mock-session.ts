@@ -863,6 +863,15 @@ export class MockPiSession implements SessionRuntime {
     return undefined
   }
 
+  async getCommandCompletions(name: string, prefix: string): Promise<JsonValue | undefined> {
+    if (name !== "mock-command") return undefined
+    const options = ["alpha", "beta", "gamma"]
+    const items = options
+      .filter(value => value.startsWith(prefix))
+      .map(value => ({ value, label: value, description: `mock completion for ${name}` }))
+    return items.length > 0 ? items : undefined
+  }
+
   async navigateTree(entryId: string): Promise<JsonObject> {
     const entry = this.entries.find(item => item.id === entryId)
     if (!entry) throw Object.assign(new Error("entry not found"), { code: "NOT_FOUND" })

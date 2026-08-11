@@ -67,6 +67,7 @@ export interface SessionRuntime {
   setActiveTools(toolNames: string[]): Promise<void>
   invokeTool(name: string, args?: JsonObject): Promise<JsonValue | undefined>
   invokeCommand(name: string, args?: string): Promise<JsonValue | undefined>
+  getCommandCompletions(name: string, prefix: string): Promise<JsonValue | undefined>
 
   navigateTree(
     entryId: string,

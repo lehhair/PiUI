@@ -539,6 +539,20 @@ export function invokePiCommand(sessionId: string, name: string, args = '', sign
   return postPiSessionCommand(sessionId, 'invokeCommand', { name, args }, signal)
 }
 
+/**
+ * Resolve argument completions for a registered Pi slash command — pi TUI
+ * `getArgumentCompletions(prefix)` parity. Resolves with
+ * `Array<{ value: string; label: string; description?: string }>` or undefined.
+ */
+export function getPiCommandCompletions(
+  sessionId: string,
+  name: string,
+  prefix: string,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
+  return postPiSessionCommand(sessionId, 'commands.completions', { name, prefix }, signal)
+}
+
 export type PiForkResult = {
   operation?: string
   sourceSessionId?: string

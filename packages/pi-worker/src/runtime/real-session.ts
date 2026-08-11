@@ -778,6 +778,20 @@ export class RealPiSession implements SessionRuntime {
     return undefined
   }
 
+  /**
+   * Resolve argument completions for a registered extension command — pi TUI
+   * `getArgumentCompletions(prefix)` parity. Returns [{ value, label, description? }]
+   * or undefined when the command exposes no completions.
+   */
+  async getCommandCompletions(name: string, prefix: string): Promise<JsonValue | undefined> {
+    const runner = this.runtime.session.extensionRunner
+    if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
+    const command = runner.getCommand(name)
+    if (!command?.getArgumentCompletions) return undefined
+    const items = await command.getArgumentCompletions(prefix)
+    return toJson(items) ?? undefined
+  }
+
   private getNativeFingerprint(): string {
     const manager = this.runtime.session.sessionManager
     const entries = manager.getEntries()

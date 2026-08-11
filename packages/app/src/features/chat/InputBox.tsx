@@ -35,6 +35,8 @@ import type { FileCapabilities } from '../../types/ui'
 
 type ModelInfo = Model<Api>
 import { usePiCapabilities } from '../../pi/capabilities'
+import { getPiCommandCompletions } from '../../pi/transport/index.js'
+import { apiErrorHandler } from '../../utils'
 import {
   getDroppedPathsInfo,
   isTauriDropPointInsideElement,
@@ -63,6 +65,19 @@ interface DraggedFileInfo {
   path: string
   absolute: string
   name: string
+}
+
+/** 参数补全条目（pi TUI getArgumentCompletions 返回的 AutocompleteItem 序列化形态） */
+interface ArgCompletionItem {
+  value: string
+  label: string
+  description?: string
+}
+
+/** 当前补全上下文：命令名 + 参数起点（补全替换 [argStart, cursor) 区间） */
+interface ArgCompletionContext {
+  commandName: string
+  argStart: number
 }
 
 const TEXTAREA_MIN_HEIGHT = 24
@@ -272,6 +287,25 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [slashQuery, setSlashQuery] = useState('')
   const [slashStartIndex, setSlashStartIndex] = useState(-1)
 
+  // 命令参数 Tab 补全状态（pi TUI getArgumentCompletions parity）
+  const [argCompletionOpen, setArgCompletionOpen] = useState(false)
+  const [argCompletionItems, setArgCompletionItems] = useState<ArgCompletionItem[]>([])
+  const [argCompletionIndex, setArgCompletionIndex] = useState(0)
+  const [argCompletionLoading, setArgCompletionLoading] = useState(false)
+  const argCompletionReqRef = useRef(0)
+  const argCompletionCtxRef = useRef<ArgCompletionContext | null>(null)
+  const argCompletionTimerRef = useRef<number | null>(null)
+  const argCompletionOpenRef = useRef(false)
+  useEffect(() => {
+    argCompletionOpenRef.current = argCompletionOpen
+  }, [argCompletionOpen])
+  useEffect(() => {
+    const timerRef = argCompletionTimerRef
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    }
+  }, [])
+
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
   const [isInternalFileDragging, setIsInternalFileDragging] = useState(false)
@@ -291,6 +325,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const toolbarRef = useRef<HTMLDivElement>(null)
   const mentionMenuRef = useRef<MentionMenuHandle>(null)
   const slashMenuRef = useRef<SlashCommandMenuHandle>(null)
+  const argCompletionMenuRef = useRef<HTMLDivElement>(null)
   const prevRevertedTextRef = useRef<string | undefined>(undefined)
   const latestDraftRef = useRef<HistoryEntry>({ text: '', attachments: [] })
   const appendedRestoreRef = useRef<string | undefined>(undefined)
@@ -619,6 +654,166 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     [text, mentionStartIndex, mentionQuery],
   )
 
+  // ============================================
+  // 命令参数 Tab 补全（pi TUI getArgumentCompletions parity）
+  // ============================================
+
+  const closeArgCompletions = useCallback(() => {
+    if (argCompletionTimerRef.current !== null) {
+      window.clearTimeout(argCompletionTimerRef.current)
+      argCompletionTimerRef.current = null
+    }
+    setArgCompletionOpen(false)
+    setArgCompletionItems([])
+    setArgCompletionLoading(false)
+    argCompletionCtxRef.current = null
+    argCompletionReqRef.current += 1
+  }, [])
+
+  /**
+   * 解析当前输入里的命令参数上下文：
+   * 1. 优先用 command attachment（斜杠菜单选过）：光标在命令文本之后即命中
+   * 2. 否则识别行首手输的 `/name args`（slashOpen 为 false 说明命令名已完整）
+   * 返回 { commandName, argStart }，补全会替换 [argStart, cursor) 区间。
+   */
+  const resolveArgCompletionContext = useCallback(
+    (currentText: string, cursorPos: number): ArgCompletionContext | null => {
+      const commandAttachment = attachments.find(a => a.type === 'command' && a.commandName && a.textRange)
+      if (commandAttachment && commandAttachment.textRange) {
+        // 参数起点跳过命令与参数之间的分隔空白（/name <prefix>）
+        let argStart = commandAttachment.textRange.end
+        while (argStart < currentText.length && /[ \n]/.test(currentText[argStart]!)) argStart += 1
+        if (cursorPos >= argStart) {
+          return { commandName: commandAttachment.commandName!, argStart }
+        }
+      }
+      // 行首手输命令：/name 后跟空格/换行且光标在参数区
+      if (currentText.startsWith('/')) {
+        const rest = currentText.slice(1)
+        const spaceIndex = rest.search(/[ \n]/)
+        if (spaceIndex > 0 && cursorPos > spaceIndex + 1) {
+          return { commandName: rest.slice(0, spaceIndex), argStart: spaceIndex + 2 }
+        }
+      }
+      return null
+    },
+    [attachments],
+  )
+
+  /** 请求并打开参数补全菜单（prefix 为空时列出全部候选，与 TUI 一致） */
+  const requestArgCompletions = useCallback(
+    async (ctx: ArgCompletionContext, prefix: string) => {
+      if (!sessionId) {
+        closeArgCompletions()
+        return
+      }
+      const requestId = ++argCompletionReqRef.current
+      argCompletionCtxRef.current = ctx
+      if (argCompletionTimerRef.current !== null) {
+        window.clearTimeout(argCompletionTimerRef.current)
+        argCompletionTimerRef.current = null
+      }
+      // 已打开的菜单刷新时不闪 loading（首次打开才显示）
+      if (!argCompletionOpenRef.current) setArgCompletionLoading(true)
+      try {
+        const result = (await getPiCommandCompletions(sessionId, ctx.commandName, prefix)) as
+          | ArgCompletionItem[]
+          | null
+          | undefined
+        if (requestId !== argCompletionReqRef.current) return
+        const items = Array.isArray(result) ? result : []
+        if (items.length === 0) {
+          closeArgCompletions()
+          return
+        }
+        setArgCompletionItems(items)
+        setArgCompletionIndex(0)
+        setArgCompletionOpen(true)
+      } catch (error) {
+        if (requestId !== argCompletionReqRef.current) return
+        apiErrorHandler('command completions', error)
+        closeArgCompletions()
+      } finally {
+        if (requestId === argCompletionReqRef.current) {
+          setArgCompletionLoading(false)
+        }
+      }
+    },
+    [closeArgCompletions, sessionId],
+  )
+
+  /** 应用选中的补全：替换 [argStart, cursor) 为 value，光标移到 value 末尾 */
+  const applyArgCompletion = useCallback(
+    (item: ArgCompletionItem) => {
+      if (!textareaRef.current) return
+      const ctx = argCompletionCtxRef.current
+      if (!ctx) return
+      const cursorPos = textareaRef.current.selectionStart ?? text.length
+      const newText = text.slice(0, ctx.argStart) + item.value + text.slice(cursorPos)
+      setText(newText)
+      closeArgCompletions()
+      requestAnimationFrame(() => {
+        if (!textareaRef.current) return
+        const newCursorPos = ctx.argStart + item.value.length
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        textareaRef.current.focus()
+      })
+    },
+    [closeArgCompletions, text],
+  )
+
+  /**
+   * 防抖调度：参数区文本变化后 120ms 合并请求（选中命令自动弹出 + 输入实时筛选）。
+   * 不在参数区时关闭菜单。
+   */
+  const scheduleArgCompletion = useCallback(
+    (currentText: string, cursorPos: number) => {
+      const ctx = resolveArgCompletionContext(currentText, cursorPos)
+      if (!ctx) {
+        closeArgCompletions()
+        return
+      }
+      if (argCompletionTimerRef.current !== null) {
+        window.clearTimeout(argCompletionTimerRef.current)
+      }
+      argCompletionTimerRef.current = window.setTimeout(() => {
+        argCompletionTimerRef.current = null
+        // 回调时用 DOM 最新值重解析，避免防抖窗口内文本再变导致 ctx 过期
+        const textarea = textareaRef.current
+        if (!textarea) return
+        const latestCursor = textarea.selectionStart ?? textarea.value.length
+        const latestCtx = resolveArgCompletionContext(textarea.value, latestCursor)
+        if (!latestCtx) return
+        const latestPrefix = textarea.value.slice(latestCtx.argStart, latestCursor)
+        void requestArgCompletions(latestCtx, latestPrefix)
+      }, 120)
+    },
+    [closeArgCompletions, requestArgCompletions, resolveArgCompletionContext],
+  )
+
+  /** Tab 键：打开/循环参数补全。返回 true 表示已处理。 */
+  const handleArgCompletionTab = useCallback((): boolean => {
+    if (!textareaRef.current) return false
+    if (argCompletionOpen) {
+      setArgCompletionIndex(prev => (prev + 1) % Math.max(argCompletionItems.length, 1))
+      return true
+    }
+    if (slashOpen) return false // 命令名菜单优先，交给 slash 分支
+    const cursorPos = textareaRef.current.selectionStart ?? text.length
+    const ctx = resolveArgCompletionContext(text, cursorPos)
+    if (!ctx) return false
+    const prefix = text.slice(ctx.argStart, cursorPos)
+    void requestArgCompletions(ctx, prefix)
+    return true
+  }, [
+    argCompletionOpen,
+    argCompletionItems.length,
+    requestArgCompletions,
+    resolveArgCompletionContext,
+    slashOpen,
+    text,
+  ])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const nativeEvent = e.nativeEvent
@@ -699,6 +894,31 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         }
       }
 
+      // 命令参数补全菜单打开时，拦截导航键（优先级高于普通 Tab 行为）
+      if (argCompletionOpen) {
+        switch (e.key) {
+          case 'ArrowUp':
+            e.preventDefault()
+            setArgCompletionIndex(prev => (prev <= 0 ? argCompletionItems.length - 1 : prev - 1))
+            return
+          case 'ArrowDown':
+            e.preventDefault()
+            setArgCompletionIndex(prev => (prev >= argCompletionItems.length - 1 ? 0 : prev + 1))
+            return
+          case 'Enter':
+          case 'Tab':
+            e.preventDefault()
+            if (argCompletionItems[argCompletionIndex]) {
+              applyArgCompletion(argCompletionItems[argCompletionIndex]!)
+            }
+            return
+          case 'Escape':
+            e.preventDefault()
+            closeArgCompletions()
+            return
+        }
+      }
+
       // Pi TUI model/thinking shortcuts. The visible model selector remains
       // the source of truth; these keys only trigger its native callbacks.
       if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'p') {
@@ -717,9 +937,10 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         return
       }
 
-      // Tab 键：mention 菜单关闭时，不做任何事（阻止跳到工具栏）
+      // Tab 键：mention 菜单关闭时，先试命令参数补全，否则不做任何事（阻止跳到工具栏）
       if (e.key === 'Tab') {
         e.preventDefault()
+        if (handleArgCompletionTab()) return
         return
       }
 
@@ -744,13 +965,21 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         handleSend()
       }
     },
-    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown, onCycleModel, onCycleThinkingLevel, onOpenModelSelector],
+    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown, onCycleModel, onCycleThinkingLevel, onOpenModelSelector, argCompletionOpen, argCompletionItems, argCompletionIndex, applyArgCompletion, closeArgCompletions, handleArgCompletionTab],
   )
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value
       setText(newText)
+
+      // 命令参数区：选中命令后自动弹出补全，继续输入实时筛选（防抖合并；
+      // IME 组合中不打扰，compositionend 后由下一次 change 接管）
+      if (isComposingRef.current) {
+        closeArgCompletions()
+      } else {
+        scheduleArgCompletion(newText, e.target.selectionStart || 0)
+      }
 
       // 移动端 IME 兜底：全选删除时 compositionend 可能不触发（已知的
       // 移动端输入法行为），isComposingRef 会永久卡在 true——之后回车
@@ -803,7 +1032,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         }
       }
     },
-    [handleHistoryChange],
+    [scheduleArgCompletion, closeArgCompletions, handleHistoryChange],
   )
 
   const handleCompositionStart = useCallback(() => {
@@ -920,6 +1149,11 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       setAttachments(prev => [...prev, attachment])
       setSlashOpen(false)
 
+      // 自动弹出参数补全：选中带参命令后光标已在参数区，直接列出候选
+      // （无候选的命令会自动关闭菜单，不发多余 UI）
+      const argStart = slashStartIndex + commandText.length + 1
+      void requestArgCompletions({ commandName: command.name, argStart }, '')
+
       // 移动光标到命令后
       requestAnimationFrame(() => {
         if (!textareaRef.current) return
@@ -928,13 +1162,14 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         textareaRef.current.focus()
       })
     },
-    [text, slashStartIndex, slashQuery, onCommand, submitCommandOptimistically],
+    [text, slashStartIndex, slashQuery, onCommand, requestArgCompletions, submitCommandOptimistically],
   )
 
   const handleSlashClose = useCallback(() => {
     setSlashOpen(false)
     textareaRef.current?.focus()
   }, [])
+
 
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
@@ -1103,6 +1338,18 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   )
 
   const insertDraggedFile = useCallback((fileInfo: DraggedFileInfo) => insertDraggedFiles([fileInfo]), [insertDraggedFiles])
+
+  // 命令参数补全菜单：点击外部关闭
+  useEffect(() => {
+    if (!argCompletionOpen) return
+    const handleClickOutside = (e: PointerEvent) => {
+      if (argCompletionMenuRef.current && !argCompletionMenuRef.current.contains(e.target as Node)) {
+        closeArgCompletions()
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    return () => document.removeEventListener('pointerdown', handleClickOutside)
+  }, [argCompletionOpen, closeArgCompletions])
 
   useEffect(() => {
     const updateInternalFileDragState = () => {
@@ -1363,6 +1610,46 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               onSelect={handleSlashSelect}
               onClose={handleSlashClose}
             />
+
+            {/* 命令参数 Tab 补全菜单（pi TUI getArgumentCompletions parity） */}
+            {argCompletionOpen && (
+              <div
+                ref={argCompletionMenuRef}
+                data-dropdown-open
+                className="absolute z-50 w-full md:max-w-[360px] flex flex-col glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
+                style={{ bottom: '100%', left: 0, marginBottom: '8px', maxHeight: 'min(280px, calc(100dvh - 10rem))' }}
+              >
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-1.5">
+                  {argCompletionLoading && argCompletionItems.length === 0 && (
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('common:loading')}</div>
+                  )}
+                  {!argCompletionLoading && argCompletionItems.length === 0 && (
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('slashCommand.noMatchingCommands')}</div>
+                  )}
+                  {argCompletionItems.map((item, index) => (
+                    <button
+                      key={item.value}
+                      title={[item.label, item.description].filter(Boolean).join(' ')}
+                      className={`w-full px-2.5 py-2 md:py-1.5 flex items-center gap-3 text-left rounded-lg transition-colors ${index === argCompletionIndex ? 'bg-accent-main-100/10 text-text-100' : 'text-text-200 hover:bg-bg-100/40'}`}
+                      onClick={() => applyArgCompletion(item)}
+                      onPointerEnter={() => setArgCompletionIndex(index)}
+                    >
+                      <span className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${index === argCompletionIndex ? 'text-accent-main-100' : 'text-text-300'}`}>
+                        {item.label}
+                      </span>
+                      {item.description && (
+                        <div className="flex-1 min-w-0 text-[length:var(--fs-sm)] text-text-400 truncate">{item.description}</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="hidden md:flex px-3 py-1.5 text-[length:var(--fs-xs)] text-text-500/70 gap-3">
+                  <span>{t('common:upDownSelect')}</span>
+                  <span>{t('common:enterRun')}</span>
+                  <span>{t('common:escCancel')}</span>
+                </div>
+              </div>
+            )}
 
             {/* Input Container */}
             <div

@@ -96,6 +96,7 @@ export const PI_COMMAND_SPECS = [
   { name: "setActiveTools", scope: "session", description: "Set active Pi tools", paramsSchema: objectSchema({ toolNames: STRING_ARRAY }), queue: "serialized" },
   { name: "invokeTool", scope: "session", source: "pi-extension", description: "Invoke a registered Pi tool by name", paramsSchema: objectSchema({ name: STRING, arguments: objectSchema({}, [], true) }, ["name"]), queue: "serialized" },
   { name: "invokeCommand", scope: "session", source: "pi-extension", description: "Invoke a registered Pi slash command by name", paramsSchema: objectSchema({ name: STRING, args: STRING }, ["name"]), queue: "serialized" },
+  { name: "commands.completions", scope: "session", description: "Resolve argument completions for a registered slash command (pi TUI getArgumentCompletions parity)", paramsSchema: objectSchema({ name: STRING, prefix: STRING }, ["name"]), queue: "immediate", idempotent: true },
   { name: "navigateTree", scope: "session", description: "Navigate the Pi session tree", paramsSchema: objectSchema({ entryId: STRING, summarize: BOOLEAN, customInstructions: STRING, replaceInstructions: BOOLEAN, label: STRING }, ["entryId"]), queue: "serialized", replacement: true, cancellable: true },
   { name: "setLabel", scope: "session", description: "Set an entry label", paramsSchema: objectSchema({ entryId: STRING, label: STRING }, ["entryId"]), queue: "serialized" },
   { name: "sendCustomMessage", scope: "session", description: "Send a custom Pi message", paramsSchema: objectSchema({ customType: STRING, content: { type: "array", items: { anyOf: [objectSchema({ type: { const: "text" }, text: STRING }, ["type", "text"]), IMAGE_INPUT] } }, display: BOOLEAN, details: ANY_JSON, triggerTurn: BOOLEAN, deliverAs: { enum: ["steer", "followUp", "nextTurn"] } }, ["customType", "content", "display"]), queue: "serialized" },
@@ -184,6 +185,7 @@ export const RUNTIME_TARGETS = {
   setActiveTools: "setActiveTools",
   invokeTool: "invokeTool",
   invokeCommand: "invokeCommand",
+  "commands.completions": "getCommandCompletions",
   navigateTree: "navigateTree",
   setLabel: "setLabel",
   sendCustomMessage: "sendCustomMessage",
@@ -233,6 +235,7 @@ export type PiCommandParams = CoreCommandParams & {
   "prompts.list": Record<string, never>
   "agentsFiles.list": Record<string, never>
   "attachment.get": { entryId: string; blockIndex: number }
+  "commands.completions": { name: string; prefix: string }
   "session.list": { cwd: string }
   "session.listAll": Record<string, never>
   "session.create": { cwd: string }
