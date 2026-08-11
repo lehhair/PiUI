@@ -210,4 +210,38 @@ describe('InputToolbar file selection', () => {
     expect(screen.getByRole('button', { name: /send|发送/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /stop|停止/i })).toBeNull()
   })
+
+  it('shows Send once the user types content (canSend) while compacting', () => {
+    const onSend = vi.fn()
+    render(
+      <InputToolbar
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        isCompacting
+        canSend
+        onSend={onSend}
+        onAbort={vi.fn()}
+      />,
+    )
+
+    // 压缩中但只要输入框有内容就是发送按钮（停止按钮只在空输入时出现）
+    expect(screen.getByRole('button', { name: /send|发送/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /stop|停止/i })).toBeNull()
+  })
+
+  it('shows Stop while compacting and the input is empty', () => {
+    render(
+      <InputToolbar
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        isCompacting
+        canSend={false}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /stop|停止/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /send|发送/i })).toBeNull()
+  })
 })

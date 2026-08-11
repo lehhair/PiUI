@@ -429,9 +429,10 @@ export function InputToolbar({
             </IconButton>
           </>
         </AnimatedPresence>
-        {/* 停止按钮条件：压缩中；或输入框为空且（流式中 / session 活跃兜底）。
-            用户输入内容（canSend）后必须回到发送按钮 */}
-        {(isCompacting || (!canSend && (isStreaming || sessionActive))) && !isSending ? (
+        {/* 停止按钮条件：输入框为空（不可发送）且（压缩中 / 流式中 / 会话活跃）。
+            只要输入框有内容（canSend），就显示发送按钮——停止按钮只在
+            没有可发送内容时出现（中止压缩/生成）。 */}
+        {(!canSend && (isCompacting || isStreaming || sessionActive)) && !isSending ? (
           <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
             <StopIcon />
           </IconButton>
