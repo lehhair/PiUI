@@ -4,6 +4,10 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.9] - 2026-08-11
+
+- fix(chat): force real-DOM re-measure on row content change; rAF-defer ResizeObserver (988e9fbe)
+
 ## [v0.4.8] - 2026-08-11
 
 - feat(chat): command argument completions via native getArgumentCompletions (Tab + auto-popup + live filter) (d0072e79)
