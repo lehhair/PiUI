@@ -137,7 +137,8 @@ export const CollapsedCapsule = memo(function CollapsedCapsule({
 }: CollapsedCapsuleProps) {
   const { t } = useTranslation(['chat', 'common'])
   return (
-    <div className="flex items-center justify-center gap-2 pointer-events-none">
+    // 胶囊 -m-2 外扩 8px 热区会吃掉 flex gap：gap-4(16px) - 外扩(8px) = 恢复 8px 视觉间距
+    <div className="flex items-center justify-center gap-4 pointer-events-none">
       <button
         type="button"
         onClick={onExpand}
