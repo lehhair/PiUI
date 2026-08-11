@@ -71,11 +71,35 @@ export function useMobileCollapse({
   // isFocused: textarea 是否聚焦中（或用户正在与输入框容器交互中）
   const [isFocused, setIsFocused] = useState(false)
 
+  // ---- 清空文本缓冲 ----
+  // 移动端输入法“全选 → 删除”时：选择/删除瞬间系统 UI 可能抢走焦点
+  // （blur → isFocused=false），文本清空（hasContent=false）后输入框会
+  // 立即收成胶囊——而用户还开着输入法在编辑，收起后的输入区是
+  // pointer-events-none 的透明层，表现为“无法点击、无法输入”。
+  // 从非空变空后缓冲 4s 不收起；期间焦点回来（继续输入）就恢复正常。
+  const [justCleared, setJustCleared] = useState(false)
+  const justClearedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevHasContentRef = useRef(hasContent)
+  useEffect(() => {
+    const previous = prevHasContentRef.current
+    prevHasContentRef.current = hasContent
+    if (!previous || hasContent) return
+    if (justClearedTimerRef.current) clearTimeout(justClearedTimerRef.current)
+    setJustCleared(true)
+    justClearedTimerRef.current = setTimeout(() => {
+      justClearedTimerRef.current = null
+      setJustCleared(false)
+    }, 4_000)
+  }, [hasContent])
+  useEffect(() => () => {
+    if (justClearedTimerRef.current) clearTimeout(justClearedTimerRef.current)
+  }, [])
+
   // 直接计算是否收起（纯派生值）
   // isAtBottom 语义是「用户未主动离底」（ChatArea 用 !userScrolled），不是几何 dist。
   // 流式贴底跟随期间 dist 会抖，但 userScrolled 仍为 false → 不收起，Footer 不闪。
   const hasPendingDialogs = !!collapsedPermission || !!collapsedQuestion
-  const isCollapsed = enabled && !isAtBottom && !hasContent && !isFocused && !hasPendingDialogs
+  const isCollapsed = enabled && !isAtBottom && !hasContent && !isFocused && !hasPendingDialogs && !justCleared
 
   // 展开态内容区高度（用于收起时占位，防 isAtBottom 反馈循环）
   const [expandedHeight, setExpandedHeight] = useState(0)

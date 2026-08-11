@@ -752,6 +752,18 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       const newText = e.target.value
       setText(newText)
 
+      // 移动端 IME 兜底：全选删除时 compositionend 可能不触发（已知的
+      // 移动端输入法行为），isComposingRef 会永久卡在 true——之后回车
+      // 发送永远被 isImeComposing 拦截。文本被清空说明 composition 已
+      // 被中断，强制复位。
+      if (isComposingRef.current && newText.length === 0) {
+        isComposingRef.current = false
+        if (compositionEndTimerRef.current !== null) {
+          clearTimeout(compositionEndTimerRef.current)
+          compositionEndTimerRef.current = null
+        }
+      }
+
       // 用户修改了内容，检查是否应退出历史模式
       handleHistoryChange(newText)
 
