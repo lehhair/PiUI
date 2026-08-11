@@ -4,6 +4,13 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.4.7] - 2026-08-11
+
+- fix(chat): show the send button whenever the input has content, even while compacting (1a34455c)
+- fix(mobile): keep the input box usable after select-all-delete with an IME (1ab11e85)
+- fix(sidebar): materialize only when the session file exists; broadcast deletes (cf1e5893)
+- fix(chat): clear the extension editor state on send so the input box stays cleared (a8d7a063)
+
 ## [v0.4.6] - 2026-08-10
 
 - refactor(worker): one shared worker process for all Pi runtimes (0f538454)
