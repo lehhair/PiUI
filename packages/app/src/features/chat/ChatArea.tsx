@@ -300,6 +300,8 @@ interface RowProps {
   turnDurationMap: Map<string, number>
   turnLatestAssistantIds: Set<string>
   measureElement: (el: HTMLElement | null) => void
+  /** 强制按真实 DOM 高度重测（绕过 virtual-core 无 entry 时的缓存分支） */
+  resizeItem: (index: number, size: number) => void
   onEntryGrowComplete?: (messageId: string) => void
 }
 
@@ -317,6 +319,7 @@ const VirtualRow = memo(function VirtualRow({
   turnDurationMap,
   turnLatestAssistantIds,
   measureElement,
+  resizeItem,
   onEntryGrowComplete,
 }: RowProps) {
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -330,12 +333,20 @@ const VirtualRow = memo(function VirtualRow({
   }, [measureElement])
 
   useLayoutEffect(() => {
-    // item 引用变化（打断/折叠/错误条出现，A 步保证只有变化行变）时
-    // 重新测量：virtual-core 的 measureElement 在测量高度与缓存一致
-    // （delta === 0）时不 notify，行会残留旧 transform 与相邻行重叠。
-    // 这里在内容变化后强制重测，让后续行位置按最新高度重算。
-    if (rowRef.current) measureElement(rowRef.current)
-  }, [measureElement, virtualItem.index, item.key, rowYClass, item])
+    // item 引用变化（打断/折叠/错误条出现/流式 chunk，A 步保证只有变化行变）
+    // 时强制按真实 DOM 高度重测。
+    //
+    // 不能只调 virtualizer.measureElement：virtual-core 的 measureElement 在
+    // 无 entry（ref 回调 / layout effect 路径）时直接返回 itemSizeCache 缓存
+    // 值，根本不读 DOM——delta 恒为 0，resizeItem 永不 notify，行残留旧
+    // transform 与相邻行重叠（内容变化但 RO 未及时触发的窗口期，或 RO
+    // 通知被丢时）。这里读 offsetHeight + resizeItem，让后续行位置按最新
+    // 高度重算；高度没变时 resizeItem 内部 delta===0 幂等跳过。
+    const el = rowRef.current
+    if (!el) return
+    const height = el.offsetHeight
+    if (height > 0) resizeItem(virtualItem.index, height)
+  }, [virtualItem.index, item.key, rowYClass, item, resizeItem])
 
   return (
     <div
@@ -422,6 +433,7 @@ const VirtualRow = memo(function VirtualRow({
   prev.turnDurationMap === next.turnDurationMap &&
   prev.turnLatestAssistantIds === next.turnLatestAssistantIds &&
   prev.measureElement === next.measureElement &&
+  prev.resizeItem === next.resizeItem &&
   prev.onEntryGrowComplete === next.onEntryGrowComplete
 )
 
@@ -657,6 +669,11 @@ export const ChatArea = memo(
         overscan: 50,
         directDomUpdates: true,
         directDomUpdatesMode: 'transform',
+        // RO 回调延迟到 rAF：避免与 onChange 的 flushSync 渲染嵌套竞争
+        // （RO 回调同步执行时，测量可能读到 React 重渲染的中间态，或
+        // 嵌套 RO 导致浏览器丢弃通知——流式增长时行高因此失真，后续行
+        // transform 停留旧位置，视觉上重叠/空白）。
+        useAnimationFrameWithResizeObserver: true,
         rangeExtractor: (range) => {
           const indexes = defaultRangeExtractor({ ...range, overscan: renderOverscan })
           return mergeVirtualRangeIndexes(indexes, resizePinnedRef.current, hotPinnedRef.current)
@@ -1138,6 +1155,7 @@ export const ChatArea = memo(
                     turnDurationMap={turnDurationMap}
                     turnLatestAssistantIds={turnLatestAssistantIds}
                     measureElement={virtualizer.measureElement as (el: HTMLElement | null) => void}
+                    resizeItem={virtualizer.resizeItem}
                     onEntryGrowComplete={emptyShellGate.onEntryGrowComplete}
                   />
                 )
