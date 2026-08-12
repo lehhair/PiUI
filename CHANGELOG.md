@@ -4,6 +4,10 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.5.1] - 2026-08-12
+
+- fix(chat): prevent stale virtual row visuals during stream resize (984f28c8)
+
 ## [v0.5.0] - 2026-08-11
 
 - fix(chat): restore 8px visual gap around the collapsed capsule (17ee0abf)
