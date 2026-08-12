@@ -14,7 +14,9 @@ jobs:
   validate:
     name: validate ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 7 个子命令串行（3 build + 4 test），慢 runner 上总时长可逼近 15 分钟；
+    # 放宽到 25 分钟，避免偶发慢速触发 job 级超时误杀
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

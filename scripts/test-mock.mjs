@@ -9,7 +9,9 @@ if (!npmCli) {
 
 // CI 上 worker spawn 偶发挂起会拖死整个 validate；每个子命令设硬超时，
 // 超时 kill 并明确报出卡住的命令，避免 job 挂到 runner 上限。
-const COMMAND_TIMEOUT_MS = Number(process.env.PIUI_TEST_COMMAND_TIMEOUT_MS) || 300_000
+// 默认 600s：慢 runner（如 windows 或共享实例）上 vitest 偶发超过 300s，
+// 阈值翻倍后只有真挂死才会触发；仍可用 PIUI_TEST_COMMAND_TIMEOUT_MS 覆盖。
+const COMMAND_TIMEOUT_MS = Number(process.env.PIUI_TEST_COMMAND_TIMEOUT_MS) || 600_000
 
 const commands = [
   ["run", "build", "-w", "@piui/protocol"],
