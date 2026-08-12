@@ -754,12 +754,16 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       const ctx = argCompletionCtxRef.current
       if (!ctx) return
       const cursorPos = textareaRef.current.selectionStart ?? text.length
-      const newText = text.slice(0, ctx.argStart) + item.value + text.slice(cursorPos)
+      // 参数区起点前不是空白时（用户删掉了 /command 后的空格）补一个空格，
+      // 否则补全值会直接黏在命令名后面（/permissionworkspace-write）
+      const needsSpace = ctx.argStart > 0 && !/[ \n]/.test(text[ctx.argStart - 1] ?? '')
+      const sep = needsSpace ? ' ' : ''
+      const newText = text.slice(0, ctx.argStart) + sep + item.value + text.slice(cursorPos)
       setText(newText)
       closeArgCompletions()
       requestAnimationFrame(() => {
         if (!textareaRef.current) return
-        const newCursorPos = ctx.argStart + item.value.length
+        const newCursorPos = ctx.argStart + sep.length + item.value.length
         textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
         textareaRef.current.focus()
       })
@@ -1029,15 +1033,27 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         // 检测 / 触发（只在行首或空白后）
         const slashTrigger = detectSlashTrigger(newText, cursorPos)
         if (slashTrigger) {
-          setSlashQuery(slashTrigger.query)
-          setSlashStartIndex(slashTrigger.startIndex)
-          setSlashOpen(true)
+          // 命令名已通过 slash 菜单确定（存在匹配的 command attachment）：
+          // 不再重新进入命令选择。否则删掉参数区空格后（如 "/permission"）
+          // 回车会被 slash 菜单抢走，重新插入命令并复制一个命令附件；
+          // 此时参数补全（attachment 路径）仍然有效，回车应直接应用补全。
+          const hasMatchingCommandAttachment = attachments.some(
+            a => a.type === 'command' && a.commandName && a.textRange &&
+              newText.startsWith(`/${a.commandName}`),
+          )
+          if (!hasMatchingCommandAttachment) {
+            setSlashQuery(slashTrigger.query)
+            setSlashStartIndex(slashTrigger.startIndex)
+            setSlashOpen(true)
+          } else {
+            setSlashOpen(false)
+          }
         } else {
           setSlashOpen(false)
         }
       }
     },
-    [scheduleArgCompletion, closeArgCompletions, handleHistoryChange],
+    [scheduleArgCompletion, closeArgCompletions, handleHistoryChange, attachments],
   )
 
   const handleCompositionStart = useCallback(() => {
@@ -1056,8 +1072,16 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     compositionEndTimerRef.current = window.setTimeout(() => {
       isComposingRef.current = false
       compositionEndTimerRef.current = null
+      // IME 组合期间的 change 全部被跳过（isComposing 时 closeArgCompletions），
+      // 组合结束（确认/删除/切英文）后补发一次参数补全调度：否则手输命令时
+      // 参数区的补全要等下一次输入/删除才会出现。组合结束光标可能已在参数区，
+      // resolveArgCompletionContext 不命中时自然关闭，无副作用。
+      const textarea = textareaRef.current
+      if (!textarea) return
+      const cursorPos = textarea.selectionStart ?? textarea.value.length
+      scheduleArgCompletion(textarea.value, cursorPos)
     }, 0)
-  }, [])
+  }, [scheduleArgCompletion])
 
   // @ Mention 选择处理
   const handleMentionSelect = useCallback(
@@ -1151,7 +1175,19 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       }
 
       setText(newText)
-      setAttachments(prev => [...prev, attachment])
+      // 幂等：同一命令重复选择时替换旧附件（textRange 可能随文本变化），
+      // 避免输入框里累积多个相同的命令附件
+      setAttachments(prev => {
+        const existingIndex = prev.findIndex(
+          a => a.type === 'command' && a.commandName === command.name,
+        )
+        if (existingIndex >= 0) {
+          const next = [...prev]
+          next[existingIndex] = attachment
+          return next
+        }
+        return [...prev, attachment]
+      })
       setSlashOpen(false)
 
       // 自动弹出参数补全：选中带参命令后光标已在参数区，直接列出候选

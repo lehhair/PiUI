@@ -122,6 +122,7 @@ describe('InputBox slash command selection', () => {
   beforeEach(() => {
     slashCommands = []
     historyTexts = []
+    completionsMock.mockReset()
   })
 
   it('executes frontend commands immediately on selection', async () => {
@@ -208,6 +209,81 @@ describe('InputBox slash command selection', () => {
     })
   })
 
+  it('applies argument completion on Enter after deleting the trailing space (no re-insert / duplicate attachment)', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([
+      { value: 'workspace-write', label: 'workspace-write' },
+      { value: 'read-only', label: 'read-only' },
+    ])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    // 从 slash 菜单选中 permission → 文本 "/permission " + 命令附件 + 自动弹出候选
+    fireEvent.change(textarea, { target: { value: '/', selectionStart: 1 } })
+    fireEvent.click(screen.getByRole('button', { name: 'permission' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+
+    // 删掉参数区空格 → "/permission"：slash 菜单不应重新打开（命令已确定），
+    // 参数补全（attachment 路径）保持有效
+    fireEvent.change(textarea, { target: { value: '/permission', selectionStart: 11 } })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+
+    // 回车：应直接应用参数补全，而不是被 slash 菜单抢走重新插入命令
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => {
+      expect(textarea.value).toBe('/permission workspace-write')
+    })
+  })
+
+  it('replaces the command attachment when the same slash command is selected twice', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([{ value: 'workspace-write', label: 'workspace-write' }])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '/', selectionStart: 1 } })
+    fireEvent.click(screen.getByRole('button', { name: 'permission' }))
+    // 再次通过 slash 菜单选择同一命令：附件应被替换而不是追加
+    fireEvent.change(textarea, { target: { value: '/perm', selectionStart: 5 } })
+    fireEvent.click(screen.getByRole('button', { name: 'permission' }))
+
+    // 最终文本只有一份命令文本，且补全只应用一次（无重复附件导致的异常）
+    await waitFor(() => {
+      expect(textarea.value).toBe('/permission ')
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => {
+      expect(textarea.value).toBe('/permission workspace-write')
+    })
+  })
+
+  it('re-schedules argument completions after IME composition ends', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([{ value: 'workspace-write', label: 'workspace-write' }])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    // 中文输入法：组合期间输入 /permission w（change 被 isComposing 跳过）
+    fireEvent.compositionStart(textarea)
+    fireEvent.change(textarea, { target: { value: '/permission ', selectionStart: 12 } })
+    fireEvent.change(textarea, { target: { value: '/permission w', selectionStart: 13 } })
+    expect(completionsMock).not.toHaveBeenCalled()
+
+    // 组合结束：应补发一次调度，参数区自动弹出补全（无需下一次输入/删除）
+    fireEvent.compositionEnd(textarea)
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', 'w')
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+  })
+
   it('keeps Tab as a fallback trigger for argument completions', async () => {
     slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
     completionsMock.mockResolvedValue([{ value: 'workspace-write', label: 'workspace-write' }])
@@ -219,6 +295,29 @@ describe('InputBox slash command selection', () => {
     fireEvent.change(textarea, { target: { value: '/permission w' } })
     textarea.setSelectionRange(textarea.value.length, textarea.value.length)
     fireEvent.keyDown(textarea, { key: 'Tab' })
+
+    await waitFor(() => {
+      expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', 'w')
+      expect(screen.getByRole('button', { name: 'workspace-write' })).toBeTruthy()
+    })
+  })
+
+  it('auto-opens completions when typing the command by hand (no slash menu selection)', async () => {
+    slashCommands = [{ name: 'permission', description: 'Permission presets', source: 'api' }]
+    completionsMock.mockResolvedValue([
+      { value: 'workspace-write', label: 'workspace-write' },
+      { value: 'read-only', label: 'read-only' },
+      { value: 'danger-full-access', label: 'danger-full-access' },
+    ])
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} sessionId="s1" />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    // 手输 /permission + 空格 + w，每次 change 带真实光标位置（用户场景：
+    // 不走 slash 菜单选中，参数区应自动弹出补全）
+    fireEvent.change(textarea, { target: { value: '/permission', selectionStart: 11 } })
+    fireEvent.change(textarea, { target: { value: '/permission ', selectionStart: 12 } })
+    fireEvent.change(textarea, { target: { value: '/permission w', selectionStart: 13 } })
 
     await waitFor(() => {
       expect(completionsMock).toHaveBeenCalledWith('s1', 'permission', 'w')

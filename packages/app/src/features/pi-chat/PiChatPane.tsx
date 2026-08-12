@@ -1374,12 +1374,19 @@ export function PiChatPane({
 
       // 扩展命令（如 /exa /ui-test-*）：真正调用扩展注册的 handler，而不是
       // 当普通消息发给模型（那只会让模型回答一段"这不是命令"的废话）。
+      // 反馈走 pi 原生语义：命令自己的 ctx.ui.notify / 返回值就是结果。
+      // 这里不再前置记录 "Invoking" 日志——自带 notify 的命令（/permission
+      // /exa 等）会因此出现两条重复通知。
       if (registered) {
-        report('ok', `Invoking extension command /${command}${args ? ` ${args}` : ''}`, sid)
         try {
           const result = await invokePiCommand(sid, command, args)
           const summary = typeof result === 'string' && result ? result : ''
-          if (summary) report('ok', summary, sid)
+          if (summary) {
+            report('ok', summary, sid)
+          } else if (themeStore.autoExpandExtensionsOnCommand && !AUTO_EXPAND_EXCLUDED.has(command)) {
+            // 静默命令（无返回也不 notify）：至少把扩展面板带出来看状态变化
+            layoutStore.addExtensionsTab('right')
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           report('error', `/${command} failed: ${message}`, sid)
