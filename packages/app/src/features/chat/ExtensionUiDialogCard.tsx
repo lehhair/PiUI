@@ -301,11 +301,11 @@ function SelectOption({
   const [overflow, setOverflow] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  // 溢出检测：摘要被单行截断时才需要展开入口
+  // 溢出检测：单行（truncate）下长内容水平溢出，需要展开入口
   useEffect(() => {
     const el = textRef.current
     if (!el) return
-    const check = () => setOverflow(el.scrollHeight > el.clientHeight + 1)
+    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1)
     check()
     const ro = new ResizeObserver(check)
     ro.observe(el)
@@ -337,7 +337,7 @@ function SelectOption({
           <span
             ref={textRef}
             title={option}
-            className={`min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed line-clamp-1 ${
+            className={`min-w-0 flex-1 truncate text-[length:var(--fs-sm)] ${
               selected ? 'text-text-100' : 'text-text-300 hover:text-text-100'
             }`}
           >
@@ -351,7 +351,7 @@ function SelectOption({
             onClick={() => setExpanded(prev => !prev)}
             title={expanded ? t('dialog.collapse') : t('dialog.expand')}
             aria-expanded={expanded}
-            className="mt-0.5 shrink-0 rounded p-0.5 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
+            className="self-center shrink-0 rounded p-0.5 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
           >
             {expanded ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
           </button>

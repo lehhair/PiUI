@@ -167,9 +167,9 @@ describe('ExtensionUiDialogHost', () => {
   })
 
   it('expands long select options inline and keeps them selectable', async () => {
-    // jsdom 无布局：mock scrollHeight 使所有文本都"溢出"，触发展开入口
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    // jsdom 无布局：mock scrollWidth 使所有选项文本"水平溢出"，触发展开入口
+    const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
       configurable: true,
       get: () => 200,
     })
@@ -197,10 +197,10 @@ describe('ExtensionUiDialogHost', () => {
         expect.objectContaining({ value: longOption }),
       ))
     } finally {
-      if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      if (originalScrollWidth) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth)
       } else {
-        delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth
       }
     }
   })
