@@ -1011,7 +1011,8 @@ $$`
 
     expect(surface).toHaveAttribute('tabindex', '0')
     expect(sourceButton.className).toContain('text-accent-main-100')
-    expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-0')
+    // waitFor：容忍极端时序下首帧渲染与 mock 生效之间的延迟（CI 偶发 flaky）
+    await waitFor(() => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-0'))
 
     const srcDoc = frame.getAttribute('srcdoc') ?? ''
     const resizeId = JSON.parse(srcDoc.match(/const id=("[^"]+")/)?.[1] ?? 'null') as string | null
