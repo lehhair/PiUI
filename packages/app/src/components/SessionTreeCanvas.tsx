@@ -10,7 +10,7 @@ import {
   useReactFlow,
   type NodeProps,
 } from '@xyflow/react'
-import { Bot, FileText, Focus, GitBranch, Maximize2, Minus, Plus, Search, UserRound, Wrench } from 'lucide-react'
+import { Bot, ChevronDown, ChevronUp, FileText, Focus, GitBranch, Maximize2, Minus, Plus, Search, UserRound, Wrench } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import { IconButton } from './ui/IconButton'
 import {
@@ -122,6 +122,8 @@ function CanvasContent({
 }: Omit<SessionTreeCanvasProps, 'sessionId'>) {
   const { t } = useTranslation('components')
   const [query, setQuery] = useState('')
+  // 当前定位到的匹配序号（-1 = 尚未定位）；query 变化时重置
+  const [matchIndex, setMatchIndex] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
   const [viewportRevision, setViewportRevision] = useState(0)
   const { fitView, zoomIn, zoomOut } = useReactFlow<SessionGraphNode>()
@@ -159,6 +161,21 @@ function CanvasContent({
     onSelectEntry(current.id)
   }, [fitView, nodes, onSelectEntry])
 
+  // 上一个/下一个匹配跳转（循环）：fitView 定位 + 选中该节点
+  const jumpToMatch = useCallback(
+    (delta: 1 | -1) => {
+      if (matchedNodes.length === 0) return
+      const next = (matchIndex + delta + matchedNodes.length) % matchedNodes.length
+      setMatchIndex(next)
+      const target = matchedNodes[next]
+      if (target) {
+        void fitView({ nodes: [target], padding: 1, minZoom: 0.9, maxZoom: 0.9, duration: 200 })
+        onSelectEntry(target.id)
+      }
+    },
+    [fitView, matchedNodes, matchIndex, onSelectEntry],
+  )
+
   useEffect(() => {
     if (nodes.length === 0 || viewportRevision === 0) return
     const frame = requestAnimationFrame(() => {
@@ -192,22 +209,53 @@ function CanvasContent({
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 transition-colors group-focus-within:text-accent-main-100" aria-hidden="true" />
           <input
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={event => {
+              setQuery(event.target.value)
+              setMatchIndex(-1)
+            }}
             onKeyDown={event => {
-              if (event.key === 'Escape') setQuery('')
-              if (event.key === 'Enter' && matchedNodes[0]) {
+              if (event.key === 'Escape') {
+                setQuery('')
+                setMatchIndex(-1)
+              }
+              // Enter 下一个 / Shift+Enter 上一个（循环）
+              if (event.key === 'Enter') {
                 event.preventDefault()
-                void fitView({ nodes: [matchedNodes[0]], padding: 1, minZoom: 0.9, maxZoom: 0.9, duration: 200 })
-                onSelectEntry(matchedNodes[0].id)
+                jumpToMatch(event.shiftKey ? -1 : 1)
               }
             }}
             aria-label={t('sessionTree.search')}
             placeholder={t('sessionTree.searchPlaceholder')}
             autoComplete="off"
-            className="w-full rounded-lg border border-transparent bg-bg-200/40 py-1 pl-[30px] pr-12 text-[length:var(--fs-xs)] text-text-100 transition-all placeholder:text-text-400/70 hover:bg-bg-200/60 focus:border-border-200 focus:bg-bg-000 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-200 focus-visible:outline-none"
+            className="w-full rounded-lg border border-transparent bg-bg-200/40 py-1 pl-[30px] pr-[88px] text-[length:var(--fs-xs)] text-text-100 transition-all placeholder:text-text-400/70 hover:bg-bg-200/60 focus:border-border-200 focus:bg-bg-000 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-200 focus-visible:outline-none"
           />
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 tabular-nums text-[length:var(--fs-xs)] text-text-500" aria-live="polite">
-            {normalizedQuery ? `${matchedNodes.length}/${nodes.length}` : nodes.length}
+          <span
+            className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5"
+            aria-live="polite"
+          >
+            <span className="min-w-[2.5rem] px-1 text-right tabular-nums text-[length:var(--fs-xs)] text-text-500">
+              {normalizedQuery ? `${matchIndex + 1}/${matchedNodes.length}` : nodes.length}
+            </span>
+            <button
+              type="button"
+              aria-label={t('sessionTree.searchPrevious')}
+              title={t('sessionTree.searchPrevious')}
+              disabled={!normalizedQuery || matchedNodes.length === 0}
+              onClick={() => jumpToMatch(-1)}
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-text-400 transition-colors hover:bg-bg-200/50 hover:text-text-100 disabled:pointer-events-none disabled:opacity-35"
+            >
+              <ChevronUp size={13} />
+            </button>
+            <button
+              type="button"
+              aria-label={t('sessionTree.searchNext')}
+              title={t('sessionTree.searchNext')}
+              disabled={!normalizedQuery || matchedNodes.length === 0}
+              onClick={() => jumpToMatch(1)}
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-text-400 transition-colors hover:bg-bg-200/50 hover:text-text-100 disabled:pointer-events-none disabled:opacity-35"
+            >
+              <ChevronDown size={13} />
+            </button>
           </span>
         </div>
         <button

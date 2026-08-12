@@ -158,7 +158,9 @@
       "assistant_aborted": "助手 · 已中止",
       "assistant_empty": "助手 · 无内容",
       "unknown": "会话记录"
-    }
+    },
+    "searchPrevious": "上一个匹配",
+    "searchNext": "下一个匹配"
   },
   "sessionChanges": {
     "loadingChanges": "加载变更中...",

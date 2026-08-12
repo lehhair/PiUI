@@ -158,7 +158,9 @@
       "assistant_aborted": "Assistant · Aborted",
       "assistant_empty": "Assistant · No content",
       "unknown": "Session entry"
-    }
+    },
+    "searchPrevious": "Previous match",
+    "searchNext": "Next match"
   },
   "sessionChanges": {
     "loadingChanges": "Loading changes...",
