@@ -196,6 +196,7 @@ export function ExtensionUiDialogCard({
                 option={option}
                 selected={value === option}
                 disabled={submitting}
+                compact={compact}
                 onSelect={() => setValue(option)}
               />
             ))}
@@ -278,18 +279,21 @@ export function ExtensionUiDialogCard({
 }
 
 /**
- * 单选选项行：摘要默认 2 行截断；内容溢出时提供展开按钮，展开后内联
- * 展示完整文本（限高内部滚动）。展开/收起只影响详情，不改变选中状态。
+ * 单选选项行：按钮永远单行（摘要单行截断），内容溢出时提供展开按钮，
+ * 展开后内联展示完整文本（CodePreview / CodeMirror，限高内部滚动）。
+ * 展开/收起只影响详情，不改变选中状态。
  */
 function SelectOption({
   option,
   selected,
   disabled,
+  compact,
   onSelect,
 }: {
   option: string
   selected: boolean
   disabled: boolean
+  compact: boolean
   onSelect: () => void
 }) {
   const { t } = useTranslation('components')
@@ -297,7 +301,7 @@ function SelectOption({
   const [overflow, setOverflow] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  // 溢出检测：摘要被 line-clamp-2 截断时才需要展开入口
+  // 溢出检测：摘要被单行截断时才需要展开入口
   useEffect(() => {
     const el = textRef.current
     if (!el) return
@@ -333,7 +337,7 @@ function SelectOption({
           <span
             ref={textRef}
             title={option}
-            className={`min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed line-clamp-2 ${
+            className={`min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed line-clamp-1 ${
               selected ? 'text-text-100' : 'text-text-300 hover:text-text-100'
             }`}
           >
@@ -354,8 +358,8 @@ function SelectOption({
         )}
       </div>
       {expanded && (
-        <div className="mx-3 mb-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-200/40 bg-bg-000/40 p-2 text-[length:var(--fs-sm)] leading-relaxed text-text-200 custom-scrollbar">
-          {option}
+        <div className="mx-3 mb-2 overflow-hidden rounded-md border border-border-200/40 bg-bg-100">
+          <CodePreview code={option} language="text" maxHeight={compact ? 100 : 180} />
         </div>
       )}
     </div>
