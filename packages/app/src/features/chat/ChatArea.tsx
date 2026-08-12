@@ -56,6 +56,8 @@ const PROCESS_SHELL_HEADER = 36
 const EMPTY_WORKING_SHELL_EXTRA_DELAY_MS = 500
 const DEFAULT_BOTTOM_SPACER = 256
 const SESSION_CACHE_LIMIT = 16
+/** 加载历史的指示器最小时长（ms）：本地快速加载时避免一闪而过 */
+const MIN_LOADING_MS = 300
 
 /** 内容等价判断：流式 chunk 只换数组引用时，复用旧 Map/Set 引用，
  *  否则 VirtualRow 的 memo 比较（含这三个引用）会被击穿，历史行跟着重渲染。 */
@@ -814,12 +816,19 @@ export const ChatArea = memo(
       const loadMore = useCallback(() => {
         capturePrepend()
         setIsLoadingMore(true); loadingMoreRef.current = true
+        const startedAt = performance.now()
         Promise.resolve()
           .then(() => onLoadMoreRef.current?.())
           .catch(() => {})
           .finally(() => {
-            setIsLoadingMore(false); loadingMoreRef.current = false
+            // 先恢复 prepend 锚点（数据已插入），spinner 再显示最小时长，
+            // 避免本地快速加载时指示器一闪而过、用户看不到加载反馈
             restorePrepend(true)
+            const elapsed = performance.now() - startedAt
+            const delay = Math.max(0, MIN_LOADING_MS - elapsed)
+            window.setTimeout(() => {
+              setIsLoadingMore(false); loadingMoreRef.current = false
+            }, delay)
           })
       }, [capturePrepend, restorePrepend])
 
@@ -1120,10 +1129,13 @@ export const ChatArea = memo(
             onClick={autoHandleInteraction}
           >
             {visibleItems.length > 0 && isLoadingMore && (
-              <div className="flex justify-center py-3" aria-live="polite">
-                <div className="flex items-center gap-2 text-text-400 text-[length:var(--fs-sm)]">
+              <div
+                className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2"
+                aria-live="polite"
+              >
+                <div className="flex items-center gap-2 rounded-full border border-border-200/60 bg-bg-100/95 px-3 py-1.5 shadow-float">
                   <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
-                  {t('chatArea.loadingHistory')}
+                  <span className="text-[length:var(--fs-xs)] text-text-400">{t('chatArea.loadingHistory')}</span>
                 </div>
               </div>
             )}
