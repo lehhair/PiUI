@@ -7,7 +7,7 @@
  * 3. 冷启动 initialOffset 估在底部 + scrollToFn 预写 total height
  * 4. anchorTo/followOnAppend + 贴底时 size change 直接 scrollToEnd
  * 5. unmount takeSnapshot 写回 cache
- * 6. directDomUpdates 滚动写 transform，不触发 React 重渲染
+ * 6. directDomUpdates 直接写行位置，不触发 React 重渲染
  */
 import {
   useRef, useImperativeHandle, forwardRef, memo,
@@ -339,7 +339,7 @@ const VirtualRow = memo(function VirtualRow({
     // 不能只调 virtualizer.measureElement：virtual-core 的 measureElement 在
     // 无 entry（ref 回调 / layout effect 路径）时直接返回 itemSizeCache 缓存
     // 值，根本不读 DOM——delta 恒为 0，resizeItem 永不 notify，行残留旧
-    // transform 与相邻行重叠（内容变化但 RO 未及时触发的窗口期，或 RO
+    // 位置与相邻行重叠（内容变化但 RO 未及时触发的窗口期，或 RO
     // 通知被丢时）。这里读 offsetHeight + resizeItem，让后续行位置按最新
     // 高度重算；高度没变时 resizeItem 内部 delta===0 幂等跳过。
     const el = rowRef.current
@@ -353,7 +353,7 @@ const VirtualRow = memo(function VirtualRow({
       ref={setRef}
       data-timeline-key={item.key}
       data-index={virtualItem.index}
-      style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
+      style={{ position: 'absolute', left: 0, width: '100%' }}
     >
       <div className={`w-full ${maxWidthClass} mx-auto ${paddingClass} ${rowYClass} transition-[max-width] duration-300 ease-in-out`}>
         {item.kind === 'message' ? (
@@ -668,12 +668,9 @@ export const ChatArea = memo(
         followOnAppend: false,
         overscan: 50,
         directDomUpdates: true,
-        directDomUpdatesMode: 'transform',
-        // RO 回调延迟到 rAF：避免与 onChange 的 flushSync 渲染嵌套竞争
-        // （RO 回调同步执行时，测量可能读到 React 重渲染的中间态，或
-        // 嵌套 RO 导致浏览器丢弃通知——流式增长时行高因此失真，后续行
-        // transform 停留旧位置，视觉上重叠/空白）。
-        useAnimationFrameWithResizeObserver: true,
+        // 避免 translate3d 把每一行提升为独立合成层。WebView2 在行高动态
+        // 变化时可能不刷新旧纹理，DOM 几何正确但画面仍会重叠或残留。
+        directDomUpdatesMode: 'position',
         rangeExtractor: (range) => {
           const indexes = defaultRangeExtractor({ ...range, overscan: renderOverscan })
           return mergeVirtualRangeIndexes(indexes, resizePinnedRef.current, hotPinnedRef.current)
