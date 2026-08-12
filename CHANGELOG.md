@@ -4,6 +4,11 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.3] - 2026-08-12
+
+- feat(session-tree): next/previous match navigation for search (fixes #1) (2f25e8c2)
+- docs: fix the release workflow path in CHANGELOG (packages/app/scripts) (6ae5a499)
+
 ## [v0.6.1] - 2026-08-12
 
 - fix(chat): keep the load-history spinner inline in the message flow (f590a246)
