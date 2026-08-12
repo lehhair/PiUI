@@ -4,6 +4,15 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.0] - 2026-08-12
+
+- fix(dialog): compact single-line options via truncate instead of line-clamp (79774031)
+- refactor(dialog): single-line option rows, CodePreview for expanded details (546a3ac4)
+- feat(dialog): expandable long select options + stress-test extension (2c17292f)
+- fix(chat): keep the arg completion selection visible while keyboard-navigating (ec74406c)
+- fix(chat): slash command UX — drop duplicate invoke notice, fix arg completion (ca705659)
+- fix(chat): stop stale extension editor mirror from clobbering composer text (ae2d9bd7)
+
 ## [v0.5.1] - 2026-08-12
 
 - fix(chat): prevent stale virtual row visuals during stream resize (984f28c8)
