@@ -1,6 +1,6 @@
 {
   "name": "@piui/app",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Pi coding agent client UI",
   "license": "GPL-3.0-only",
   "type": "module",

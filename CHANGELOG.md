@@ -4,6 +4,13 @@
 
 发布流程：`node scripts/prepare-release.mjs <version>` 校验 + 升版本号 → 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.1] - 2026-08-12
+
+- fix(chat): keep the load-history spinner inline in the message flow (f590a246)
+- fix(chat): make the load-history indicator always visible with a minimum duration (c726a211)
+- ci: relax test-mock command timeout and validate job budget (3e9a841b)
+- fix(release): restore package-lock versions corrupted by the 0.6.0 bump (d906f084)
+
 ## [v0.6.0] - 2026-08-12
 
 - fix(dialog): compact single-line options via truncate instead of line-clamp (79774031)

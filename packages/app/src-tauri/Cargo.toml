@@ -1,6 +1,6 @@
 [package]
 name = "piui"
-version = "0.6.0"
+version = "0.6.1"
 description = "PiUI desktop client"
 authors = ["PiUI contributors"]
 license = "GPL-3.0-only"
