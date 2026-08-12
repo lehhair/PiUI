@@ -221,7 +221,9 @@
   "dialog": {
     "minimize": "Minimize",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "expand": "Expand details",
+    "collapse": "Collapse details"
   },
   "contentBlock": {
     "fullscreen": "Fullscreen",

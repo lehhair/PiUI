@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ExtensionUiDialogRequest, ExtensionUiDialogResponse } from '@piui/protocol'
-import { QuestionIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from '../../components/Icons'
+import { QuestionIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from '../../components/Icons'
 import { CodePreview } from '../../components/CodePreview'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { respondPiExtensionUi } from '../../pi/controllers/index.js'
@@ -190,36 +190,15 @@ export function ExtensionUiDialogCard({
 
         {request.kind === 'select' && (
           <div className="flex flex-col gap-1">
-            {request.options.map(option => {
-              const selected = value === option
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => setValue(option)}
-                  className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-[length:var(--fs-sm)] transition-colors ${
-                    selected
-                      ? 'border-accent-main-100/60 bg-accent-main-100/10 text-text-100'
-                      : 'border-border-200/60 bg-bg-100 text-text-300 hover:border-border-300 hover:text-text-100'
-                  }`}
-                >
-                  <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center ${
-                      selected ? 'text-accent-secondary-100' : 'text-text-500'
-                    }`}
-                  >
-                    {selected && <CheckIcon size={14} />}
-                  </span>
-                  <span
-                    className="min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed line-clamp-2"
-                    title={option}
-                  >
-                    {option}
-                  </span>
-                </button>
-              )
-            })}
+            {request.options.map((option, index) => (
+              <SelectOption
+                key={`${index}-${option}`}
+                option={option}
+                selected={value === option}
+                disabled={submitting}
+                onSelect={() => setValue(option)}
+              />
+            ))}
           </div>
         )}
 
@@ -294,6 +273,91 @@ export function ExtensionUiDialogCard({
           {submitting ? '…' : request.kind === 'confirm' ? t('common:confirm') : t('common:submit')}
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 单选选项行：摘要默认 2 行截断；内容溢出时提供展开按钮，展开后内联
+ * 展示完整文本（限高内部滚动）。展开/收起只影响详情，不改变选中状态。
+ */
+function SelectOption({
+  option,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  option: string
+  selected: boolean
+  disabled: boolean
+  onSelect: () => void
+}) {
+  const { t } = useTranslation('components')
+  const textRef = useRef<HTMLSpanElement | null>(null)
+  const [overflow, setOverflow] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+
+  // 溢出检测：摘要被 line-clamp-2 截断时才需要展开入口
+  useEffect(() => {
+    const el = textRef.current
+    if (!el) return
+    const check = () => setOverflow(el.scrollHeight > el.clientHeight + 1)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [option])
+
+  return (
+    <div
+      className={`flex flex-col overflow-hidden rounded-md border transition-colors ${
+        selected
+          ? 'border-accent-main-100/60 bg-accent-main-100/10'
+          : 'border-border-200/60 bg-bg-100 hover:border-border-300'
+      }`}
+    >
+      <div className="flex items-start gap-2 px-3 py-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        >
+          <span
+            className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center ${
+              selected ? 'text-accent-secondary-100' : 'text-text-500'
+            }`}
+          >
+            {selected && <CheckIcon size={14} />}
+          </span>
+          <span
+            ref={textRef}
+            title={option}
+            className={`min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed line-clamp-2 ${
+              selected ? 'text-text-100' : 'text-text-300 hover:text-text-100'
+            }`}
+          >
+            {option}
+          </span>
+        </button>
+        {overflow && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setExpanded(prev => !prev)}
+            title={expanded ? t('dialog.collapse') : t('dialog.expand')}
+            aria-expanded={expanded}
+            className="mt-0.5 shrink-0 rounded p-0.5 text-text-400 hover:bg-bg-200 hover:text-text-200 transition-colors"
+          >
+            {expanded ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="mx-3 mb-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-200/40 bg-bg-000/40 p-2 text-[length:var(--fs-sm)] leading-relaxed text-text-200 custom-scrollbar">
+          {option}
+        </div>
+      )}
     </div>
   )
 }

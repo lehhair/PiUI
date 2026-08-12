@@ -166,6 +166,45 @@ describe('ExtensionUiDialogHost', () => {
     expect(screen.queryByText(/^\d+\/\d+$/)).toBeNull()
   })
 
+  it('expands long select options inline and keeps them selectable', async () => {
+    // jsdom 无布局：mock scrollHeight 使所有文本都"溢出"，触发展开入口
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 200,
+    })
+    try {
+      const longOption = 'b'.repeat(500)
+      extensionUiStore.requestOpened(selectRequest({ options: ['a'.repeat(500), longOption] }))
+      render(<ExtensionUiDialogHost sessionId="session-1" />)
+
+      // 溢出选项都有展开按钮；展开前完整文本只存在于摘要节点
+      const expandButtons = screen.getAllByTitle(/展开详情|Expand details/i)
+      expect(expandButtons.length).toBe(2)
+      expect(screen.getAllByText(longOption)).toHaveLength(1)
+
+      // 展开：完整文本内联出现（摘要 + 展开区 = 2 处），按钮变为收起
+      fireEvent.click(expandButtons[1]!)
+      expect(screen.getAllByText(longOption)).toHaveLength(2)
+      expect(screen.getAllByTitle(/收起详情|Collapse details/i)).toHaveLength(1)
+
+      // 展开状态下点击选项仍正常选中并提交
+      fireEvent.click(screen.getByTitle(longOption))
+      fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+      await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-1',
+        expect.objectContaining({ value: longOption }),
+      ))
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight
+      }
+    }
+  })
+
   it('clears the settled request from the store after submit', async () => {
     extensionUiStore.requestOpened(selectRequest())
     render(<ExtensionUiDialogHost sessionId="session-1" />)
