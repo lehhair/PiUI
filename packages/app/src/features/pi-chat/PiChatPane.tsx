@@ -57,7 +57,7 @@ import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
-import { extensionUiStore } from '../../pi/extensionUiStore'
+import { extensionUiStore, getEditorTextSource } from '../../pi/extensionUiStore'
 import { paneControllerStore } from '../../store/paneControllerStore'
 import { commandFeedbackStore, type CommandFeedbackStatus } from '../../pi/commandFeedbackStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
@@ -841,11 +841,26 @@ export function PiChatPane({
     () => (sessionId ? extensionUiStore.getSnapshot().sessions[sessionId]?.state : undefined),
     () => undefined,
   )
+  // 输入框的本地最新文本（onTextChange 每次变化都记录）。桥接层用它与
+  // worker 镜像比较，防止滞后的镜像把用户正在编辑的内容打回旧值。
+  const localComposerTextRef = useRef<string | undefined>(undefined)
+  const composerMountedRef = useRef(false)
   useEffect(() => {
     if (!extensionState || extensionState.editorText === lastEditorTextRef.current) return
+    const source = getEditorTextSource(sessionId)
+    // 镜像回填只服务于恢复场景（页面刷新/重连后输入框为空）。它来自
+    // state 刷新——本地 → worker 有 500ms 防抖同步窗口，镜像必然滞后：
+    // 只要用户在本挂载里输入/删除过内容（localComposerTextRef 已记录且
+    // 与镜像不同），就跳过回填，否则输入框会被反复打回旧文本。
+    // 扩展真实发出的 editor set/paste 事件（'extension'）不受此限。
+    const localText = localComposerTextRef.current
+    if (source === 'mirror' && localText !== undefined && localText !== extensionState.editorText) {
+      lastEditorTextRef.current = localText
+      return
+    }
     lastEditorTextRef.current = extensionState.editorText
     inputBoxRef.current?.setEditorText(extensionState.editorText)
-  }, [extensionState])
+  }, [extensionState, sessionId])
 
   const editorSyncTimerRef = useRef<number | null>(null)
   const refreshTimerRefs = useRef(new Set<number>())
@@ -872,6 +887,13 @@ export function PiChatPane({
 
   const handleTextChange = useCallback(
     (text: string) => {
+      // 忽略 InputBox 挂载时的回显（首次渲染触发 onTextChange('')，不是
+      // 用户输入）；从真实输入开始记录本地最新文本，供镜像回填判断。
+      if (!composerMountedRef.current) {
+        composerMountedRef.current = true
+        if (text === '') return
+      }
+      localComposerTextRef.current = text
       // 会话已不可用时别再往服务端同步编辑器状态（每敲一个字一个 404）
       if (!sessionId || sessionUnavailableRef.current) return
       if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
