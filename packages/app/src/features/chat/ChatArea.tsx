@@ -1129,13 +1129,10 @@ export const ChatArea = memo(
             onClick={autoHandleInteraction}
           >
             {visibleItems.length > 0 && isLoadingMore && (
-              <div
-                className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 rounded-full border border-border-200/60 bg-bg-100/95 px-3 py-1.5 shadow-float">
+              <div className="flex justify-center py-3" aria-live="polite">
+                <div className="flex items-center gap-2 text-text-400 text-[length:var(--fs-sm)]">
                   <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
-                  <span className="text-[length:var(--fs-xs)] text-text-400">{t('chatArea.loadingHistory')}</span>
+                  {t('chatArea.loadingHistory')}
                 </div>
               </div>
             )}
