@@ -22,7 +22,9 @@ import { perfMark } from '../utils/perf'
 import { marked } from 'marked'
 import type { Tokens } from 'marked'
 import { isMarkupPreviewLanguage, projectMarkdownStream, stripLeadingHtmlComments, type MarkdownStreamProjection } from './markdownStream'
-import { renderMarkdownToHtml } from './markdownHtmlRenderer'
+import { renderMarkdownToHtml, renderKatexHtml } from './markdownHtmlRenderer'
+import { getFootnoteId, scanTextSegments } from './markdownSegments'
+import type { MarkdownSegment } from './markdownSegments'
 import {
   buildHtmlSandboxThemeCss,
   createHtmlSandboxMeasureScript,
@@ -680,7 +682,7 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
     if (item.type === 'text') {
       const nested = item.tokens as unknown[] | undefined
       if (nested?.length) return <Fragment key={index}>{renderInlineTokensToReact(nested, _isReasoning)}</Fragment>
-      return renderTextExtensionsToReact(String(item.text ?? ''), `text-${index}`, _isReasoning)
+      return renderSegmentsToReact(scanTextSegments(String(item.text ?? '')), `text-${index}`, _isReasoning)
     }
     if (item.type === 'strong') return <strong key={index} className={_isReasoning ? 'font-semibold text-text-300' : 'font-semibold text-text-100'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</strong>
     if (item.type === 'em') return <em key={index} className={_isReasoning ? 'italic text-text-300' : 'italic text-text-200'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</em>
@@ -712,129 +714,48 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
       return <img key={index} src={src} alt={String(item.text ?? '')} width={dimensions?.width} height={dimensions?.height} loading="eager" decoding="async" className="block max-w-full rounded-md" />
     }
     if (item.type === 'br') return <br key={index} />
+    if (item.type === 'math') {
+      const text = String(item.text ?? '')
+      const display = item.display === true
+      const fallback = display ? `\\[${text}\\]` : `\\(${text}\\)`
+      return (
+        <span key={index} dangerouslySetInnerHTML={{ __html: renderKatexHtml(text, display, fallback) }} />
+      )
+    }
     return <span key={index}>{String(item.text ?? item.raw ?? '')}</span>
   })
 }
 
-function isEscapedTextAt(text: string, index: number): boolean {
-  let slashCount = 0
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashCount += 1
-  return slashCount % 2 === 1
-}
-
-function isAsciiDigitAtText(text: string, index: number): boolean {
-  const char = text[index]
-  return char !== undefined && char >= '0' && char <= '9'
-}
-
-function findUnescapedText(text: string, marker: string, start: number): number {
-  let cursor = start
-  while (cursor < text.length) {
-    const index = text.indexOf(marker, cursor)
-    if (index === -1) return -1
-    if (!isEscapedTextAt(text, index)) return index
-    cursor = index + marker.length
-  }
-  return -1
-}
-
-function getFootnoteIdInline(label: string): string {
-  const normalized = label.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-  return normalized || 'note'
-}
-
-function renderTextExtensionsToReact(text: string, keyPrefix: string, isReasoning: boolean): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let cursor = 0
-  let lastIndex = 0
-
-  const pushText = (end: number) => {
-    if (end > lastIndex) parts.push(text.slice(lastIndex, end))
-  }
-
-  while (cursor < text.length) {
-    if (isEscapedTextAt(text, cursor)) {
-      cursor += 1
-      continue
-    }
-
-    if (text.startsWith('[^', cursor)) {
-      const close = text.indexOf(']', cursor + 2)
-      const label = close === -1 ? '' : text.slice(cursor + 2, close)
-      if (label && !/\s/.test(label)) {
-        const id = getFootnoteIdInline(label)
+/** 把统一扫描出的 segments 渲染成 React 节点（表格单元格路径）。 */
+function renderSegmentsToReact(segments: MarkdownSegment[], keyPrefix: string, isReasoning: boolean): React.ReactNode {
+  return segments.map((segment, index) => {
+    const key = `${keyPrefix}-${index}`
+    switch (segment.type) {
+      case 'text':
+        return <Fragment key={key}>{segment.text}</Fragment>
+      case 'math':
+        return <span key={key} dangerouslySetInnerHTML={{ __html: renderKatexHtml(segment.latex, segment.display) }} />
+      case 'mark': {
+        const className = isReasoning
+          ? 'rounded-sm bg-bg-300/70 px-0.5 text-text-300'
+          : 'rounded-sm bg-accent-main-100/15 px-0.5 text-text-100'
+        return <mark key={key} className={className}>{renderSegmentsToReact(segment.children, key, isReasoning)}</mark>
+      }
+      case 'sup':
+        return <sup key={key}>{renderSegmentsToReact(segment.children, key, isReasoning)}</sup>
+      case 'sub':
+        return <sub key={key}>{renderSegmentsToReact(segment.children, key, isReasoning)}</sub>
+      case 'footnoteRef': {
+        const id = getFootnoteId(segment.label)
         const className = isReasoning ? 'align-super text-[0.75em] text-accent-main-200/80' : 'align-super text-[0.75em] text-accent-main-100'
-        pushText(cursor)
-        parts.push(
-          <sup key={`${keyPrefix}-fn-${cursor}`} id={`fnref-${id}`} className={className}>
-            <a href={`#fn-${id}`} className="font-medium underline underline-offset-2">
-              {label}
-            </a>
-          </sup>,
+        return (
+          <sup key={key} id={`fnref-${id}`} className={className}>
+            <a href={`#fn-${id}`} className="font-medium underline underline-offset-2">{segment.label}</a>
+          </sup>
         )
-        cursor = close + 1
-        lastIndex = cursor
-        continue
       }
     }
-
-    if (text.startsWith('==', cursor)) {
-      const close = findUnescapedText(text, '==', cursor + 2)
-      const content = close === -1 ? '' : text.slice(cursor + 2, close)
-      if (content && !content.includes('\n')) {
-        const className = isReasoning ? 'rounded-sm bg-bg-300/70 px-0.5 text-text-300' : 'rounded-sm bg-accent-main-100/15 px-0.5 text-text-100'
-        pushText(cursor)
-        parts.push(
-          <mark key={`${keyPrefix}-mark-${cursor}`} className={className}>
-            {renderTextExtensionsToReact(content, `${keyPrefix}-mark-${cursor}`, isReasoning)}
-          </mark>,
-        )
-        cursor = close + 2
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    if (text[cursor] === '^') {
-      const close = findUnescapedText(text, '^', cursor + 1)
-      const content = close === -1 ? '' : text.slice(cursor + 1, close)
-      if (content && !/\s/.test(content)) {
-        pushText(cursor)
-        parts.push(<sup key={`${keyPrefix}-sup-${cursor}`}>{renderTextExtensionsToReact(content, `${keyPrefix}-sup-${cursor}`, isReasoning)}</sup>)
-        cursor = close + 1
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    if (text[cursor] === '~' && text[cursor + 1] !== '~') {
-      const close = findUnescapedText(text, '~', cursor + 1)
-      const content = close === -1 ? '' : text.slice(cursor + 1, close)
-      // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-      // 两侧紧邻数字视为范围/约数写法（1~2、3~5个、版本1.0~2.0），保持字面。
-      if (
-        content &&
-        !/\s/.test(content) &&
-        !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) &&
-        content.length <= 5 &&
-        !isAsciiDigitAtText(text, cursor - 1) &&
-        !isAsciiDigitAtText(text, close + 1)
-      ) {
-        pushText(cursor)
-        parts.push(<sub key={`${keyPrefix}-sub-${cursor}`}>{renderTextExtensionsToReact(content, `${keyPrefix}-sub-${cursor}`, isReasoning)}</sub>)
-        cursor = close + 1
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    cursor += 1
-  }
-
-  pushText(text.length)
-  if (parts.length === 0) return text
-  if (parts.length === 1) return parts[0]
-  return parts
+  })
 }
 
 function isUnsafeHrefInline(href?: string): boolean {

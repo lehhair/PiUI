@@ -4,6 +4,8 @@ import DOMPurify from 'dompurify'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { inferImageDimensions } from './imageDimensions'
+import { MATH_DELIMITERS, getFootnoteId, isEscapedAt, scanTextSegments } from './markdownSegments'
+import type { MarkdownSegment } from './markdownSegments'
 
 const LOCAL_FILE_LINK_PREFIX = '#piui-local-file:'
 
@@ -65,17 +67,6 @@ function isUnsafeImageSrc(src?: string): boolean {
   return isUnsafeHref(src)
 }
 
-function isEscapedAt(text: string, index: number): boolean {
-  let slashCount = 0
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashCount += 1
-  return slashCount % 2 === 1
-}
-
-function isAsciiDigitAt(text: string, index: number): boolean {
-  const char = text[index]
-  return char !== undefined && char >= '0' && char <= '9'
-}
-
 function normalizeAlignedMath(source: string): string {
   return source.replace(/\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}/g, (environment, body: string) => {
     if ((body.match(/&/g)?.length ?? 0) < 2) return environment
@@ -102,6 +93,8 @@ function renderKatexHtml(source: string, displayMode: boolean, fallback?: string
   }
 }
 
+export { renderKatexHtml }
+
 /**
  * \(...\) / \[...\] 是否按 LaTeX 公式处理。
  * 只接受明显的公式内容，避免把转义括号（\(注意\)、\[0\]）误当成数学。
@@ -115,6 +108,29 @@ function looksLikeMath(source: string): boolean {
 // marked v18（CommonMark 0.31+）会把单 ~ 对也切成 del（删除线），而中文对话里 ~ 常用作
 // 范围/约数符（1~2、3~5个、TGP021~024、8.85~9.16），导致 1~2 被误渲染成下标/删除线。
 // 这里只让双 ~~ 生成 del；单 ~ 保留为文本，由下方 subscript 逻辑决定是否按下标渲染。
+// 数学扩展由 MATH_DELIMITERS 清单（markdownSegments.ts）驱动生成。
+// 块级（$$、\\[）在 lheading/paragraph 之前整体捕获，避免公式内容被块级规则
+// （如 Setext 标题的 `=` 行、列表、引用）拆散；行内（\\(、\\[）在 escape/em 之前拦截。
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const MARKED_BLOCK_MATH_DELIMITERS = MATH_DELIMITERS.filter(delimiter => delimiter.block)
+// 行内数学由 marked 扩展在 emStrong / escape 之前拦截，数学内容不会被 `_`/`*`/`\` 拆散。
+// 覆盖 $、$$、\(、\[ 四种 delimiter。
+const MARKED_INLINE_MATH_DELIMITERS = MATH_DELIMITERS.filter(
+  delimiter => delimiter.left === '$' || delimiter.left === '$$' || delimiter.left.startsWith('\\'),
+)
+// 正则预编译：block/inline tokenizer 每次调用不再构造 RegExp
+const BLOCK_MATH_PATTERNS = MARKED_BLOCK_MATH_DELIMITERS.map(delimiter => ({
+  display: delimiter.display,
+  pattern: new RegExp(`^${escapeRegex(delimiter.left)}([\\s\\S]*?)${escapeRegex(delimiter.right)}`),
+}))
+const INLINE_MATH_PATTERNS = MARKED_INLINE_MATH_DELIMITERS.map(delimiter => ({
+  display: delimiter.display,
+  // `$` / `$$` 保持宽松（货币、简写也能渲染，与原 text 层行为一致）；
+  // `\(` / `\[` 需要明显的公式内容（避免转义括号被误判）。
+  gate: delimiter.left.startsWith('\\'),
+  pattern: new RegExp(`^${escapeRegex(delimiter.left)}${delimiter.left === '$' ? '(?!\\$)' : ''}(${delimiter.display ? '[\\s\\S]*?' : '[^\\n]*?'})${escapeRegex(delimiter.right)}`),
+}))
+
 marked.use({
   tokenizer: {
     del(src: string) {
@@ -130,23 +146,53 @@ marked.use({
   },
   extensions: [
     {
+      name: 'displayMath',
+      level: 'block',
+      tokenizer(src: string) {
+        for (const { display, pattern } of BLOCK_MATH_PATTERNS) {
+          const match = pattern.exec(src)
+          if (match?.[1] && looksLikeMath(match[1])) {
+            return { type: 'displayMath', raw: match[0], text: match[1], display }
+          }
+        }
+        return undefined
+      },
+      renderer(token: Tokens.Generic) {
+        const text = String(token.text ?? '')
+        return renderKatexHtml(text, true, `\\[${text}\\]`)
+      },
+    },
+    {
       name: 'math',
       level: 'inline',
       start(src: string) {
-        const inline = src.indexOf('\\(')
-        const display = src.indexOf('\\[')
-        if (inline === -1) return display
-        if (display === -1) return inline
-        return Math.min(inline, display)
+        let index = -1
+        for (const delimiter of MARKED_INLINE_MATH_DELIMITERS) {
+          let found = src.indexOf(delimiter.left)
+          if (delimiter.left === '$$') {
+            // `$$` 必须成对闭合才作为数学起点；无闭合时跳过（否则第二个 `$` 会被 `$` 项误用）
+            while (found !== -1) {
+              const escaped = isEscapedAt(src, found)
+              const hasClose = src.indexOf('$$', found + 2) !== -1
+              if (!escaped && hasClose) break
+              found = src.indexOf('$$', found + 2)
+            }
+          } else if (delimiter.left === '$') {
+            // 转义美元（\$）与 `$$` 的成员（前/后紧跟 `$`）不作为数学起点
+            while (found !== -1 && (isEscapedAt(src, found) || src[found - 1] === '$' || src[found + 1] === '$')) {
+              found = src.indexOf('$', found + 1)
+            }
+          }
+          if (found !== -1 && (index === -1 || found < index)) index = found
+        }
+        return index
       },
       tokenizer(src: string) {
-        const inlineMatch = /^\\\(([\s\S]*?)\\\)/.exec(src)
-        if (inlineMatch?.[1] && !inlineMatch[1].includes('\n') && looksLikeMath(inlineMatch[1])) {
-          return { type: 'math', raw: inlineMatch[0], text: inlineMatch[1], display: false }
-        }
-        const displayMatch = /^\\\[([\s\S]*?)\\\]/.exec(src)
-        if (displayMatch?.[1] && looksLikeMath(displayMatch[1])) {
-          return { type: 'math', raw: displayMatch[0], text: displayMatch[1], display: true }
+        for (const { display, gate, pattern } of INLINE_MATH_PATTERNS) {
+          const match = pattern.exec(src)
+          if (match?.[1] && (!gate || looksLikeMath(match[1]))) {
+            return { type: 'math', raw: match[0], text: match[1], display }
+          }
         }
         return undefined
       },
@@ -159,22 +205,6 @@ marked.use({
   ],
 })
 
-function getFootnoteId(label: string): string {
-  const normalized = label.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-  return normalized || 'note'
-}
-
-function findUnescaped(text: string, marker: string, start: number): number {
-  let cursor = start
-  while (cursor < text.length) {
-    const index = text.indexOf(marker, cursor)
-    if (index === -1) return -1
-    if (!isEscapedAt(text, index)) return index
-    cursor = index + marker.length
-  }
-  return -1
-}
-
 function renderFootnoteReferenceHtml(label: string, isReasoning: boolean): string {
   const id = getFootnoteId(label)
   const className = isReasoning
@@ -183,136 +213,30 @@ function renderFootnoteReferenceHtml(label: string, isReasoning: boolean): strin
   return `<sup id="fnref-${escapeAttribute(id)}" class="${className}"><a href="#fn-${escapeAttribute(id)}" class="font-medium underline underline-offset-2">${escapeHtml(label)}</a></sup>`
 }
 
-function renderTextExtensionsHtml(text: string, isReasoning: boolean): string {
-  const chunks: string[] = []
-  let cursor = 0
-  let lastIndex = 0
-
-  const pushText = (end: number) => {
-    if (end > lastIndex) chunks.push(escapeHtml(text.slice(lastIndex, end)))
-  }
-
-  while (cursor < text.length) {
-    if (isEscapedAt(text, cursor)) {
-      cursor += 1
-      continue
-    }
-
-    if (text.startsWith('[^', cursor)) {
-      const close = text.indexOf(']', cursor + 2)
-      const label = close === -1 ? '' : text.slice(cursor + 2, close)
-      if (label && !/\s/.test(label)) {
-        pushText(cursor)
-        chunks.push(renderFootnoteReferenceHtml(label, isReasoning))
-        cursor = close + 1
-        lastIndex = cursor
-        continue
+/** 把统一扫描出的 segments 渲染成 HTML 字符串（正文路径）。 */
+function renderSegmentsToHtml(segments: MarkdownSegment[], isReasoning: boolean): string {
+  return segments
+    .map(segment => {
+      switch (segment.type) {
+        case 'text':
+          return escapeHtml(segment.text)
+        case 'math':
+          return renderKatexHtml(segment.latex, segment.display)
+        case 'mark': {
+          const className = isReasoning
+            ? 'rounded-sm bg-bg-300/70 px-0.5 text-text-300'
+            : 'rounded-sm bg-accent-main-100/15 px-0.5 text-text-100'
+          return `<mark class="${className}">${renderSegmentsToHtml(segment.children, isReasoning)}</mark>`
+        }
+        case 'sup':
+          return `<sup>${renderSegmentsToHtml(segment.children, isReasoning)}</sup>`
+        case 'sub':
+          return `<sub>${renderSegmentsToHtml(segment.children, isReasoning)}</sub>`
+        case 'footnoteRef':
+          return renderFootnoteReferenceHtml(segment.label, isReasoning)
       }
-    }
-
-    if (text.startsWith('==', cursor)) {
-      const close = findUnescaped(text, '==', cursor + 2)
-      const content = close === -1 ? '' : text.slice(cursor + 2, close)
-      if (content && !content.includes('\n')) {
-        pushText(cursor)
-        const className = isReasoning
-          ? 'rounded-sm bg-bg-300/70 px-0.5 text-text-300'
-          : 'rounded-sm bg-accent-main-100/15 px-0.5 text-text-100'
-        chunks.push(`<mark class="${className}">${renderTextExtensionsHtml(content, isReasoning)}</mark>`)
-        cursor = close + 2
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    if (text[cursor] === '^') {
-      const close = findUnescaped(text, '^', cursor + 1)
-      const content = close === -1 ? '' : text.slice(cursor + 1, close)
-      if (content && !/\s/.test(content)) {
-        pushText(cursor)
-        chunks.push(`<sup>${renderTextExtensionsHtml(content, isReasoning)}</sup>`)
-        cursor = close + 1
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    if (text[cursor] === '~' && text[cursor + 1] !== '~') {
-      const close = findUnescaped(text, '~', cursor + 1)
-      const content = close === -1 ? '' : text.slice(cursor + 1, close)
-      // 仅解析化学式下标（H~2~O、SO~4~）：无空格、无 CJK、长度 ≤ 5。
-      // 两侧紧邻数字视为范围/约数写法（1~2、3~5个、版本1.0~2.0），保持字面。
-      if (
-        content &&
-        !/\s/.test(content) &&
-        !/[\u4e00-\u9fff\u3040-\u30ff]/.test(content) &&
-        content.length <= 5 &&
-        !isAsciiDigitAt(text, cursor - 1) &&
-        !isAsciiDigitAt(text, close + 1)
-      ) {
-        pushText(cursor)
-        chunks.push(`<sub>${renderTextExtensionsHtml(content, isReasoning)}</sub>`)
-        cursor = close + 1
-        lastIndex = cursor
-        continue
-      }
-    }
-
-    cursor += 1
-  }
-
-  pushText(text.length)
-  return chunks.length > 0 ? chunks.join('') : escapeHtml(text)
-}
-
-function renderTextWithMathHtml(text: string, isReasoning: boolean): string {
-  if (!text.includes('$')) return renderTextExtensionsHtml(text, isReasoning)
-
-  const chunks: string[] = []
-  let cursor = 0
-  let lastIndex = 0
-
-  while (cursor < text.length) {
-    if (text[cursor] !== '$' || isEscapedAt(text, cursor)) {
-      cursor += 1
-      continue
-    }
-
-    const display = text[cursor + 1] === '$'
-    const marker = display ? '$$' : '$'
-    const start = cursor + marker.length
-    let end = start
-    let close = -1
-
-    while (end < text.length) {
-      const next = text.indexOf(marker, end)
-      if (next === -1) break
-      if (!isEscapedAt(text, next)) {
-        close = next
-        break
-      }
-      end = next + marker.length
-    }
-
-    if (close === -1) {
-      cursor += marker.length
-      continue
-    }
-
-    const source = text.slice(start, close)
-    if (!display && (!source || source.includes('\n'))) {
-      cursor += marker.length
-      continue
-    }
-
-    if (cursor > lastIndex) chunks.push(renderTextExtensionsHtml(text.slice(lastIndex, cursor), isReasoning))
-    chunks.push(renderKatexHtml(source, display))
-    cursor = close + marker.length
-    lastIndex = cursor
-  }
-
-  if (lastIndex < text.length) chunks.push(renderTextExtensionsHtml(text.slice(lastIndex), isReasoning))
-  return chunks.length > 0 ? chunks.join('') : renderTextExtensionsHtml(text, isReasoning)
+    })
+    .join('')
 }
 
 function getDisplayMathSource(text: string): string | null {
@@ -378,7 +302,7 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderer.text = function (this: any, { text, tokens }: any) {
     if (tokens && tokens.length > 0) return this.parser.parseInline(tokens)
-    return renderTextWithMathHtml(text, isReasoning)
+    return renderSegmentsToHtml(scanTextSegments(text), isReasoning)
   }
 
   renderer.codespan = ({ text }) => {
