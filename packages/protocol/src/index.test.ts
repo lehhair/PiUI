@@ -17,7 +17,7 @@ import {
 describe("protocol foundation", () => {
   it("pins versions", () => {
     assert.equal(PROTOCOL_VERSION, 1)
-    assert.equal(PI_PARITY_SDK_VERSION, "0.84.1")
+    assert.equal(PI_PARITY_SDK_VERSION, "0.84.2")
     assert.equal(EVENT_WS_SUBPROTOCOL, "piui.events.v1")
   })
 
