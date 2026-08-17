@@ -966,17 +966,6 @@ export function PiChatPane({
       }
       void setPiExtensionEditorState(sid, '').catch(() => undefined)
 
-      // pi TUI parity: `!command` runs one-shot bash through the runtime
-      if (text.startsWith('!') && text.length > 1) {
-        const clientId = crypto.randomUUID()
-        bashPendingStore.add(sid, clientId, text.slice(1))
-        void executePiBash(sid, text.slice(1), undefined, clientId).catch(error => {
-          console.error('Failed to run bash command:', error)
-        })
-        scheduleDelayedRefresh(sid)
-        return true
-      }
-
       // Fire and refresh: the prompt command stays open for the whole turn,
       // Fire and refresh: the prompt command stays open for the whole turn,
       // so awaiting it would block the composer until the turn ends. Return
@@ -1122,7 +1111,7 @@ export function PiChatPane({
         return true
       }
 
-      // /bash <command> — 斜杠命令形式的 one-shot bash（pi TUI `!` 前缀的对应物）
+      // /bash <command> — one-shot bash via the slash command path
       if (command === 'bash') {
         if (!args) {
           report('error', 'Usage: /bash <command>', sid)

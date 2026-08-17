@@ -45,7 +45,8 @@ export function getFrontendCommands(): Command[] {
     { name: 'export', description: 'Export session (HTML default, or specify path: .html/.jsonl)', argumentHint: '<path>', source: 'builtin' },
     { name: 'import', description: 'Import and resume a session from a JSONL file', argumentHint: '<path>', source: 'builtin' },
     { name: 'scoped-models', description: 'Enable/disable models for Ctrl+P cycling', argumentHint: '<patterns>', source: 'builtin' },
-    // PiUI 扩展：把 bash 也做成斜杠命令（pi TUI 里 ! 前缀的对应物）
+    // PiUI 扩展：one-shot bash 通过斜杠命令路径执行，不再保留 TUI 的 `!` 前缀
+    // 快捷方式，避免误触与 Markdown 图片语法冲突。
     { name: 'bash', description: 'Run a one-shot bash command', argumentHint: '<command>', source: 'builtin' },
   ]
 }
