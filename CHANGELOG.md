@@ -4,6 +4,12 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.4] - 2026-08-17
+
+- chore(deps): bump @earendil-works/pi-* sdk to 0.84.2 (b314ab60)
+- fix(markdown): robust math parsing and converge renderer rules (449ba05f)
+- test(markdown): tolerate first-frame timing in the touch-controls assertion (ad2267fd)
+
 ## [v0.6.3] - 2026-08-12
 
 - feat(session-tree): next/previous match navigation for search (fixes #1) (2f25e8c2)
