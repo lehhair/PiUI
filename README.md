@@ -192,6 +192,71 @@ npm run install:test-extension
 - `scripts`：开发、构建和测试辅助脚本
 - `docs`：设计和开发文档
 
+## 发版流程
+
+本项目采用线性历史：日常开发在 `dev` 分支，稳定/发布在 `main` 分支，`main` 只用于发版。
+
+### 正常发版
+
+```bash
+# 1. 确保 dev 已包含要发布的改动
+#    需要时先把 dev rebase 到最新的 origin/main
+git switch dev
+git fetch origin
+git rebase origin/main
+
+# 2. 用 fast-forward 把 dev 推进到 main
+git switch main
+git pull --ff-only origin main
+git merge --ff-only dev
+
+# 3. 在 main 上准备发版：升版本号、生成 CHANGELOG
+#    默认会跑 npm run validate；--skip-validate 可跳过完整验证
+node packages/app/scripts/prepare-release.mjs 0.x.x [--skip-validate]
+
+# 4. 提交、打 tag、推送
+git add -A
+git commit -m "chore: release 0.x.x"
+git tag v0.x.x
+git push origin main
+git push origin v0.x.x
+
+# 5. GitHub Actions 自动构建并发布桌面端
+
+# 6. 把 main 同步回 dev
+git switch dev
+git merge --ff-only main
+git push origin dev
+```
+
+发版脚本要求：
+
+- 工作区必须是干净的。
+- 目标版本 tag（如 `v0.6.6`）不能已存在于本地或远程。
+- 普通开发不要制造 `Merge branch 'dev' into main` 这类噪音提交；只有在确实需要保留上游 PR 拓扑时才使用真正的 merge commit。
+
+### 升级 Pi SDK
+
+升级 `@earendil-works/pi-*` SDK 时，不要只改 `package.json`，应使用同步脚本，它会同时更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档基线：
+
+```bash
+# 自动取 npm 最新版
+node scripts/update-pi-sdk.mjs
+
+# 或指定版本
+node scripts/update-pi-sdk.mjs 0.x.x
+
+# 不重新 npm install（依赖已正确安装时使用）
+node scripts/update-pi-sdk.mjs 0.x.x --no-install
+```
+
+然后运行 SDK 一致性校验：
+
+```bash
+npm run conformance:sdk          # 全量验证
+npm run conformance:sdk:check    # 只检查版本一致性
+```
+
 ## 许可证
 
 UI 基线为 GPL-3.0。协议、server 和其他包的许可证以对应目录声明为准。
