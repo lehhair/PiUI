@@ -162,6 +162,11 @@ export async function startPiUiServer(
   }
   app.server.on("error", error => console.error("[piui-server] server error", error))
 
+  // 后台预热共享 catalog worker：health 走只读快照保持毫秒级响应，同时让
+  // 首个 catalog 命令/会话 attach 不必承担 ~300MB SDK 冷启动；预热失败
+  // 不影响服务（真正用到时会重新孵化）。
+  void app.supervisor.getCatalogHandshake().catch(() => undefined)
+
   console.info(`[piui-server] listening http://${config.host}:${config.port}`)
   console.info(`[piui-server] events ws://${config.host}:${config.port}/api/v1/events`)
   console.info(`[piui-server] terminal stream ws://${config.host}:${config.port}/api/v1/host/terminals/:terminalId/stream`)

@@ -440,6 +440,13 @@ pub fn run() {
                 }
             }
         }
+        // 退出兜底：任何走到正常退出的路径（关窗、app.exit、确认弹窗的
+        // window.destroy）都会经过这里——清掉我们启动的服务子进程，防止
+        // 非常规关闭留下孤儿进程长期占用端口。
+        #[cfg(desktop)]
+        if let tauri::RunEvent::Exit = &event {
+            app_handle.state::<ServiceState>().stop_service_on_exit();
+        }
         let _ = (app_handle, event);
     });
 }

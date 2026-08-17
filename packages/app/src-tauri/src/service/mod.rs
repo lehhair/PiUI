@@ -29,6 +29,8 @@ pub struct ServiceState {
     child_pid: AtomicU32,
     started_by_us: AtomicBool,
     allow_close: AtomicBool,
+    /// 用户在关闭确认里选择「保留后台服务」：退出兜底不再强杀子进程。
+    keep_on_exit: AtomicBool,
     lifecycle: tokio::sync::Mutex<()>,
     service_url: Mutex<Option<String>>,
     output: Arc<Mutex<VecDeque<String>>>,
@@ -37,6 +39,30 @@ pub struct ServiceState {
 impl ServiceState {
     pub fn should_confirm_close(&self) -> bool {
         self.started_by_us.load(Ordering::SeqCst) && !self.allow_close.swap(false, Ordering::SeqCst)
+    }
+
+    /// 应用退出前的最后兜底（RunEvent::Exit）：无论前端确认弹窗是否走到，
+    /// 只要服务是我们启动的、且用户没选择「保留后台服务」，就杀掉子进程，
+    /// 防止孤儿进程长期占用端口。强杀（taskkill /F、断电）不会经过这里，
+    /// 那类场景由下次启动时的收养逻辑清场。
+    pub fn stop_service_on_exit(&self) {
+        if self.keep_on_exit.load(Ordering::SeqCst) {
+            return;
+        }
+        if !self.started_by_us.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let pid = self.child_pid.swap(0, Ordering::SeqCst);
+        if pid > 0 {
+            kill_process_tree(pid);
+        }
+        if let Ok(mut child) = self.child.lock() {
+            if let Some(process) = child.as_mut() {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+            *child = None;
+        }
     }
 }
 
@@ -47,6 +73,7 @@ impl Default for ServiceState {
             child_pid: AtomicU32::new(0),
             started_by_us: AtomicBool::new(false),
             allow_close: AtomicBool::new(false),
+            keep_on_exit: AtomicBool::new(false),
             lifecycle: tokio::sync::Mutex::new(()),
             service_url: Mutex::new(None),
             output: Arc::new(Mutex::new(VecDeque::new())),
@@ -164,13 +191,16 @@ fn recent_output(state: &ServiceState) -> String {
 }
 
 async fn service_health(url: &str, token: Option<&str>) -> Result<HealthResponse, HealthFailure> {
+    // 超时别太紧：服务端 health 已改为只读快照（不在请求路径上孵化
+    // worker），正常响应在毫秒级；但系统繁忙/杀软扫描时仍可能抖动，
+    // 过紧的超时会把「活着」的服务误判为不可达，进而触发不必要的清场。
     let client = Client::builder()
-        .connect_timeout(Duration::from_secs(1))
+        .connect_timeout(Duration::from_secs(2))
         .build()
         .map_err(|_| HealthFailure::Unreachable)?;
     let mut request = client
         .get(format!("{}/api/v1/host/health", url.trim_end_matches('/')))
-        .timeout(Duration::from_secs(2));
+        .timeout(Duration::from_secs(5));
     if let Some(token) = token.filter(|value| !value.is_empty()) {
         request = request.bearer_auth(token);
     }
@@ -204,6 +234,11 @@ fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
     format!("http://{host}:{port}")
 }
 
+/// 残留服务收养的宽限探测：进程可能刚从上次启动冷启动（SDK worker 孵化
+/// 要数秒），首轮探测不可达不等于僵死，重试几轮再判死。
+const ADOPT_HEALTH_ATTEMPTS: u32 = 4;
+const ADOPT_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(1_000);
+
 async fn adopt_persisted_service(
     app: &AppHandle,
     state: &ServiceState,
@@ -212,30 +247,50 @@ async fn adopt_persisted_service(
     let Some(marker) = marker::read(app)? else {
         return Ok(false);
     };
-    match service_health(&marker.url, config.initial_token.as_deref()).await {
-        Ok(health) if health.process_id == Some(marker.pid) => {
-            state.child_pid.store(marker.pid, Ordering::SeqCst);
-            state.started_by_us.store(true, Ordering::SeqCst);
-            if let Ok(mut url) = state.service_url.lock() {
-                *url = Some(marker.url);
+    let mut last_failure = HealthFailure::Unreachable;
+    for attempt in 0..ADOPT_HEALTH_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(ADOPT_HEALTH_RETRY_DELAY).await;
+        }
+        match service_health(&marker.url, config.initial_token.as_deref()).await {
+            Ok(health) if health.process_id == Some(marker.pid) => {
+                state.child_pid.store(marker.pid, Ordering::SeqCst);
+                state.started_by_us.store(true, Ordering::SeqCst);
+                if let Ok(mut url) = state.service_url.lock() {
+                    *url = Some(marker.url.clone());
+                }
+                return Ok(true);
             }
-            return Ok(true);
+            // URL 已被别的服务接管：放弃收养，按外部服务处理。
+            Ok(_) => {
+                marker::clear(app);
+                clear_service_ownership(state);
+                return Ok(false);
+            }
+            Err(failure) => last_failure = failure,
         }
-        Ok(_) => {
+        if !is_process_alive(marker.pid) {
+            // 进程已退出：清掉陈旧标记，走全新启动。
+            marker::clear(app);
+            clear_service_ownership(state);
+            return Ok(false);
+        }
+    }
+    match last_failure {
+        // 宽限后仍不可达 = 僵死进程（事件循环卡死/半初始化）。旧逻辑在这里
+        // 直接报错并拒绝启动，导致端口被孤儿进程永久占用、新服务起不来；
+        // 现在强杀残留进程，让启动流程照常孵化新服务。
+        HealthFailure::Unreachable => {
+            log::warn!(
+                "killing retained PiUI service process {} at {}: health stayed unreachable",
+                marker.pid, marker.url
+            );
+            kill_process_tree(marker.pid);
             marker::clear(app);
             clear_service_ownership(state);
             Ok(false)
         }
-        Err(HealthFailure::Unreachable) if !is_process_alive(marker.pid) => {
-            marker::clear(app);
-            clear_service_ownership(state);
-            Ok(false)
-        }
-        Err(HealthFailure::Unreachable) => Err(format!(
-            "A retained PiUI service process {} is still running at {}, but its health endpoint is unreachable",
-            marker.pid, marker.url
-        )),
-        Err(HealthFailure::Rejected(reason)) => Err(format!(
+        HealthFailure::Rejected(reason) => Err(format!(
             "A retained PiUI service at {} rejected its health check ({reason}); check its token and environment before starting another service",
             marker.url
         )),
@@ -291,12 +346,14 @@ async fn start_piui_service_inner(
         }
         let pid = state.child_pid.load(Ordering::SeqCst);
         if pid > 0 && is_process_alive(pid) {
-            return Err(format!(
-                "The PiUI service process {pid} is still running at {url}, but its health endpoint is unreachable"
-            ));
+            // 本次会话内启动的服务僵死（进程在、health 不可达）：旧逻辑直接
+            // 报错并保留僵尸进程占用端口；现在强杀后走下方全新启动。
+            log::warn!("killing hung PiUI service process {pid} at {url}: health unreachable");
+            stop_piui_service_process(app, state);
+        } else {
+            marker::clear(app);
+            clear_service_ownership(state);
         }
-        marker::clear(app);
-        clear_service_ownership(state);
     }
 
     if is_service_running(&config.url, config.initial_token.as_deref()).await {
@@ -481,6 +538,9 @@ pub async fn confirm_close_app(
     state: State<'_, ServiceState>,
     stop_service: bool,
 ) -> Result<(), String> {
+    // 记录用户对后台服务的处置意愿：退出兜底（stop_service_on_exit）据此
+    // 决定是否强杀子进程——选了「保留」就不能杀。
+    state.keep_on_exit.store(!stop_service, Ordering::SeqCst);
     if stop_service {
         let _lifecycle = state.lifecycle.lock().await;
         stop_piui_service_process(window.app_handle(), &state);

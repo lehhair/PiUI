@@ -267,6 +267,7 @@ describe("http api", () => {
     const supervisor = {
       onEvent: () => () => {},
       prewarm: async () => {},
+      peekCatalogHandshake: async () => hello,
       getCatalogHandshake: async () => hello,
       dispose: async () => {},
     } as unknown as import("./pi/supervisor.ts").RuntimeSupervisor
@@ -285,6 +286,7 @@ describe("http api", () => {
     const supervisor = {
       onEvent: () => () => {},
       prewarm: async () => {},
+      peekCatalogHandshake: async () => { throw new Error("worker crashed") },
       getCatalogHandshake: async () => { throw new Error("worker crashed") },
       dispose: async () => {},
     } as unknown as import("./pi/supervisor.ts").RuntimeSupervisor

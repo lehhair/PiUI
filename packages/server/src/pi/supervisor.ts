@@ -90,6 +90,24 @@ export class RuntimeSupervisor {
     return this.ensureRuntimeHost().getHandshake()
   }
 
+  /**
+   * 只读快照握手：worker 未孵化时立即返回 undefined（不触发 ~300MB SDK
+   * 冷启动），已孵化则在预算内等握手。专供 health 等高频只读探测——
+   * 健康检查绝不能阻塞或卡在 worker 启动上，否则会把「活着」的服务
+   * 误判为不可达，触发不必要的清场/重启。
+   */
+  peekCatalogHandshake(timeoutMs = 3_000): Promise<WorkerHello | undefined> {
+    const host = this.runtimeHost
+    if (!host || this.disposed) return Promise.resolve(undefined)
+    return Promise.race([
+      host.getHandshake(),
+      new Promise<undefined>(resolve => {
+        const timer = setTimeout(() => resolve(undefined), timeoutMs)
+        timer.unref?.()
+      }),
+    ]).catch(() => undefined)
+  }
+
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
     const opening = this.performOpen(cwd, sessionFile, signal)
