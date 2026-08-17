@@ -1,6 +1,6 @@
 {
   "name": "piui",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "type": "module",
   "description": "Pi coding agent client — OCUI visual shell + Pi-native runtime",

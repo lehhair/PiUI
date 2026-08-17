@@ -4,6 +4,11 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.7] - 2026-08-17
+
+- chore: sync Pi SDK parity to 0.84.2 (207e2ecc)
+- docs: add release workflow and SDK upgrade guide to README (09d1e456)
+
 ## [v0.6.6] - 2026-08-17
 
 - fix: reclaim stale service process and decouple health from worker spawn (bd6a07a1)
