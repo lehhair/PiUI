@@ -37,14 +37,20 @@ if (isWorker) {
 } else if (isWeb) {
   // Bun builds cannot fork a TypeScript entry, so the server respawns this
   // executable with --pi-worker. Node development keeps using child_process.fork.
-  if (process.versions.bun) process.env.PIUI_WORKER_SELF = "1"
+  // 用显式参数传递 self-spawn 意图，而不是写环境变量——环境变量会顺着
+  // 子进程树泄漏到业务 bash/agent 命令，污染 node 开发模式（spawnSelfWorker
+  // 误判成 node.exe --pi-worker）。
   process.env.PIUI_DRIVER ??= "pi"
   const { parseWebArgs, printWebHelp, startPiUiServer } = await import("./start.ts")
   const { help, ...options } = parseWebArgs(process.argv.slice(3))
   if (help) {
     printWebHelp()
   } else {
-    await startPiUiServer(options)
+    await startPiUiServer({
+      ...options,
+      // 只有 bun 打包的单文件 exe 需要 self-spawn；node 开发模式永远 fork
+      selfSpawnWorker: Boolean(process.versions.bun),
+    })
   }
 } else if (process.versions.bun) {
   await import("./pi-cli-bun-entry.js")

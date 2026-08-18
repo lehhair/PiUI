@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Server as HttpServer } from "node:http"
 import { authTokenPath, ensureCursorSecretEnv, resolveAuthToken } from "./host/auth-token.ts"
+import { RuntimeSupervisor } from "./pi/supervisor.ts"
 import { createAppServer, firstLanAddress } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
 import { attachEventWebSocket } from "./ws.ts"
@@ -24,6 +25,12 @@ export interface ServerConfigOverrides {
   webRoot?: string | null
   authToken?: string
   shutdownTimeoutMs?: number
+  /**
+   * 是否以 self-spawn 方式孵化 worker（bun 打包的单文件 exe 无法 fork，
+   * worker = 同一个 exe 加 --pi-worker 再拉一个自己）。由 bundle-entry
+   * 显式传入，不再用 PIUI_WORKER_SELF 环境变量传递（避免泄漏到子进程）。
+   */
+  selfSpawnWorker?: boolean
 }
 
 export interface RunningPiUiServer {
@@ -115,6 +122,9 @@ export async function startPiUiServer(
     share: { host: config.host, port: config.port },
     staticRoot: config.webRoot ?? undefined,
     onShutdown: () => shutdownHook?.(),
+    supervisor: new RuntimeSupervisor({
+      worker: { selfSpawn: overrides.selfSpawnWorker },
+    }),
   })
   const eventServer = attachEventWebSocket(app.server, {
     eventHub: app.eventHub,

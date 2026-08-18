@@ -15,6 +15,12 @@ export interface WorkerClientOptions {
   execArgv?: string[]
   requestTimeoutMs?: number
   handshakeTimeoutMs?: number
+  /**
+   * 是否以 self-spawn 方式孵化 worker（bun 单文件 exe）。由 bundle-entry
+   * 显式传入；不再读 PIUI_WORKER_SELF 环境变量——那个变量会顺着子进程
+   * 树泄漏到业务命令，污染 node 开发模式。
+   */
+  selfSpawn?: boolean
 }
 
 interface PendingRequest {
@@ -156,11 +162,12 @@ class WorkerHostCore {
 
   private spawn(): ChildProcess {
     // 编译成单文件 exe 时没有独立 node 可 fork——worker 就是同一个 exe
-    // 加 --pi-worker 参数再拉一个自己，IPC 通道不变。
-    // 守卫 process.versions.bun：PIUI_WORKER_SELF 可能从 bun 打包的 server
-    // 顺着子进程链泄漏到 node 开发模式（npm run dev），此时 self-spawn 会
-    // 变成 node.exe --pi-worker（bad option），worker 永远起不来。
-    const child = process.env.PIUI_WORKER_SELF === "1" && process.versions.bun
+    // 加 --pi-worker 参数再拉一个自己，IPC 通道不变。self-spawn 意图由
+    // options.selfSpawn 显式传入（bundle-entry 只在 bun 下置 true），不
+    // 再依赖 PIUI_WORKER_SELF 环境变量——它从 bun server 顺着子进程链
+    // 泄漏到 node 开发模式时，self-spawn 会变成 node.exe --pi-worker
+    // （bad option），worker 永远起不来。
+    const child = this.options.selfSpawn
       ? spawnSelfWorker(this.options.env)
       : fork(this.workerEntry, {
         env: { ...process.env, ...this.options.env },
