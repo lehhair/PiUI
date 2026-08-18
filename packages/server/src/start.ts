@@ -204,6 +204,19 @@ export async function startPiUiServer(
   if (options.installSignalHandlers !== false) {
     process.once("SIGINT", () => { void stop("SIGINT").catch(error => { console.error("[piui-server] shutdown failed", error); process.exitCode = 1 }) })
     process.once("SIGTERM", () => { void stop("SIGTERM").catch(error => { console.error("[piui-server] shutdown failed", error); process.exitCode = 1 }) })
+
+    // 未捕获异常 = 进程级错误，必须退出（Node 事件循环状态已不可信），
+    // 但不能直接崩——否则监听 socket 和活动连接僵死，Windows 上留下孤儿
+    // TCP 实体占住端口（与 taskkill /F 同一类问题）。先走 stop() 优雅
+    // 关闭再退出，日志里带堆栈便于定位死因。
+    process.once("uncaughtException", error => {
+      console.error("[piui-server] uncaught exception; shutting down gracefully:", error)
+      stop().finally(() => process.exit(1))
+    })
+    // 单个请求/事件的异步疏忽不应杀死整个服务：记录并继续。
+    process.on("unhandledRejection", reason => {
+      console.error(`[piui-server] unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`)
+    })
   }
 
   return { server: app.server, config, stop }
