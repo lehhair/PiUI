@@ -4,6 +4,14 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.8] - 2026-08-18
+
+- docs: document app icon generation pipeline (SVG sources + make-android-icons.ps1) (d082d4db)
+- fix(diff-viewer): prefer standard unified patch over line-numbered display diff (ddc9357f)
+- fix(model-selector): use onPointerEnter instead of onMouseMove to avoid touch-scroll jump (a245081d)
+- fix: align PiUI @-mention behavior with pi TUI semantics (decc678a)
+- feat: script-driven Android app icons, mark tightened to 56% (dsh pipeline parity) (f5b7a07d)
+
 ## [v0.6.7] - 2026-08-17
 
 - chore: sync Pi SDK parity to 0.84.2 (207e2ecc)

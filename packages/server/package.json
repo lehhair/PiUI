@@ -1,6 +1,6 @@
 {
   "name": "@piui/server",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "type": "module",
   "bin": {
@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",
-    "@piui/pi-worker": "0.6.7",
-    "@piui/protocol": "0.6.7",
+    "@piui/pi-worker": "0.6.8",
+    "@piui/protocol": "0.6.8",
     "bun-pty": "^0.4.8",
     "chokidar": "^4.0.3",
     "ws": "^8.21.1"
