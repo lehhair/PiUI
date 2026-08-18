@@ -107,10 +107,14 @@ export async function startPiUiServer(
   // 分页光标密钥持久化并注入环境，保证 worker 重启后客户端旧光标仍有效
   // （必须在任何 worker spawn 之前完成）。
   ensureCursorSecretEnv()
+  // POST /api/v1/host/shutdown 的钩子：createAppServer 返回后才定义 stop()，
+  // 用可变引用延迟绑定 —— HTTP 请求只能发生在 listen 之后，届时 stop 已就位。
+  let shutdownHook: (() => Promise<void>) | undefined
   const app = createAppServer({
     authToken,
     share: { host: config.host, port: config.port },
     staticRoot: config.webRoot ?? undefined,
+    onShutdown: () => shutdownHook?.(),
   })
   const eventServer = attachEventWebSocket(app.server, {
     eventHub: app.eventHub,
@@ -195,6 +199,7 @@ export async function startPiUiServer(
       cleanup: () => app.dispose(),
     })
   }
+  shutdownHook = stop
 
   if (options.installSignalHandlers !== false) {
     process.once("SIGINT", () => { void stop("SIGINT").catch(error => { console.error("[piui-server] shutdown failed", error); process.exitCode = 1 }) })

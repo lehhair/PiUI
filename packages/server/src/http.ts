@@ -154,6 +154,13 @@ export interface CreateAppServerOptions {
   share?: { host: string; port: number }
   /** Web client build directory; when it exists the server hosts the SPA. */
   staticRoot?: string
+  /**
+   * Invoked by POST /api/v1/host/shutdown after the response is flushed.
+   * Hosts wire this to their graceful stop (close listeners, drain
+   * connections, dispose workers) so Windows taskkill /F fallback is only a
+   * last resort — a force kill leaves orphaned TCP sockets bound to the port.
+   */
+  onShutdown?: () => void | Promise<void>
 }
 
 export interface AppServer {
@@ -237,6 +244,22 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
           processId: process.pid,
         }
         return sendJson(res, 200, body)
+      }
+
+      if (method === "POST" && p === "/api/v1/host/shutdown") {
+        // 先 flush 响应再触发关闭：进程退出不能让客户端读不到 200。
+        sendJson(res, 200, { ok: true })
+        if (options.onShutdown) {
+          setImmediate(() => {
+            Promise.resolve(options.onShutdown!()).catch(error => {
+              console.error("[piui-server] graceful shutdown hook failed", error)
+              process.kill(process.pid, "SIGTERM")
+            })
+          })
+        } else {
+          setImmediate(() => process.kill(process.pid, "SIGTERM"))
+        }
+        return
       }
 
       if (method === "GET" && p === "/api/v1/host/share") {
@@ -331,6 +354,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 function allowedMethodsForPath(pathname: string): string | undefined {
   if (pathname === "/api/v1/host/health" || pathname === "/api/v1/host/share" ||
     pathname === "/api/v1/host/registry" || pathname === "/api/v1/pi/registry") return "GET"
+  if (pathname === "/api/v1/host/shutdown") return "POST"
   if (/^\/api\/v1\/pi\/commands\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/pi\/sessions\/[^/]+\/commands\/[^/]+$/.test(pathname)) return "POST"
   if (/^\/api\/v1\/host\/commands\/[^/]+$/.test(pathname)) return "GET, POST"

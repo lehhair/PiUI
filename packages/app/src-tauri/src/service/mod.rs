@@ -18,8 +18,8 @@ mod marker;
 mod process;
 
 use process::{
-    is_process_alive, kill_process_tree, prepare_server, resource_root, service_environment,
-    spawn_server,
+    is_process_alive, kill_process_tree, prepare_server, request_graceful_shutdown, resource_root,
+    service_environment, spawn_server,
 };
 
 const DEFAULT_PORT: &str = "8787";
@@ -33,6 +33,8 @@ pub struct ServiceState {
     keep_on_exit: AtomicBool,
     lifecycle: tokio::sync::Mutex<()>,
     service_url: Mutex<Option<String>>,
+    /// 当前托管服务的鉴权 token（优雅关闭请求需要带鉴权头）。
+    service_token: Mutex<Option<String>>,
     output: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -53,8 +55,26 @@ impl ServiceState {
             return;
         }
         let pid = self.child_pid.swap(0, Ordering::SeqCst);
+        let url = self.service_url.lock().ok().and_then(|mut guard| guard.take());
+        let token = self.service_token.lock().ok().and_then(|mut guard| guard.take());
         if pid > 0 {
-            kill_process_tree(pid);
+            if let Some(url) = url {
+                // 同步的 RunEvent::Exit 上下文：block_on 跑一次带短超时的优雅关闭
+                // （请求 3s + 等待退出 ~3s），失败/超时则强杀兜底，不留孤儿端口。
+                let graceful = tauri::async_runtime::block_on(request_graceful_shutdown(&url, token.as_deref()));
+                if graceful {
+                    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                    while std::time::Instant::now() < deadline {
+                        if !is_process_alive(pid) {
+                            break
+                        }
+                        std::thread::sleep(Duration::from_millis(150));
+                    }
+                }
+            }
+            if is_process_alive(pid) {
+                kill_process_tree(pid);
+            }
         }
         if let Ok(mut child) = self.child.lock() {
             if let Some(process) = child.as_mut() {
@@ -76,6 +96,7 @@ impl Default for ServiceState {
             keep_on_exit: AtomicBool::new(false),
             lifecycle: tokio::sync::Mutex::new(()),
             service_url: Mutex::new(None),
+            service_token: Mutex::new(None),
             output: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
@@ -259,6 +280,9 @@ async fn adopt_persisted_service(
                 if let Ok(mut url) = state.service_url.lock() {
                     *url = Some(marker.url.clone());
                 }
+                if let Ok(mut token) = state.service_token.lock() {
+                    *token = config.initial_token.clone();
+                }
                 return Ok(true);
             }
             // URL 已被别的服务接管：放弃收养，按外部服务处理。
@@ -285,7 +309,18 @@ async fn adopt_persisted_service(
                 "killing retained PiUI service process {} at {}: health stayed unreachable",
                 marker.pid, marker.url
             );
-            kill_process_tree(marker.pid);
+            // 优雅优先：先请求 HTTP 关闭，等进程退出，超时才强杀。
+            // （保留进程的 token 应与当前配置一致 —— 都是同一个 auth-token 文件）
+            let _ = request_graceful_shutdown(&marker.url, config.initial_token.as_deref()).await;
+            for _ in 0..20 {
+                if !is_process_alive(marker.pid) {
+                    break
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            if is_process_alive(marker.pid) {
+                kill_process_tree(marker.pid);
+            }
             marker::clear(app);
             clear_service_ownership(state);
             Ok(false)
@@ -349,7 +384,7 @@ async fn start_piui_service_inner(
             // 本次会话内启动的服务僵死（进程在、health 不可达）：旧逻辑直接
             // 报错并保留僵尸进程占用端口；现在强杀后走下方全新启动。
             log::warn!("killing hung PiUI service process {pid} at {url}: health unreachable");
-            stop_piui_service_process(app, state);
+            stop_piui_service_process(app, state).await;
         } else {
             marker::clear(app);
             clear_service_ownership(state);
@@ -390,8 +425,12 @@ async fn start_piui_service_inner(
         .service_url
         .lock()
         .map_err(|error| error.to_string())? = Some(config.url.clone());
+    *state
+        .service_token
+        .lock()
+        .map_err(|error| error.to_string())? = config.initial_token.clone();
     if let Err(error) = marker::persist(app, pid, &config.url) {
-        stop_piui_service_process(app, state);
+        stop_piui_service_process(app, state).await;
         return Err(format!("failed to persist PiUI service ownership: {error}"));
     }
 
@@ -430,22 +469,46 @@ async fn start_piui_service_inner(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    stop_piui_service_process(app, state);
+    stop_piui_service_process(app, state).await;
     Err(format!(
         "PiUI server started but health check did not pass.{}",
         recent_output(state)
     ))
 }
 
-fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
+/// 优雅停止托管的服务进程：先请求 HTTP 优雅关闭并等进程退出，
+/// 超时（进程仍活着）才退回 taskkill /F 强杀兜底。
+async fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
     let pid = state.child_pid.swap(0, Ordering::SeqCst);
     state.started_by_us.store(false, Ordering::SeqCst);
     marker::clear(app);
-    if let Ok(mut url) = state.service_url.lock() {
-        *url = None;
-    }
+    let url = state
+        .service_url
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take());
+    let token = state
+        .service_token
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take());
     if pid > 0 {
-        kill_process_tree(pid);
+        if let Some(url) = url {
+            // 1. 先触发服务端优雅关闭（关监听、排空连接、dispose worker）
+            let _ = request_graceful_shutdown(&url, token.as_deref()).await;
+            // 2. 等进程自己退出（最多 ~4s）
+            for _ in 0..20 {
+                if !is_process_alive(pid) {
+                    break
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+        // 3. 兜底：优雅关闭失败/超时才强杀进程树
+        if is_process_alive(pid) {
+            log::warn!("graceful shutdown of PiUI service {pid} did not complete; force killing");
+            kill_process_tree(pid);
+        }
     }
     if let Ok(mut child) = state.child.lock() {
         if let Some(process) = child.as_mut() {
@@ -461,6 +524,9 @@ fn clear_service_ownership(state: &ServiceState) {
     state.started_by_us.store(false, Ordering::SeqCst);
     if let Ok(mut url) = state.service_url.lock() {
         *url = None;
+    }
+    if let Ok(mut token) = state.service_token.lock() {
+        *token = None;
     }
     if let Ok(mut child) = state.child.lock() {
         let exited = child
@@ -480,7 +546,7 @@ pub async fn stop_piui_service(
     state: State<'_, ServiceState>,
 ) -> Result<(), String> {
     let _lifecycle = state.lifecycle.lock().await;
-    stop_piui_service_process(&app, &state);
+    stop_piui_service_process(&app, &state).await;
     Ok(())
 }
 
@@ -491,7 +557,7 @@ pub async fn restart_piui_service(
     env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
     let _lifecycle = state.lifecycle.lock().await;
-    stop_piui_service_process(&app, &state);
+    stop_piui_service_process(&app, &state).await;
     start_piui_service_inner(&app, &state, env_vars).await
 }
 
@@ -543,7 +609,7 @@ pub async fn confirm_close_app(
     state.keep_on_exit.store(!stop_service, Ordering::SeqCst);
     if stop_service {
         let _lifecycle = state.lifecycle.lock().await;
-        stop_piui_service_process(window.app_handle(), &state);
+        stop_piui_service_process(window.app_handle(), &state).await;
     }
     state.allow_close.store(true, Ordering::SeqCst);
     window.destroy().map_err(|error| error.to_string())

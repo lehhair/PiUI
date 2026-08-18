@@ -6,6 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 
 use tauri::{AppHandle, Manager};
@@ -152,6 +153,26 @@ pub(super) fn kill_process_tree(pid: u32) {
         .stderr(Stdio::null())
         .creation_flags(0x08000000);
     let _ = command.status();
+}
+
+/// 请求服务端优雅关闭（POST /api/v1/host/shutdown，带鉴权）。
+///
+/// Windows 没有 SIGTERM：taskkill /F 直接 TerminateProcess，server 的
+/// SIGINT/SIGTERM handler 永远不会被调用，监听 socket 和活动连接瞬间僵死，
+/// 留下孤儿 TCP 实体占用端口。必须先走 HTTP 优雅关闭（等 stop() 关监听、
+/// 排空连接、dispose worker），超时才允许强杀兜底。
+pub(super) async fn request_graceful_shutdown(url: &str, token: Option<&str>) -> bool {
+    let client = reqwest::Client::new();
+    let mut request = client
+        .post(format!("{}/api/v1/host/shutdown", url.trim_end_matches('/')))
+        .timeout(Duration::from_secs(3));
+    if let Some(token) = token.filter(|value| !value.is_empty()) {
+        request = request.bearer_auth(token);
+    }
+    match request.send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
 }
 
 #[cfg(target_os = "windows")]
