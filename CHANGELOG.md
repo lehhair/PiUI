@@ -4,6 +4,11 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.10] - 2026-08-18
+
+- fix(worker): never kill busy workers; bounded graceful shutdown (7239e360)
+- fix(server): never die abruptly — uncaughtException now shuts down gracefully (97cff143)
+
 ## [v0.6.9] - 2026-08-18
 
 - fix(service): graceful shutdown before kill — no more ghost ports on Windows (5c6caeb5)

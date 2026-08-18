@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PiUI",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "identifier": "com.piui.app",
   "build": {
     "frontendDist": "../dist",
