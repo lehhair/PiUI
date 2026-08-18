@@ -192,6 +192,24 @@ npm run install:test-extension
 - `scripts`：开发、构建和测试辅助脚本
 - `docs`：设计和开发文档
 
+## 应用图标
+
+应用图标全部由 `packages/app/assets/app-icons/` 下的 SVG 源驱动（`app-icon.svg` 为桌面/通用主图，`app-icon-android-foreground.svg` / `app-icon-android-background.svg` 为 Android 自适应图标专用）。
+
+设计比例：桌面图标背景铺满画布（圆角 22%），中心标志约占画布 56%；Android 自适应前景单独缩小到约 37% 画布居中，系统遮罩裁剪（可见 66/108）后与桌面观感一致。
+
+修改 SVG 后重新生成图标：
+
+```bash
+# 1. 重新生成桌面/Windows/macOS/iOS 全套（写 src-tauri/icons）
+npm run icons:tauri -w @piui/app
+
+# 2. 重新生成 Android mipmap 全套（tauri 的 Android 输出比例不可控，必须用脚本覆盖）
+powershell -File scripts/make-android-icons.ps1
+```
+
+`scripts/make-android-icons.ps1` 从 `src-tauri/icons/icon.png` 派生 Android 全套：`ic_launcher.png`（桌面图标原样缩放）、`ic_launcher_round.png`（圆形遮罩）、`ic_launcher_foreground.png`（标志单独 36.7% 画布居中），同时写入构建源 `gen/android/.../res` 和备份目录 `src-tauri/icons/android`。
+
 ## 发版流程
 
 本项目采用线性历史：日常开发在 `dev` 分支，稳定/发布在 `main` 分支，`main` 只用于发版。
