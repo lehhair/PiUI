@@ -133,7 +133,6 @@ interface ModelListPanelProps {
   onTouchEnd?: () => void
   handlePinKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>, interactiveIndex: number) => void
   ignoreMouseRef: React.RefObject<boolean>
-  lastMousePosRef: React.RefObject<{ x: number; y: number }>
   idPrefix: string
   listboxId: string
   maxListHeight: string
@@ -164,7 +163,6 @@ const ModelListPanel = memo(function ModelListPanel({
   onTouchEnd,
   handlePinKeyDown,
   ignoreMouseRef,
-  lastMousePosRef,
   idPrefix,
   listboxId,
   maxListHeight,
@@ -242,10 +240,8 @@ const ModelListPanel = memo(function ModelListPanel({
                     ${isSelected ? 'bg-accent-main-100/10 text-accent-main-100' : 'text-text-200'}
                     ${isHL && !isSelected ? 'bg-bg-200/40 text-text-100' : ''}
                   `}
-                  onMouseMove={e => {
+                  onPointerEnter={() => {
                     if (ignoreMouseRef.current) return
-                    if (e.clientX === lastMousePosRef.current.x && e.clientY === lastMousePosRef.current.y) return
-                    lastMousePosRef.current = { x: e.clientX, y: e.clientY }
                     const hIndex = itemIndices.indexOf(index)
                     if (hIndex !== -1 && hIndex !== highlightedIndex) setHighlightedIndex(hIndex)
                   }}
@@ -372,7 +368,6 @@ export const ModelSelector = memo(
     const listRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
     const ignoreMouseRef = useRef(false)
-    const lastMousePosRef = useRef({ x: 0, y: 0 })
     const openFocusTargetRef = useRef<'search' | 'list'>('search')
     const openHighlightedIndexRef = useRef(0)
     const pendingFocusRestoreRef = useRef<{ modelKey: string; target: 'item' | 'pin' } | null>(null)
@@ -883,7 +878,6 @@ export const ModelSelector = memo(
             onTouchEnd={handleTouchEnd}
             handlePinKeyDown={handlePinKeyDown}
             ignoreMouseRef={ignoreMouseRef}
-            lastMousePosRef={lastMousePosRef}
             idPrefix={idPrefix}
             listboxId={listboxId}
             maxListHeight={listMaxH}
