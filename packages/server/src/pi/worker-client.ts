@@ -60,7 +60,49 @@ export interface WorkerHost {
   dispose(): Promise<void>
 }
 
-const HEARTBEAT_MISS_LIMIT = 3
+/**
+ * 心跳只用于兜底发现「真死」的 worker（事件循环永久卡死/通道悬挂）。
+ * 事件循环繁忙不是死——大会话 JSONL 加载、大对象序列化、GC 都会让心跳
+ * 延迟，误杀繁忙但健康的共享进程会让所有会话一起崩（对齐 opencode 的
+ * 思路：进程死活信 exit/disconnect 事件，看门狗只是最后一道兜底，预算
+ * 要给足）。默认 12 次 × 5s ≈ 65s 才判定死亡，可用 env 调整。
+ */
+function heartbeatMissLimit(): number {
+  const fromEnv = Number(process.env.PIUI_WORKER_HEARTBEAT_MISS_LIMIT)
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? Math.floor(fromEnv) : 12
+}
+
+/**
+ * 终止 worker 及其整棵子进程树。Windows 上 signal 只终止进程本身且不级联
+ * ——worker 拉起的 provider/MCP 子进程会变孤儿继续占着端口/文件，所以用
+ * taskkill /T /F（对齐 opencode util/process.ts 的做法）。
+ */
+function killProcessTree(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    try {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
+        .on("error", () => undefined)
+      return
+    } catch {
+      /* fall through to plain kill */
+    }
+  }
+  try {
+    child.kill("SIGKILL")
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * 主动关闭 worker 的预算：worker 要 abort 在途流、flush JSONL、dispose 所有
+ * runtime，负载机器上 5s 经常不够——预算内等不到再升级 SIGKILL，避免每次
+ * 优雅关闭都以强杀收场（可能写坏 session 文件）。
+ */
+function disposeTimeoutMs(): number {
+  const fromEnv = Number(process.env.PIUI_WORKER_DISPOSE_TIMEOUT_MS)
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 15_000
+}
 
 /**
  * 一个 worker 进程的客户端核心：持有进程、pending 请求、心跳看门狗，
@@ -116,11 +158,7 @@ class WorkerHostCore {
       this.settleReadyError(Object.assign(new Error("Pi worker handshake timed out"), { code: "WORKER_PROTOCOL_MISMATCH" }))
       // 握不上手就杀掉——否则僵尸进程占着端口，而它的 ready 已拒，
       // 再也不可用
-      try {
-        this.child?.kill("SIGKILL")
-      } catch {
-        /* already gone */
-      }
+      killProcessTree(this.child)
     }, this.options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs())
     handshakeTimeout.unref()
     this.ready.finally(() => clearTimeout(handshakeTimeout)).catch(() => undefined)
@@ -228,13 +266,16 @@ class WorkerHostCore {
 
   private startHeartbeatWatchdog(intervalMs: number): void {
     if (this.heartbeatTimer) return
+    const missLimit = heartbeatMissLimit()
     this.heartbeatTimer = setInterval(() => {
       this.heartbeatMisses += 1
-      if (this.heartbeatMisses > HEARTBEAT_MISS_LIMIT) {
+      if (this.heartbeatMisses > missLimit) {
+        // 先杀后记账：反过来会有「server 已判死并孵化新 worker，旧进程还
+        // 活着」的并存窗口
+        killProcessTree(this.child)
         this.handleExit(null, null, Object.assign(new Error("Pi worker heartbeat timed out"), {
           code: "SESSION_RUNTIME_CRASHED",
         }))
-        this.child.kill("SIGKILL")
       }
     }, intervalMs)
     this.heartbeatTimer.unref()
@@ -427,7 +468,7 @@ class WorkerHostCore {
       // process exit so the parent never kills a worker between its ACK and
       // its final JSONL/provider cleanup.
       const timeout = new Promise<void>(resolve => {
-        const timer = setTimeout(resolve, 5_000)
+        const timer = setTimeout(resolve, disposeTimeoutMs())
         timer.unref()
       })
       await Promise.race([
@@ -437,7 +478,7 @@ class WorkerHostCore {
       ])
     } finally {
       if (!this.exitHandled) {
-        this.child.kill("SIGKILL")
+        killProcessTree(this.child)
         this.handleExit(null, "SIGKILL")
       }
     }

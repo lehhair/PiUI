@@ -17,8 +17,9 @@ export interface SchedulerCommand {
  * - bash 流式中执行 → 结果进 pending 队列，agent_end 时冲刷
  * - newSession/switchSession/fork → teardown 时 dispose 旧会话（中止在途回合）
  *
- * 宿主不再做任何排队/串行/屏障。close() 只负责排空在途命令后执行清理，
- * 保证 worker 关闭时没有悬空的执行。
+ * 宿主不再做任何排队/串行/屏障。close() 负责有界排空在途命令（默认 3s）
+ * 后执行清理——卡死的命令不能挡住 worker 退出，超时由 runtime.dispose
+ * 的 abort 收尾。
  */
 export function createWorkerCommandScheduler<T>(
   execute: (command: SchedulerCommand) => Promise<T>,
@@ -40,10 +41,20 @@ export function createWorkerCommandScheduler<T>(
     return result
   }) as ((command: SchedulerCommand) => Promise<T>) & { close: (cleanup: () => Promise<void>) => Promise<void> }
 
-  schedule.close = (cleanup: () => Promise<void>): Promise<void> => {
+  schedule.close = (cleanup: () => Promise<void>, drainTimeoutMs = 3_000): Promise<void> => {
     if (closePromise) return closePromise
     closing = true
-    closePromise = Promise.allSettled([...inFlight]).then(async () => {
+    // 有界排空：一条卡死的流式命令（网络挂起、无超时）不应让 worker 永远
+    // 退不掉。超时后 cleanup 照跑——runtime.dispose 会 abort 在途回合，
+    // 悬空的命令由它们自己的超时/abort 收尾。
+    const drained = Promise.allSettled([...inFlight])
+    closePromise = Promise.race([
+      drained,
+      new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, drainTimeoutMs)
+        timer.unref?.()
+      }),
+    ]).then(async () => {
       await cleanup()
     })
     return closePromise

@@ -229,12 +229,15 @@ export class RuntimeSupervisor {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
+    // 先关整个 worker 进程：worker 的 cleanup 会 dispose 所有 runtime。
+    // 不要并发发 session.close——dispose 命令会让调度器 closing，后到的
+    // session.close 全被拒成 RUNTIME_CLOSING，纯噪音。
     const pendingOpens = [...this.pendingOpens]
     await Promise.allSettled([
-      ...[...this.active].map(runtime => runtime.dispose()),
       this.runtimeHost?.dispose() ?? Promise.resolve(),
       ...pendingOpens,
     ])
+    // 进程已死，句柄 dispose 只做本地清理（onClose 释放 lease）
     if (this.active.size > 0) {
       await Promise.allSettled([...this.active].map(runtime => runtime.dispose()))
     }

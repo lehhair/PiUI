@@ -43,7 +43,25 @@ const driver = getDriverMode()
 assertRuntimeTargetBindings()
 
 function send(message: WorkerMessage): void {
-  process.send?.(message)
+  try {
+    process.send?.(message)
+  } catch {
+    // 通道已断（parent 消失）：disconnect 处理器会接手做有界清理退出，
+    // 这里不能让 ERR_IPC_CHANNEL_CLOSED 炸进 uncaughtException
+  }
+}
+
+/** 等 IPC flush 完再回调（用于退出前的最后一条消息）；通道不可用时立即回调 */
+function sendWithCallback(message: WorkerMessage, callback: () => void): void {
+  try {
+    if (process.send) {
+      process.send(message, () => callback())
+      return
+    }
+  } catch {
+    /* channel already gone */
+  }
+  callback()
 }
 
 const catalog = driver === "pi"
@@ -365,14 +383,34 @@ const heartbeatTimer = setInterval(() => {
 }, PI_WORKER_HEARTBEAT_INTERVAL_MS)
 heartbeatTimer.unref()
 
-// 扩展的异步疏忽（如延迟回调持有 stale ctx）会产生未捕获异常/拒绝。
-// 记录并继续运行：单个扩展的错误不应杀死 worker 进程（worker 崩溃会让
-// 所有已 attach 的 session 一起丢失）。正常退出只走 IPC disconnect。
+// 扩展的异步疏忽（如延迟回调持有 stale ctx）产生的 unhandledRejection：
+// 记录并继续，单个扩展的 promise 泄漏不应杀死 worker。
+// 但 uncaughtException = 进程级错误，事件循环状态已不可信——硬撑只会让
+// worker 变成心跳照发、命令全挂的僵尸，还废掉 server 侧 supervisor 的
+// 自愈重建。记录后走有界清理并非零退出，把重建交还给 supervisor。
 process.on("unhandledRejection", (reason) => {
   console.error(`[piui-worker] unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
 })
+
+let fatalExitStarted = false
+
+async function fatalExit(code: number): Promise<void> {
+  // 清理本身也可能因进程状态损坏而挂住：3s 后无条件退出
+  const force = setTimeout(() => process.exit(code), 3_000)
+  force.unref()
+  try {
+    await cleanupWorker()
+  } catch {
+    /* best effort */
+  }
+  process.exit(code)
+}
+
 process.on("uncaughtException", (error) => {
   console.error(`[piui-worker] uncaught exception: ${error?.stack ?? error}`)
+  if (fatalExitStarted) return
+  fatalExitStarted = true
+  void fatalExit(1)
 })
 
 function toResponseData(data: JsonValue | undefined | void): JsonValue | undefined {
@@ -414,20 +452,23 @@ process.on("message", (value: unknown) => {
     return
   }
   if (request.command.type === "dispose") {
+    // ACK 必须等 IPC flush 完再退出——立刻 process.exit 会砍掉还没发出去
+    // 的响应，parent 无法区分「干净关闭」和「清理中途崩溃」（对齐 opencode
+    // disposeMiddleware「先回响应再清理」的顺序）。回调不触发时 1s 兜底退出。
     void schedule.close(cleanupWorker).then(
       () => {
-        send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
-        setImmediate(() => process.exit(0))
+        sendWithCallback({ kind: "response", id: request.id, generation: workerGeneration, ok: true }, () => process.exit(0))
+        setTimeout(() => process.exit(0), 1_000).unref()
       },
       error => {
-        send({
+        sendWithCallback({
           kind: "response",
           id: request.id,
           generation: workerGeneration,
           ok: false,
           error: problemFromError(error),
-        })
-        setImmediate(() => process.exit(1))
+        }, () => process.exit(1))
+        setTimeout(() => process.exit(1), 1_000).unref()
       },
     )
     return
@@ -474,6 +515,10 @@ process.on("disconnect", () => {
     pending.reject(new Error("PiUI host disconnected"))
   }
   pendingHostCalls.clear()
+  // parent 已消失，没有任何东西会再来杀这个进程：清理必须在有界时间内
+  // 完成，否则 worker 变孤儿。10s（排空 3s + runtime 清理预算）后无条件退出。
+  const force = setTimeout(() => process.exit(1), 10_000)
+  force.unref()
   void (async () => {
     let exitCode = 0
     try {
