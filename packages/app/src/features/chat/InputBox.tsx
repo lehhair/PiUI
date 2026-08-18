@@ -68,6 +68,12 @@ interface DraggedFileInfo {
   name: string
 }
 
+/** 构建 @ 提及文本，对齐 pi TUI：路径含空格时加引号。 */
+function buildMentionText(path: string): string {
+  if (path.includes(' ')) return `@"${path}"`
+  return `@${path}`
+}
+
 /** 参数补全条目（pi TUI getArgumentCompletions 返回的 AutocompleteItem 序列化形态） */
 interface ArgCompletionItem {
   value: string
@@ -1099,7 +1105,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       }
 
       // 构建 @ 文本
-      const mentionText = `@${item.relativePath || item.displayName}`
+      const mentionText = buildMentionText(item.relativePath || item.displayName)
 
       // 计算新文本
       const beforeAt = text.slice(0, mentionStartIndex)
@@ -1341,7 +1347,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         return {
           fileInfo,
           relativePath,
-          mentionText: `@${relativePath}`,
+          mentionText: buildMentionText(relativePath),
         }
       })
       const insertedText = `${prefix}${mentions.map(item => item.mentionText).join(' ')} `

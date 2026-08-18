@@ -257,6 +257,11 @@ export function PiChatPane({
   const sessionActive = Boolean(sessionEntry)
   const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
+  // 本 pane 当前会话的实际工作区（来自会话列表或全局当前目录），用于 @ 补全根目录。
+  const inputRootPath = useMemo(() => {
+    if (!sessionId) return currentDirectory ?? ''
+    return allSessions.find(s => s.id === sessionId)?.directory ?? currentDirectory ?? ''
+  }, [sessionId, allSessions, currentDirectory])
   // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端
   // 启动中的临时错误不能被误报成已删除。
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
@@ -923,13 +928,14 @@ export function PiChatPane({
         if (!directory) return false
         const opened = await openPiSession(directory)
         if (!opened.sessionId) return false
+        const sessionDir = opened.cwd ?? directory
         targetSessionId = opened.sessionId
-        trackPiSession(targetSessionId, opened.cwd ?? directory)
+        trackPiSession(targetSessionId, sessionDir)
         // 本地创建的会话本地就有全部信息，直接进列表——磁盘扫描要等
         // 首个条目落盘才能看到它
         registerSessionRef.current({
           id: targetSessionId,
-          directory: opened.cwd ?? directory,
+          directory: sessionDir,
           title: text.trim().slice(0, 60) || i18n.t('chat:sidebar.newChat'),
           firstMessage: text.trim().slice(0, 200),
           createdAt: Date.now(),
@@ -1667,6 +1673,7 @@ export function PiChatPane({
             ref={inputBoxRef}
             paneId={paneId}
             sessionId={sessionId}
+            rootPath={inputRootPath}
             onSend={handleSend}
             onCommand={handleCommand}
             onCycleModel={direction => sessionId && void cyclePiModel(sessionId, direction).then(() => refreshPiSessionState(sessionId)).catch(() => undefined)}
