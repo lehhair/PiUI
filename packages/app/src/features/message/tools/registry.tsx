@@ -141,8 +141,22 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
         additions: file.additions,
         deletions: file.deletions,
       }))
+    } else if (typeof metadata.patch === 'string') {
+      // 标准 unified diff（edit 工具 details.patch），extractContentFromUnifiedDiff 可正确解析
+      result.diff = metadata.patch
+      // 从 filediff 获取统计
+      if (metadata.filediff && typeof metadata.filediff === 'object') {
+        const fd = metadata.filediff as { additions?: number; deletions?: number }
+        if (fd.additions !== undefined || fd.deletions !== undefined) {
+          result.diffStats = {
+            additions: fd.additions || 0,
+            deletions: fd.deletions || 0,
+          }
+        }
+      }
     } else if (typeof metadata.diff === 'string') {
-      // 优先使用 unified diff
+      // 兜底：display-oriented diff（带行号显示格式，SDK generateDiffString 产物），
+      // 仅在没有标准 patch 时使用
       result.diff = metadata.diff
       // 从 filediff 获取统计
       if (metadata.filediff && typeof metadata.filediff === 'object') {

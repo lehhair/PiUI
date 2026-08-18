@@ -172,8 +172,8 @@ function OutputBlock({
               hideLabel
               filePath={file.filePath}
               diff={
-                file.diff ||
                 file.patch ||
+                file.diff ||
                 (file.before !== undefined && file.after !== undefined
                   ? { before: file.before, after: file.after }
                   : undefined)
