@@ -105,6 +105,16 @@ function disposeTimeoutMs(): number {
 }
 
 /**
+ * 单条命令的超时预算。默认 60s：worker 卡死（进程活着但事件循环不动）时
+ * 前端请求不该挂 10 分钟——SDK 内部一次正常调用极少超过 60s，超时即视为
+ * 该命令失败；若心跳同时丢失，说明进程级卡死，直接杀掉重建（见 request）。
+ */
+function requestTimeoutMs(): number {
+  const fromEnv = Number(process.env.PIUI_WORKER_REQUEST_TIMEOUT_MS)
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 60_000
+}
+
+/**
  * 一个 worker 进程的客户端核心：持有进程、pending 请求、心跳看门狗，
  * 并把事件/hostCall 按 sessionId 路由到对应的 WorkerSession 句柄。
  */
@@ -146,8 +156,11 @@ class WorkerHostCore {
 
   private spawn(): ChildProcess {
     // 编译成单文件 exe 时没有独立 node 可 fork——worker 就是同一个 exe
-    // 加 --pi-worker 参数再拉一个自己，IPC 通道不变
-    const child = process.env.PIUI_WORKER_SELF === "1"
+    // 加 --pi-worker 参数再拉一个自己，IPC 通道不变。
+    // 守卫 process.versions.bun：PIUI_WORKER_SELF 可能从 bun 打包的 server
+    // 顺着子进程链泄漏到 node 开发模式（npm run dev），此时 self-spawn 会
+    // 变成 node.exe --pi-worker（bad option），worker 永远起不来。
+    const child = process.env.PIUI_WORKER_SELF === "1" && process.versions.bun
       ? spawnSelfWorker(this.options.env)
       : fork(this.workerEntry, {
         env: { ...process.env, ...this.options.env },
@@ -291,6 +304,13 @@ class WorkerHostCore {
       : Object.assign(new Error(`Pi worker exited unexpectedly (code ${code} signal ${signal})`), {
         code: "SESSION_RUNTIME_CRASHED",
       }))
+    // 崩溃/退出必须有可见记录：之前这里完全静默，用户（和日志）无法知道
+    // worker 何时、为何死亡，"突然死了"无从排查。
+    if (!this.disposed) {
+      console.error(`[piui-worker] worker process exited unexpectedly (pid=${this.child.pid ?? "?"} code=${code} signal=${signal}): ${this.exitError.message}`)
+    } else {
+      console.info(`[piui-worker] worker process stopped (pid=${this.child.pid ?? "?"})`)
+    }
     this.settleReadyError(this.exitError)
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
@@ -407,12 +427,20 @@ class WorkerHostCore {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.removeAbort?.()
-        // 超时不再杀进程：共享进程里还有其他会话 runtime 在跑。卡住的
-        // SDK 调用只废弃这一条命令；进程级死锁由心跳看门狗兜底。
+        // 命令超时：若心跳同时在丢失，说明进程级卡死（事件循环不动）——
+        // 立即杀掉重建，而不是让看门狗再等几十秒。若心跳正常，只是单条
+        // 命令卡住，废弃这条命令即可（共享进程里还有其他会话）。
+        if (this.heartbeatMisses > 0 && !this.exitHandled && !this.disposed) {
+          console.error(`[piui-worker] command ${command.type} timed out with heartbeat loss (misses=${this.heartbeatMisses}); killing hung worker`)
+          killProcessTree(this.child)
+          this.handleExit(null, null, Object.assign(new Error(`Pi worker hung: ${command.type} timed out with heartbeat loss`), {
+            code: "SESSION_RUNTIME_CRASHED",
+          }))
+        }
         reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
           code: "WORKER_RESULT_UNKNOWN",
         }))
-      }, this.options.requestTimeoutMs ?? 10 * 60_000)
+      }, this.options.requestTimeoutMs ?? requestTimeoutMs())
       timer.unref()
       let pending: PendingRequest
       const onAbort = () => {

@@ -52,10 +52,14 @@ export class RuntimeSupervisor {
     if (this.runtimeHost) return this.runtimeHost
     const host = WorkerSession.createHost(this.workerEntry, this.workerOptions)
     host.onCrash(() => {
-      // 进程崩溃：丢弃句柄，下次命令/open 重新孵化新进程（会话由
-      // session-host 的 onCrash 逐个清理，这里只负责重建基础设施）。
+      // 进程崩溃：丢弃句柄，会话由 session-host 的 onCrash 逐个清理，
+      // 这里负责重建基础设施。
       if (this.runtimeHost === host) this.runtimeHost = undefined
       void host.dispose().catch(() => undefined)
+      // 立即预孵化新 worker：崩溃后不等下一个请求才惰性重建。否则崩溃
+      // 后的第一次访问要同时承担「spawn + 握手 + 命令」，且期间其他请求
+      // 会打到已死的 host 上。预孵化让恢复对客户端近乎透明。
+      void this.ensureRuntimeHost().getHandshake().catch(() => undefined)
     })
     host.onEvent(event => {
       for (const listener of this.eventListeners) listener(event)
