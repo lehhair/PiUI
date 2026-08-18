@@ -1,5 +1,48 @@
 import { randomUUID } from "node:crypto"
+import { appendFileSync, mkdirSync } from "node:fs"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
+
+// worker 的 stderr 是 inherit 到 server 的：桌面壳（Tauri）只保留最近 24
+// 行内存缓冲，进程退出后全丢。这里把 worker 自己的 stderr 也追加写到
+// 和 server 相同的日志目录，崩溃后可回溯（server 侧的 handleExit 日志在
+// server 进程里写，worker 进程内的 uncaughtException 等在这里写）。
+function wireWorkerStderrFileLog(): void {
+  if (process.env.PIUI_FILE_LOG === "0") return
+  let logDir: string | undefined
+  const day = () => new Date().toISOString().slice(0, 10)
+  let file: string | undefined
+  let currentDay = ""
+  const write = (chunk: string) => {
+    try {
+      if (!file || currentDay !== day()) {
+        currentDay = day()
+        if (!logDir) {
+          const env = process.env.PIUI_DATA_DIR?.trim()
+          logDir = env
+            ? resolve(env)
+            : process.platform === "win32" && process.env.APPDATA
+              ? join(process.env.APPDATA, "com.piui.desktop")
+              : join(homedir(), ".piui")
+          logDir = join(logDir, "logs")
+          mkdirSync(logDir, { recursive: true })
+        }
+        file = join(logDir!, `piui-server-${currentDay}.log`)
+      }
+      appendFileSync(file, `[${new Date().toISOString()}] ${chunk}`)
+    } catch {
+      /* 磁盘/权限问题不阻塞 */
+    }
+  }
+  const orig = process.stderr.write.bind(process.stderr)
+  process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
+    if (typeof chunk === "string") write(chunk)
+    return orig(chunk as never, ...(rest as never[]))
+  }) as typeof process.stderr.write
+}
+wireWorkerStderrFileLog()
+
 import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
 import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from "./sdk-host.js"
