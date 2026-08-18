@@ -1,5 +1,6 @@
 import { fork, spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { logToFile } from "../logger.ts"
 import type { JsonObject, JsonValue, Problem } from "@piui/protocol"
 import {
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
@@ -314,9 +315,13 @@ class WorkerHostCore {
     // 崩溃/退出必须有可见记录：之前这里完全静默，用户（和日志）无法知道
     // worker 何时、为何死亡，"突然死了"无从排查。
     if (!this.disposed) {
-      console.error(`[piui-worker] worker process exited unexpectedly (pid=${this.child.pid ?? "?"} code=${code} signal=${signal}): ${this.exitError.message}`)
+      const message = `[piui-worker] worker process exited unexpectedly (pid=${this.child.pid ?? "?"} code=${code} signal=${signal}): ${this.exitError.message}`
+      console.error(message)
+      logToFile(message)
     } else {
-      console.info(`[piui-worker] worker process stopped (pid=${this.child.pid ?? "?"})`)
+      const message = `[piui-worker] worker process stopped (pid=${this.child.pid ?? "?"})`
+      console.info(message)
+      logToFile(message)
     }
     this.settleReadyError(this.exitError)
     for (const pending of this.pending.values()) {
@@ -438,7 +443,9 @@ class WorkerHostCore {
         // 立即杀掉重建，而不是让看门狗再等几十秒。若心跳正常，只是单条
         // 命令卡住，废弃这条命令即可（共享进程里还有其他会话）。
         if (this.heartbeatMisses > 0 && !this.exitHandled && !this.disposed) {
-          console.error(`[piui-worker] command ${command.type} timed out with heartbeat loss (misses=${this.heartbeatMisses}); killing hung worker`)
+          const message = `[piui-worker] command ${command.type} timed out with heartbeat loss (misses=${this.heartbeatMisses}); killing hung worker`
+          console.error(message)
+          logToFile(message)
           killProcessTree(this.child)
           this.handleExit(null, null, Object.assign(new Error(`Pi worker hung: ${command.type} timed out with heartbeat loss`), {
             code: "SESSION_RUNTIME_CRASHED",

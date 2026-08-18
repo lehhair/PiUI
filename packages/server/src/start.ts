@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Server as HttpServer } from "node:http"
 import { authTokenPath, ensureCursorSecretEnv, resolveAuthToken } from "./host/auth-token.ts"
-import { enableFileLogging } from "./logger.ts"
+import { enableFileLogging, logToFile } from "./logger.ts"
 import { RuntimeSupervisor } from "./pi/supervisor.ts"
 import { createAppServer, firstLanAddress } from "./http.ts"
 import { shutdownAppServer } from "./shutdown.ts"
@@ -187,6 +187,7 @@ export async function startPiUiServer(
   void app.supervisor.getCatalogHandshake().catch(() => undefined)
 
   console.info(`[piui-server] listening http://${config.host}:${config.port}`)
+  logToFile(`[piui-server] listening http://${config.host}:${config.port} (pid=${process.pid})`)
   console.info(`[piui-server] events ws://${config.host}:${config.port}/api/v1/events`)
   console.info(`[piui-server] terminal stream ws://${config.host}:${config.port}/api/v1/host/terminals/:terminalId/stream`)
   console.info(`[piui-server] driver=${config.driver}${config.driver === "pi" ? " (real models when prompt)" : " (no LLM)"}`)
