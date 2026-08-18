@@ -1,6 +1,6 @@
 {
   "name": "@piui/pi-worker",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "private": true,
   "type": "module",
   "exports": {
@@ -21,7 +21,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@earendil-works/pi-tui": "0.84.2",
-    "@piui/protocol": "0.6.8",
+    "@piui/protocol": "0.6.9",
     "jiti": "^2.7.0"
   },
   "devDependencies": {
