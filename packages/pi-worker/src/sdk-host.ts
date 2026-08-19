@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs"
+import { homedir } from "node:os"
 import { spawnSync } from "node:child_process"
 import { PI_PARITY_SDK_VERSION } from "@piui/protocol"
 import type * as PiSdkModule from "@earendil-works/pi-coding-agent"
@@ -242,6 +243,27 @@ export function defaultSdkResolution(env: NodeJS.ProcessEnv = process.env): SdkR
 }
 
 /**
+ * jiti 转译缓存目录：默认落在 node_modules/.cache/jiti——桌面安装目录通常
+ * 只读，写不进去时每次冷启动都要重新转译整个 SDK 依赖树（worker 启动大
+ * 头之一）。显式指到可写的 PiUI 数据目录，保证第二次起永远走磁盘缓存。
+ */
+function jitiCacheDir(): string | true {
+  try {
+    const env = process.env.PIUI_DATA_DIR?.trim()
+    const root = env
+      ? resolve(env)
+      : process.platform === "win32" && process.env.APPDATA
+        ? join(process.env.APPDATA, "com.piui.desktop")
+        : join(homedir(), ".piui")
+    const dir = join(root, "cache", "jiti")
+    mkdirSync(dir, { recursive: true })
+    return dir
+  } catch {
+    return true
+  }
+}
+
+/**
  * 外部 SDK 走编译进 worker 的 jiti，使用 Node 语义解析磁盘模块依赖。
  */
 async function importExternalSdk(entry: string): Promise<PiSdk> {
@@ -253,6 +275,7 @@ async function importExternalSdk(entry: string): Promise<PiSdk> {
     moduleCache: false,
     tryNative: false,
     alias: runtimePackageAliases(entry),
+    fsCache: jitiCacheDir(),
   })
   return await jiti.import(entry) as PiSdk
 }
