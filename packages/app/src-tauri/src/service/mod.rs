@@ -32,6 +32,8 @@ pub struct ServiceState {
     /// 用户在关闭确认里选择「保留后台服务」：退出兜底不再强杀子进程。
     keep_on_exit: AtomicBool,
     lifecycle: tokio::sync::Mutex<()>,
+    /// 有 start 命令正在等 health，其他命令不要把它当僵死进程杀掉。
+    is_starting: AtomicBool,
     service_url: Mutex<Option<String>>,
     /// 当前托管服务的鉴权 token（优雅关闭请求需要带鉴权头）。
     service_token: Mutex<Option<String>>,
@@ -50,6 +52,18 @@ impl ServiceState {
     pub fn stop_service_on_exit(&self) {
         if self.keep_on_exit.load(Ordering::SeqCst) {
             return;
+        }
+        // 如果服务还在冷启动中，先等一小会儿让启动完成或失败，避免退出时
+        // 留下状态不一致的半成品进程。
+        if self.is_starting.load(Ordering::SeqCst) {
+            tauri::async_runtime::block_on(async {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+                while self.is_starting.load(Ordering::SeqCst)
+                    && tokio::time::Instant::now() < deadline
+                {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            });
         }
         if !self.started_by_us.swap(false, Ordering::SeqCst) {
             return;
@@ -106,6 +120,7 @@ impl Default for ServiceState {
             allow_close: AtomicBool::new(false),
             keep_on_exit: AtomicBool::new(false),
             lifecycle: tokio::sync::Mutex::new(()),
+            is_starting: AtomicBool::new(false),
             service_url: Mutex::new(None),
             service_token: Mutex::new(None),
             output: Arc::new(Mutex::new(VecDeque::new())),
@@ -274,6 +289,20 @@ fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
     format!("http://{host}:{port}")
 }
 
+/// 等其他 start 命令完成（释放 lifecycle 锁后再轮询，避免死锁）。
+async fn wait_for_start_to_complete(state: &ServiceState) {
+    while state.is_starting.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+async fn prepare_server_async(app: &AppHandle) -> Result<process::PreparedServer, String> {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || prepare_server(&app))
+        .await
+        .map_err(|error| format!("failed to prepare PiUI runtime: {error}"))?
+}
+
 /// 残留服务收养的宽限探测：进程可能刚从上次启动冷启动（SDK worker 孵化
 /// 要数秒），首轮探测不可达不等于僵死，重试几轮再判死。单次探测超时
 /// 2s：health 是只读快照，毫秒级响应，2s 已足够覆盖系统抖动——5s × 4 轮
@@ -327,6 +356,13 @@ async fn adopt_persisted_service(
         // 直接报错并拒绝启动，导致端口被孤儿进程永久占用、新服务起不来；
         // 现在强杀残留进程，让启动流程照常孵化新服务。
         HealthFailure::Unreachable => {
+            if state.is_starting.load(Ordering::SeqCst) {
+                log::info!(
+                    "retained PiUI service process {} at {} is still starting; leaving it alone",
+                    marker.pid, marker.url
+                );
+                return Ok(false);
+            }
             log::warn!(
                 "killing retained PiUI service process {} at {}: health stayed unreachable",
                 marker.pid, marker.url
@@ -354,36 +390,30 @@ async fn adopt_persisted_service(
     }
 }
 
-#[tauri::command]
-pub async fn start_piui_service(
-    app: AppHandle,
-    state: State<'_, ServiceState>,
-    env_vars: BTreeMap<String, String>,
-) -> Result<StartServiceResult, String> {
-    let _lifecycle = state.lifecycle.lock().await;
-    start_piui_service_inner(&app, &state, env_vars).await
+enum ReuseOutcome {
+    Ready(StartServiceResult),
+    NeedSpawn,
+    NeedWait,
 }
 
-async fn start_piui_service_inner(
+async fn try_reuse_existing_service(
     app: &AppHandle,
     state: &ServiceState,
-    env_vars: BTreeMap<String, String>,
-) -> Result<StartServiceResult, String> {
-    let config = ServiceConfig::new(env_vars);
-
-    if adopt_persisted_service(app, state, &config).await? {
+    config: &ServiceConfig,
+) -> Result<ReuseOutcome, String> {
+    if adopt_persisted_service(app, state, config).await? {
         let url = state
             .service_url
             .lock()
             .map_err(|error| error.to_string())?
             .clone()
             .unwrap_or_else(|| config.url.clone());
-        return Ok(StartServiceResult {
+        return Ok(ReuseOutcome::Ready(StartServiceResult {
             started: false,
             started_by_us: true,
             url: Some(url),
-            token: config.initial_token,
-        });
+            token: config.initial_token.clone(),
+        }));
     }
 
     if state.started_by_us.load(Ordering::SeqCst) {
@@ -394,17 +424,20 @@ async fn start_piui_service_inner(
             .clone()
             .unwrap_or_else(|| config.url.clone());
         if is_service_running(&url, config.initial_token.as_deref()).await {
-            return Ok(StartServiceResult {
+            return Ok(ReuseOutcome::Ready(StartServiceResult {
                 started: false,
                 started_by_us: true,
                 url: Some(url),
-                token: config.initial_token,
-            });
+                token: config.initial_token.clone(),
+            }));
         }
         let pid = state.child_pid.load(Ordering::SeqCst);
         if pid > 0 && is_process_alive(pid) {
-            // 本次会话内启动的服务僵死（进程在、health 不可达）：旧逻辑直接
-            // 报错并保留僵尸进程占用端口；现在强杀后走下方全新启动。
+            // 本次会话内启动的服务 health 还不通。如果是正在冷启动中，
+            // 让调用方释放锁后等待，避免把还在孵化的进程当僵死杀掉。
+            if state.is_starting.load(Ordering::SeqCst) {
+                return Ok(ReuseOutcome::NeedWait);
+            }
             log::warn!("killing hung PiUI service process {pid} at {url}: health unreachable");
             stop_piui_service_process(app, state).await;
         } else {
@@ -419,24 +452,63 @@ async fn start_piui_service_inner(
             .service_url
             .lock()
             .map_err(|error| error.to_string())? = Some(config.url.clone());
-        return Ok(StartServiceResult {
+        return Ok(ReuseOutcome::Ready(StartServiceResult {
             started: false,
             started_by_us: false,
-            url: Some(config.url),
-            token: config.initial_token,
-        });
+            url: Some(config.url.clone()),
+            token: config.initial_token.clone(),
+        }));
     }
 
-    let app_for_prepare = app.clone();
-    let prepared = tauri::async_runtime::spawn_blocking(move || prepare_server(&app_for_prepare))
-        .await
-        .map_err(|error| format!("failed to prepare PiUI runtime: {error}"))??;
+    Ok(ReuseOutcome::NeedSpawn)
+}
 
+#[tauri::command]
+pub async fn start_piui_service(
+    app: AppHandle,
+    state: State<'_, ServiceState>,
+    env_vars: BTreeMap<String, String>,
+) -> Result<StartServiceResult, String> {
+    let config = ServiceConfig::new(env_vars);
+    let prepared = prepare_server_async(&app).await?;
+
+    let mut lifecycle = Some(state.lifecycle.lock().await);
+    loop {
+        match try_reuse_existing_service(&app, &state, &config).await? {
+            ReuseOutcome::Ready(result) => return Ok(result),
+            ReuseOutcome::NeedSpawn => {
+                state.is_starting.store(true, Ordering::SeqCst);
+                break;
+            }
+            ReuseOutcome::NeedWait => {
+                drop(lifecycle.take().unwrap());
+                wait_for_start_to_complete(&state).await;
+                lifecycle = Some(state.lifecycle.lock().await);
+                continue;
+            }
+        }
+    }
+
+    start_service_after_prepare(&app, &state, &config, prepared, lifecycle.take().unwrap()).await
+}
+
+/// 在已持有 lifecycle 锁的情况下孵化子进程、写入状态、持久化 marker，
+/// 然后释放锁并等待 health 通过。health 等待期间其他命令可以并行执行，
+/// 这样刷新页面触发的第二次 start 不会阻塞 60 秒，也不会把还在冷启动的
+/// 进程误判成僵死杀掉。
+async fn start_service_after_prepare(
+    app: &AppHandle,
+    state: &ServiceState,
+    config: &ServiceConfig,
+    prepared: process::PreparedServer,
+    lifecycle_guard: tokio::sync::MutexGuard<'_, ()>,
+) -> Result<StartServiceResult, String> {
     if let Ok(mut output) = state.output.lock() {
         output.clear();
     }
     let spawned = spawn_server(prepared, state.output.clone(), &config.environment)?;
     let pid = spawned.id();
+
     {
         let mut child = state.child.lock().map_err(|error| error.to_string())?;
         *child = Some(spawned);
@@ -453,9 +525,14 @@ async fn start_piui_service_inner(
         .map_err(|error| error.to_string())? = config.initial_token.clone();
     if let Err(error) = marker::persist(app, pid, &config.url) {
         stop_piui_service_process(app, state).await;
+        state.is_starting.store(false, Ordering::SeqCst);
         return Err(format!("failed to persist PiUI service ownership: {error}"));
     }
 
+    // 状态已经写入，可以释放锁让其他命令并行执行。
+    drop(lifecycle_guard);
+
+    let mut error_message = None;
     for _ in 0..120 {
         let exited = {
             let mut child = state.child.lock().map_err(|error| error.to_string())?;
@@ -467,20 +544,17 @@ async fn start_piui_service_inner(
                 .flatten()
         };
         if let Some(status) = exited {
-            state.started_by_us.store(false, Ordering::SeqCst);
-            state.child_pid.store(0, Ordering::SeqCst);
-            marker::clear(app);
-            if let Ok(mut child) = state.child.lock() {
-                *child = None;
-            }
-            return Err(format!(
+            error_message = Some(format!(
                 "PiUI server exited during startup with status {status}.{}",
                 recent_output(state)
             ));
+            break;
         }
 
         let current_token = config.token();
         if is_service_running(&config.url, current_token.as_deref()).await {
+            let _lifecycle = state.lifecycle.lock().await;
+            state.is_starting.store(false, Ordering::SeqCst);
             return Ok(StartServiceResult {
                 started: true,
                 started_by_us: true,
@@ -491,11 +565,14 @@ async fn start_piui_service_inner(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
+    // 启动失败：重新持锁做最终清理。
+    let _lifecycle = state.lifecycle.lock().await;
+    state.is_starting.store(false, Ordering::SeqCst);
     stop_piui_service_process(app, state).await;
-    Err(format!(
+    Err(error_message.unwrap_or_else(|| format!(
         "PiUI server started but health check did not pass.{}",
         recent_output(state)
-    ))
+    )))
 }
 
 /// 优雅停止托管的服务进程：先请求 HTTP 优雅关闭并等进程退出，
@@ -576,9 +653,17 @@ pub async fn stop_piui_service(
     app: AppHandle,
     state: State<'_, ServiceState>,
 ) -> Result<(), String> {
-    let _lifecycle = state.lifecycle.lock().await;
-    stop_piui_service_process(&app, &state).await;
-    Ok(())
+    let mut lifecycle = Some(state.lifecycle.lock().await);
+    loop {
+        if state.is_starting.load(Ordering::SeqCst) {
+            drop(lifecycle.take().unwrap());
+            wait_for_start_to_complete(&state).await;
+            lifecycle = Some(state.lifecycle.lock().await);
+            continue;
+        }
+        stop_piui_service_process(&app, &state).await;
+        return Ok(());
+    }
 }
 
 #[tauri::command]
@@ -587,9 +672,34 @@ pub async fn restart_piui_service(
     state: State<'_, ServiceState>,
     env_vars: BTreeMap<String, String>,
 ) -> Result<StartServiceResult, String> {
-    let _lifecycle = state.lifecycle.lock().await;
-    stop_piui_service_process(&app, &state).await;
-    start_piui_service_inner(&app, &state, env_vars).await
+    let config = ServiceConfig::new(env_vars);
+    let prepared = prepare_server_async(&app).await?;
+
+    let mut lifecycle = Some(state.lifecycle.lock().await);
+    loop {
+        if state.is_starting.load(Ordering::SeqCst) {
+            drop(lifecycle.take().unwrap());
+            wait_for_start_to_complete(&state).await;
+            lifecycle = Some(state.lifecycle.lock().await);
+            continue;
+        }
+        stop_piui_service_process(&app, &state).await;
+        match try_reuse_existing_service(&app, &state, &config).await? {
+            ReuseOutcome::Ready(result) => return Ok(result),
+            ReuseOutcome::NeedSpawn => {
+                state.is_starting.store(true, Ordering::SeqCst);
+                break;
+            }
+            ReuseOutcome::NeedWait => {
+                drop(lifecycle.take().unwrap());
+                wait_for_start_to_complete(&state).await;
+                lifecycle = Some(state.lifecycle.lock().await);
+                continue;
+            }
+        }
+    }
+
+    start_service_after_prepare(&app, &state, &config, prepared, lifecycle.take().unwrap()).await
 }
 
 #[tauri::command]
@@ -598,9 +708,19 @@ pub async fn get_piui_service_status(
     state: State<'_, ServiceState>,
     env_vars: BTreeMap<String, String>,
 ) -> Result<ServiceStatusResult, String> {
-    let _lifecycle = state.lifecycle.lock().await;
-    let config = ServiceConfig::new(env_vars);
-    let _ = adopt_persisted_service(&app, &state, &config).await;
+    let mut lifecycle = Some(state.lifecycle.lock().await);
+    let config;
+    loop {
+        if state.is_starting.load(Ordering::SeqCst) {
+            drop(lifecycle.take().unwrap());
+            wait_for_start_to_complete(&state).await;
+            lifecycle = Some(state.lifecycle.lock().await);
+            continue;
+        }
+        config = ServiceConfig::new(env_vars.clone());
+        let _ = adopt_persisted_service(&app, &state, &config).await;
+        break;
+    }
     let url = state
         .service_url
         .lock()
@@ -639,8 +759,17 @@ pub async fn confirm_close_app(
     // 决定是否强杀子进程——选了「保留」就不能杀。
     state.keep_on_exit.store(!stop_service, Ordering::SeqCst);
     if stop_service {
-        let _lifecycle = state.lifecycle.lock().await;
-        stop_piui_service_process(window.app_handle(), &state).await;
+        let mut lifecycle = Some(state.lifecycle.lock().await);
+        loop {
+            if state.is_starting.load(Ordering::SeqCst) {
+                drop(lifecycle.take().unwrap());
+                wait_for_start_to_complete(&state).await;
+                lifecycle = Some(state.lifecycle.lock().await);
+                continue;
+            }
+            stop_piui_service_process(window.app_handle(), &state).await;
+            break;
+        }
     }
     state.allow_close.store(true, Ordering::SeqCst);
     window.destroy().map_err(|error| error.to_string())
