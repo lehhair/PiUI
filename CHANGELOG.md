@@ -4,6 +4,10 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.13] - 2026-08-19
+
+- fix(server): immediate stale-lock takeover + fast parallel shutdown (1711f9cd)
+
 ## [v0.6.12] - 2026-08-19
 
 - fix(server): stop killing healthy workers on command timeout — heartbeat phase race (9fe3792b)
