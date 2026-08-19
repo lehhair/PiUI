@@ -24,7 +24,7 @@ describe("WorkspaceWatcher", () => {
     const hub = new EventHub()
     const events: EventEnvelope[] = []
     const unsubscribe = hub.subscribe(event => events.push(event))
-    const watcher = new WorkspaceWatcher(hub)
+    const watcher = new WorkspaceWatcher(hub, undefined, 0)
     const workspace = store.resolve(root)
     watcher.watch(workspace)
     try {
@@ -73,7 +73,7 @@ describe("WorkspaceWatcher", () => {
     const hub = new EventHub()
     const events: EventEnvelope[] = []
     const unsubscribe = hub.subscribe(event => events.push(event))
-    const watcher = new WorkspaceWatcher(hub)
+    const watcher = new WorkspaceWatcher(hub, undefined, 0)
     watcher.watch(store.resolve(worktree))
     try {
       await new Promise(resolve => setTimeout(resolve, 350))

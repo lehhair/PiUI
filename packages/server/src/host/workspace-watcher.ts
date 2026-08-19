@@ -11,6 +11,12 @@ import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
 const FLUSH_DELAY_MS = 80
 const MAX_CHANGES_PER_EVENT = 512
 const MAX_WATCHED_WORKSPACES = 32
+/**
+ * chokidar 建立延迟：bun 编译的 exe 下，chokidar 初始扫描会同步阻塞服务端
+ * 事件循环 ~1.2s（node 无此问题）。推迟到启动请求洪峰之后，避免把停顿转嫁
+ * 给浏览器首波 API 请求。
+ */
+const WATCH_STARTUP_DELAY_MS = 3_000
 // chokidar recursively enumerates the tree and opens one fs.watch handle per
 // directory. Past this many directories the initial scan alone can take minutes
 // and exhaust memory (a dev drive root such as E:\dev easily holds 20k+
@@ -27,6 +33,7 @@ interface WatchedWorkspace {
   gitDirty: boolean
   rescan: boolean
   timer?: NodeJS.Timeout
+  startupTimer?: NodeJS.Timeout
   lastAccessedAt: number
 }
 
@@ -36,11 +43,13 @@ export class WorkspaceWatcher {
   constructor(
     private readonly eventHub: EventHub,
     private readonly maxWatchDirectories = MAX_WATCH_DIRECTORIES,
+    private readonly startupDelayMs = WATCH_STARTUP_DELAY_MS,
   ) {}
 
   async dispose(): Promise<void> {
     const closing = [...this.watched.values()].map(async state => {
       if (state.timer) clearTimeout(state.timer)
+      if (state.startupTimer) clearTimeout(state.startupTimer)
       await Promise.all([state.watcher?.close(), state.gitWatcher?.close()])
     })
     this.watched.clear()
@@ -63,7 +72,17 @@ export class WorkspaceWatcher {
       lastAccessedAt: Date.now(),
     }
     this.watched.set(key, state)
-    void this.establishWatch(workspace, key, state)
+    // 延迟建立 watcher：bun 编译的 exe 下，chokidar 初始扫描（创建→ready）
+    // 会在服务端事件循环上产生一次 ~1.2s 的同步停顿（实测 loop 被阻塞，node
+    // 无此问题），若与浏览器启动期的并发 API（models.list/session.listAll/
+    // registry 等）撞车，所有在途请求会被一起拖住。把建立推迟到启动请求洪峰
+    // 过去之后，停顿发生在空闲窗口；功能不变（文件变更事件仍在）。
+    state.startupTimer = setTimeout(() => {
+      state.startupTimer = undefined
+      if (this.watched.get(key) !== state) return
+      void this.establishWatch(workspace, key, state)
+    }, this.startupDelayMs)
+    state.startupTimer.unref?.()
   }
 
   /**
@@ -179,6 +198,7 @@ export class WorkspaceWatcher {
     const state = this.watched.get(key)
     if (!state) return
     if (state.timer) clearTimeout(state.timer)
+    if (state.startupTimer) clearTimeout(state.startupTimer)
     this.watched.delete(key)
     void Promise.all([state.watcher?.close(), state.gitWatcher?.close()]).catch(() => undefined)
   }
@@ -188,6 +208,7 @@ export class WorkspaceWatcher {
     if (!oldest) return
     const [key, state] = oldest
     if (state.timer) clearTimeout(state.timer)
+    if (state.startupTimer) clearTimeout(state.startupTimer)
     this.watched.delete(key)
     void Promise.all([state.watcher?.close(), state.gitWatcher?.close()]).catch(() => undefined)
   }
