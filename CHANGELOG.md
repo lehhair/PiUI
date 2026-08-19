@@ -4,6 +4,16 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.15] - 2026-08-19
+
+- test(server): 覆盖快照握手与静态 registry 兜底 (36f4d369)
+- perf(server): 延迟 chokidar 建立，避开 bun 启动事件循环阻塞 (e5e48cfc)
+- fix(desktop): 服务收养/停止等待预算对齐 server 关闭 deadline (91e555b9)
+- fix(app): 后端就绪探测固定间隔重试、会话列表失败保留 (5706913a)
+- perf(pi-worker): jiti 转译缓存落到可写数据目录 (4d990410)
+- perf(server): registry 静态兜底，worker 未就绪也能回答能力表 (21e77cc7)
+- perf(server): health/registry 走只读快照、worker 预热与 listen 并行、关闭预算对齐 (cde3ff89)
+
 ## [v0.6.14] - 2026-08-19
 
 - fix(desktop): poll child handle instead of spawning tasklist on shutdown (9f5fec46)
