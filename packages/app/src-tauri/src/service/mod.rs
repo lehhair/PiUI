@@ -66,12 +66,20 @@ impl ServiceState {
                 // 重启后 SESSION_BUSY 要等 60s stale 过期。
                 let graceful = tauri::async_runtime::block_on(request_graceful_shutdown(&url, token.as_deref()));
                 if graceful {
+                    // 用持有的 Child 句柄 try_wait 判断退出（零子进程开销），
+                    // 不用 tasklist 轮询（每次 ~130ms 的进程创建）。
                     let deadline = std::time::Instant::now() + Duration::from_secs(20);
                     while std::time::Instant::now() < deadline {
-                        if !is_process_alive(pid) {
+                        let exited = self
+                            .child
+                            .lock()
+                            .ok()
+                            .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
+                            .is_some();
+                        if exited {
                             break
                         }
-                        std::thread::sleep(Duration::from_millis(150));
+                        std::thread::sleep(Duration::from_millis(100));
                     }
                 }
             }
@@ -499,9 +507,16 @@ async fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
         if let Some(url) = url {
             // 1. 先触发服务端优雅关闭（关监听、排空连接、dispose worker）
             let _ = request_graceful_shutdown(&url, token.as_deref()).await;
-            // 2. 等进程自己退出（最多 ~4s）
+            // 2. 用持有的 Child 句柄 try_wait 判断退出（零子进程开销，不用
+            //    tasklist 轮询——每次 ~130ms 的进程创建），最多等 ~4s
             for _ in 0..20 {
-                if !is_process_alive(pid) {
+                let exited = state
+                    .child
+                    .lock()
+                    .ok()
+                    .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
+                    .is_some();
+                if exited {
                     break
                 }
                 tokio::time::sleep(Duration::from_millis(200)).await;
