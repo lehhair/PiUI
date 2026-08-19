@@ -15,8 +15,8 @@ export function shutdownAppServer(
   eventServer: WebSocketServer,
   options: ShutdownOptions = {},
 ): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? 10_000
-  const hardStopGraceMs = options.hardStopGraceMs ?? 1_000
+  const timeoutMs = options.timeoutMs ?? 1_000
+  const hardStopGraceMs = options.hardStopGraceMs ?? 500
   const forceExit = options.forceExit ?? (code => process.exit(code))
   let hardStop: NodeJS.Timeout | undefined
   const deadline = setTimeout(() => {

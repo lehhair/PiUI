@@ -46,7 +46,10 @@ export interface WebCliOptions extends ServerConfigOverrides {
 
 const DEFAULT_PORT = 8787
 const DEFAULT_HOST = "127.0.0.1"
-const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000
+// 用户请求关闭就应秒关。旧值 10s 会让「有在途会话/连接」的优雅关闭被
+// server.close() 呆等截止时间才排空，壳子关窗被一起冻结到 ~11s。健康连接
+// 毫秒级排空不受影响；这里只限制忙会话/残留连接的强断窗口。
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 500
 
 export function resolveServerConfig(
   env: NodeJS.ProcessEnv = process.env,
