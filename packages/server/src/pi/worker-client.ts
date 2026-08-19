@@ -288,8 +288,18 @@ class WorkerHostCore {
   private startHeartbeatWatchdog(intervalMs: number): void {
     if (this.heartbeatTimer) return
     const missLimit = heartbeatMissLimit()
+    // 心跳看门狗与 worker 心跳同频（都 5s）：相位固定错开时 misses 恒在
+    // 0~1 波动，misses===1 只是「tick 早于心跳到达」的正常竞争，不是丢
+    // 心跳。只有连续丢失超过 warnAt（默认 3 次 ≈ 15s）才可能是真卡死，
+    // 此时记日志；累积到 missLimit（12 次 ≈ 60s）才杀进程。
+    const warnAt = Math.min(3, missLimit)
     this.heartbeatTimer = setInterval(() => {
       this.heartbeatMisses += 1
+      if (this.heartbeatMisses === warnAt && !this.exitHandled) {
+        const message = `[piui-worker] heartbeat missing for ${this.heartbeatMisses} consecutive ticks (pid=${this.child.pid ?? "?"}); worker may be stuck`
+        console.warn(message)
+        logToFile(message)
+      }
       if (this.heartbeatMisses > missLimit) {
         // 先杀后记账：反过来会有「server 已判死并孵化新 worker，旧进程还
         // 活着」的并存窗口
@@ -439,18 +449,19 @@ class WorkerHostCore {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.removeAbort?.()
-        // 命令超时：若心跳同时在丢失，说明进程级卡死（事件循环不动）——
-        // 立即杀掉重建，而不是让看门狗再等几十秒。若心跳正常，只是单条
-        // 命令卡住，废弃这条命令即可（共享进程里还有其他会话）。
-        if (this.heartbeatMisses > 0 && !this.exitHandled && !this.disposed) {
-          const message = `[piui-worker] command ${command.type} timed out with heartbeat loss (misses=${this.heartbeatMisses}); killing hung worker`
-          console.error(message)
-          logToFile(message)
-          killProcessTree(this.child)
-          this.handleExit(null, null, Object.assign(new Error(`Pi worker hung: ${command.type} timed out with heartbeat loss`), {
-            code: "SESSION_RUNTIME_CRASHED",
-          }))
-        }
+        // 命令超时——只丢弃这一条命令并落日志，绝不杀进程。
+        //
+        // 重要教训：heartbeatMisses 与心跳同频竞争（watchdog 每 5s tick
+        // 一次 +1，心跳每 5s 到达重置 0），相位固定错开时 misses 永远在
+        // 0~1 之间波动、从不累积到 missLimit。因此「超时 + misses>0」完全
+        // 不能证明 worker 卡死——上一版在这里杀进程，把健康 worker 当
+        // 卡死误杀（日志里全是 misses=1 的 killing 记录），导致会话全丢。
+        // 真正的进程级卡死由心跳看门狗兜底：心跳持续丢失累积到
+        // missLimit（12 次 ≈ 60s+）才杀。单条命令超时（如模型响应慢）
+        // 只废弃该命令，共享进程继续服务其他会话。
+        const message = `[piui-worker] command ${command.type} timed out after ${this.options.requestTimeoutMs ?? requestTimeoutMs()}ms (misses=${this.heartbeatMisses}); discarding command, worker stays`
+        console.error(message)
+        logToFile(message)
         reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
           code: "WORKER_RESULT_UNKNOWN",
         }))

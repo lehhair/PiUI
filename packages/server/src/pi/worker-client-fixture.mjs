@@ -5,6 +5,8 @@
 //   silent            — hello + request replies, but never heartbeats
 //   exit-on-request   — hello + heartbeats, then exit(1) on the first request
 //   wrong-protocol    — hello with a bumped protocol version, then idle
+//   slow-command      — hello + heartbeats, but never replies to requests
+//                       (simulates a healthy worker stuck on one command)
 //
 // Heartbeat cadence comes from PIUI_FIXTURE_HEARTBEAT_MS (default 20ms) so the
 // client watchdog fires quickly without slowing the suite.
@@ -44,6 +46,18 @@ if (mode === "silent" || mode === "wrong-protocol") {
     process.on("message", message => {
       if (message && typeof message === "object" && message.kind === "request") {
         process.exit(1)
+      }
+    })
+  } else if (mode === "slow-command") {
+    // Healthy heartbeats, but never reply to any request. Models a worker
+    // whose event loop is alive (heartbeats flow) while one command hangs
+    // (e.g. a slow model call). The client must time the command out and
+    // KEEP the worker — killing it here would murder a healthy process.
+    process.on("message", message => {
+      if (message && typeof message === "object" && message.kind === "request" &&
+          message.command?.type === "dispose") {
+        send({ kind: "response", id: message.id, generation, ok: true })
+        setImmediate(() => process.exit(0))
       }
     })
   } else {
