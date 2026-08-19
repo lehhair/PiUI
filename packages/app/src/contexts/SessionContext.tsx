@@ -73,10 +73,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (requestId !== requestIdRef.current) return
           void fetchSessionsRef.current(retryAttempt + 1)
         }, [500, 1500, 3000][retryAttempt])
-      } else {
-        allSessionsRef.current = []
-        setSessions([])
       }
+      // 最终失败保留已有列表：后端冷启动/抖动时不清空用户可见数据，
+      // 后续由 sessions-changed 事件或下一次操作触发刷新恢复。
       sessionErrorHandler('fetch sessions', error)
     } finally {
       fetchInFlightRef.current = false

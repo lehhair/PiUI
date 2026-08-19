@@ -24,7 +24,6 @@ export interface PiBackendBootstrapResult {
 
 let initialization: Promise<PiBackendBootstrapResult> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
-let retryAttempt = 0
 let serverSwitchInstalled = false
 
 export async function initializePiBackend(): Promise<PiBackendBootstrapResult> {
@@ -37,7 +36,9 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
   const serverGeneration = serverStore.getActiveServerGeneration()
   setPiBackendState({ ...getPiBackendState(), status: "booting", error: undefined })
   try {
-    const native = await refreshPiNativeStatus(AbortSignal.timeout(2000))
+    // 预算 5s：registry 在 server 侧是静态快照（不等 worker），正常毫秒级；
+    // 宽松预算只为覆盖冷机器的进程调度/杀软抖动，不再为 worker 冷启动买单。
+    const native = await refreshPiNativeStatus(AbortSignal.timeout(5000))
     if (serverStore.getActiveServerGeneration() !== serverGeneration) return { available: false }
     const driver = native.registry?.driver
     if (native.status !== "online" && native.status !== "degraded") {
@@ -53,7 +54,6 @@ async function initializePiBackendOnce(): Promise<PiBackendBootstrapResult> {
       checkedAt: Date.now(),
     })
     console.info("[PiUI] server up, driver=", driver ?? "unknown")
-    retryAttempt = 0
     if (retryTimer) {
       clearTimeout(retryTimer)
       retryTimer = null
@@ -106,9 +106,11 @@ export function installPiBackendServerSwitch(): void {
 
 function scheduleBackendRetry(): void {
   if (retryTimer || typeof window === "undefined") return
-  const delay = Math.min(30_000, 1_000 * 2 ** Math.min(retryAttempt++, 5))
+  // 固定 1s 间隔重试，不用指数退避：server 冷启动（exe 加载 + worker SDK
+  // 预热）本身就要秒级，指数退避会把「服务刚好就绪」到「UI 发现它」之间
+  // 再人为塞进一段退避窗口（最坏 30s），可感知的可用时间被无谓拉长。
   retryTimer = setTimeout(() => {
     retryTimer = null
     void initializePiBackend()
-  }, delay)
+  }, 1_000)
 }
