@@ -5,8 +5,8 @@ import { readdir } from "node:fs/promises"
 import { open } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import type { CommandEnvelope, CommandRecord, JsonObject, JsonValue, PiCapability, PiRegistrySnapshot, RegistrySnapshot, SessionActivityStatus, SessionsActivitySnapshot } from "@piui/protocol"
-import { isJsonObject, validateParams } from "@piui/protocol"
-import { getCommandCapability, type WorkerEvent } from "@piui/pi-worker"
+import { isJsonObject, PI_PARITY_SDK_VERSION, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
+import { createRegistryDescribeCapability, getCommandCapability, getDriverMode, listCommandCapabilities, type WorkerEvent } from "@piui/pi-worker"
 import type { EventHub } from "../event-hub.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionExecutor, type SubmittedCommand } from "./session-executor.ts"
@@ -352,6 +352,24 @@ export class SessionHost {
   }
 
   async piRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {
+    // worker 未就绪（冷启动 SDK 加载中）时立即返回静态快照：命令能力表是
+    // 编译期静态的（@piui/protocol 的 PI_COMMAND_SPECS），不需要 worker。
+    // 否则前端 bootstrap 会被 worker 的数秒 SDK 加载卡住，触发退避重试。
+    // sdkVersion 用 parity 常量兜底；worker 就绪后走真实 describeRegistry。
+    const ready = await this.supervisor.peekCatalogHandshake().catch(() => undefined)
+    if (!ready) {
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        revision: 1,
+        sdkVersion: PI_PARITY_SDK_VERSION,
+        driver: getDriverMode(),
+        globalCommands: mergeCapabilities(SERVER_GLOBAL_CAPABILITIES, [
+          createRegistryDescribeCapability(),
+          ...listCommandCapabilities("global"),
+        ]),
+        sessionCommands: mergeCapabilities(SERVER_SESSION_CAPABILITIES, listCommandCapabilities("session")),
+      }
+    }
     const data = await this.catalogCommand("registry.describe", undefined, { retry: true, idempotent: true, signal }) as PiRegistrySnapshot | undefined
     if (!data || typeof data !== "object") {
       throw Object.assign(new Error("Pi registry is unavailable"), { code: "REGISTRY_UNAVAILABLE" })

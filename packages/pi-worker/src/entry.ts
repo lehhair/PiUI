@@ -43,14 +43,14 @@ function wireWorkerStderrFileLog(): void {
 }
 wireWorkerStderrFileLog()
 
-import type { JsonObject, JsonValue, PiCapability, PiRegistrySnapshot } from "@piui/protocol"
+import type { JsonObject, JsonValue, PiRegistrySnapshot } from "@piui/protocol"
 import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
 import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from "./sdk-host.js"
 import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
 import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
 import { PiCatalog } from "./runtime/catalog.js"
 import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
-import { COMMAND_HANDLERS, listCommandCapabilities, resolveExtensionTarget, type CommandContext } from "./command-table.js"
+import { COMMAND_HANDLERS, createRegistryDescribeCapability, listCommandCapabilities, resolveExtensionTarget, type CommandContext } from "./command-table.js"
 import { assertRuntimeTargetBindings } from "./runtime-contract.js"
 import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
 import { getDriverMode } from "./driver.js"
@@ -376,21 +376,12 @@ function shouldCheckRegistryAfter(type: string): boolean {
 }
 
 function describeRegistry(): PiRegistrySnapshot {
-  const registryDescribe: PiCapability = {
-    name: "registry.describe",
-    scope: "global",
-    source: "piui-adapter",
-    description: "Describe registered Pi capabilities exposed by this worker",
-    paramsSchema: { type: "object", additionalProperties: false, properties: {} },
-    queue: "immediate",
-    idempotent: true,
-  }
   return {
     protocolVersion: PROTOCOL_VERSION,
     revision: registryRevision,
     sdkVersion: loadedSdkInfo?.version ?? "unknown",
     driver,
-    globalCommands: [registryDescribe, ...listCommandCapabilities("global")],
+    globalCommands: [createRegistryDescribeCapability(), ...listCommandCapabilities("global")],
     sessionCommands: listCommandCapabilities("session"),
   }
 }

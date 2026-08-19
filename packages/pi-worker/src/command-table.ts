@@ -308,6 +308,22 @@ export function getCommandCapability(name: string): PiCapability | undefined {
   return { ...found.capability }
 }
 
+/**
+ * registry.describe 能力描述的唯一来源：worker 的 describeRegistry 和 server
+ * 的静态 registry 快照（worker 未就绪时的兜底）共用，避免两处漂移。
+ */
+export function createRegistryDescribeCapability(): PiCapability {
+  return {
+    name: "registry.describe",
+    scope: "global",
+    source: "piui-adapter",
+    description: "Describe registered Pi capabilities exposed by this worker",
+    paramsSchema: { type: "object", additionalProperties: false, properties: {} },
+    queue: "immediate",
+    idempotent: true,
+  }
+}
+
 export function listCommandCapabilities(scope?: PiCapabilityScope): PiCapability[] {
   return COMMAND_REGISTRY
     .filter(item => !scope || item.capability.scope === scope)
