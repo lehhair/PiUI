@@ -4,6 +4,12 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.17] - 2026-08-19
+
+- fix(service): avoid killing starting service on desktop refresh and release lifecycle lock during health wait (617c8ef9)
+- chore: release 0.6.16 (3dd1a796)
+- fix(server): 默认关闭截止时间 10s→500ms，忙会话也能秒关 (1838354c)
+
 ## [v0.6.16] - 2026-08-19
 
 - fix(server): 默认关闭截止时间 10s→500ms，忙会话也能秒关 (1838354)

@@ -1,6 +1,6 @@
 {
   "name": "@piui/app",
-  "version": "0.6.16",
+  "version": "0.6.17",
   "description": "Pi coding agent client UI",
   "license": "GPL-3.0-only",
   "type": "module",
@@ -41,7 +41,7 @@
     "@earendil-works/pi-agent-core": "^0.84.2",
     "@earendil-works/pi-ai": "^0.84.2",
     "@earendil-works/pi-coding-agent": "0.84.2",
-    "@piui/protocol": "0.6.16",
+    "@piui/protocol": "0.6.17",
     "@tanstack/react-virtual": "^3.14.6",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
