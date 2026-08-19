@@ -223,7 +223,15 @@ fn recent_output(state: &ServiceState) -> String {
 }
 
 async fn service_health(url: &str, token: Option<&str>) -> Result<HealthResponse, HealthFailure> {
-    // 超时别太紧：服务端 health 已改为只读快照（不在请求路径上孵化
+    service_health_with_timeout(url, token, Duration::from_secs(5)).await
+}
+
+async fn service_health_with_timeout(
+    url: &str,
+    token: Option<&str>,
+    timeout: Duration,
+) -> Result<HealthResponse, HealthFailure> {
+    // 超时别太紧：服务端 health 是只读快照（不在请求路径上孵化/等待
     // worker），正常响应在毫秒级；但系统繁忙/杀软扫描时仍可能抖动，
     // 过紧的超时会把「活着」的服务误判为不可达，进而触发不必要的清场。
     let client = Client::builder()
@@ -232,7 +240,7 @@ async fn service_health(url: &str, token: Option<&str>) -> Result<HealthResponse
         .map_err(|_| HealthFailure::Unreachable)?;
     let mut request = client
         .get(format!("{}/api/v1/host/health", url.trim_end_matches('/')))
-        .timeout(Duration::from_secs(5));
+        .timeout(timeout);
     if let Some(token) = token.filter(|value| !value.is_empty()) {
         request = request.bearer_auth(token);
     }
@@ -267,9 +275,12 @@ fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
 }
 
 /// 残留服务收养的宽限探测：进程可能刚从上次启动冷启动（SDK worker 孵化
-/// 要数秒），首轮探测不可达不等于僵死，重试几轮再判死。
-const ADOPT_HEALTH_ATTEMPTS: u32 = 4;
-const ADOPT_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(1_000);
+/// 要数秒），首轮探测不可达不等于僵死，重试几轮再判死。单次探测超时
+/// 2s：health 是只读快照，毫秒级响应，2s 已足够覆盖系统抖动——5s × 4 轮
+/// 的旧预算会让「进程活着但卡死」的场景在启动路径上白等 ~24s。
+const ADOPT_HEALTH_ATTEMPTS: u32 = 3;
+const ADOPT_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+const ADOPT_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 async fn adopt_persisted_service(
     app: &AppHandle,
@@ -284,7 +295,7 @@ async fn adopt_persisted_service(
         if attempt > 0 {
             tokio::time::sleep(ADOPT_HEALTH_RETRY_DELAY).await;
         }
-        match service_health(&marker.url, config.initial_token.as_deref()).await {
+        match service_health_with_timeout(&marker.url, config.initial_token.as_deref(), ADOPT_HEALTH_TIMEOUT).await {
             Ok(health) if health.process_id == Some(marker.pid) => {
                 state.child_pid.store(marker.pid, Ordering::SeqCst);
                 state.started_by_us.store(true, Ordering::SeqCst);
@@ -323,7 +334,7 @@ async fn adopt_persisted_service(
             // 优雅优先：先请求 HTTP 关闭，等进程退出，超时才强杀。
             // （保留进程的 token 应与当前配置一致 —— 都是同一个 auth-token 文件）
             let _ = request_graceful_shutdown(&marker.url, config.initial_token.as_deref()).await;
-            for _ in 0..20 {
+            for _ in 0..30 {
                 if !is_process_alive(marker.pid) {
                     break
                 }
@@ -508,8 +519,10 @@ async fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
             // 1. 先触发服务端优雅关闭（关监听、排空连接、dispose worker）
             let _ = request_graceful_shutdown(&url, token.as_deref()).await;
             // 2. 用持有的 Child 句柄 try_wait 判断退出（零子进程开销，不用
-            //    tasklist 轮询——每次 ~130ms 的进程创建），最多等 ~4s
-            for _ in 0..20 {
+            //    tasklist 轮询——每次 ~130ms 的进程创建）。等待必须覆盖
+            //    server 的 shutdown deadline（默认 10s），否则繁忙会话的
+            //    优雅关闭每次都以强杀收场 → 会话锁残留、session 文件写坏。
+            for _ in 0..60 {
                 let exited = state
                     .child
                     .lock()
