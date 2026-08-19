@@ -154,6 +154,11 @@ export async function startPiUiServer(
     },
   })
 
+  // 后台预热共享 catalog worker，与 listen 并行：SDK 冷启动要秒级，预热每
+  // 提前一点，首个 catalog 命令/会话 attach 就少等一点；预热失败不影响服
+  // 务（真正用到时会重新孵化）。health 走只读快照保持毫秒级响应。
+  void app.supervisor.getCatalogHandshake().catch(() => undefined)
+
   let listening = false
   try {
     await new Promise<void>((resolveListen, rejectListen) => {
@@ -180,11 +185,6 @@ export async function startPiUiServer(
     throw error
   }
   app.server.on("error", error => console.error("[piui-server] server error", error))
-
-  // 后台预热共享 catalog worker：health 走只读快照保持毫秒级响应，同时让
-  // 首个 catalog 命令/会话 attach 不必承担 ~300MB SDK 冷启动；预热失败
-  // 不影响服务（真正用到时会重新孵化）。
-  void app.supervisor.getCatalogHandshake().catch(() => undefined)
 
   console.info(`[piui-server] listening http://${config.host}:${config.port}`)
   logToFile(`[piui-server] listening http://${config.host}:${config.port} (pid=${process.pid})`)

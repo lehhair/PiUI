@@ -95,21 +95,16 @@ export class RuntimeSupervisor {
   }
 
   /**
-   * 只读快照握手：worker 未孵化时立即返回 undefined（不触发 ~300MB SDK
-   * 冷启动），已孵化则在预算内等握手。专供 health 等高频只读探测——
-   * 健康检查绝不能阻塞或卡在 worker 启动上，否则会把「活着」的服务
-   * 误判为不可达，触发不必要的清场/重启。
+   * 只读快照：worker 握手已完成则返回 hello，否则（未孵化/握手进行中/
+   * 已 dispose）立即返回 undefined。绝不等待——health 是高频探测，在请求
+   * 路径上等握手会把 worker 冷启动的数秒转嫁给健康检查（实测 hold 住
+   * 2.4s+），把「活着」的服务误判为不可达。worker 由启动时的后台预热
+   * 负责孵化，health 只读快照。
    */
-  peekCatalogHandshake(timeoutMs = 3_000): Promise<WorkerHello | undefined> {
+  peekCatalogHandshake(): Promise<WorkerHello | undefined> {
     const host = this.runtimeHost
     if (!host || this.disposed) return Promise.resolve(undefined)
-    return Promise.race([
-      host.getHandshake(),
-      new Promise<undefined>(resolve => {
-        const timer = setTimeout(() => resolve(undefined), timeoutMs)
-        timer.unref?.()
-      }),
-    ]).catch(() => undefined)
+    return Promise.resolve(host.peekHandshake())
   }
 
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {

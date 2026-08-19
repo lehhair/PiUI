@@ -56,6 +56,12 @@ export interface WorkerCatalog {
  */
 export interface WorkerHost {
   getHandshake(): Promise<WorkerHello>
+  /**
+   * 同步只读快照：握手已完成则返回 hello，进行中/未开始返回 undefined。
+   * 永不等待、永不触发孵化——专供 health 等高频探测（见 supervisor
+   * peekCatalogHandshake；等握手会把 worker 冷启动的数秒转嫁到 health 上）。
+   */
+  peekHandshake(): WorkerHello | undefined
   /** 在共享进程内打开一个会话 runtime，返回每会话句柄 */
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession>
   /** 无会话归属的全局事件（provider.auth / packages.progress / resources.updated） */
@@ -103,12 +109,13 @@ function killProcessTree(child: ChildProcess): void {
 
 /**
  * 主动关闭 worker 的预算：worker 要 abort 在途流、flush JSONL、dispose 所有
- * runtime，负载机器上 5s 经常不够——预算内等不到再升级 SIGKILL，避免每次
- * 优雅关闭都以强杀收场（可能写坏 session 文件）。
+ * runtime（worker 侧每个 runtime 清理有 3s 上限且并行、调度器排空 3s 上限，
+ * 典型远低于此）。预算必须低于 server 的 shutdown deadline（默认 10s），否则
+ * 每次优雅关闭都会先被 server 兜底强退收场（可能写坏 session 文件）。
  */
 function disposeTimeoutMs(): number {
   const fromEnv = Number(process.env.PIUI_WORKER_DISPOSE_TIMEOUT_MS)
-  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 15_000
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 8_000
 }
 
 /**
@@ -146,6 +153,8 @@ class WorkerHostCore {
   private rejectReady!: (error: Error) => void
   private resolveExited!: () => void
   private readySettled = false
+  /** 握手完成后的 hello 快照（peekHandshake 用），未就绪为 undefined */
+  private readyHello?: WorkerHello
 
   constructor(
     private readonly workerEntry: URL,
@@ -204,6 +213,7 @@ class WorkerHostCore {
       this.startHeartbeatWatchdog(message.heartbeatIntervalMs || PI_WORKER_HEARTBEAT_INTERVAL_MS)
       if (!this.readySettled) {
         this.readySettled = true
+        this.readyHello = message
         this.resolveReady(message)
       }
       return
@@ -366,6 +376,10 @@ class WorkerHostCore {
 
   getHandshake(): Promise<WorkerHello> {
     return this.ready
+  }
+
+  peekHandshake(): WorkerHello | undefined {
+    return this.readyHello
   }
 
   async open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
@@ -576,6 +590,7 @@ export class WorkerSession {
     const core = new WorkerHostCore(workerEntry, options)
     return {
       getHandshake: () => core.getHandshake(),
+      peekHandshake: () => core.peekHandshake(),
       open: (cwd, sessionFile, signal) => core.open(cwd, sessionFile, signal),
       onEvent: listener => core.onEvent(listener),
       onCrash: listener => core.onCrash(listener),

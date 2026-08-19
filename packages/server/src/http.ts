@@ -229,11 +229,11 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
 
       if (method === "GET" && p === "/api/v1/host/health") {
-        // health 是高频只读探测：只读 catalog worker 的握手快照，绝不在
-        // 请求路径上孵化/等待 worker（~300MB SDK 冷启动动辄数秒，远超
-        // 客户端健康超时，会把「活着」的服务误判为不可达）。未就绪时
-        // 回退 parity 常量；worker 由启动时的后台预热负责孵化。
-        const handshake = await supervisor.peekCatalogHandshake(3_000).catch(() => undefined)
+        // health 是高频只读探测：只读 worker 握手的同步快照（未就绪返回
+        // undefined，回退 parity 常量），绝不在请求路径上孵化/等待 worker
+        // ——worker 冷启动动辄数秒，等握手会把「活着」的服务误判为不可达。
+        // worker 由启动时的后台预热负责孵化。
+        const handshake = await supervisor.peekCatalogHandshake().catch(() => undefined)
         const body: HealthResponse = {
           ok: true,
           protocolVersion: PROTOCOL_VERSION,
