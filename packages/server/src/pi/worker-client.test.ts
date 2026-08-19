@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { WorkerSession, type WorkerCatalog } from "./worker-client.ts"
+import { WorkerSession, type WorkerCatalog, type WorkerHost } from "./worker-client.ts"
 
 function startCatalog(mode: string, options: { requestTimeoutMs?: number } = {}): WorkerCatalog {
   return WorkerSession.createCatalog(new URL("./worker-client-fixture.mjs", import.meta.url), {
@@ -9,6 +9,28 @@ function startCatalog(mode: string, options: { requestTimeoutMs?: number } = {})
     requestTimeoutMs: options.requestTimeoutMs ?? 200,
   })
 }
+
+function startHost(mode: string): WorkerHost {
+  return WorkerSession.createHost(new URL("./worker-client-fixture.mjs", import.meta.url), {
+    env: { PIUI_FIXTURE_MODE: mode },
+    execArgv: ["--import", "tsx"],
+  })
+}
+
+test("peekHandshake is a non-blocking snapshot: undefined while booting, hello after handshake", async () => {
+  const host = startHost("slow-hello")
+  try {
+    // 握手进行中：立即返回 undefined，绝不等待（health 路径的硬约束）
+    const started = Date.now()
+    assert.equal(host.peekHandshake(), undefined)
+    assert.ok(Date.now() - started < 100, "peekHandshake must not wait for the handshake")
+    const hello = await host.getHandshake()
+    assert.equal(hello.piSdkVersion, "0.84.0")
+    assert.equal(host.peekHandshake()?.piSdkVersion, "0.84.0")
+  } finally {
+    await host.dispose()
+  }
+})
 
 test("WorkerSession fulfills a command on a healthy worker", async () => {
   const catalog = startCatalog("hello-ok")

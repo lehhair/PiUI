@@ -7,6 +7,8 @@
 //   wrong-protocol    — hello with a bumped protocol version, then idle
 //   slow-command      — hello + heartbeats, but never replies to requests
 //                       (simulates a healthy worker stuck on one command)
+//   slow-hello        — hello delayed ~400ms (simulates SDK cold boot), then
+//                       heartbeats + request replies as in hello-ok
 //
 // Heartbeat cadence comes from PIUI_FIXTURE_HEARTBEAT_MS (default 20ms) so the
 // client watchdog fires quickly without slowing the suite.
@@ -18,7 +20,7 @@ const generation = "fixture-gen"
 
 const send = (message) => process.send?.(message)
 
-send({
+const hello = () => send({
   kind: "hello",
   workerProtocolVersion: mode === "wrong-protocol" ? PI_WORKER_PROTOCOL_VERSION + 1 : PI_WORKER_PROTOCOL_VERSION,
   piSdkVersion: "0.84.0",
@@ -27,6 +29,12 @@ send({
   processId: process.pid,
   heartbeatIntervalMs,
 })
+
+if (mode === "slow-hello") {
+  setTimeout(hello, 400)
+} else {
+  hello()
+}
 
 if (mode === "silent" || mode === "wrong-protocol") {
   // Never heartbeat. The client settles the ready error on the wrong protocol

@@ -5,6 +5,7 @@ import { rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { EventHub } from "../event-hub.ts"
+import { getDriverMode } from "@piui/pi-worker"
 import type { WorkerSession } from "./worker-client.ts"
 import type { RuntimeSupervisor } from "./supervisor.ts"
 import { SessionHost } from "./session-host.ts"
@@ -341,4 +342,61 @@ test("SessionHost reaps an idle runtime without prewarming", async () => {
   // 单共享进程架构：回收后不再补预热（worker 常驻，无需预热进程）
   assert.equal(prewarmed, 0)
   host.dispose()
+})
+
+test("SessionHost piRegistry falls back to the static snapshot while the worker is booting", async () => {
+  let catalogCalled = false
+  const supervisor = {
+    onEvent: () => () => {},
+    peekCatalogHandshake: async () => undefined,
+    catalogCommand: async () => {
+      catalogCalled = true
+      throw new Error("worker must not be queried before it is ready")
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  try {
+    const registry = await host.piRegistry()
+    assert.equal(catalogCalled, false)
+    assert.equal(registry.driver, getDriverMode())
+    const names = new Set([
+      ...registry.globalCommands.map(command => command.name),
+      ...registry.sessionCommands.map(command => command.name),
+    ])
+    // server 注入的能力 + 静态命令表的核心命令必须都在
+    for (const required of ["session.open", "session.attached", "session.listAll", "state.get", "prompt", "abort", "registry.get", "registry.describe"]) {
+      assert.ok(names.has(required), `missing capability: ${required}`)
+    }
+  } finally {
+    host.dispose()
+  }
+})
+
+test("SessionHost piRegistry uses the worker snapshot once the handshake is ready", async () => {
+  const supervisor = {
+    onEvent: () => () => {},
+    peekCatalogHandshake: async () => ({ piSdkVersion: "9.9.9", piSdkVerified: false }),
+    catalogCommand: async (type: string) => {
+      assert.equal(type, "registry.describe")
+      return {
+        protocolVersion: 1,
+        revision: 7,
+        sdkVersion: "9.9.9",
+        driver: "pi",
+        globalCommands: [{ name: "registry.describe", scope: "global", source: "piui-adapter", description: "", paramsSchema: { type: "object" }, queue: "immediate" }],
+        sessionCommands: [],
+      }
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  try {
+    const registry = await host.piRegistry()
+    assert.equal(registry.sdkVersion, "9.9.9")
+    assert.equal(registry.revision, 7)
+    // server 能力仍合并进来
+    assert.ok(registry.globalCommands.some(command => command.name === "session.open"))
+    assert.ok(registry.sessionCommands.some(command => command.name === "session.close"))
+  } finally {
+    host.dispose()
+  }
 })
