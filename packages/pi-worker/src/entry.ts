@@ -409,9 +409,22 @@ async function cleanupWorker(): Promise<void> {
   clearInterval(heartbeatTimer)
   unsubscribeProviderAuth()
   providerAuth.dispose()
-  for (const sessionId of [...runtimes.keys()]) {
-    await closeRuntime(sessionId).catch(() => undefined)
-  }
+  // 并发清理所有 runtime，且每个 dispose 有界（SDK 清理可能卡在 provider
+  // 连接/流式响应上，串行会让关闭随会话数线性变慢）。超时的会话直接放弃
+  // 等它——进程马上退出，锁由 server 侧兜底释放。
+  await Promise.allSettled([...runtimes.keys()].map(async sessionId => {
+    const current = runtimes.get(sessionId)
+    if (!current) return
+    runtimes.delete(sessionId)
+    registryDigests.delete(sessionId)
+    await Promise.race([
+      current.dispose(),
+      new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, 3_000)
+        timer.unref()
+      }),
+    ])
+  }))
 }
 
 const unsubscribeProviderAuth = providerAuth.onEvent(event => send({

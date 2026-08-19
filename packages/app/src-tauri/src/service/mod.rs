@@ -61,9 +61,12 @@ impl ServiceState {
             if let Some(url) = url {
                 // 同步的 RunEvent::Exit 上下文：block_on 跑一次带短超时的优雅关闭
                 // （请求 3s + 等待退出 ~3s），失败/超时则强杀兜底，不留孤儿端口。
+                // 注意：server 优雅关闭要等 worker 清理所有 runtime（dispose 预算
+                // 15s），这里等待必须覆盖它，否则每次都强杀 → 会话锁残留 →
+                // 重启后 SESSION_BUSY 要等 60s stale 过期。
                 let graceful = tauri::async_runtime::block_on(request_graceful_shutdown(&url, token.as_deref()));
                 if graceful {
-                    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                    let deadline = std::time::Instant::now() + Duration::from_secs(20);
                     while std::time::Instant::now() < deadline {
                         if !is_process_alive(pid) {
                             break

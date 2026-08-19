@@ -89,6 +89,23 @@ async function removeStaleLock(lockPath: string, staleMs: number): Promise<boole
       return false
     }
   }
+  // 先查 meta.json 里的 pid：若持有者进程已不存在，锁必死（进程崩溃/强杀
+  // 后 heartbeat 停更，但 staleMs=60s 太久——SESSION_BUSY 要等满 60s 才
+  // 恢复）。pid 检测让崩溃后的锁立即失效。
+  const metaPid = readLockOwnerPid(lockPath)
+  if (metaPid !== undefined && !isProcessAlive(metaPid)) {
+    try {
+      await mkdir(marker)
+    } catch {
+      return false
+    }
+    try {
+      await rm(lockPath, { recursive: true, force: true })
+      return true
+    } finally {
+      await rm(marker, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
   if (Date.now() - heartbeat.mtimeMs <= staleMs) return false
   try {
     await mkdir(marker)
@@ -109,5 +126,23 @@ async function removeStaleLock(lockPath: string, staleMs: number): Promise<boole
     return false
   } finally {
     await rm(marker, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+function readLockOwnerPid(lockPath: string): number | undefined {
+  try {
+    const meta = JSON.parse(readFileSync(path.join(lockPath, "meta.json"), "utf8")) as { pid?: unknown }
+    return typeof meta.pid === "number" && Number.isInteger(meta.pid) && meta.pid > 0 ? meta.pid : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
