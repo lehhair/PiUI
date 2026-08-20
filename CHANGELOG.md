@@ -4,6 +4,10 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.18] - 2026-08-20
+
+- fix: stop desktop shell from killing external servers, exempt turn commands from 60s timeout (81fa9132)
+
 ## [v0.6.17] - 2026-08-19
 
 - fix(service): avoid killing starting service on desktop refresh and release lifecycle lock during health wait (617c8ef9)
