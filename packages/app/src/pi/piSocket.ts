@@ -10,6 +10,9 @@ export const PI_SOCKET_OPEN = 1
 export const PI_SOCKET_CLOSING = 2
 export const PI_SOCKET_CLOSED = 3
 
+/** 桥连接 open 看门狗：超时仍未收到 open 事件则主动失败让调用方重连 */
+const WS_BRIDGE_OPEN_TIMEOUT_MS = 8_000
+
 export interface PiSocket {
   readonly readyState: number
   onopen: (() => void) | null
@@ -50,8 +53,21 @@ class TauriBridgeSocket implements PiSocket {
       this.invokeFn = invoke as TauriInvoke
       const channel = new Channel<BridgeEvent>()
       channel.onmessage = event => this.handleEvent(event)
+      // 首次 webview 会话的 IPC 偶发不可靠：invoke 悬挂或事件不送达时，
+      // 靠 open 看门狗主动失败一次，让调用方的重连逻辑用全新的 Channel/
+      // invoke 重试（等价于一次刷新）。
+      let watchdogFired = false
+      const openWatchdog = window.setTimeout(() => {
+        if (this.readyState !== 0) return
+        watchdogFired = true
+        this.readyState = PI_SOCKET_CLOSED
+        this.onerror?.()
+        this.onclose?.({ code: 1006 })
+      }, WS_BRIDGE_OPEN_TIMEOUT_MS)
       const id = await invoke<number>('ws_bridge_connect', { url, onEvent: channel })
-      if (this.closedByUs) {
+      clearTimeout(openWatchdog)
+      if (watchdogFired || this.closedByUs) {
+        // 看门狗已判死：这条 Rust 连接不再需要，及时关掉避免泄漏。
         void invoke('ws_bridge_close', { id }).catch(() => undefined)
         return
       }

@@ -11,6 +11,9 @@ import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
 /** 恢复失败时的退避重试间隔：桌面壳冷启动/服务重启窗口内后端可能还不可达 */
 const RESTORE_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000]
 
+/** workspace 解析失败时的退避重试间隔（首次会话冷启动窗口） */
+const WORKSPACE_RESOLVE_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000]
+
 /**
  * 同步当前 workspace 的终端列表，并在 workspace 切换或服务端变化后重建
  * terminal tabs。底部和右侧面板共享同一份恢复逻辑，保证切换 workspace 时
@@ -32,16 +35,31 @@ export function useTerminalSessionRestore(directory?: string) {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let active = true
+    let retryTimer: number | undefined
     workspacePathRef.current = undefined
     setWorkspacePath(undefined)
-    void resolveWorkspacePath(normalizedDirectory).then(resolved => {
-      if (!active || !resolved) return
-      workspacePathRef.current = resolved
-      setWorkspacePath(resolved)
-      piEventStream.connectWorkspace(resolved)
-    }).catch(() => undefined)
+    const resolve = async (attempt: number) => {
+      try {
+        const resolved = await resolveWorkspacePath(normalizedDirectory)
+        if (!active) return
+        if (!resolved) return
+        workspacePathRef.current = resolved
+        setWorkspacePath(resolved)
+        piEventStream.connectWorkspace(resolved)
+      } catch {
+        if (!active) return
+        // 冷启动首次会话的 workspace 解析可能慢/挂（plugin-http 首调、
+        // token 竞态等）。失败就退避重试，绝不吞掉放弃——否则 workspacePath
+        // 永远 undefined，事件流不连、终端也无法连接（首次会话黄屏 bug）。
+        const delay = WORKSPACE_RESOLVE_RETRY_DELAYS_MS[attempt]
+        if (delay === undefined) return
+        retryTimer = window.setTimeout(() => void resolve(attempt + 1), delay)
+      }
+    }
+    void resolve(0)
     return () => {
       active = false
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
       const resolved = workspacePathRef.current
       workspacePathRef.current = undefined
       if (resolved) piEventStream.disconnectWorkspace(resolved)
