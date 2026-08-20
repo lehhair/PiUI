@@ -109,11 +109,17 @@ describe('useTerminalSessionRestore', () => {
     await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p'))
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
 
-    listHostTerminalsMock.mockRejectedValue(new Error('boom'))
-    serverChangeCallback.current?.()
-
-    await waitFor(() => expect(uiErrorHandlerMock).toHaveBeenCalled())
-    expect(result.current.isRestoring).toBe(false)
+    // 恢复失败会静默退避重试（500+1000+2000+4000+8000ms），终败才上报
+    vi.useFakeTimers()
+    try {
+      listHostTerminalsMock.mockRejectedValue(new Error('boom'))
+      serverChangeCallback.current?.()
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(uiErrorHandlerMock).toHaveBeenCalled()
+      expect(result.current.isRestoring).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ignores a pending restore after unmount', async () => {

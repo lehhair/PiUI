@@ -27,9 +27,20 @@ export interface WorkerClientOptions {
 interface PendingRequest {
   resolve: (data: JsonValue | undefined) => void
   reject: (error: Error) => void
-  timer: NodeJS.Timeout
+  timer?: NodeJS.Timeout
   removeAbort?: () => void
 }
+
+/**
+ * 回合级命令：一个 agent turn 合法耗时可达数分钟（模型思考、工具调用、
+ * 或排在正在进行的 turn 后面）。固定 60s 超时会把健康的长回合误判丢弃
+ * （WORKER_RESULT_UNKNOWN），而 worker 还在后台正常跑——日志里的
+ * "sendUserMessage timed out after 60000ms (misses=0)" 就是这种误伤。
+ * 这类命令不走默认死超时：取消靠调用方 AbortSignal，进程级真卡死由
+ * 心跳看门狗（missLimit ≈ 60s 连续丢心跳）兜底。显式配置的超时
+ * （测试注入 / PIUI_WORKER_REQUEST_TIMEOUT_MS）对所有命令仍然生效。
+ */
+const TURN_SCOPED_COMMANDS = new Set(["prompt", "sendUserMessage", "compact"])
 
 /**
  * Spawning the SDK worker takes seconds on a loaded machine (cold boot even
@@ -459,28 +470,36 @@ class WorkerHostCore {
         reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
         return
       }
-      const timer = setTimeout(() => {
-        const pending = this.pending.get(id)
-        this.pending.delete(id)
-        pending?.removeAbort?.()
-        // 命令超时——只丢弃这一条命令并落日志，绝不杀进程。
-        //
-        // 重要教训：heartbeatMisses 与心跳同频竞争（watchdog 每 5s tick
-        // 一次 +1，心跳每 5s 到达重置 0），相位固定错开时 misses 永远在
-        // 0~1 之间波动、从不累积到 missLimit。因此「超时 + misses>0」完全
-        // 不能证明 worker 卡死——上一版在这里杀进程，把健康 worker 当
-        // 卡死误杀（日志里全是 misses=1 的 killing 记录），导致会话全丢。
-        // 真正的进程级卡死由心跳看门狗兜底：心跳持续丢失累积到
-        // missLimit（12 次 ≈ 60s+）才杀。单条命令超时（如模型响应慢）
-        // 只废弃该命令，共享进程继续服务其他会话。
-        const message = `[piui-worker] command ${command.type} timed out after ${this.options.requestTimeoutMs ?? requestTimeoutMs()}ms (misses=${this.heartbeatMisses}); discarding command, worker stays`
-        console.error(message)
-        logToFile(message)
-        reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
-          code: "WORKER_RESULT_UNKNOWN",
-        }))
-      }, this.options.requestTimeoutMs ?? requestTimeoutMs())
-      timer.unref()
+      const timeoutMs =
+        this.options.requestTimeoutMs ??
+        (TURN_SCOPED_COMMANDS.has(command.type) && !process.env.PIUI_WORKER_REQUEST_TIMEOUT_MS
+          ? undefined
+          : requestTimeoutMs())
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              const pending = this.pending.get(id)
+              this.pending.delete(id)
+              pending?.removeAbort?.()
+              // 命令超时——只丢弃这一条命令并落日志，绝不杀进程。
+              //
+              // 重要教训：heartbeatMisses 与心跳同频竞争（watchdog 每 5s tick
+              // 一次 +1，心跳每 5s 到达重置 0），相位固定错开时 misses 永远在
+              // 0~1 之间波动、从不累积到 missLimit。因此「超时 + misses>0」完全
+              // 不能证明 worker 卡死——上一版在这里杀进程，把健康 worker 当
+              // 卡死误杀（日志里全是 misses=1 的 killing 记录），导致会话全丢。
+              // 真正的进程级卡死由心跳看门狗兜底：心跳持续丢失累积到
+              // missLimit（12 次 ≈ 60s+）才杀。单条命令超时（如模型响应慢）
+              // 只废弃该命令，共享进程继续服务其他会话。
+              const message = `[piui-worker] command ${command.type} timed out after ${timeoutMs}ms (misses=${this.heartbeatMisses}); discarding command, worker stays`
+              console.error(message)
+              logToFile(message)
+              reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
+                code: "WORKER_RESULT_UNKNOWN",
+              }))
+            }, timeoutMs)
+      timer?.unref()
       let pending: PendingRequest
       const onAbort = () => {
         if (this.pending.get(id) !== pending) return

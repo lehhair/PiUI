@@ -73,27 +73,32 @@ impl ServiceState {
         let token = self.service_token.lock().ok().and_then(|mut guard| guard.take());
         if pid > 0 {
             if let Some(url) = url {
-                // 同步的 RunEvent::Exit 上下文：block_on 跑一次带短超时的优雅关闭
-                // （请求 3s + 等待退出 ~3s），失败/超时则强杀兜底，不留孤儿端口。
-                // 注意：server 优雅关闭要等 worker 清理所有 runtime（dispose 预算
-                // 15s），这里等待必须覆盖它，否则每次都强杀 → 会话锁残留 →
-                // 重启后 SESSION_BUSY 要等 60s stale 过期。
-                let graceful = tauri::async_runtime::block_on(request_graceful_shutdown(&url, token.as_deref()));
-                if graceful {
-                    // 用持有的 Child 句柄 try_wait 判断退出（零子进程开销），
-                    // 不用 tasklist 轮询（每次 ~130ms 的进程创建）。
-                    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-                    while std::time::Instant::now() < deadline {
-                        let exited = self
-                            .child
-                            .lock()
-                            .ok()
-                            .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
-                            .is_some();
-                        if exited {
-                            break
+                // 核对身份：URL 上活着的必须是我们的 pid 才发 HTTP 关闭。
+                // 子进程早死、端口被外部服务接管时，盲发会误杀别人的服务。
+                let ours = tauri::async_runtime::block_on(service_matches_pid(&url, token.as_deref(), pid));
+                if ours {
+                    // 同步的 RunEvent::Exit 上下文：block_on 跑一次带短超时的优雅关闭
+                    // （请求 3s + 等待退出 ~3s），失败/超时则强杀兜底，不留孤儿端口。
+                    // 注意：server 优雅关闭要等 worker 清理所有 runtime（dispose 预算
+                    // 15s），这里等待必须覆盖它，否则每次都强杀 → 会话锁残留 →
+                    // 重启后 SESSION_BUSY 要等 60s stale 过期。
+                    let graceful = tauri::async_runtime::block_on(request_graceful_shutdown(&url, token.as_deref()));
+                    if graceful {
+                        // 用持有的 Child 句柄 try_wait 判断退出（零子进程开销），
+                        // 不用 tasklist 轮询（每次 ~130ms 的进程创建）。
+                        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+                        while std::time::Instant::now() < deadline {
+                            let exited = self
+                                .child
+                                .lock()
+                                .ok()
+                                .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
+                                .is_some();
+                            if exited {
+                                break
+                            }
+                            std::thread::sleep(Duration::from_millis(100));
                         }
-                        std::thread::sleep(Duration::from_millis(100));
                     }
                 }
             }
@@ -276,6 +281,40 @@ async fn is_service_running(url: &str, token: Option<&str>) -> bool {
     service_health(url, token).await.is_ok()
 }
 
+/// 校验 url 上活着的服务是我们 spawn 的那个 pid。
+/// 这是防误杀的关键不变式：健康检查通 ≠ 是我们的进程（用户手动起的
+/// server、pid 复用都会让端口健康）。认领 / 关闭 / 强杀前必须先核对身份，
+/// 否则桌面壳会把别人的 server 当成自己的杀掉。
+async fn service_matches_pid(url: &str, token: Option<&str>, pid: u32) -> bool {
+    matches!(
+        service_health(url, token).await,
+        Ok(health) if health.process_id == Some(pid)
+    )
+}
+
+/// 只清理我们自己的子进程，绝不碰 URL：用于「子进程还活着但端口已被
+/// 外部服务接管」的极端场景——往 URL 发 HTTP 关闭会误杀别人的服务。
+async fn stop_own_child_only(state: &ServiceState) {
+    let pid = state.child_pid.swap(0, Ordering::SeqCst);
+    state.started_by_us.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = state.service_url.lock() {
+        guard.take();
+    }
+    if let Ok(mut guard) = state.service_token.lock() {
+        guard.take();
+    }
+    if pid > 0 && is_process_alive(pid) {
+        kill_process_tree(pid);
+    }
+    if let Ok(mut child) = state.child.lock() {
+        if let Some(process) = child.as_mut() {
+            let _ = process.kill();
+            let _ = process.wait();
+        }
+        *child = None;
+    }
+}
+
 fn configured_service_url(env_vars: &BTreeMap<String, String>) -> String {
     let port = env_vars
         .get("PIUI_PORT")
@@ -423,23 +462,33 @@ async fn try_reuse_existing_service(
             .map_err(|error| error.to_string())?
             .clone()
             .unwrap_or_else(|| config.url.clone());
-        if is_service_running(&url, config.initial_token.as_deref()).await {
+        let pid = state.child_pid.load(Ordering::SeqCst);
+        // 复用前核对身份：只有端口上活着的确实是我们的子进程才复用。
+        // 健康但 pid 不符 = 我们的子进程已死、端口被外部服务接管，必须
+        // 走下面的外部服务分支（started_by_us=false），绝不能继续认领。
+        if pid > 0 && service_matches_pid(&url, config.initial_token.as_deref(), pid).await {
             return Ok(ReuseOutcome::Ready(StartServiceResult {
                 started: false,
                 started_by_us: true,
-                url: Some(url),
+                url: Some(url.clone()),
                 token: config.initial_token.clone(),
             }));
         }
-        let pid = state.child_pid.load(Ordering::SeqCst);
         if pid > 0 && is_process_alive(pid) {
             // 本次会话内启动的服务 health 还不通。如果是正在冷启动中，
             // 让调用方释放锁后等待，避免把还在孵化的进程当僵死杀掉。
             if state.is_starting.load(Ordering::SeqCst) {
                 return Ok(ReuseOutcome::NeedWait);
             }
-            log::warn!("killing hung PiUI service process {pid} at {url}: health unreachable");
-            stop_piui_service_process(app, state).await;
+            if is_service_running(&url, config.initial_token.as_deref()).await {
+                // 子进程活着但端口被别的进程服务（极端抢占）：只杀自己的
+                // 子进程，绝不往别人的 URL 发关闭。
+                log::warn!("PiUI service child {pid} is alive but {url} is served by another process; dropping ownership and killing only our child");
+                stop_own_child_only(state).await;
+            } else {
+                log::warn!("killing hung PiUI service process {pid} at {url}: health unreachable");
+                stop_piui_service_process(app, state).await;
+            }
         } else {
             marker::clear(app);
             clear_service_ownership(state);
@@ -552,15 +601,30 @@ async fn start_service_after_prepare(
         }
 
         let current_token = config.token();
-        if is_service_running(&config.url, current_token.as_deref()).await {
-            let _lifecycle = state.lifecycle.lock().await;
-            state.is_starting.store(false, Ordering::SeqCst);
-            return Ok(StartServiceResult {
-                started: true,
-                started_by_us: true,
-                url: Some(config.url.clone()),
-                token: current_token,
-            });
+        match service_health(&config.url, current_token.as_deref()).await {
+            Ok(health) if health.process_id == Some(pid) => {
+                // 身份确认：端口上活着的确实是刚 spawn 的进程。
+                let _lifecycle = state.lifecycle.lock().await;
+                state.is_starting.store(false, Ordering::SeqCst);
+                return Ok(StartServiceResult {
+                    started: true,
+                    started_by_us: true,
+                    url: Some(config.url.clone()),
+                    token: current_token,
+                });
+            }
+            Ok(health) => {
+                // 端口健康但进程不是我们的：外部/手动启动的 server 占着端口。
+                // 绝不认领——认领意味着退出时会按 URL 把它误杀。
+                error_message = Some(format!(
+                    "Port for the PiUI service is already served by another process (pid {:?}); not claiming it. Start the app after stopping that service, or change the port.",
+                    health.process_id
+                ));
+                break;
+            }
+            Err(_) => {
+                // 还没起来（冷启动中），继续等。
+            }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -593,26 +657,32 @@ async fn stop_piui_service_process(app: &AppHandle, state: &ServiceState) {
         .and_then(|mut guard| guard.take());
     if pid > 0 {
         if let Some(url) = url {
-            // 1. 先触发服务端优雅关闭（关监听、排空连接、dispose worker）
-            let _ = request_graceful_shutdown(&url, token.as_deref()).await;
-            // 2. 用持有的 Child 句柄 try_wait 判断退出（零子进程开销，不用
-            //    tasklist 轮询——每次 ~130ms 的进程创建）。等待必须覆盖
-            //    server 的 shutdown deadline（默认 10s），否则繁忙会话的
-            //    优雅关闭每次都以强杀收场 → 会话锁残留、session 文件写坏。
-            for _ in 0..60 {
-                let exited = state
-                    .child
-                    .lock()
-                    .ok()
-                    .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
-                    .is_some();
-                if exited {
-                    break
+            // 发 HTTP 关闭前核对身份：URL 上活着的必须是我们的 pid。
+            // 子进程已死、端口被外部/手动启动的服务接管时，往 URL 发关闭
+            // 会误杀别人的服务（appdata 日志里手动 server 被桌面壳杀掉
+            // 就是走了这条路）。
+            if service_matches_pid(&url, token.as_deref(), pid).await {
+                // 1. 先触发服务端优雅关闭（关监听、排空连接、dispose worker）
+                let _ = request_graceful_shutdown(&url, token.as_deref()).await;
+                // 2. 用持有的 Child 句柄 try_wait 判断退出（零子进程开销，不用
+                //    tasklist 轮询——每次 ~130ms 的进程创建）。等待必须覆盖
+                //    server 的 shutdown deadline（默认 10s），否则繁忙会话的
+                //    优雅关闭每次都以强杀收场 → 会话锁残留、session 文件写坏。
+                for _ in 0..60 {
+                    let exited = state
+                        .child
+                        .lock()
+                        .ok()
+                        .and_then(|mut child| child.as_mut().and_then(|process| process.try_wait().ok()).flatten())
+                        .is_some();
+                    if exited {
+                        break
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
-        // 3. 兜底：优雅关闭失败/超时才强杀进程树
+        // 3. 兜底：优雅关闭失败/超时才强杀进程树（只杀我们自己的 pid）
         if is_process_alive(pid) {
             log::warn!("graceful shutdown of PiUI service {pid} did not complete; force killing");
             kill_process_tree(pid);

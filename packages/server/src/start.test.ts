@@ -37,7 +37,10 @@ test("one server provides the web app and authenticated API on the same port", a
   writeFileSync(join(webRoot, "index.html"), "<html>piui</html>")
   const port = await availablePort()
   const running = await startPiUiServer(
-    { host: "127.0.0.1", port, webRoot, authToken: "test-token" },
+    // 测试环境的 undici keep-alive 连接 + Windows 机器上的 dispose 轻松超过
+    // 生产默认的 500ms 关闭窗口；这里用宽松预算，避免 hardStop 的
+    // process.exit(1) 把测试进程带走。
+    { host: "127.0.0.1", port, webRoot, authToken: "test-token", shutdownTimeoutMs: 5_000 },
     { installSignalHandlers: false },
   )
   try {

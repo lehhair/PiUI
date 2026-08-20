@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -78,6 +79,11 @@ impl BridgeState {
     }
 }
 
+/// WS 拨号超时：connect_async 本身无超时，撞上服务重启/半死端口的窗口期
+/// 会永远 pending——前端没有 open 也没有 close 事件，终端 tab 永远停在
+/// connecting（黄色）。超时后报错，前端的断线重连逻辑会接管。
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[tauri::command]
 pub async fn ws_bridge_connect(
     app: AppHandle,
@@ -86,8 +92,9 @@ pub async fn ws_bridge_connect(
     url: String,
     on_event: Channel<Value>,
 ) -> Result<u32, String> {
-    let (socket, _) = connect_async(&url)
+    let (socket, _) = tokio::time::timeout(WS_CONNECT_TIMEOUT, connect_async(&url))
         .await
+        .map_err(|_| format!("WebSocket connect timed out after {}s", WS_CONNECT_TIMEOUT.as_secs()))?
         .map_err(|error| format!("WebSocket connect failed: {error}"))?;
     let (mut writer, mut reader) = socket.split();
 
