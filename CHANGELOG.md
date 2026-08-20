@@ -4,6 +4,10 @@
 
 发布流程：`node packages/app/scripts/prepare-release.mjs <version>` 校验 + 升版本号（root/workspaces/tauri/Cargo + CHANGELOG 生成）→ 打 tag（`vX.Y.Z`）→ GitHub Actions 自动构建并发布。
 
+## [v0.6.19] - 2026-08-20
+
+- fix(app): self-heal cold-start terminal connections in the desktop shell (072ebaa5)
+
 ## [v0.6.18] - 2026-08-20
 
 - fix: stop desktop shell from killing external servers, exempt turn commands from 60s timeout (81fa9132)
