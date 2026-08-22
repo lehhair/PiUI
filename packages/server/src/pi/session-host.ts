@@ -104,7 +104,8 @@ export class SessionHost {
     if (!source.sessionFile || pathKey(dirname(source.sessionFile)) !== pathKey(dirname(sessionFile))) return undefined
 
     const result = await source.worker.command("switchSession", { sessionPath: sessionFile, cwdOverride: cwd }, signal)
-    await this.trackReplacement(source, result)
+    // 静默 runtime 复用：不是用户语义的 session 替换，标记后前端不做 pane remap
+    await this.trackReplacement(source, result, { reason: "runtime-reuse" })
     const target = this.requireAttached(source.sessionId)
     const state = await target.worker.command("state.get", undefined, signal) as JsonObject | undefined
     return {
@@ -477,7 +478,7 @@ export class SessionHost {
   private async trackReplacement(
     session: AttachedSession,
     data: JsonValue | undefined,
-    options: { leaseCommitted?: boolean } = {},
+    options: { leaseCommitted?: boolean; reason?: "runtime-reuse" } = {},
   ): Promise<void> {
     if (!isJsonObject(data) || data.cancelled !== false || typeof data.targetSessionId !== "string") return
     if (data.targetSessionId === session.sessionId) return
@@ -523,6 +524,9 @@ export class SessionHost {
         targetSessionId,
         targetSessionFile: session.sessionFile,
         targetCwd: session.cwd,
+        // runtime-reuse = ensureAttached 偷同目录空闲 runtime 的静默身份切换，
+        // 区别于 fork/new/import 的用户语义替换——前端据此决定是否 remap pane
+        ...(options.reason ? { reason: options.reason } : {}),
       })
     } catch (error) {
       // The SDK has already changed identity. A failed parent-side commit

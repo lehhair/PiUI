@@ -71,6 +71,8 @@ type SessionsUpdatedPayload = {
   sourceSessionId?: string
   targetSessionId?: string
   targetCwd?: string
+  /** runtime-reuse = server 复用空闲 runtime 的静默身份切换；空 = fork/new/import 等真实替换 */
+  reason?: string
 }
 
 /**
@@ -397,6 +399,14 @@ class PiEventStream {
 
   private handleSessionsUpdated(payload: SessionsUpdatedPayload | undefined): void {
     if (payload?.replaced && payload.sourceSessionId && payload.targetSessionId) {
+      if (payload.reason === 'runtime-reuse') {
+        // runtime 复用（ensureAttached 偷同目录空闲 runtime）：源 session 的
+        // 磁盘数据和 pane 绑定都不变，不做替换清理，只刷新会话列表。
+        // 若按真实替换处理，paneLayoutStore.remapSession 会把所有绑定源
+        // session 的 pane 全部切走（分屏互相串扰）。
+        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+        return
+      }
       // Runtime replacement (fork/new/import): the worker now owns a
       // different session id. Drop the old session's cursors and keyed
       // data; panes re-subscribe and reload under the new id when they

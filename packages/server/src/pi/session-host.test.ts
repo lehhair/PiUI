@@ -167,15 +167,34 @@ test("SessionHost reuses an idle runtime for a session switch", async () => {
     },
     replaceRuntimeLease: async () => {},
   } as unknown as RuntimeSupervisor
-  const host = new SessionHost(supervisor, new EventHub())
+  const hub = new EventHub()
+  const host = new SessionHost(supervisor, hub)
+
+  const updated: unknown[] = []
+  const off = hub.subscribe(event => {
+    if (event.channel === "sessions.updated") updated.push(event.payload)
+  })
 
   await host.openSession(".", "session-1.jsonl")
   const opened = await host.openSession(".", "session-2.jsonl", undefined, "session-1")
+  off()
 
   assert.equal(opens, 1)
   assert.equal(opened.sessionId, "session-2")
   assert.equal(host.getAttached("session-1"), undefined)
   assert.equal(host.getAttached("session-2")?.sessionFile, "session-2.jsonl")
+
+  // runtime 复用必须带 reason 标记——前端据此跳过 pane remap（分屏隔离）
+  const replaced = updated.find(p => (p as { replaced?: boolean }).replaced === true)
+  assert.ok(replaced, "expected a sessions.updated replaced event")
+  assert.deepEqual(replaced, {
+    replaced: true,
+    sourceSessionId: "session-1",
+    targetSessionId: "session-2",
+    targetSessionFile: "session-2.jsonl",
+    targetCwd: ".",
+    reason: "runtime-reuse",
+  })
   host.dispose()
 })
 
